@@ -167,6 +167,26 @@ export function gen2PublicPoolCap(
   return base + gen2WlLeftoverForPublic(launch, wlMintedGlobal)
 }
 
+/**
+ * True when WHITELIST lingers only as a concurrent (carried) phase — the primary phase already moved
+ * on (e.g. to PUBLIC) — and its 48h window has elapsed. The cron then drops it from `active_phases`
+ * so WL is officially closed and only PUBLIC (plus any other still-open concurrent phase such as the
+ * paid presale / Gen1 airdrop) remains mintable.
+ */
+export function isConcurrentWhitelistWindowElapsed(input: {
+  activePhase: OwlCenterPhase
+  activePhases: readonly OwlCenterPhase[]
+  whitelistStartMs: number | null
+  nowMs: number
+}): boolean {
+  if (input.activePhase === 'WHITELIST') return false
+  if (!input.activePhases.includes('WHITELIST')) return false
+  if (input.whitelistStartMs == null || !Number.isFinite(input.whitelistStartMs)) return false
+  const windowMs = gen2PhaseWindowMs('WHITELIST')
+  if (!Number.isFinite(windowMs)) return false
+  return input.nowMs >= input.whitelistStartMs + windowMs
+}
+
 /** Maps auto-advanced mint phase → launch status column. */
 export function statusForAutoAdvancedPhase(phase: OwlCenterPhase): OwlCenterStatus | null {
   switch (phase) {
@@ -269,6 +289,31 @@ export async function advanceGen2PhaseIfScheduled(nowMs: number = Date.now()): P
   // Only progress the timeline while the mint is actually live.
   if (launch.is_paused || !isOwlCenterMintOperational(launch)) {
     return { ok: true, advanced: false, reason: 'mint_not_operational', active_phase: launch.active_phase }
+  }
+
+  // Officially close WHITELIST once its 48h window elapses, even when it only lingers as a concurrent
+  // (carried) phase after the primary advanced to PUBLIC. After this, WL holders can no longer mint
+  // their allocations — only PUBLIC (and any other still-open concurrent phase) remains. PUBLIC's pool
+  // already absorbed the WL leftover, so the supply stays mintable; it just routes through PUBLIC.
+  if (
+    isConcurrentWhitelistWindowElapsed({
+      activePhase: launch.active_phase,
+      activePhases: launch.active_phases ?? [],
+      whitelistStartMs: parseIsoMs(getPhaseStartsAt(launch, 'WHITELIST')),
+      nowMs,
+    })
+  ) {
+    const nextActivePhases = (launch.active_phases ?? []).filter((p) => p !== 'WHITELIST')
+    const updated = await updateOwlCenterLaunchAdmin(GEN2_SLUG, { active_phases: nextActivePhases })
+    if (!updated) return { ok: false, error: 'update_failed' }
+    await getSupabaseAdmin()
+      .from('owl_center_activity_logs')
+      .insert({
+        launch_id: launch.id,
+        message: 'WHITELIST 48h window elapsed — WL officially closed; only PUBLIC remains mintable',
+        event_type: 'system',
+      })
+    return { ok: true, advanced: false, reason: 'whitelist_window_closed', active_phase: launch.active_phase }
   }
 
   const current = launch.active_phase

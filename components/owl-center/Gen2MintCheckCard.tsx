@@ -283,7 +283,11 @@ export function Gen2MintCheckCard({
 
                   <PhaseSupplyBar minted={p.phase_minted} total={p.phase_supply} />
 
-                  {p.phase === 'WHITELIST' && p.window_ends_at ? (
+                  {/* Only show the WL countdown while WHITELIST is the primary gating phase. Once
+                      the primary phase is PUBLIC, the WL leftover has already rolled into public, so
+                      the countdown would be misleading — hide it (WL still officially closes at 48h
+                      via the cron, after which only public remains). */}
+                  {p.phase === 'WHITELIST' && p.window_ends_at && check.active_phase === 'WHITELIST' ? (
                     <PhaseWindowCountdown endsAt={p.window_ends_at} active={active} />
                   ) : null}
 

@@ -16,6 +16,7 @@ import {
   gen2PhasePoolCap,
   gen2PhaseWindowMs,
   gen2PublicPoolCap,
+  isConcurrentWhitelistWindowElapsed,
   isGen2WhitelistClosed,
 } from '@/lib/owl-center/gen2-phase-advance'
 
@@ -148,6 +149,29 @@ check(
 check(
   'WL closed (800/800 minted) → PUBLIC pool = 200 (no leftover)',
   gen2PublicPoolCap({ ...launch, active_phase: 'PUBLIC' }, 800) === 200
+)
+
+console.log('Concurrent WHITELIST auto-close at 48h:')
+const WL_START = T0 + HOUR // 17:00 UTC
+check(
+  'WL primary (active_phase=WHITELIST) → never auto-closed as concurrent',
+  isConcurrentWhitelistWindowElapsed({ activePhase: 'WHITELIST', activePhases: [], whitelistStartMs: WL_START, nowMs: WL_START + 100 * HOUR }) === false
+)
+check(
+  'WL carried + window NOT elapsed → keep open',
+  isConcurrentWhitelistWindowElapsed({ activePhase: 'PUBLIC', activePhases: ['WHITELIST'], whitelistStartMs: WL_START, nowMs: WL_START + 47 * HOUR }) === false
+)
+check(
+  'WL carried + 48h elapsed → close',
+  isConcurrentWhitelistWindowElapsed({ activePhase: 'PUBLIC', activePhases: ['WHITELIST'], whitelistStartMs: WL_START, nowMs: WL_START + 48 * HOUR }) === true
+)
+check(
+  'WL not in active_phases → nothing to close',
+  isConcurrentWhitelistWindowElapsed({ activePhase: 'PUBLIC', activePhases: ['AIRDROP', 'PRESALE'], whitelistStartMs: WL_START, nowMs: WL_START + 100 * HOUR }) === false
+)
+check(
+  'WL carried + no start time → do not close',
+  isConcurrentWhitelistWindowElapsed({ activePhase: 'PUBLIC', activePhases: ['WHITELIST'], whitelistStartMs: null, nowMs: WL_START + 100 * HOUR }) === false
 )
 
 if (failures > 0) {
