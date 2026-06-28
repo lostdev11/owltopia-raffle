@@ -569,38 +569,6 @@ export function Gen2MintPageClient() {
       <section className="mb-12 space-y-4">
 
         <SectionHeading
-          id="minted"
-          title="All minted owls"
-          hint={
-            mintedMints.length
-              ? 'Every owl minted from this drop so far. New owls appear here after confirm-mint records the tx.'
-              : 'Minted owls will appear here once the first mints are confirmed on-chain.'
-          }
-        />
-
-        {mintedMints.length ? (
-          <CollectionMintedGrid
-            mints={mintedMints}
-            preferMainnet={preferMainnet}
-            label={`ALL MINTS // ${mintedMints.length}`}
-            description="Every owl minted from this drop so far (all wallets). New owls appear here after confirm-mint records the tx."
-          />
-        ) : (
-          <CommandCard label="ALL MINTS // 0">
-            <p className="text-sm leading-relaxed text-[#9BA8B4]">
-              No owls minted yet. Once minting opens and the first transactions confirm, the minted owls will show up
-              here.
-            </p>
-          </CommandCard>
-        )}
-
-      </section>
-
-
-
-      <section className="mb-12 space-y-4">
-
-        <SectionHeading
           id="my-minted"
           title="My mints"
           hint="Just the owls this wallet (and any linked wallets) minted — review exactly what you got."
@@ -628,6 +596,38 @@ export function Gen2MintPageClient() {
             <p className="text-sm leading-relaxed text-[#9BA8B4]">
               You haven&apos;t minted any owls from this drop yet. After you mint, your owls show up here once the
               transaction is confirmed on-chain.
+            </p>
+          </CommandCard>
+        )}
+
+      </section>
+
+
+
+      <section className="mb-12 space-y-4">
+
+        <SectionHeading
+          id="minted"
+          title="All minted owls"
+          hint={
+            mintedMints.length
+              ? 'Every owl minted from this drop so far. New owls appear here after confirm-mint records the tx.'
+              : 'Minted owls will appear here once the first mints are confirmed on-chain.'
+          }
+        />
+
+        {mintedMints.length ? (
+          <CollectionMintedGrid
+            mints={mintedMints}
+            preferMainnet={preferMainnet}
+            label={`ALL MINTS // ${mintedMints.length}`}
+            description="Every owl minted from this drop so far (all wallets). New owls appear here after confirm-mint records the tx."
+          />
+        ) : (
+          <CommandCard label="ALL MINTS // 0">
+            <p className="text-sm leading-relaxed text-[#9BA8B4]">
+              No owls minted yet. Once minting opens and the first transactions confirm, the minted owls will show up
+              here.
             </p>
           </CommandCard>
         )}
