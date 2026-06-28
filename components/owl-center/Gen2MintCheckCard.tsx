@@ -234,6 +234,14 @@ export function Gen2MintCheckCard({
               const canMintNow = connected && active && eligible && p.max_mintable > 0
               const hasUserAllocation = connected && p.reserved_mints > 0
               const activeTag = phaseActiveTag(p, check.presale_sold_out)
+              // WL has run its course (window elapsed / sold out → launch on PUBLIC) and is no longer
+              // live, so its unminted spots have rolled into the Public pool — not "reserved" anymore.
+              const wlClosed =
+                p.phase === 'WHITELIST' &&
+                !active &&
+                (check.active_phase === 'PUBLIC' ||
+                  check.active_phase === 'SOLD_OUT' ||
+                  check.active_phase === 'TRADING_ACTIVE')
               return (
                 <li
                   key={p.phase}
@@ -347,15 +355,19 @@ export function Gen2MintCheckCard({
                         {p.wl.admin_allocated ? ' · admin allocation' : ''}
                         {p.wl.available_mints > 0 && active
                           ? ` · mint up to ${p.max_mintable} at once`
-                          : p.reserved_mints > 0
-                            ? ` · ${p.reserved_mints} reserved for WL`
-                            : ''}
+                          : wlClosed
+                            ? ' · WL closed — rolled into Public'
+                            : p.reserved_mints > 0
+                              ? ` · ${p.reserved_mints} reserved for WL`
+                              : ''}
                         {p.wl.community ? ` · ${p.wl.community}` : ''}
                         {p.wl.discord_whitelist && !p.wl.admin_allocated ? ' · Discord WL (spots pending)' : ''}
                       </p>
-                      <p className="text-[#5C6773]">
-                        FCFS when WL opens — shared {p.phase_supply} cap; mint order matters once the phase is live.
-                      </p>
+                      {!wlClosed ? (
+                        <p className="text-[#5C6773]">
+                          FCFS when WL opens — shared {p.phase_supply} cap; mint order matters once the phase is live.
+                        </p>
+                      ) : null}
                       {(p.wl.cluster_available_mints ?? 0) > p.wl.available_mints ? (
                         <p className="text-[#5C6773]">
                           Linked cluster WL available: {p.wl.cluster_available_mints}

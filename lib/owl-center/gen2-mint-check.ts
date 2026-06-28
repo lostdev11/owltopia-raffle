@@ -25,7 +25,7 @@ import { resolveGen1SnapshotForMint } from '@/lib/owl-center/gen2-mint-delegatio
 import { reconcileGen2WalletMints } from '@/lib/owl-center/reconcile-gen2-wallet-mints'
 import { isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
-import { gen2PhaseWindowMs, gen2PublicPoolCap } from '@/lib/owl-center/gen2-phase-advance'
+import { gen2PhaseWindowMs, gen2PublicPoolCap, isGen2WhitelistClosed } from '@/lib/owl-center/gen2-phase-advance'
 import {
   gen1AirdropMaxMintable,
   presaleOverageMaxMintable,
@@ -477,6 +477,10 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       })
       const connectedRow = wlCluster.wallets.find((row) => row.is_connected_wallet)
       const isActive = isPhaseMintLive(phase)
+      // WL has run its course (sold out or 48h window elapsed → launch moved to PUBLIC) and is no
+      // longer live. Distinguish this from a not-yet-opened phase so the note reads "closed / rolled
+      // into Public" instead of the misleading "not live yet … when admin opens this phase".
+      const wlClosed = !isActive && isGen2WhitelistClosed(launch)
       const reserved_mints = availWl
       const admin_allocated = allowed > 0
       const wlReason = wlOnLinked
@@ -506,10 +510,14 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         phase_starts_at,
         is_active: isActive,
         is_eligible: wlGate.is_eligible,
-        max_mintable: isActive ? max : reserved_mints,
+        // Once WL is closed there is nothing left to mint here — don't advertise a mintable count.
+        max_mintable: isActive ? max : wlClosed ? 0 : reserved_mints,
         reserved_mints,
-        phase_note:
-          reserved_mints > 0 && (!isActive || launch.is_paused)
+        phase_note: wlClosed
+          ? reserved_mints > 0
+            ? 'WL has closed — your unminted WL spots rolled into the Public phase ($40) and can be minted there'
+            : 'WL has closed — any unminted WL spots rolled into the Public phase'
+          : reserved_mints > 0 && (!isActive || launch.is_paused)
             ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational)
             : null,
         reason: wlGate.reason,
