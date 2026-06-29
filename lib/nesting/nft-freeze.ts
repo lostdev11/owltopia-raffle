@@ -45,10 +45,27 @@ function resolveCollectionCandidatesForFreezeCheck(collectionMint?: string | nul
     const t = addr?.trim()
     if (t && !out.includes(t)) out.push(t)
   }
-  add(collectionMint)
-  add(resolveWalletOwlNestCollectionAddress())
-  add(CANONICAL_OWL_NEST_365_COLLECTION_ADDRESS)
-  add(LEGACY_OWL_NEST_COLLECTION_ADDRESS)
+
+  const requested = collectionMint?.trim() || ''
+  const owlNestAddresses = [
+    resolveWalletOwlNestCollectionAddress(),
+    CANONICAL_OWL_NEST_365_COLLECTION_ADDRESS,
+    LEGACY_OWL_NEST_COLLECTION_ADDRESS,
+  ]
+    .map((a) => a?.trim())
+    .filter((a): a is string => Boolean(a))
+
+  // A non-Owl-Nest collection (e.g. the Gen2 owls) is scoped strictly to the requested mint so an NFT
+  // from another collection can't be frozen into the wrong perch. The canonical Owltopia coin perch —
+  // whose collection mint is one of the Owl-Nest addresses (or empty) — keeps its multi-address
+  // fallback exactly as before.
+  if (requested && !owlNestAddresses.includes(requested)) {
+    add(requested)
+    return out
+  }
+
+  add(requested)
+  for (const addr of owlNestAddresses) add(addr)
   return out
 }
 

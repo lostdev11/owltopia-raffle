@@ -55,7 +55,13 @@ export function resolveWalletOwlNestCollectionCandidates(pool: {
     return out
   }
 
-  add(poolKey)
+  // Any other perch (e.g. the Gen2 nests) is scoped strictly to its own configured collection so NFTs
+  // from a different collection — like the Owltopia coins — are never eligible in it. Only fall back to
+  // the shared env collection when the perch has no collection_key of its own.
+  if (poolKey) {
+    add(poolKey)
+    return out
+  }
   add(env)
   return out
 }

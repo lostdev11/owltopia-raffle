@@ -3,8 +3,15 @@ import { StakingUserError } from '@/lib/nesting/errors'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
 
-/** Canonical Owl Nest staking: 1 OWL per NFT per day (rounded by emission policy validation). */
+/** Canonical Owl Nest staking: 1 OWL per NFT per day (suggested default for the legacy perch). */
 const DEFAULT_DAILY_OWL_PER_NFT = 1
+/**
+ * Allowed OWL/day band for NFT nesting pools. Replaces the old "exactly 1 OWL/day" rule so lock-tiered
+ * Gen2 perches (e.g. 0.1/day for 90-day, 0.3/day for 180-day) validate while still rejecting fat-fingered
+ * rates. The canonical 1 OWL/day perch stays inside the default band. Override via env if tokenomics change.
+ */
+const DEFAULT_DAILY_OWL_PER_NFT_MIN = 0
+const DEFAULT_DAILY_OWL_PER_NFT_MAX = 100
 const DEFAULT_SELL_OUT_REQUIRED = true
 
 function readNumber(raw: string | undefined, fallback: number): number {
@@ -115,8 +122,22 @@ export function assertNestingSelloutReached(): void {
   }
 }
 
+/** Suggested default OWL/day rate for a new NFT perch (used as a UI hint; no longer hard-enforced). */
 export function getRequiredDailyOwlPerNft(): number {
   return readNumber(process.env.NESTING_OWL_DAILY_REWARD_PER_NFT, DEFAULT_DAILY_OWL_PER_NFT)
+}
+
+/**
+ * Allowed [min, max] OWL/day band an NFT perch's `reward_rate` must fall within. Defaults comfortably
+ * include the canonical 1 OWL/day perch and the Gen2 0.1/0.3 lock tiers. Configure via
+ * `NESTING_OWL_DAILY_REWARD_MIN` / `NESTING_OWL_DAILY_REWARD_MAX`.
+ */
+export function getNestingDailyOwlRewardBand(): { min: number; max: number } {
+  const min = readNumber(process.env.NESTING_OWL_DAILY_REWARD_MIN, DEFAULT_DAILY_OWL_PER_NFT_MIN)
+  const max = readNumber(process.env.NESTING_OWL_DAILY_REWARD_MAX, DEFAULT_DAILY_OWL_PER_NFT_MAX)
+  // Guard against an inverted band misconfig (min > max) collapsing to "nothing is valid".
+  if (min > max) return { min: max, max: min }
+  return { min, max }
 }
 
 export function getNestingRewardTreasuryWallet(): string {
@@ -156,11 +177,15 @@ export function validatePoolAgainstNestingEmissionPolicy(pool: Pick<
       400
     )
   }
-  const required = getRequiredDailyOwlPerNft()
   const actual = Number(pool.reward_rate)
-  if (Math.abs(actual - required) > 1e-9) {
+  if (!Number.isFinite(actual)) {
+    throw new StakingUserError('NFT nesting pools must have a numeric OWL/day reward rate.', 400)
+  }
+  const { min, max } = getNestingDailyOwlRewardBand()
+  // 1e-9 tolerance avoids float edge cases right at the band boundary (e.g. 0.1 stored as 0.0999999…).
+  if (actual < min - 1e-9 || actual > max + 1e-9) {
     throw new StakingUserError(
-      `NFT nesting pools must use ${required} OWL/day reward rate.`,
+      `NFT nesting pools must use an OWL/day reward rate between ${min} and ${max}.`,
       400
     )
   }
