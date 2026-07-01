@@ -111,6 +111,22 @@ function MintRevealCard({ mint, preferMainnet, active, onArtworkLoaded }: MintRe
 
   const scanning = Boolean(mint && (imageLoading || (currentImageSrc && !artworkLoaded)))
 
+  const tryNextImage = useCallback(() => {
+    setArtworkLoaded(false)
+    setImageAttemptIdx((idx) => (idx + 1 < imageAttemptChain.length ? idx + 1 : idx))
+  }, [imageAttemptChain.length])
+
+  const handleImageLoad = useCallback(
+    (img: HTMLImageElement) => {
+      if (img.naturalWidth > 0) {
+        setArtworkLoaded(true)
+      } else {
+        tryNextImage()
+      }
+    },
+    [tryNextImage]
+  )
+
   return (
     <div className="min-w-full w-full shrink-0 snap-center px-1">
       <div
@@ -141,12 +157,12 @@ function MintRevealCard({ mint, preferMainnet, active, onArtworkLoaded }: MintRe
                 ref={(node) => {
                   if (node?.complete && node.naturalWidth > 0) {
                     setArtworkLoaded(true)
+                  } else if (node?.complete && node.naturalWidth === 0) {
+                    tryNextImage()
                   }
                 }}
-                onLoad={() => setArtworkLoaded(true)}
-                onError={() =>
-                  setImageAttemptIdx((idx) => (idx + 1 < imageAttemptChain.length ? idx + 1 : idx))
-                }
+                onLoad={(e) => handleImageLoad(e.currentTarget)}
+                onError={tryNextImage}
               />
               {!artworkLoaded ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center">

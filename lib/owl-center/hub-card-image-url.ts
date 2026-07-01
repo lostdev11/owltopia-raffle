@@ -1,20 +1,11 @@
-import { arweaveUriToHttps, irysGatewayMirrorHttpsUrls, isIrysGatewayHttpsUrl } from '@/lib/nft-media-uri'
+import {
+  arweaveUriToHttps,
+  irysGatewayMirrorHttpsUrls,
+  isIrysGatewayHttpsUrl,
+  unwrapHeliusCdnImageUrl,
+} from '@/lib/nft-media-uri'
 
 const HUB_CARD_FALLBACK = '/images/gen2-logo-mark.png'
-
-/**
- * Peel the underlying origin URL out of a Helius image-CDN url, e.g.
- * `https://cdn.helius-rpc.com/cdn-cgi/image//https://gateway.irys.xyz/<id>` -> the irys url.
- * Lets us keep the reliable CDN copy first while still falling back to the gateway + mirrors.
- */
-function heliusCdnInnerUrl(url: string): string | null {
-  const marker = '/cdn-cgi/image/'
-  const idx = url.indexOf(marker)
-  if (idx === -1) return null
-  const rest = url.slice(idx + marker.length)
-  const match = rest.match(/https?:\/\/.+/i)
-  return match ? match[0] : null
-}
 
 function dedupeUrls(urls: string[]): string[] {
   const out: string[] = []
@@ -36,12 +27,13 @@ function isArweaveHttpsUrl(url: string): boolean {
   }
 }
 
+/** Browser-direct mirrors — omit arweave.net/dev (often return a 200 HTML shell, no onerror). */
 function arweaveMirrorUrls(url: string): string[] {
   try {
     const u = new URL(url)
     const txPath = u.pathname.replace(/^\//, '') + u.search + u.hash
     if (!txPath || txPath === '/') return []
-    const bases = ['gateway.irys.xyz', 'uploader.irys.xyz', 'arweave.dev', 'arweave.net', 'ar-io.net']
+    const bases = ['gateway.irys.xyz', 'uploader.irys.xyz', 'ar-io.net']
     return bases.map((host) => `https://${host}/${txPath}`)
   } catch {
     return []
@@ -71,12 +63,16 @@ export function buildOwlCenterHubCardImageChain(
     return includeFallback ? [HUB_CARD_FALLBACK] : []
   }
 
-  // 1) Server proxy (sniffs PNG + races gateways), 2) the URL itself (reliable Helius CDN copy).
-  const chain: string[] = [`/api/proxy-image?url=${encodeURIComponent(url)}`, url]
+  // 1) Server proxy (sniffs PNG + races gateways). Skip raw arweave.net/dev in-browser — they
+  // often return a 200 HTML app shell (broken <img>, no onerror).
+  const chain: string[] = [`/api/proxy-image?url=${encodeURIComponent(url)}`]
+  if (!isArweaveHttpsUrl(url)) {
+    chain.push(url)
+  }
 
-  // 3) Deep fallbacks: if the URL is a Helius CDN wrapper, fall back to the underlying
+  // 2) Deep fallbacks: if the URL is a Helius CDN wrapper, fall back to the underlying
   // gateway URL and its mirrors; otherwise mirror the gateway URL directly.
-  const inner = heliusCdnInnerUrl(url)
+  const inner = unwrapHeliusCdnImageUrl(url)
   const seed = inner ?? url
   if (inner) chain.push(inner)
   if (isIrysGatewayHttpsUrl(seed)) {

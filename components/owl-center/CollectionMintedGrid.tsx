@@ -55,6 +55,14 @@ function MintedPieceCard({
 
   const imageSrc = imageAttemptChain[imageAttemptIdx] ?? null
 
+  const tryNextImage = () =>
+    setImageAttemptIdx((idx) => (idx + 1 < imageAttemptChain.length ? idx + 1 : idx))
+
+  const handleImageLoad = (img: HTMLImageElement) => {
+    if (img.naturalWidth > 0) return
+    tryNextImage()
+  }
+
   const explorer = preferMainnet
     ? `https://solscan.io/token/${mint}`
     : `https://solscan.io/token/${mint}?cluster=devnet`
@@ -87,12 +95,14 @@ function MintedPieceCard({
         ) : imageSrc ? (
           // eslint-disable-next-line @next/next/no-img-element -- gateway fallbacks via onError chain
           <img
+            key={`${imageAttemptIdx}-${imageSrc.slice(0, 96)}`}
             src={imageSrc}
             alt={name ? `${name} artwork` : `Minted NFT ${index + 1}`}
             className="h-full w-full object-cover"
             loading="lazy"
             decoding="async"
-            onError={() => setImageAttemptIdx((idx) => (idx + 1 < imageAttemptChain.length ? idx + 1 : idx))}
+            onLoad={(e) => handleImageLoad(e.currentTarget)}
+            onError={tryNextImage}
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center">

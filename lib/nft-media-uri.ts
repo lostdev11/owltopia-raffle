@@ -15,6 +15,19 @@ export function fullyDecodeURIComponentSafe(raw: string): string {
   return s
 }
 
+/**
+ * Peel the origin URL wrapped by Helius' image CDN, e.g.
+ * `https://cdn.helius-rpc.com/cdn-cgi/image//https://gateway.irys.xyz/<id>` → the inner https url.
+ */
+export function unwrapHeliusCdnImageUrl(url: string): string | null {
+  const marker = '/cdn-cgi/image/'
+  const idx = url.indexOf(marker)
+  if (idx === -1) return null
+  const rest = url.slice(idx + marker.length)
+  const match = rest.match(/https?:\/\/.+/i)
+  return match ? match[0] : null
+}
+
 /** Metaplex-style `ar://<txId>` → HTTPS gateway. */
 export function arweaveUriToHttps(uri: string): string | null {
   const t = uri.trim()

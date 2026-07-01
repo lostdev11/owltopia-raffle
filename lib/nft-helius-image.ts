@@ -30,27 +30,31 @@ export function pickImageFromHeliusAsset(result: unknown): string | null {
     return firstUri ?? null
   }
 
+  const metadata = content.metadata as Record<string, unknown> | undefined
+
+  const metaImg = metadata?.image
+  const metaImgStr =
+    typeof metaImg === 'string'
+      ? metaImg.trim()
+      : metaImg && typeof metaImg === 'object' && metaImg !== null
+        ? (metaImg as { uri?: string }).uri?.trim() ?? ''
+        : ''
+  // Inline arweave.net image beats Helius CDN wrappers around dead gateway.irys.xyz paths.
+  if (metaImgStr && /arweave\.net\//i.test(metaImgStr)) return metaImgStr
+
   const files = content.files as Array<{ uri?: string; cdn_uri?: string }> | undefined
   const first = files?.[0]
-  // Prefer Helius' CDN copy (Cloudflare-backed) over the raw Arweave/Irys gateway URL.
-  // gateway.irys.xyz frequently RSTs and arweave.net mirrors often return an app shell,
-  // which leaves minted-owl cards stuck on the placeholder; the CDN copy resolves reliably.
   const cdn = first?.cdn_uri?.trim()
   const direct = first?.uri?.trim()
+  if (direct && /arweave\.net\//i.test(direct)) return direct
+  // Prefer Helius CDN over raw gateway.irys.xyz when no canonical arweave.net uri is present.
   if (cdn) return cdn
   if (direct) return direct
-
-  const metadata = content.metadata as Record<string, unknown> | undefined
 
   const fromPropFiles = pickFromPropertiesFiles(metadata)
   if (fromPropFiles) return fromPropFiles
 
-  const metaImg = metadata?.image
-  if (typeof metaImg === 'string' && metaImg.trim()) return metaImg.trim()
-  if (metaImg && typeof metaImg === 'object' && metaImg !== null) {
-    const u = (metaImg as { uri?: string }).uri
-    if (typeof u === 'string' && u.trim()) return u.trim()
-  }
+  if (metaImgStr) return metaImgStr
 
   const links = content.links as Record<string, unknown> | undefined
   const linkImg = links?.image

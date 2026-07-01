@@ -12,6 +12,7 @@ import {
   irysUploaderMirrorHttpsUrls,
   isIrysGatewayHttpsUrl,
   isIrysUploaderHttpsUrl,
+  unwrapHeliusCdnImageUrl,
 } from '@/lib/nft-media-uri'
 
 export const runtime = 'nodejs'
@@ -374,6 +375,16 @@ function aggregateProxyFailure(errors: unknown[]): NextResponse {
   return NextResponse.json({ error: 'Image fetch failed' }, { status: 404 })
 }
 
+function proxyFetchCandidateUrls(targetStr: string, gatewaySeed: string): string[] {
+  const inner = unwrapHeliusCdnImageUrl(targetStr)
+  const seed = inner ?? targetStr
+  if (isArweaveUrl(seed)) return expandArweaveProxyUrls(seed)
+  if (isIrysUploaderHttpsUrl(seed)) return irysUploaderMirrorHttpsUrls(seed)
+  if (isIrysGatewayHttpsUrl(seed)) return irysGatewayMirrorHttpsUrls(seed)
+  if (inner) return irysGatewayMirrorHttpsUrls(seed)
+  return getIpfsGatewayUrls(gatewaySeed)
+}
+
 /**
  * GET /api/proxy-image?url=<encoded-image-url>
  *
@@ -411,13 +422,7 @@ export async function GET(request: NextRequest) {
     const targetStr = targetUrl.toString()
     /** Prefer the caller's HTTPS URL (e.g. `{cid}.ipfs.w3s.link`) before normalized ipfs.io rewrites. */
     const gatewaySeed = /^https?:\/\//i.test(decodedInput) ? decodedInput : targetStr
-    const urlsToTry = isArweaveUrl(targetStr)
-      ? expandArweaveProxyUrls(targetStr)
-      : isIrysUploaderHttpsUrl(targetStr)
-        ? irysUploaderMirrorHttpsUrls(targetStr)
-        : isIrysGatewayHttpsUrl(targetStr)
-          ? irysGatewayMirrorHttpsUrls(targetStr)
-          : getIpfsGatewayUrls(gatewaySeed)
+    const urlsToTry = proxyFetchCandidateUrls(targetStr, gatewaySeed)
 
     if (urlsToTry.length === 0) {
       return NextResponse.json({ error: 'Image fetch failed' }, { status: 502 })
