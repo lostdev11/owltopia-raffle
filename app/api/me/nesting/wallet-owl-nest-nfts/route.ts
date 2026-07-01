@@ -106,7 +106,9 @@ export async function GET(request: NextRequest) {
 
         const content = item.content
         const firstFile = content?.files?.[0]
-        let image: string | null = firstFile?.uri ?? firstFile?.cdn_uri ?? null
+        // Prefer Helius CDN for Owltopia art — direct `uri` is often gateway.irys.xyz, which
+        // mobile browsers and some gateways fail on; metadata-image uses the same preference.
+        let image: string | null = firstFile?.cdn_uri ?? firstFile?.uri ?? null
         if (!image) {
           image = await resolveImageUriFromDasAssetPayload(item)
         }
