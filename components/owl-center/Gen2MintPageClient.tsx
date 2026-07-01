@@ -676,7 +676,13 @@ export function Gen2MintPageClient() {
 
   return (
 
-    <HeroVideoBackground videoSrc={videoSrc} posterSrc={posterSrc} className="text-[#E8EEF2]" overlayClassName="bg-black/70">
+    <HeroVideoBackground
+      videoSrc={videoSrc}
+      posterSrc={posterSrc}
+      className="text-[#E8EEF2]"
+      overlayClassName="bg-black/70"
+      videoPreload="metadata"
+    >
 
       {inner}
 

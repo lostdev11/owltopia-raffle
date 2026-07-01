@@ -94,8 +94,8 @@ export function fetchMintNftMetadata(mint: string, preferMainnet: boolean): Prom
   const pending = inflight.get(key)
   if (pending) return pending
 
-  const promise = new Promise<MintNftMetadata>((resolve, reject) => {
-    queue.push({ mint: id, preferMainnet, resolve, reject })
+  const promise = new Promise<MintNftMetadata>((resolve) => {
+    queue.push({ mint: id, preferMainnet, resolve })
     scheduleFlush()
   })
   inflight.set(key, promise)
