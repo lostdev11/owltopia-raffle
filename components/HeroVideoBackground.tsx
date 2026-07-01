@@ -11,6 +11,8 @@ export type HeroVideoBackgroundProps = {
   className?: string
   /** Applied on top of the base `bg-black/65` dim layer (before the green gradient). */
   overlayClassName?: string
+  /** Defaults to `auto`; use `metadata` on heavy pages to avoid competing with image fetches. */
+  videoPreload?: 'auto' | 'metadata' | 'none'
 }
 
 /**
@@ -26,6 +28,7 @@ export function HeroVideoBackground({
   children,
   className,
   overlayClassName,
+  videoPreload = 'auto',
 }: HeroVideoBackgroundProps) {
   /** False until mounted so SSR/first paint match (poster only), then desktop allows video. */
   const [useVideo, setUseVideo] = useState(false)
@@ -65,7 +68,7 @@ export function HeroVideoBackground({
           muted
           loop
           playsInline
-          preload="auto"
+          preload={videoPreload}
           aria-hidden
         />
       ) : null}

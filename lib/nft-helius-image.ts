@@ -262,3 +262,106 @@ export async function fetchNftImageUriFromHelius(
   const meta = await fetchNftMintMetaFromHelius(assetId, options)
   return meta?.image ?? null
 }
+
+const BATCH_CHUNK_SIZE = 20
+const BATCH_JSON_RESOLVE_CONCURRENCY = 4
+
+function mintMetaCacheKey(assetId: string, preferMainnet: boolean): string {
+  return preferMainnet ? `m:${assetId}` : assetId
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  if (!items.length) return []
+  const results = new Array<R>(items.length)
+  let next = 0
+  async function worker() {
+    while (next < items.length) {
+      const idx = next++
+      results[idx] = await fn(items[idx]!)
+    }
+  }
+  const workers = Math.min(Math.max(1, concurrency), items.length)
+  await Promise.all(Array.from({ length: workers }, () => worker()))
+  return results
+}
+
+async function heliusGetAssetBatch(
+  heliusUrl: string,
+  ids: string[]
+): Promise<Map<string, unknown>> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(heliusUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'nft-image-batch',
+        method: 'getAssetBatch',
+        params: { ids },
+      }),
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+    if (!res.ok) return new Map()
+    const json: { result?: unknown[]; error?: unknown } = await res.json().catch(() => ({}))
+    if (json.error || !Array.isArray(json.result)) return new Map()
+    const out = new Map<string, unknown>()
+    for (const row of json.result) {
+      if (!row || typeof row !== 'object') continue
+      const id = (row as { id?: string }).id?.trim()
+      if (id) out.set(id, row)
+    }
+    return out
+  } catch {
+    return new Map()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Resolve metadata for many mints via Helius DAS getAssetBatch (chunked, cached).
+ */
+export async function fetchNftMintMetaBatchFromHelius(
+  assetIds: string[],
+  options?: FetchNftImageFromHeliusOptions
+): Promise<Map<string, NftMintMetaFromHelius>> {
+  const preferMainnet = options?.preferMainnet === true
+  const heliusUrl = preferMainnet ? getHeliusMainnetRpcUrl() : getHeliusRpcUrl()
+  const out = new Map<string, NftMintMetaFromHelius>()
+  if (!heliusUrl) return out
+
+  const unique = [...new Set(assetIds.map((id) => id.trim()).filter(Boolean))]
+  const missing: string[] = []
+
+  for (const id of unique) {
+    const key = mintMetaCacheKey(id, preferMainnet)
+    const cached = mintMetaCache.get(key)
+    if (cached && cached.expiresAt > Date.now()) {
+      out.set(id, { image: cached.image, name: cached.name })
+    } else {
+      missing.push(id)
+    }
+  }
+
+  for (let i = 0; i < missing.length; i += BATCH_CHUNK_SIZE) {
+    const chunk = missing.slice(i, i + BATCH_CHUNK_SIZE)
+    const payloads = await heliusGetAssetBatch(heliusUrl, chunk)
+    await mapWithConcurrency(chunk, BATCH_JSON_RESOLVE_CONCURRENCY, async (id) => {
+      const payload = payloads.get(id)
+      const meta = payload
+        ? await resolveMintMetaFromDasAssetPayload(payload)
+        : { image: null, name: null }
+      cacheMintMeta(mintMetaCacheKey(id, preferMainnet), meta)
+      out.set(id, meta)
+    })
+  }
+
+  return out
+}

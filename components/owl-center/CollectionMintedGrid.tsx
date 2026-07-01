@@ -5,7 +5,9 @@ import { Download, ExternalLink, Loader2 } from 'lucide-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { buildOwlCenterHubCardImageChain } from '@/lib/owl-center/hub-card-image-url'
+import { fetchMintNftMetadata } from '@/lib/client/nft-metadata-client'
 import { useSaveImage } from '@/components/use-save-image'
+import { useNearViewportOnce } from '@/hooks/use-near-viewport-once'
 
 function MintedPieceCard({
   mint,
@@ -16,6 +18,7 @@ function MintedPieceCard({
   preferMainnet: boolean
   index: number
 }) {
+  const { ref, visible } = useNearViewportOnce('320px 0px')
   const [name, setName] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [imageAttemptIdx, setImageAttemptIdx] = useState(0)
@@ -24,21 +27,20 @@ function MintedPieceCard({
   const { saveImage, savePngOverlay } = useSaveImage()
 
   useEffect(() => {
+    if (!visible) return
+
     let cancelled = false
     setLoading(true)
     setName(null)
     setImageAttemptIdx(0)
     setImageAttemptChain([])
 
-    const qs = preferMainnet ? '&preferMainnet=1' : ''
-    fetch(`/api/nft/metadata-image?mint=${encodeURIComponent(mint)}${qs}`, { cache: 'no-store' })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((json: { image?: string | null; name?: string | null } | null) => {
+    fetchMintNftMetadata(mint, preferMainnet)
+      .then((json) => {
         if (cancelled) return
-        const raw = json?.image?.trim()
-        const n = json?.name?.trim()
+        const raw = json.image?.trim()
+        const n = json.name?.trim()
         if (n) setName(n)
-        // Always end on a fallback so an image renders even if metadata can't be resolved.
         setImageAttemptChain(buildOwlCenterHubCardImageChain(raw ?? null))
       })
       .catch(() => {
@@ -51,9 +53,10 @@ function MintedPieceCard({
     return () => {
       cancelled = true
     }
-  }, [mint, preferMainnet])
+  }, [mint, preferMainnet, visible])
 
   const imageSrc = imageAttemptChain[imageAttemptIdx] ?? null
+  const showLoading = !visible || loading
 
   const tryNextImage = () =>
     setImageAttemptIdx((idx) => (idx + 1 < imageAttemptChain.length ? idx + 1 : idx))
@@ -78,7 +81,6 @@ function MintedPieceCard({
       const blob = await res.blob()
       await saveImage(blob, downloadName, { title: name ?? 'Owl artwork' })
     } catch {
-      // Cross-origin gateways may block fetch — open the image so users can long-press to save (esp. on mobile).
       window.open(imageSrc, '_blank', 'noopener,noreferrer')
     } finally {
       setDownloading(false)
@@ -86,9 +88,9 @@ function MintedPieceCard({
   }
 
   return (
-    <article className="overflow-hidden border border-[#1A222B] bg-[#10161C]/85">
+    <article ref={ref} className="overflow-hidden border border-[#1A222B] bg-[#10161C]/85">
       <div className="relative aspect-square w-full bg-[#0B0F13]">
-        {loading ? (
+        {showLoading ? (
           <div className="flex h-full items-center justify-center">
             <Loader2 className="h-7 w-7 animate-spin text-[#00FF9C]" aria-hidden />
           </div>
@@ -153,9 +155,7 @@ export function CollectionMintedGrid({
 }: {
   mints: string[]
   preferMainnet?: boolean
-  /** Override the card label (defaults to MINTED // n). */
   label?: string
-  /** Override the intro copy above the grid. */
   description?: string
 }) {
   if (!mints.length) return null
