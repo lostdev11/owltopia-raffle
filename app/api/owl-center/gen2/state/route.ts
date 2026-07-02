@@ -109,8 +109,7 @@ export async function GET(request: NextRequest) {
 
   const phase_breakdown = OWL_CENTER_MINTABLE_PHASES.map((phase) => {
     const phaseMinted = phaseMintedByPhase[phase] ?? 0
-    // Public absorbs unminted WL leftover so the collection can mint out (airdrop/presale leftover
-    // stays reserved for the team backstop).
+    // Public is unlimited minus GEN1 + presale backstop; WL unminted spots held until WL closes.
     const cap =
       phase === 'PUBLIC'
         ? gen2PublicPoolCap(launch, phaseMintedByPhase.WHITELIST ?? 0)
@@ -143,7 +142,7 @@ export async function GET(request: NextRequest) {
       airdrop: launch.airdrop_supply,
       presale: launch.presale_supply,
       whitelist: launch.wl_supply,
-      public: launch.public_supply,
+      public: gen2PublicPoolCap(launch, phaseMintedByPhase.WHITELIST ?? 0),
     },
     phase_breakdown,
     prices_usdc: {

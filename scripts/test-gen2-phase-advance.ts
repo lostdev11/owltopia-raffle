@@ -16,6 +16,7 @@ import {
   gen2PhasePoolCap,
   gen2PhaseWindowMs,
   gen2PublicPoolCap,
+  gen2ReservedBackstopSupply,
   isConcurrentWhitelistWindowElapsed,
   isGen2WhitelistClosed,
 } from '@/lib/owl-center/gen2-phase-advance'
@@ -123,32 +124,37 @@ check(
   decideGen2PhaseTransition({ currentPhase: 'PRESALE', activationMs: null, mintedInPhase: 0, poolCap: 657, nowMs: T0 }).advance === false
 )
 
-// Pool cap mapping.
-const launch = { airdrop_supply: 343, presale_supply: 657, presale_overage_supply: 13, wl_supply: 800, public_supply: 200 }
+// Pool cap mapping (public is unlimited: total minus GEN1 + presale backstop).
+const launch = { total_supply: 2000, airdrop_supply: 343, presale_supply: 657, presale_overage_supply: 13, wl_supply: 800, public_supply: 200 }
+const backstop = gen2ReservedBackstopSupply(launch)
 console.log('Pool cap mapping:')
+check('backstop = 343 + 657 + 13 = 1013', backstop === 1013)
 check('AIRDROP cap = 343', gen2PhasePoolCap(launch, 'AIRDROP') === 343)
 check('PRESALE cap = 657', gen2PhasePoolCap(launch, 'PRESALE') === 657)
 check('PRESALE_OVERAGE cap = 13', gen2PhasePoolCap(launch, 'PRESALE_OVERAGE') === 13)
 check('WHITELIST cap = 800', gen2PhasePoolCap(launch, 'WHITELIST') === 800)
-check('PUBLIC base cap = 200', gen2PhasePoolCap(launch, 'PUBLIC') === 200)
+check('PUBLIC max cap (WL closed) = 987', gen2PhasePoolCap(launch, 'PUBLIC') === 987)
 
-console.log('Public pool absorbs WL leftover (only after WL closes):')
-// While WHITELIST is the active phase, leftover is held back — PUBLIC pool = public_supply only.
+console.log('Public pool (unlimited minus GEN1 + presale backstop):')
+// While WHITELIST is active, unminted WL spots are held back from PUBLIC.
 check(
-  'WL still active → PUBLIC pool = 200 (no rollover)',
-  gen2PublicPoolCap({ ...launch, active_phase: 'WHITELIST' }, 300) === 200
+  'WL active, 0 WL minted → PUBLIC pool = 187',
+  gen2PublicPoolCap({ ...launch, active_phase: 'WHITELIST' }, 0) === 187
+)
+check(
+  'WL active, 300 WL minted → PUBLIC pool = 487',
+  gen2PublicPoolCap({ ...launch, active_phase: 'WHITELIST' }, 300) === 487
 )
 check('isGen2WhitelistClosed false while active_phase=WHITELIST', isGen2WhitelistClosed({ active_phase: 'WHITELIST' }) === false)
 check('isGen2WhitelistClosed true once active_phase=PUBLIC', isGen2WhitelistClosed({ active_phase: 'PUBLIC' }) === true)
-// WL closed, 300/800 minted → 500 leftover rolls into PUBLIC: 200 + 500 = 700.
+// WL closed → full non-backstop supply is public (987), regardless of WL mint count.
 check(
-  'WL closed (300/800 minted) → PUBLIC pool = 200 + 500 = 700',
-  gen2PublicPoolCap({ ...launch, active_phase: 'PUBLIC' }, 300) === 700
+  'WL closed (300/800 minted) → PUBLIC pool = 987',
+  gen2PublicPoolCap({ ...launch, active_phase: 'PUBLIC' }, 300) === 987
 )
-// WL fully minted → no leftover: PUBLIC pool = 200.
 check(
-  'WL closed (800/800 minted) → PUBLIC pool = 200 (no leftover)',
-  gen2PublicPoolCap({ ...launch, active_phase: 'PUBLIC' }, 800) === 200
+  'WL closed (800/800 minted) → PUBLIC pool = 987',
+  gen2PublicPoolCap({ ...launch, active_phase: 'PUBLIC' }, 800) === 987
 )
 
 console.log('Concurrent WHITELIST auto-close at 48h:')

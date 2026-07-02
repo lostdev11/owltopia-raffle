@@ -549,7 +549,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
     }
 
     const mintedPublic = await sumPhaseMintedForWallet(launch.id, w, 'PUBLIC', network)
-    // Public pool absorbs unminted WL leftover (airdrop/presale leftover stays reserved for the team).
+    // Public pool is unlimited (total minus GEN1 + presale backstop); unminted WL held until WL closes.
     const publicPoolCap = gen2PublicPoolCap(launch, wlMintedGlobal)
     const publicPoolRemaining = Math.max(0, publicPoolCap - publicMintedGlobal)
     const cap = Math.max(0, launch.wallet_mint_limit - mintedPublic)

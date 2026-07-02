@@ -97,6 +97,8 @@ const TEST_GROUP_MODE = process.argv.includes('--with-test-group')
 const TEST_GROUP_CAP = 5
 
 const PHASE_SUPPLY = { gen1: 343, pre: 657, wl: 800, pub: 200 } as const
+// pub=200 is the legacy nominal slice; PUBLIC is unlimited off-chain (total minus GEN1 + presale
+// backstop — see gen2PublicPoolCap). On-chain redeemedAmount uses TOTAL_SUPPLY for every group.
 // IMPORTANT: `redeemedAmount` is a GLOBAL candy-guard guard — it compares the candy machine's TOTAL
 // itemsRedeemed against `maximum`, NOT a per-group/per-phase counter. So every group's redeemedAmount
 // MUST be the full supply, otherwise that phase bot-taxes once the COLLECTION's total mints pass its
@@ -278,8 +280,8 @@ async function setGuards(confirm: boolean) {
   groups.push({
     label: 'pub',
     guards: {
-      // Capped at 200 so the four caps sum to 2000 and public cannot absorb the reserved gen1
-      // pool. Any unminted gen1/pre/wl remainder is minted by the team, not by public.
+      // PUBLIC is unlimited off-chain (gen2PublicPoolCap reserves GEN1 + presale backstop). On-chain
+      // redeemedAmount is TOTAL_SUPPLY so public mints are not bot-taxed early.
       startDate: some({ date: dateTime(PHASE_START_ISO.pub) }),
       mintLimit: some({ id: 2, limit: PUB_MINT_LIMIT }),
       redeemedAmount: some({ maximum: BigInt(TOTAL_SUPPLY) }),

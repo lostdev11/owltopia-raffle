@@ -60,11 +60,11 @@ export function whitelistMaxMintable(input: {
 }
 
 /**
- * PUBLIC phase: bounded by the per-wallet limit AND the public pool. The public pool is
- * `public_supply` plus whatever WHITELIST left unminted (WL rarely mints 100%, so its leftover
- * rolls into PUBLIC so the collection can mint out — see `gen2PublicPoolCap`). AIRDROP/PRESALE
- * leftover does NOT roll in — it stays reserved for the team's airdrop backstop. Callers pass the
- * already-rolled `publicPoolRemaining`; this is still globally capped by `supplyRemaining`.
+ * PUBLIC phase: bounded by the per-wallet limit AND the public pool. The public pool is unlimited
+ * (total supply minus reserved GEN1 + presale backstop pools), with unminted WL spots held back until
+ * WL closes — see `gen2PublicPoolCap`. AIRDROP/PRESALE leftover does NOT roll in — it stays reserved
+ * for the team to mint after public sells out. Callers pass `publicPoolRemaining`; still capped by
+ * `supplyRemaining`.
  */
 export function publicMaxMintable(input: {
   walletLimitRemaining: number

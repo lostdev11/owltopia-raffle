@@ -22,7 +22,8 @@ const TERMINAL_PHASES: ReadonlySet<OwlCenterPhase> = new Set(['SOLD_OUT', 'TRADI
  * - 16:25–16:50 PRESALE (free, prepaid)      — 25-min self-mint window or sellout
  * - 16:50–17:00 PRESALE_OVERAGE (free, +13)  — 10-min self-mint window or sellout
  * - 17:00–(+48h) WHITELIST ($30)             — opens at +1h floor, 48-hour window or sellout
- * - after WL    PUBLIC ($40)                  — opens once WL is done, absorbs leftover WL supply
+ * - after WL    PUBLIC ($40)                  — opens once WL is done; unlimited pool (total minus
+ *   reserved GEN1 + presale backstop); absorbs unminted WL leftover when WL closes
  * The early windows cascade so WHITELIST opens ~17:00 and runs 48h; PUBLIC opens when WL sells
  * out or its 48h window elapses, and its pool absorbs whatever WL left unminted (see
  * {@link gen2PublicPoolCap}). Sellout advances earlier, but the WHITELIST/PUBLIC open floors hold
@@ -99,11 +100,25 @@ function nextSequentialPhase(phase: OwlCenterPhase): OwlCenterPhase | null {
   return GEN2_SEQUENTIAL_PHASES[idx + 1] ?? null
 }
 
+/**
+ * GEN1 + presale pools reserved for holder redemption and the team's post-public backstop mint.
+ * Public mints everything else (including WL leftover once WL closes).
+ */
+export function gen2ReservedBackstopSupply(
+  launch: Pick<OwlCenterLaunchPublic, 'airdrop_supply' | 'presale_supply' | 'presale_overage_supply'>
+): number {
+  return (
+    Math.max(0, launch.airdrop_supply) +
+    Math.max(0, launch.presale_supply) +
+    Math.max(0, launch.presale_overage_supply ?? 0)
+  )
+}
+
 /** Supply pool cap for a phase (the number that, once minted, counts as "sold out"). */
 export function gen2PhasePoolCap(
   launch: Pick<
     OwlCenterLaunchPublic,
-    'airdrop_supply' | 'presale_supply' | 'presale_overage_supply' | 'wl_supply' | 'public_supply'
+    'airdrop_supply' | 'presale_supply' | 'presale_overage_supply' | 'wl_supply' | 'total_supply'
   >,
   phase: OwlCenterPhase
 ): number {
@@ -117,7 +132,8 @@ export function gen2PhasePoolCap(
     case 'WHITELIST':
       return launch.wl_supply
     case 'PUBLIC':
-      return launch.public_supply
+      // Max public pool when WL is fully rolled in (WL closed). Live cap uses {@link gen2PublicPoolCap}.
+      return Math.max(0, launch.total_supply - gen2ReservedBackstopSupply(launch))
     default:
       return 0
   }
@@ -153,18 +169,24 @@ export function gen2WlLeftoverForPublic(
 }
 
 /**
- * PUBLIC pool cap = its own `public_supply`, plus whatever WL left unminted ONCE WL has closed
- * ({@link isGen2WhitelistClosed}). While WHITELIST is still its own live phase the leftover is held
- * back so PUBLIC buyers cannot take spots out from under WL holders. Still globally bounded by total
- * supply (`total_supply − minted_count`), enforced by the callers and the confirm-mint RPC.
+ * PUBLIC pool cap = `total_supply` minus the reserved GEN1 + presale backstop pools. While WHITELIST
+ * is still open, unminted WL spots are held back (`wl_supply − wl_minted`) so PUBLIC cannot take them
+ * from WL holders; once WL closes those spots are included automatically (same formula — held-back
+ * drops to zero). AIRDROP/PRESALE leftover never rolls in — it stays for the team to mint after public
+ * sells out. Still globally bounded by `total_supply − minted_count` in callers and confirm-mint.
  */
 export function gen2PublicPoolCap(
-  launch: Pick<OwlCenterLaunchPublic, 'public_supply' | 'wl_supply' | 'active_phase'>,
+  launch: Pick<
+    OwlCenterLaunchPublic,
+    'total_supply' | 'airdrop_supply' | 'presale_supply' | 'presale_overage_supply' | 'wl_supply' | 'active_phase'
+  >,
   wlMintedGlobal: number
 ): number {
-  const base = Math.max(0, launch.public_supply)
-  if (!isGen2WhitelistClosed(launch)) return base
-  return base + gen2WlLeftoverForPublic(launch, wlMintedGlobal)
+  const backstop = gen2ReservedBackstopSupply(launch)
+  const wlHeldBack = isGen2WhitelistClosed(launch)
+    ? 0
+    : gen2WlLeftoverForPublic(launch, wlMintedGlobal)
+  return Math.max(0, launch.total_supply - backstop - wlHeldBack)
 }
 
 /**

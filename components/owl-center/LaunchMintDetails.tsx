@@ -32,7 +32,13 @@ function phaseRows(launch: OwlCenterLaunchPublic): PhaseRow[] {
   if (launch.wl_supply > 0) {
     rows.push({ label: 'WL', supply: launch.wl_supply, note: 'FCFS' })
   }
-  if (launch.public_supply > 0) {
+  if (launch.slug === 'gen2') {
+    rows.push({
+      label: 'Public',
+      supply: Math.max(0, launch.total_supply - launch.airdrop_supply - launch.presale_supply - (launch.presale_overage_supply ?? 0)),
+      note: 'unlimited · GEN1 + presale reserved',
+    })
+  } else if (launch.public_supply > 0) {
     rows.push({ label: 'Public', supply: launch.public_supply })
   }
   return rows
