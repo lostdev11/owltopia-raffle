@@ -5,6 +5,7 @@ import { ImageDown, Trophy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { computePromoPngArtDrawRect } from '@/lib/promo-png-art-draw'
 import { loadPromoPngArt, loadPromoPngSiteAsset } from '@/lib/promo-png-load-image'
+import { buildRaffleImageAttemptChain } from '@/lib/raffle-display-image-url'
 import { useSaveImage } from '@/components/use-save-image'
 
 type RaffleWinnerPngButtonProps = {
@@ -13,7 +14,11 @@ type RaffleWinnerPngButtonProps = {
   imageUrl?: string | null
   imageAttemptUrls?: string[] | null
   imageFallbackUrl?: string | null
+  /** When artwork is missing from raffle rows, resolve via Helius DAS metadata. */
+  nftMintAddress?: string | null
   winnerWallet: string
+  /** Platform display name when already known (skips lookup). */
+  winnerDisplayName?: string | null
   className?: string
   buttonLabel?: string
   fullWidth?: boolean
@@ -27,6 +32,45 @@ function shortWallet(wallet: string): string {
   const w = wallet.trim()
   if (w.length <= 12) return w
   return `${w.slice(0, 6)}...${w.slice(-4)}`
+}
+
+async function resolveWinnerDisplayLabel(
+  winnerWallet: string,
+  preferredName?: string | null
+): Promise<string> {
+  const pref = preferredName?.trim()
+  if (pref) return pref
+  const wallet = winnerWallet.trim()
+  if (!wallet) return 'Winner'
+  try {
+    const res = await fetch(`/api/profiles?wallets=${encodeURIComponent(wallet)}`, {
+      cache: 'no-store',
+    })
+    if (res.ok) {
+      const map = (await res.json().catch(() => null)) as Record<string, string> | null
+      const name = map?.[wallet]
+      if (typeof name === 'string' && name.trim()) return name.trim()
+    }
+  } catch {
+    /* fall through */
+  }
+  return shortWallet(wallet)
+}
+
+function fitSingleLineText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number
+): string {
+  if (maxWidth <= 0 || ctx.measureText(text).width <= maxWidth) return text
+  const ell = '…'
+  let end = text.length
+  while (end > 0) {
+    const candidate = `${text.slice(0, end).trimEnd()}${ell}`
+    if (ctx.measureText(candidate).width <= maxWidth) return candidate
+    end -= 1
+  }
+  return ell
 }
 
 function clampText(input: string, max: number): string {
@@ -59,13 +103,50 @@ function watermarkIconUrl(): string {
   return new URL('/icon.png', window.location.origin).href
 }
 
+async function resolveMintImageAttemptUrls(mint: string): Promise<string[]> {
+  const trimmed = mint.trim()
+  if (!trimmed) return []
+  try {
+    const res = await fetch(`/api/nft/metadata-image?mint=${encodeURIComponent(trimmed)}`, {
+      cache: 'no-store',
+    })
+    if (!res.ok) return []
+    const data = (await res.json().catch(() => null)) as { image?: string | null } | null
+    const raw = typeof data?.image === 'string' ? data.image.trim() : ''
+    if (!raw) return []
+    return buildRaffleImageAttemptChain(raw, null)
+  } catch {
+    return []
+  }
+}
+
+async function resolveWinnerPngArtCandidates(
+  imageAttemptUrls: string[] | null | undefined,
+  imageUrl: string | null | undefined,
+  imageFallbackUrl: string | null | undefined,
+  nftMintAddress: string | null | undefined
+): Promise<string[]> {
+  const fromProps =
+    imageAttemptUrls && imageAttemptUrls.length > 0
+      ? imageAttemptUrls
+      : imageUrl?.trim()
+        ? [imageUrl.trim()]
+        : []
+  if (fromProps.length > 0) return fromProps
+  const mint = nftMintAddress?.trim()
+  if (!mint) return []
+  return resolveMintImageAttemptUrls(mint)
+}
+
 export function RaffleWinnerPngButton({
   title,
   slug,
   imageUrl,
   imageAttemptUrls,
   imageFallbackUrl,
+  nftMintAddress,
   winnerWallet,
+  winnerDisplayName,
   className,
   buttonLabel = 'Winner PNG',
   fullWidth = false,
@@ -97,7 +178,7 @@ export function RaffleWinnerPngButton({
       if (!ctx) throw new Error('Canvas unavailable')
 
       const safeTitle = clampText(title || 'Owltopia Raffle', 110)
-      const winnerLine = `Winner: ${shortWallet(winnerWallet)}`
+      const winnerLabel = await resolveWinnerDisplayLabel(winnerWallet, winnerDisplayName)
 
       const bg = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT)
       bg.addColorStop(0, '#1a1200')
@@ -145,12 +226,12 @@ export function RaffleWinnerPngButton({
       ctx.save()
       roundRectPath(ctx, artBox.x, artBox.y, artBox.w, artBox.h, 20)
       ctx.clip()
-      const artCandidates =
-        imageAttemptUrls && imageAttemptUrls.length > 0
-          ? imageAttemptUrls
-          : imageUrl?.trim()
-            ? [imageUrl]
-            : []
+      const artCandidates = await resolveWinnerPngArtCandidates(
+        imageAttemptUrls,
+        imageUrl,
+        imageFallbackUrl,
+        nftMintAddress
+      )
       if (artCandidates.length > 0) {
         const loadedArt = await loadPromoPngArt(artCandidates, imageUrl, imageFallbackUrl)
         if (loadedArt) {
@@ -220,6 +301,10 @@ export function RaffleWinnerPngButton({
       ctx.restore()
       ctx.fillStyle = '#fde68a'
       ctx.font = `600 30px ${FONT_SANS}`
+      const badgeInnerW = Math.min(textMaxW, 520) - 40
+      const winnerPrefix = 'Winner: '
+      const winnerNameMaxW = badgeInnerW - ctx.measureText(winnerPrefix).width
+      const winnerLine = `${winnerPrefix}${fitSingleLineText(ctx, winnerLabel, winnerNameMaxW)}`
       ctx.fillText(winnerLine, textX + 20, badgeY + 41)
 
       ctx.save()

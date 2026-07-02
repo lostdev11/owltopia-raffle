@@ -2690,6 +2690,7 @@ export function RaffleDetailClient({
               imageUrl={heroImageDead ? null : heroImageSrc}
               imageAttemptUrls={heroImageDead ? [] : promoPngImageAttemptUrls}
               imageFallbackUrl={raffle.image_fallback_url}
+              nftMintAddress={raffle.nft_mint_address}
               winnerWallet={raffle.winner_wallet}
               buttonLabel="Winner PNG"
               fullWidth={false}
@@ -4924,6 +4925,7 @@ export function RaffleDetailClient({
                     imageUrl={heroImageDead ? null : heroImageSrc}
                     imageAttemptUrls={heroImageDead ? [] : promoPngImageAttemptUrls}
                     imageFallbackUrl={raffle.image_fallback_url}
+                    nftMintAddress={raffle.nft_mint_address}
                     winnerWallet={raffle.winner_wallet.trim()}
                     buttonLabel="Download winner PNG"
                     fullWidth

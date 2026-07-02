@@ -37,18 +37,64 @@ function dedupeUrls(urls: string[]): string[] {
   return out
 }
 
+function buildPromoPngDisplaySeeds(
+  displayAttemptUrls: string[] | null | undefined,
+  primaryUrl?: string | null,
+  imageFallbackUrl?: string | null
+): string[] {
+  return dedupeUrls([
+    ...(displayAttemptUrls && displayAttemptUrls.length > 0 ? displayAttemptUrls : []),
+    ...buildRaffleImageAttemptChain(primaryUrl, imageFallbackUrl ?? null),
+  ])
+}
+
 /** Ordered fetch URLs for promo PNG canvas art (proxy-wrapped when needed). */
 export function buildPromoCanvasImageAttemptChain(
   displayAttemptUrls: string[] | null | undefined,
   primaryUrl?: string | null,
   imageFallbackUrl?: string | null
 ): string[] {
-  const seeds =
-    displayAttemptUrls && displayAttemptUrls.length > 0
-      ? displayAttemptUrls
-      : buildRaffleImageAttemptChain(primaryUrl, imageFallbackUrl ?? null)
-
+  const seeds = buildPromoPngDisplaySeeds(displayAttemptUrls, primaryUrl, imageFallbackUrl)
   return dedupeUrls(seeds.map((raw) => toPromoCanvasFetchUrl(raw)))
+}
+
+function isLikelyImageContentType(contentType: string): boolean {
+  const ct = contentType.trim().toLowerCase()
+  if (!ct) return true
+  if (ct.startsWith('image/')) return true
+  // Many NFT gateways serve PNG/WebP as octet-stream.
+  return ct === 'application/octet-stream' || ct === 'binary/octet-stream'
+}
+
+async function decodeBlobAsImage(blob: Blob, objectUrl: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const el = new window.Image()
+    el.onload = () => {
+      resolve(el.naturalWidth >= 2 && el.naturalHeight >= 2 ? el : null)
+    }
+    el.onerror = () => resolve(null)
+    el.src = objectUrl
+  })
+}
+
+/** crossOrigin image load when fetch+blob fails (e.g. proxy 307 to a CORS-enabled CDN). */
+async function tryCrossOriginPromoImage(
+  fetchUrl: string,
+  sourceUrl: string
+): Promise<LoadedPromoImage | null> {
+  return new Promise((resolve) => {
+    const el = new window.Image()
+    el.crossOrigin = 'anonymous'
+    el.onload = () => {
+      if (el.naturalWidth >= 2 && el.naturalHeight >= 2) {
+        resolve({ img: el, sourceUrl, revoke: () => {} })
+      } else {
+        resolve(null)
+      }
+    }
+    el.onerror = () => resolve(null)
+    el.src = fetchUrl
+  })
 }
 
 async function fetchWithTimeout(url: string, ms: number): Promise<Response | null> {
@@ -78,52 +124,43 @@ export async function loadPromoPngArt(
 ): Promise<LoadedPromoImage | null> {
   if (typeof window === 'undefined') return null
 
-  const fetchUrls = buildPromoCanvasImageAttemptChain(
-    displayAttemptUrls,
-    primaryUrl,
-    imageFallbackUrl
-  )
+  const seeds = buildPromoPngDisplaySeeds(displayAttemptUrls, primaryUrl, imageFallbackUrl)
+  const fetchUrls = dedupeUrls(seeds.map((raw) => toPromoCanvasFetchUrl(raw)))
   const sourceByFetch = new Map<string, string>()
-  const seeds =
-    displayAttemptUrls && displayAttemptUrls.length > 0
-      ? displayAttemptUrls
-      : buildRaffleImageAttemptChain(primaryUrl, imageFallbackUrl ?? null)
   for (const raw of seeds) {
     sourceByFetch.set(toPromoCanvasFetchUrl(raw), raw)
   }
 
   for (const fetchUrl of fetchUrls) {
+    const sourceUrl = sourceByFetch.get(fetchUrl) ?? fetchUrl
     const res = await fetchWithTimeout(fetchUrl, LOAD_TIMEOUT_MS)
-    if (!res?.ok) continue
-    if (res.redirected && !isSameOriginPromoUrl(res.url)) continue
-
-    const contentType = res.headers.get('content-type') ?? ''
-    let blob: Blob
-    try {
-      blob = await res.blob()
-    } catch {
-      continue
-    }
-    if (blob.size < 8) continue
-    const blobType = blob.type || contentType
-    if (blobType && !blobType.startsWith('image/')) continue
-
-    const objectUrl = URL.createObjectURL(blob)
-    const img = await new Promise<HTMLImageElement | null>((resolve) => {
-      const el = new window.Image()
-      el.onload = () => resolve(el)
-      el.onerror = () => resolve(null)
-      el.src = objectUrl
-    })
-
-    if (img && img.naturalWidth >= 2 && img.naturalHeight >= 2) {
-      return {
-        img,
-        sourceUrl: sourceByFetch.get(fetchUrl) ?? fetchUrl,
-        revoke: () => URL.revokeObjectURL(objectUrl),
+    if (res?.ok) {
+      const contentType = res.headers.get('content-type') ?? ''
+      let blob: Blob | null = null
+      try {
+        blob = await res.blob()
+      } catch {
+        blob = null
+      }
+      if (blob && blob.size >= 8) {
+        const blobType = blob.type || contentType
+        if (isLikelyImageContentType(blobType)) {
+          const objectUrl = URL.createObjectURL(blob)
+          const img = await decodeBlobAsImage(blob, objectUrl)
+          if (img) {
+            return {
+              img,
+              sourceUrl,
+              revoke: () => URL.revokeObjectURL(objectUrl),
+            }
+          }
+          URL.revokeObjectURL(objectUrl)
+        }
       }
     }
-    URL.revokeObjectURL(objectUrl)
+
+    const crossOrigin = await tryCrossOriginPromoImage(fetchUrl, sourceUrl)
+    if (crossOrigin) return crossOrigin
   }
 
   return null

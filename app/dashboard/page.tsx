@@ -70,6 +70,33 @@ import {
   getEscrowPrizeClaimSuccessCopy,
   GIVEAWAY_NFT_CLAIM_SUCCESS_DETAIL,
 } from '@/lib/raffles/claim-prize-success-copy'
+import { buildRaffleImageAttemptChain } from '@/lib/raffle-display-image-url'
+
+type WinnerPngArtParams = {
+  imageAttemptUrls?: string[]
+  imageFallbackUrl?: string | null
+  nftMintAddress?: string | null
+}
+
+function winnerPngArtFromRaffle(raffle: {
+  image_url?: string | null
+  image_fallback_url?: string | null
+  nft_mint_address?: string | null
+}): WinnerPngArtParams {
+  return {
+    imageAttemptUrls: buildRaffleImageAttemptChain(
+      raffle.image_url ?? null,
+      raffle.image_fallback_url ?? null
+    ),
+    imageFallbackUrl: raffle.image_fallback_url ?? null,
+    nftMintAddress: raffle.nft_mint_address ?? null,
+  }
+}
+
+function winnerPngArtFromMint(nftMintAddress?: string | null): WinnerPngArtParams {
+  const mint = nftMintAddress?.trim()
+  return mint ? { nftMintAddress: mint } : {}
+}
 
 type FeeTier = { feeBps: number; reason: string }
 type Raffle = {
@@ -91,6 +118,8 @@ type Raffle = {
   prize_type?: string | null
   nft_mint_address?: string | null
   nft_token_id?: string | null
+  image_url?: string | null
+  image_fallback_url?: string | null
   nft_transfer_transaction?: string | null
   prize_deposited_at?: string | null
   prize_returned_at?: string | null
@@ -130,6 +159,8 @@ type EntryWithRaffle = {
     prize_amount?: number | null
     prize_currency?: string | null
     nft_mint_address?: string | null
+    image_url?: string | null
+    image_fallback_url?: string | null
     nft_transfer_transaction?: string | null
     prize_deposited_at?: string | null
     prize_returned_at?: string | null
@@ -411,6 +442,10 @@ export default function DashboardPage() {
     heading: string
     message: string
     showWinnerPng?: boolean
+    imageAttemptUrls?: string[]
+    imageFallbackUrl?: string | null
+    nftMintAddress?: string | null
+    winnerDisplayName?: string | null
   } | null>(null)
   const [walletReady, setWalletReady] = useState(false)
   const [claimTrackerRefreshing, setClaimTrackerRefreshing] = useState(false)
@@ -724,6 +759,10 @@ export default function DashboardPage() {
       message: string
       winnerWallet?: string
       showWinnerPng?: boolean
+      imageAttemptUrls?: string[]
+      imageFallbackUrl?: string | null
+      nftMintAddress?: string | null
+      winnerDisplayName?: string | null
     }) => {
       setClaimSuccess({
         tx: params.tx?.trim() ?? '',
@@ -733,6 +772,10 @@ export default function DashboardPage() {
         heading: params.heading,
         message: params.message,
         showWinnerPng: params.showWinnerPng ?? false,
+        imageAttemptUrls: params.imageAttemptUrls,
+        imageFallbackUrl: params.imageFallbackUrl ?? null,
+        nftMintAddress: params.nftMintAddress ?? null,
+        winnerDisplayName: params.winnerDisplayName ?? null,
       })
     },
     [walletAddr]
@@ -785,6 +828,9 @@ export default function DashboardPage() {
       winner_wallet?: string | null
       prize_type?: string | null
       prize_currency?: string | null
+      image_url?: string | null
+      image_fallback_url?: string | null
+      nft_mint_address?: string | null
     }) => {
       setClaimActionError(null)
       setClaimSuccess(null)
@@ -820,13 +866,15 @@ export default function DashboardPage() {
                 prize_currency: raffle.prize_currency ?? null,
               }).sentDetail,
           showWinnerPng: true,
+          ...winnerPngArtFromRaffle(raffle),
+          winnerDisplayName: data?.displayName?.trim() || undefined,
         })
         await loadDashboard({ silent: true })
       } finally {
         setClaimPrizeLoadingId(null)
       }
     },
-    [loadDashboard, presentClaimSuccess, walletAddr]
+    [loadDashboard, presentClaimSuccess, walletAddr, data?.displayName]
   )
 
   const handleClaimMilestoneBonus = useCallback(
@@ -1014,13 +1062,15 @@ export default function DashboardPage() {
           heading: 'NFT claimed!',
           message: GIVEAWAY_NFT_CLAIM_SUCCESS_DETAIL,
           showWinnerPng: true,
+          ...winnerPngArtFromMint(g.nft_mint_address),
+          winnerDisplayName: data?.displayName?.trim() || undefined,
         })
         await loadDashboard({ silent: true })
       } finally {
         setClaimGiveawayLoadingId(null)
       }
     },
-    [loadDashboard, presentClaimSuccess, publicKey]
+    [loadDashboard, presentClaimSuccess, publicKey, data?.displayName]
   )
 
   const handleClaimCommunityGiveaway = useCallback(
@@ -1053,13 +1103,15 @@ export default function DashboardPage() {
           heading: 'NFT claimed!',
           message: GIVEAWAY_NFT_CLAIM_SUCCESS_DETAIL,
           showWinnerPng: true,
+          ...winnerPngArtFromMint(g.nft_mint_address),
+          winnerDisplayName: data?.displayName?.trim() || undefined,
         })
         await loadDashboard({ silent: true })
       } finally {
         setClaimCommunityGiveawayLoadingId(null)
       }
     },
-    [loadDashboard, presentClaimSuccess, publicKey]
+    [loadDashboard, presentClaimSuccess, publicKey, data?.displayName]
   )
 
   const handleClaimRefund = useCallback(
@@ -4214,6 +4266,10 @@ export default function DashboardPage() {
                 title: claimSuccess.title,
                 slug: claimSuccess.slug,
                 winnerWallet: claimSuccess.winnerWallet,
+                imageAttemptUrls: claimSuccess.imageAttemptUrls,
+                imageFallbackUrl: claimSuccess.imageFallbackUrl,
+                nftMintAddress: claimSuccess.nftMintAddress,
+                winnerDisplayName: claimSuccess.winnerDisplayName,
               }
             : undefined
         }

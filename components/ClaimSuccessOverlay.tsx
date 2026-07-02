@@ -16,6 +16,10 @@ export type ClaimSuccessOverlayProps = {
     slug: string
     winnerWallet: string
     imageUrl?: string | null
+    imageAttemptUrls?: string[] | null
+    imageFallbackUrl?: string | null
+    nftMintAddress?: string | null
+    winnerDisplayName?: string | null
   }
   onClose: () => void
 }
@@ -64,6 +68,10 @@ export function ClaimSuccessOverlay({
             title={winnerPng.title}
             slug={winnerPng.slug}
             imageUrl={winnerPng.imageUrl}
+            imageAttemptUrls={winnerPng.imageAttemptUrls}
+            imageFallbackUrl={winnerPng.imageFallbackUrl}
+            nftMintAddress={winnerPng.nftMintAddress}
+            winnerDisplayName={winnerPng.winnerDisplayName}
             winnerWallet={winnerPng.winnerWallet}
             buttonLabel="Download winner PNG"
             fullWidth
