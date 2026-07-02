@@ -21,6 +21,8 @@ type Props = {
   pools: { id: string; slug: string; asset_type: string }[]
   /** When set (e.g. dashboard `?pool=`), prefer this NFT perch. */
   preferredPoolId?: string | null
+  /** Bumps when parent nest rows change so this panel stays in sync without a full page reload. */
+  positionsVersion?: string | null
   className?: string
 }
 
@@ -30,6 +32,7 @@ type Props = {
 export function NestingOwlCoinWalletProgressPanel({
   pools,
   preferredPoolId = null,
+  positionsVersion = null,
   className,
 }: Props) {
   const { connected, publicKey } = useWallet()
@@ -127,6 +130,12 @@ export function NestingOwlCoinWalletProgressPanel({
   useEffect(() => {
     void loadPositions()
   }, [loadPositions])
+
+  useEffect(() => {
+    if (!positionsVersion) return
+    void loadPositions()
+    setMintScan({ status: 'idle', mints: [], configured: true })
+  }, [positionsVersion, loadPositions])
 
   useEffect(() => {
     setMintScan({ status: 'idle', mints: [], configured: true })

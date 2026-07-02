@@ -437,7 +437,12 @@ export function DashboardNestingClient() {
       if (document.visibilityState !== 'visible') return
       const run = () => {
         void loadPositions({ heal: false, silent: true }).then((ok) => {
-          if (ok) void loadPositions({ heal: true, silent: true })
+          if (ok) {
+            void loadPositions({ heal: true, silent: true })
+            if (owlNestLastLoadedPoolIdRef.current) {
+              void loadOwlNestNftsRef.current()
+            }
+          }
         })
       }
       if (isMobileDevice()) {
@@ -828,6 +833,19 @@ export function DashboardNestingClient() {
     nftMintRequired,
     selectedPerch?.id,
   ])
+
+  /** Refresh nest rows + eligible coin list after stake/unstake without a full page reload. */
+  const refreshNestingUiAfterChange = useCallback(
+    async (opts?: { heal?: boolean }) => {
+      const heal = opts?.heal !== false
+      await loadPositions({ heal: false, silent: true })
+      if (heal) await loadPositions({ heal: true, silent: true })
+      if (nftMintRequired && owlNestLastLoadedPoolIdRef.current === selectedPerch?.id) {
+        void loadOwlNestNftsRef.current()
+      }
+    },
+    [loadPositions, nftMintRequired, selectedPerch?.id]
+  )
 
   const loadOwlNestNftsRef = useRef(loadOwlNestNftsFromWallet)
   loadOwlNestNftsRef.current = loadOwlNestNftsFromWallet
@@ -1691,6 +1709,12 @@ export function DashboardNestingClient() {
                 )
                 setStakeTxPhase('syncing')
                 await completeNftNestWithWalletSig(prep, lastSig, lastSig)
+                await refreshNestingUiAfterChange({ heal: false })
+                if (preps.length > 1) {
+                  setNftStakeBatchHint(
+                    `Locked ${i + 1} of ${preps.length} — approve the next wallet prompt…`
+                  )
+                }
               }
               return { signature: lastSig, confirmedInFallback: true }
             }
@@ -1709,6 +1733,7 @@ export function DashboardNestingClient() {
               }
               try {
                 prepared.push(await prepareNftNest(assetId))
+                await refreshNestingUiAfterChange({ heal: false })
               } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') throw e
                 if (e instanceof Error && e.name === 'AbortError') throw e
@@ -1777,6 +1802,12 @@ export function DashboardNestingClient() {
                 }
               }
               completed += chunkPreps.length
+              await refreshNestingUiAfterChange({ heal: false })
+              if (chunkIdx < assetIdChunks.length - 1 && totalNests > 1) {
+                setNftStakeBatchHint(
+                  `Nested ${completed} of ${totalNests} — approve the next batch in your wallet…`
+                )
+              }
             }
 
             return { nestedCount: completed }
@@ -1793,7 +1824,7 @@ export function DashboardNestingClient() {
           setStakeAmount('')
           setStakeAssetId('')
           setStakeAssetIds([])
-          await loadPositions()
+          await refreshNestingUiAfterChange()
           await loadPools()
         },
       })
@@ -1819,6 +1850,11 @@ export function DashboardNestingClient() {
               : 'Your coins stay in your wallet while rewards accrue. Claim OWL anytime in Your nests below.'
             : 'OWL rewards accrue on this perch. Claim anytime in Your nests below.',
       })
+      if (typeof document !== 'undefined') {
+        requestAnimationFrame(() => {
+          document.getElementById('nesting-your-nests')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        })
+      }
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
         setActionError(null)
@@ -1828,6 +1864,7 @@ export function DashboardNestingClient() {
       }
       if (isNestingStakeFlowError(e)) {
         setActionError(e.userMessage)
+        void refreshNestingUiAfterChange()
         return
       }
       if (e instanceof Error && e.message === 'stake') return
@@ -2442,6 +2479,7 @@ export function DashboardNestingClient() {
           <NestingOwlCoinWalletProgressPanel
             pools={pools}
             preferredPoolId={owlCoinProgressPreferredPoolId}
+            positionsVersion={nestedActiveMintKey}
             className="mt-3 max-w-md rounded-xl border border-emerald-500/20 bg-black/30 px-3 py-3"
           />
         </div>
@@ -3398,7 +3436,7 @@ export function DashboardNestingClient() {
         ) : null}
       </section>
 
-      <section>
+      <section id="nesting-your-nests">
         <SectionHeader
           title="Your nests"
           description="Claim OWL anytime—use it in raffles right away or let it stack. Many Owltopia coins on the same perch show in one card—tap the header to expand or collapse."
