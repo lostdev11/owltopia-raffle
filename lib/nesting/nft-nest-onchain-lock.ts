@@ -100,8 +100,18 @@ export function assertPoolConfiguredForOnChainNftFreeze(pool: StakingPoolRow): v
   }
 }
 
-const CLAIM_ALL_LOCK_VERIFY_CONCURRENCY = 3
-const CLAIM_ALL_LOCK_CHUNK_DELAY_MS = 200
+const CLAIM_ALL_LOCK_VERIFY_CONCURRENCY_DEFAULT = 3
+const CLAIM_ALL_LOCK_CHUNK_DELAY_MS_DEFAULT = 200
+
+function claimAllLockVerifyConcurrency(nestCount: number): number {
+  if (nestCount <= 10) return CLAIM_ALL_LOCK_VERIFY_CONCURRENCY_DEFAULT
+  if (nestCount <= 30) return 6
+  return 8
+}
+
+function claimAllLockChunkDelayMs(nestCount: number): number {
+  return nestCount > 30 ? 100 : CLAIM_ALL_LOCK_CHUNK_DELAY_MS_DEFAULT
+}
 
 function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -117,9 +127,12 @@ export async function verifyActiveNestLocksForClaimAll(
     return pool && positionRequiresOnChainNftFreezeLock(row, pool)
   })
 
-  for (let i = 0; i < rowsToVerify.length; i += CLAIM_ALL_LOCK_VERIFY_CONCURRENCY) {
-    if (i > 0) await sleepMs(CLAIM_ALL_LOCK_CHUNK_DELAY_MS)
-    const chunk = rowsToVerify.slice(i, i + CLAIM_ALL_LOCK_VERIFY_CONCURRENCY)
+  const concurrency = claimAllLockVerifyConcurrency(rowsToVerify.length)
+  const chunkDelayMs = claimAllLockChunkDelayMs(rowsToVerify.length)
+
+  for (let i = 0; i < rowsToVerify.length; i += concurrency) {
+    if (i > 0) await sleepMs(chunkDelayMs)
+    const chunk = rowsToVerify.slice(i, i + concurrency)
     await Promise.all(
       chunk.map(async (row) => {
         const rowPool = poolById.get(row.pool_id)

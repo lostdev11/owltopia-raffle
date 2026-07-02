@@ -114,6 +114,7 @@ import {
   formatNestingApiFetchError,
   nestingClientApiUrl,
   NESTING_CLAIM_FETCH_TIMEOUT_MS,
+  NESTING_CLAIM_ALL_FETCH_TIMEOUT_MS,
   nestingFetchNetworkErrorMessage,
   nestingFetchTimeoutMessage,
 } from '@/lib/nesting/fetch-json'
@@ -2180,7 +2181,7 @@ export function DashboardNestingClient() {
           }>('/api/me/staking/claim-all', {
             method: 'POST',
             credentials: 'include',
-            timeoutMs: NESTING_CLAIM_FETCH_TIMEOUT_MS,
+            timeoutMs: NESTING_CLAIM_ALL_FETCH_TIMEOUT_MS,
             headers: {
               'Content-Type': 'application/json',
               'X-Connected-Wallet': publicKey.toBase58(),

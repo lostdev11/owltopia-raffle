@@ -24,7 +24,7 @@ import {
   minOwlClaimThresholdMessage,
   noClaimableRewardsMessage,
 } from '@/lib/nesting/claim-plan'
-import { executeBatchOwlClaims } from '@/lib/nesting/batch-claim'
+import { executeChunkedBatchOwlClaims } from '@/lib/nesting/chunked-claim-all'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { resolveMutationAdapter } from '@/lib/nesting/resolve-adapter'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
@@ -51,7 +51,11 @@ import {
   assertPoolConfiguredForOnChainNftFreeze,
 } from '@/lib/nesting/nft-nest-onchain-lock'
 import { tryClearCrossWalletBlockerForMint } from '@/lib/nesting/clear-cross-wallet-stale-nests'
-import { requireStakingPlatformFeeLinked } from '@/lib/nesting/link-staking-platform-fee'
+import {
+  commitStakingPlatformFeeLinked,
+  requireStakingPlatformFeeLinked,
+  validateStakingPlatformFeeLinked,
+} from '@/lib/nesting/link-staking-platform-fee'
 
 export async function executeStake(params: {
   wallet: string
@@ -354,19 +358,24 @@ export async function executeClaim(params: {
     })
   }
 
-  const adapter = resolveMutationAdapter(pool)
-  await requireStakingPlatformFeeLinked({
+  const feeParams = {
     wallet: params.wallet,
-    action: 'claim',
+    action: 'claim' as const,
     feeSignature: params.platform_fee_signature,
     positionIds: [position_id],
-  })
-  return adapter.claimPositionRewards({
+  }
+  await validateStakingPlatformFeeLinked(feeParams)
+
+  const adapter = resolveMutationAdapter(pool)
+  const result = await adapter.claimPositionRewards({
     wallet: params.wallet,
     positionId: position_id,
     amount: payoutAmount,
     newClaimedTotal,
   })
+
+  await commitStakingPlatformFeeLinked(feeParams)
+  return result
 }
 
 /** Claim pending OWL from every active nest in one request (one on-chain transfer when configured). */
@@ -419,12 +428,13 @@ export async function executeClaimAll(params: {
 
   await verifyActiveNestLocksForClaimAll(rowsToVerify, poolById)
 
-  await requireStakingPlatformFeeLinked({
+  const feeParams = {
     wallet: params.wallet,
-    action: 'claim',
+    action: 'claim' as const,
     feeSignature: params.platform_fee_signature,
     positionIds: plans.map((p) => p.positionId),
-  })
+  }
+  await validateStakingPlatformFeeLinked(feeParams)
 
   const rewardToken = (pool.reward_token ?? '').trim().toUpperCase()
   if (rewardToken === 'OWL' && !isNestingDbOnlyOwlClaimsAllowed()) {
@@ -442,9 +452,12 @@ export async function executeClaimAll(params: {
     }
   }
 
-  return executeBatchOwlClaims({
+  const result = await executeChunkedBatchOwlClaims({
     wallet: params.wallet,
     pool,
     plans,
   })
+
+  await commitStakingPlatformFeeLinked(feeParams)
+  return result
 }

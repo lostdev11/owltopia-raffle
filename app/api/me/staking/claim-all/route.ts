@@ -6,7 +6,7 @@ import { isStakingUserError } from '@/lib/nesting/errors'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+export const maxDuration = 120
 
 const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 
@@ -36,12 +36,19 @@ export async function POST(request: NextRequest) {
 
     const txSig =
       typeof result.transaction_signature === 'string' ? result.transaction_signature.trim() : ''
+    const txSigs = Array.isArray(result.transaction_signatures)
+      ? result.transaction_signatures.filter((s): s is string => typeof s === 'string' && !!s.trim())
+      : txSig
+        ? [txSig]
+        : []
 
     return NextResponse.json({
       total_claimed: result.total_claimed,
       claim_count: result.claims.length,
       claims: result.claims,
       transaction_signature: txSig || null,
+      transaction_signatures: txSigs,
+      batch_count: result.batch_count ?? 1,
       execution: {
         path: result.execution_path,
       },

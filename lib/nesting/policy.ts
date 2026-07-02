@@ -159,6 +159,16 @@ export function isNestingClaimAllDisabled(): boolean {
   return readBoolean(process.env.NESTING_CLAIM_ALL_DISABLED, false)
 }
 
+const DEFAULT_CLAIM_ALL_BATCH_SIZE = 25
+
+/** Max nests per Claim-all server batch (SPL + ledger). Override: `NESTING_CLAIM_ALL_BATCH_SIZE`. */
+export function getClaimAllBatchSize(): number {
+  const raw = process.env.NESTING_CLAIM_ALL_BATCH_SIZE?.trim()
+  const n = raw ? Number(raw) : DEFAULT_CLAIM_ALL_BATCH_SIZE
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_CLAIM_ALL_BATCH_SIZE
+  return Math.min(Math.floor(n), 100)
+}
+
 export function validatePoolAgainstNestingEmissionPolicy(pool: Pick<
   StakingPoolRow,
   'asset_type' | 'reward_token' | 'reward_rate' | 'reward_rate_unit'

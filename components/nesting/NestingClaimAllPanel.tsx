@@ -46,6 +46,7 @@ export function NestingClaimAllPanel({
   const claimDisabled = disabled || !canClaim || busy
   const txInFlight = isNestingTxPhaseInFlight(phase)
   const statusLabel = txInFlight ? nestingTxPhaseLabel(phase, 'claim') || 'Processing your claim…' : null
+  const totalOwlLabel = totalOwl.toLocaleString(undefined, { maximumFractionDigits: 6 })
 
   return (
     <div
@@ -83,18 +84,41 @@ export function NestingClaimAllPanel({
           </>
         )}
       </p>
+      {canClaim && !txInFlight ? (
+        <div
+          className="rounded-lg border border-theme-prime/35 bg-background/40 px-3 py-2.5 space-y-1.5 text-center"
+          role="note"
+          aria-label="Claim summary"
+        >
+          <p className="text-sm font-semibold text-theme-prime">
+            You receive: +{totalOwlLabel} OWL → your wallet
+          </p>
+          {platformFeeLabel ? (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              You pay: {platformFeeLabel} (one SOL approval in your wallet, then OWL is sent automatically).
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {txInFlight && statusLabel ? (
         <div
           className={cn(
-            'flex min-h-[52px] w-full items-center justify-center gap-3 rounded-lg border border-theme-prime/40 px-4 py-3',
+            'flex min-h-[52px] w-full flex-col items-center justify-center gap-1 rounded-lg border border-theme-prime/40 px-4 py-3',
             canClaim ? 'bg-theme-prime/15' : 'bg-muted/30'
           )}
           role="status"
           aria-live="polite"
           aria-busy="true"
         >
-          <Loader2 className="h-5 w-5 shrink-0 animate-spin text-theme-prime" aria-hidden />
-          <p className="text-sm font-medium text-foreground text-center">{statusLabel}</p>
+          <div className="flex items-center justify-center gap-3">
+            <Loader2 className="h-5 w-5 shrink-0 animate-spin text-theme-prime" aria-hidden />
+            <p className="text-sm font-medium text-foreground text-center">{statusLabel}</p>
+          </div>
+          {phase === 'awaiting_wallet_signature' && canClaim ? (
+            <p className="text-xs text-muted-foreground text-center leading-relaxed">
+              +{totalOwlLabel} OWL will be sent to this wallet immediately after the fee confirms.
+            </p>
+          ) : null}
         </div>
       ) : (
         <Button
@@ -109,15 +133,10 @@ export function NestingClaimAllPanel({
           aria-disabled={claimDisabled}
         >
           {canClaim
-            ? `Claim all · ${totalOwl.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL`
+            ? `Claim all · ${totalOwlLabel} OWL`
             : 'Claim all — accruing OWL'}
         </Button>
       )}
-      {platformFeeLabel && canClaim && !txInFlight ? (
-        <p className="text-xs text-muted-foreground leading-relaxed text-center" role="note">
-          Platform fee: {platformFeeLabel} (one SOL transaction before OWL is sent).
-        </p>
-      ) : null}
       {disabledReason && canClaim && !txInFlight ? (
         <p className="text-xs text-amber-200/95 leading-relaxed text-center" role="status">
           {disabledReason}

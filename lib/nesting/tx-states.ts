@@ -33,7 +33,7 @@ const PHASE_LABEL: Record<NestingTxPhase, string> = {
 const CLAIM_PHASE_LABEL: Record<NestingTxPhase, string> = {
   idle: '',
   preparing: 'Processing your claim…',
-  awaiting_wallet_signature: 'Approve in your wallet to finish claiming…',
+  awaiting_wallet_signature: 'Approve the SOL platform fee in your wallet — OWL is sent right after.',
   submitting: 'Sending OWL to your wallet…',
   confirming: 'Confirming payout…',
   syncing: 'Updating your balance…',

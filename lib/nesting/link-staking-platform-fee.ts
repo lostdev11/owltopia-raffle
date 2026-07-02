@@ -14,6 +14,13 @@ import { verifyStakingPlatformFeeTransaction } from '@/lib/nesting/verify-stakin
 import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
 
+export type StakingPlatformFeeLinkParams = {
+  wallet: string
+  action: StakingPlatformFeeAction
+  feeSignature: unknown
+  positionIds: string[]
+}
+
 function parseFeeSignature(raw: unknown): string {
   return typeof raw === 'string' ? raw.trim() : ''
 }
@@ -31,16 +38,10 @@ function validatePositionIds(positionIds: string[]): string[] {
   return ids
 }
 
-/**
- * Links an on-chain platform fee payment to one or more nest positions before stake/unstake/claim.
- */
-export async function requireStakingPlatformFeeLinked(params: {
-  wallet: string
-  action: StakingPlatformFeeAction
-  feeSignature: unknown
-  positionIds: string[]
-}): Promise<void> {
-  if (!isStakingPlatformFeeEnabled()) return
+function parseStakingPlatformFeeLinkParams(params: StakingPlatformFeeLinkParams) {
+  if (!isStakingPlatformFeeEnabled()) {
+    return null
+  }
 
   const wallet = params.wallet.trim()
   const feeSignature = parseFeeSignature(params.feeSignature)
@@ -59,12 +60,27 @@ export async function requireStakingPlatformFeeLinked(params: {
     throw new StakingUserError('Platform fee treasury is not configured.', 503)
   }
 
+  return { wallet, feeSignature, positionIds, treasury, action: params.action }
+}
+
+/**
+ * Verifies the on-chain platform fee without recording it in the DB.
+ * Use before stake/unstake/claim work so a failed payout does not consume the fee link.
+ */
+export async function validateStakingPlatformFeeLinked(
+  params: StakingPlatformFeeLinkParams
+): Promise<void> {
+  const parsed = parseStakingPlatformFeeLinkParams(params)
+  if (!parsed) return
+
+  const { wallet, feeSignature, positionIds, treasury, action } = parsed
+
   const existing = await getStakingPlatformFeePaymentBySignature(feeSignature)
   if (existing) {
     if (existing.wallet_address !== wallet) {
       throw new StakingUserError('That platform fee transaction belongs to a different wallet.', 400)
     }
-    if (existing.action !== params.action) {
+    if (existing.action !== action) {
       throw new StakingUserError('That platform fee transaction was used for a different nest action.', 400)
     }
 
@@ -80,6 +96,38 @@ export async function requireStakingPlatformFeeLinked(params: {
         400
       )
     }
+    return
+  }
+
+  const verified = await verifyStakingPlatformFeeTransaction({
+    signature: feeSignature,
+    fromWallet: wallet,
+    treasuryWallet: treasury,
+    minUnits: positionIds.length,
+  })
+  if (!verified.ok) {
+    throw new StakingUserError(verified.error, 400)
+  }
+
+  if (verified.units < positionIds.length) {
+    throw new StakingUserError(
+      `Platform fee covers ${verified.units} nest(s) but this action needs ${positionIds.length}.`,
+      400
+    )
+  }
+}
+
+/**
+ * Records a validated platform fee payment after the nest action succeeds.
+ */
+export async function commitStakingPlatformFeeLinked(params: StakingPlatformFeeLinkParams): Promise<void> {
+  const parsed = parseStakingPlatformFeeLinkParams(params)
+  if (!parsed) return
+
+  const { wallet, feeSignature, positionIds, treasury, action } = parsed
+
+  const existing = await getStakingPlatformFeePaymentBySignature(feeSignature)
+  if (existing) {
     await appendStakingPlatformFeePositionIds(feeSignature, positionIds)
     return
   }
@@ -94,7 +142,6 @@ export async function requireStakingPlatformFeeLinked(params: {
     throw new StakingUserError(verified.error, 400)
   }
 
-  const unitLamports = getStakingPlatformFeeLamports()
   const expectedUnits = verified.units
   if (expectedUnits < positionIds.length) {
     throw new StakingUserError(
@@ -106,9 +153,17 @@ export async function requireStakingPlatformFeeLinked(params: {
   await insertStakingPlatformFeePayment({
     tx_signature: feeSignature,
     wallet_address: wallet,
-    action: params.action,
+    action,
     units: expectedUnits,
     lamports: verified.lamports,
     position_ids: positionIds,
   })
+}
+
+/**
+ * Validates and records an on-chain platform fee payment in one step (stake / unstake / freeze / sync).
+ */
+export async function requireStakingPlatformFeeLinked(params: StakingPlatformFeeLinkParams): Promise<void> {
+  await validateStakingPlatformFeeLinked(params)
+  await commitStakingPlatformFeeLinked(params)
 }

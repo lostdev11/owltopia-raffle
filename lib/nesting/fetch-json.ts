@@ -4,6 +4,8 @@ import { isMobileDevice, isMobileWebBrowser, isSolanaMobileEnvironment } from '@
 
 export const NESTING_POSITIONS_FETCH_TIMEOUT_MS = 28_000
 export const NESTING_CLAIM_FETCH_TIMEOUT_MS = 55_000
+/** Claim-all can run multiple on-chain batches for large wallets. */
+export const NESTING_CLAIM_ALL_FETCH_TIMEOUT_MS = 115_000
 
 export type NestingFetchJsonResult<T> = {
   ok: boolean
