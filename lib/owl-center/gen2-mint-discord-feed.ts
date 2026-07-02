@@ -15,7 +15,7 @@ import {
   postDiscordIncomingWebhookEmbeds,
 } from '@/lib/discord-incoming-webhook'
 import {
-  discordWebhookImageUrlFromRaw,
+  discordEmbedImageUrlFromRaw,
   isReliableDiscordFeedImageUri,
 } from '@/lib/discord-nft-embed-image'
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
@@ -25,7 +25,7 @@ import { OWL_CENTER_MINTABLE_PHASES } from '@/lib/owl-center/phase-schedule'
 import { sumOwlCenterPhaseMinted } from '@/lib/owl-center/presale-mint-pool'
 import { reconcileLaunchMintedCount } from '@/lib/owl-center/reconcile-gen2-minted-count'
 import type { OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
-import { fetchNftMintMetaFromHelius, type NftMintMetaFromHelius } from '@/lib/nft-helius-image'
+import { fetchNftMintMetaFromHelius } from '@/lib/nft-helius-image'
 import { fetchMetadataJsonFromUri, imageUrlFromMetadataJson } from '@/lib/owl-center/metadata-json-fix'
 import { getMetaplexTokenMetadata } from '@/lib/solana/metaplex-mint-onchain-metadata'
 import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
@@ -100,68 +100,59 @@ async function buildProgressSnapshot(
 }
 
 function discordImageUrl(rawImageUri: string | null | undefined): string | undefined {
-  return discordWebhookImageUrlFromRaw(rawImageUri)
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-/** Helius DAS lags fresh mints; retry briefly and bypass the negative cache between attempts. */
-async function fetchDasMetaForDiscordFeed(mint: string): Promise<NftMintMetaFromHelius | null> {
-  const retryDelaysMs = [0, 900, 1800]
-  let best: NftMintMetaFromHelius | null = null
-  for (let i = 0; i < retryDelaysMs.length; i++) {
-    if (retryDelaysMs[i]! > 0) await delay(retryDelaysMs[i]!)
-    const meta = await fetchNftMintMetaFromHelius(mint, {
-      preferMainnet: true,
-      bypassCache: i > 0,
-    })
-    if (!meta) continue
-    best = meta
-    if (meta.name && meta.image && isReliableDiscordFeedImageUri(meta.image)) return meta
-  }
-  return best
+  return discordEmbedImageUrlFromRaw(rawImageUri)
 }
 
 type MintFeedMeta = { name: string | null; image: string | null }
 
-/**
- * Resolve a just-minted owl's name + image for the Discord card.
- *
- * Helius DAS (`getAsset`) is the fast path, but it lags behind the chain by a few seconds, so a
- * freshly minted NFT — especially the later ones when a wallet mints several in quick succession —
- * is often not indexed yet and DAS returns nothing. That left those cards stuck on the "GEN2 Owl"
- * fallback title with no art. When DAS is missing either field we read the on-chain Metaplex
- * metadata account directly (available the instant the mint confirms) for the name + JSON URI and
- * resolve the image from that JSON. Best-effort: any failure just leaves the DAS result as-is.
- */
-async function resolveMintFeedMeta(mint: string): Promise<MintFeedMeta> {
-  const das = await fetchDasMetaForDiscordFeed(mint)
-  let name = das?.name ?? null
-  let image = das?.image ?? null
-  if (name && image && isReliableDiscordFeedImageUri(image)) return { name, image }
+/** On-chain Metaplex metadata + JSON — available the instant the mint confirms (before DAS indexes). */
+async function fetchOnChainMintFeedMeta(mint: string): Promise<MintFeedMeta> {
+  const rpcUrl = getHeliusMainnetRpcUrl()
+  if (!rpcUrl) return { name: null, image: null }
 
   try {
-    const rpcUrl = getHeliusMainnetRpcUrl()
-    if (!rpcUrl) return { name, image }
     const connection = new Connection(rpcUrl, 'confirmed')
     const onChain = await getMetaplexTokenMetadata(connection, new PublicKey(mint))
-    if (!onChain) return { name, image }
+    if (!onChain) return { name: null, image: null }
 
-    if (!name && onChain.name) name = onChain.name
+    let name = onChain.name?.trim() || null
+    let image: string | null = null
 
-    if ((!image || !isReliableDiscordFeedImageUri(image)) && onChain.uri) {
+    if (onChain.uri) {
       const json = await fetchMetadataJsonFromUri(onChain.uri, 'mainnet')
       if (json) {
         const fromJson = imageUrlFromMetadataJson(json)
-        if (fromJson) image = fromJson
+        if (fromJson && isReliableDiscordFeedImageUri(fromJson)) image = fromJson
         if (!name && typeof json.name === 'string' && json.name.trim()) name = json.name.trim()
       }
     }
+
+    return { name, image }
   } catch (e) {
-    console.error('[gen2-mint-discord-feed] on-chain metadata fallback failed', mint, e)
+    console.error('[gen2-mint-discord-feed] on-chain metadata read failed', mint, e)
+    return { name: null, image: null }
   }
+}
+
+/**
+ * Resolve a just-minted owl's name + image for the Discord card.
+ *
+ * On-chain JSON is read first (available at confirm time). DAS supplements the token id when the
+ * indexer has caught up. Unreliable interim gateway/CDN URLs from DAS are never posted.
+ */
+async function resolveMintFeedMeta(mint: string): Promise<MintFeedMeta> {
+  const [onChain, das] = await Promise.all([
+    fetchOnChainMintFeedMeta(mint),
+    fetchNftMintMetaFromHelius(mint, { preferMainnet: true, bypassCache: true }),
+  ])
+
+  let name = onChain.name ?? das?.name ?? null
+  let image = onChain.image ?? null
+
+  if (!image && das?.image && isReliableDiscordFeedImageUri(das.image)) {
+    image = das.image
+  }
+  if (!name && das?.name) name = das.name
 
   if (!image) {
     console.warn('[gen2-mint-discord-feed] no image for mint embed', mint, { name })
@@ -302,14 +293,17 @@ export async function postGen2MintFeed(input: Gen2MintFeedInput): Promise<void> 
   const launch = await getOwlCenterLaunchBySlug(GEN2_SLUG)
   if (!launch) return
 
-  const snapshot = await buildProgressSnapshot(launch, input.network)
-
   const mints = input.mints.filter((m) => typeof m === 'string' && m.trim()).slice(0, MAX_MINT_EMBEDS)
+  const fallbackThumbnailUrl = launch.image_url?.trim()
+    ? discordImageUrl(launch.image_url)
+    : undefined
+
+  const [snapshot, metas] = await Promise.all([
+    buildProgressSnapshot(launch, input.network),
+    Promise.all(mints.map((mint) => resolveMintFeedMeta(mint))),
+  ])
+
   if (mints.length > 0) {
-    const fallbackThumbnailUrl = launch.image_url?.trim()
-      ? discordImageUrl(launch.image_url)
-      : undefined
-    const metas = await Promise.all(mints.map((mint) => resolveMintFeedMeta(mint)))
     const embeds: DiscordIncomingEmbed[] = mints.map((mint, i) => {
       const meta = metas[i]!
       return buildMintEmbed({
