@@ -1,6 +1,5 @@
 import { getPresaleOverageAllocation } from '@/lib/db/gen2-presale-overage'
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
-import { getBalanceByWallet } from '@/lib/gen2-presale/db'
 import {
   gen2PresalePhaseCreditsAvailable,
   gen2PresaleOveragePhaseCreditsAvailable,
@@ -11,6 +10,7 @@ import {
 } from '@/lib/gen2-presale/presale-participation'
 import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { resolveGen1SnapshotForMint } from '@/lib/owl-center/gen2-mint-delegation'
+import { resolvePresaleBalanceForMint } from '@/lib/owl-center/gen2-presale-delegation'
 import { gen2PublicPoolCap } from '@/lib/owl-center/gen2-phase-advance'
 import {
   gen1AirdropMaxMintable,
@@ -259,7 +259,8 @@ export async function buildGen2Eligibility(
       slug: launch.slug,
     })
     const overage = await getPresaleOverageAllocation(w)
-    const bal = await getBalanceByWallet(w)
+    const resolved = await resolvePresaleBalanceForMint(w)
+    const bal = resolved.balance
     const allowance = buildPresaleWalletAllowance({ balance: bal, pool })
     const presaleCredits = gen2PresalePhaseCreditsAvailable(bal, overage)
     const max = presaleRedemptionMaxMintable({
@@ -277,18 +278,22 @@ export async function buildGen2Eligibility(
         available_mints: allowance.available_mints,
         purchased_available_mints: gen2PresalePurchasedCreditsAvailable(bal),
         is_paid_participant: isGen2PresalePaidParticipant(bal),
+        delegated_from: resolved.delegated_from,
+        delegated_away_to: resolved.delegated_away_to,
       },
       is_eligible: max > 0,
       max_mintable: Math.max(0, max),
-      reason: !bal || !isGen2PresaleCreditHolder(bal)
-        ? 'not_presale_participant'
-        : presaleCredits <= 0
-          ? overageReserved > 0
-            ? 'presale_credits_in_overage_phase'
-            : 'no_presale_credits'
-          : max <= 0
-            ? 'presale_pool_exhausted'
-            : null,
+      reason: resolved.delegated_away_to
+        ? 'presale_delegated_away'
+        : !bal || !isGen2PresaleCreditHolder(bal)
+          ? 'not_presale_participant'
+          : presaleCredits <= 0
+            ? overageReserved > 0
+              ? 'presale_credits_in_overage_phase'
+              : 'no_presale_credits'
+            : max <= 0
+              ? 'presale_pool_exhausted'
+              : null,
       price_usdc: 0,
     }
   }
@@ -298,7 +303,8 @@ export async function buildGen2Eligibility(
       slug: launch.slug,
     })
     const overage = await getPresaleOverageAllocation(w)
-    const bal = await getBalanceByWallet(w)
+    const resolved = await resolvePresaleBalanceForMint(w)
+    const bal = resolved.balance
     const availOverage = overage ? Math.max(0, overage.allowed_mints - overage.used_mints) : 0
     const overageCredits = gen2PresaleOveragePhaseCreditsAvailable(bal, overage)
     const max = presaleOverageMaxMintable({
@@ -317,18 +323,33 @@ export async function buildGen2Eligibility(
             available_mints: bal.available_mints,
             purchased_available_mints: gen2PresalePurchasedCreditsAvailable(bal),
             is_paid_participant: isGen2PresalePaidParticipant(bal),
+            delegated_from: resolved.delegated_from,
+            delegated_away_to: resolved.delegated_away_to,
           }
-        : undefined,
+        : resolved.delegated_away_to
+          ? {
+              purchased_mints: 0,
+              gifted_mints: 0,
+              used_mints: 0,
+              available_mints: 0,
+              purchased_available_mints: 0,
+              is_paid_participant: false,
+              delegated_from: null,
+              delegated_away_to: resolved.delegated_away_to,
+            }
+          : undefined,
       is_eligible: max > 0,
       max_mintable: Math.max(0, max),
       reason:
-        !bal || overageCredits <= 0
-          ? 'no_presale_credits'
-          : !overage || availOverage <= 0
-            ? 'not_on_overage_list'
-            : max <= 0
-              ? 'overage_pool_exhausted'
-              : null,
+        resolved.delegated_away_to
+          ? 'presale_delegated_away'
+          : !bal || overageCredits <= 0
+            ? 'no_presale_credits'
+            : !overage || availOverage <= 0
+              ? 'not_on_overage_list'
+              : max <= 0
+                ? 'overage_pool_exhausted'
+                : null,
       price_usdc: 0,
     }
   }

@@ -19,8 +19,10 @@ import {
   type IrysUploaderHandle,
 } from '@/lib/owl-center/irys-uploader'
 import { createIrysDeployerUmi } from '@/lib/owl-center/sugar-deploy-onchain'
+import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { getGen2CollectionMint, isDevnetMintEnabled, type OwlMintNetwork } from '@/lib/solana/network'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 /** Marker every wallet-safe `image` URL contains (Owltopia proxy). */
 const PROXY_IMAGE_MARKER = '/api/proxy-image'
@@ -49,6 +51,69 @@ export type WalletSafeFixSummary = {
 
 function dasRpcUrl(): string {
   return resolveServerSolanaRpcUrl()
+}
+
+/** Recent Gen2 mint addresses from DB — cheap cron candidate set vs full getAssetsByGroup walk. */
+async function listRecentGen2MintAddresses(limit = 60): Promise<string[]> {
+  const launch = await getOwlCenterLaunchBySlug('gen2')
+  if (!launch) return []
+  const network = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
+  const db = getSupabaseAdmin()
+  const { data } = await db
+    .from('owl_center_mint_events')
+    .select('minted_nft_mints')
+    .eq('launch_id', launch.id)
+    .eq('network', network)
+    .order('created_at', { ascending: false })
+    .limit(Math.max(10, limit))
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const row of data ?? []) {
+    const list = (row as { minted_nft_mints?: string[] | null }).minted_nft_mints
+    if (!Array.isArray(list)) continue
+    for (const m of list) {
+      const id = String(m ?? '').trim()
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      out.push(id)
+      if (out.length >= limit) return out
+    }
+  }
+  return out
+}
+
+async function dasGetAssetImage(mint: string): Promise<string | null> {
+  const res = await fetch(dasRpcUrl(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'owl-wallet-safe-asset',
+      method: 'getAsset',
+      params: { id: mint },
+    }),
+    cache: 'no-store',
+  })
+  const json = (await res.json()) as { result?: DasAsset; error?: unknown }
+  if (json.error || !json.result) return null
+  const a = json.result
+  return a.content?.links?.image ?? a.content?.files?.[0]?.uri ?? null
+}
+
+/**
+ * Cheap pre-filter for cron: check recent mints via getAsset instead of paginating the whole collection.
+ */
+export async function listRecentGen2WalletUnsafeMints(max = 30): Promise<string[]> {
+  const collection = getGen2CollectionMint().trim()
+  if (!collection) return []
+  const recent = await listRecentGen2MintAddresses(max * 2)
+  const out: string[] = []
+  for (const mint of recent) {
+    const image = await dasGetAssetImage(mint)
+    if (!isProxyImageUrl(image)) out.push(mint)
+    if (out.length >= max) break
+  }
+  return out
 }
 
 function isProxyImageUrl(url: unknown): boolean {
@@ -229,12 +294,12 @@ export async function runGen2WalletSafeMetadataFix(opts?: {
   if (!isIrysUploadConfigured()) return { ...empty, results: [{ mint: '-', ok: false, error: 'irys_not_configured' }], failed: 1 }
   if (!collection) return { ...empty, results: [{ mint: '-', ok: false, error: 'no_collection_mint' }], failed: 1 }
 
-  // Candidate set: explicit mints, else the collection NFT + DAS-listed unsafe mints.
+  // Candidate set: explicit mints (confirm-mint), else recent DB mints checked via getAsset (cron).
   let candidates: string[]
   if (opts?.mints?.length) {
     candidates = [...new Set(opts.mints.map((m) => m.trim()).filter(Boolean))]
   } else {
-    const unsafe = await listGen2WalletUnsafeMints({ collection, max })
+    const unsafe = await listRecentGen2WalletUnsafeMints(max)
     candidates = [...new Set([collection, ...unsafe])].slice(0, max)
   }
   if (candidates.length === 0) return empty

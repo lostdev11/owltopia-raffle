@@ -60,16 +60,12 @@ export async function getGen1ClusterSummary(connectedWallet: string): Promise<Ge
 
   const primary = (await getPrimaryWalletForAddress(connected)) ?? connected
   const cluster = await getWalletClusterAddresses(primary)
-  const wallets: Gen1ClusterWalletRow[] = []
-
-  for (const w of cluster) {
-    const snap = await getOwltopiaGen1Snapshot(w)
-    wallets.push({
-      wallet: w,
-      is_connected_wallet: w === connected,
-      gen1_nft_count: snap.gen1_nft_count,
-    })
-  }
+  const snapshots = await Promise.all(cluster.map((w) => getOwltopiaGen1Snapshot(w)))
+  const wallets: Gen1ClusterWalletRow[] = cluster.map((w, i) => ({
+    wallet: w,
+    is_connected_wallet: w === connected,
+    gen1_nft_count: snapshots[i]?.gen1_nft_count ?? 0,
+  }))
 
   const connectedRow = wallets.find((row) => row.is_connected_wallet)
   const connected_gen1_nft_count = connectedRow?.gen1_nft_count ?? 0

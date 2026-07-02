@@ -18,6 +18,7 @@ import { AdminWlCommunityManager } from '@/components/admin/AdminWlCommunityMana
 import { AdminGen2MintMilestones } from '@/components/admin/AdminGen2MintMilestones'
 import { AdminWalletBulkUpload } from '@/components/admin/AdminWalletBulkUpload'
 import { AdminGen1WalletSwitch } from '@/components/admin/AdminGen1WalletSwitch'
+import { AdminPresaleWalletSwitch } from '@/components/admin/AdminPresaleWalletSwitch'
 import { AdminGen1SnapshotPanel } from '@/components/admin/AdminGen1SnapshotPanel'
 import { PhaseScheduleEditor } from '@/components/owl-center/PhaseScheduleEditor'
 import { GEN2_WL_COLLAB_COMMUNITIES, owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
@@ -482,6 +483,10 @@ export default function AdminOwlCenterPage() {
 
             <CommandCard id="gen1-wallet-switch" label="gen1_wallet_switch.sys">
               <AdminGen1WalletSwitch connected={connected} />
+            </CommandCard>
+
+            <CommandCard id="presale-wallet-switch" label="presale_wallet_switch.sys">
+              <AdminPresaleWalletSwitch connected={connected} />
             </CommandCard>
 
             <CommandCard id="wl-audit" label="wl_allocation_audit.sys">

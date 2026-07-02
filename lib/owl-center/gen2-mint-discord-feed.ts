@@ -14,6 +14,10 @@ import {
   postDiscordIncomingWebhookEmbedReturnId,
   postDiscordIncomingWebhookEmbeds,
 } from '@/lib/discord-incoming-webhook'
+import {
+  discordWebhookImageUrlFromRaw,
+  isReliableDiscordFeedImageUri,
+} from '@/lib/discord-nft-embed-image'
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { gen2PhasePoolCap, gen2PublicPoolCap } from '@/lib/owl-center/gen2-phase-advance'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
@@ -21,12 +25,11 @@ import { OWL_CENTER_MINTABLE_PHASES } from '@/lib/owl-center/phase-schedule'
 import { sumOwlCenterPhaseMinted } from '@/lib/owl-center/presale-mint-pool'
 import { reconcileLaunchMintedCount } from '@/lib/owl-center/reconcile-gen2-minted-count'
 import type { OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
-import { fetchNftMintMetaFromHelius } from '@/lib/nft-helius-image'
+import { fetchNftMintMetaFromHelius, type NftMintMetaFromHelius } from '@/lib/nft-helius-image'
 import { fetchMetadataJsonFromUri, imageUrlFromMetadataJson } from '@/lib/owl-center/metadata-json-fix'
 import { getMetaplexTokenMetadata } from '@/lib/solana/metaplex-mint-onchain-metadata'
 import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
 import { Connection, PublicKey } from '@solana/web3.js'
-import { getSiteBaseUrl } from '@/lib/site-config'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 const GEN2_SLUG = 'gen2'
@@ -96,10 +99,29 @@ async function buildProgressSnapshot(
   return { total: launch.total_supply, minted, percent: pct(minted, launch.total_supply), phases }
 }
 
-function proxyImageUrl(rawImageUri: string | null | undefined): string | undefined {
-  const trimmed = rawImageUri?.trim()
-  if (!trimmed) return undefined
-  return `${getSiteBaseUrl().replace(/\/$/, '')}/api/proxy-image?url=${encodeURIComponent(trimmed)}`
+function discordImageUrl(rawImageUri: string | null | undefined): string | undefined {
+  return discordWebhookImageUrlFromRaw(rawImageUri)
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Helius DAS lags fresh mints; retry briefly and bypass the negative cache between attempts. */
+async function fetchDasMetaForDiscordFeed(mint: string): Promise<NftMintMetaFromHelius | null> {
+  const retryDelaysMs = [0, 900, 1800]
+  let best: NftMintMetaFromHelius | null = null
+  for (let i = 0; i < retryDelaysMs.length; i++) {
+    if (retryDelaysMs[i]! > 0) await delay(retryDelaysMs[i]!)
+    const meta = await fetchNftMintMetaFromHelius(mint, {
+      preferMainnet: true,
+      bypassCache: i > 0,
+    })
+    if (!meta) continue
+    best = meta
+    if (meta.name && meta.image && isReliableDiscordFeedImageUri(meta.image)) return meta
+  }
+  return best
 }
 
 type MintFeedMeta = { name: string | null; image: string | null }
@@ -115,10 +137,10 @@ type MintFeedMeta = { name: string | null; image: string | null }
  * resolve the image from that JSON. Best-effort: any failure just leaves the DAS result as-is.
  */
 async function resolveMintFeedMeta(mint: string): Promise<MintFeedMeta> {
-  const das = await fetchNftMintMetaFromHelius(mint, { preferMainnet: true })
+  const das = await fetchDasMetaForDiscordFeed(mint)
   let name = das?.name ?? null
   let image = das?.image ?? null
-  if (name && image) return { name, image }
+  if (name && image && isReliableDiscordFeedImageUri(image)) return { name, image }
 
   try {
     const rpcUrl = getHeliusMainnetRpcUrl()
@@ -129,7 +151,7 @@ async function resolveMintFeedMeta(mint: string): Promise<MintFeedMeta> {
 
     if (!name && onChain.name) name = onChain.name
 
-    if (!image && onChain.uri) {
+    if ((!image || !isReliableDiscordFeedImageUri(image)) && onChain.uri) {
       const json = await fetchMetadataJsonFromUri(onChain.uri, 'mainnet')
       if (json) {
         const fromJson = imageUrlFromMetadataJson(json)
@@ -137,8 +159,12 @@ async function resolveMintFeedMeta(mint: string): Promise<MintFeedMeta> {
         if (!name && typeof json.name === 'string' && json.name.trim()) name = json.name.trim()
       }
     }
-  } catch {
-    /* best-effort: keep whatever DAS resolved */
+  } catch (e) {
+    console.error('[gen2-mint-discord-feed] on-chain metadata fallback failed', mint, e)
+  }
+
+  if (!image) {
+    console.warn('[gen2-mint-discord-feed] no image for mint embed', mint, { name })
   }
 
   return { name, image }
@@ -148,11 +174,12 @@ function buildMintEmbed(input: {
   mint: string
   name: string | null
   imageUrl?: string
+  fallbackThumbnailUrl?: string
   wallet: string
   phase: OwlCenterPhase
   txSig: string
 }): DiscordIncomingEmbed {
-  const { mint, name, imageUrl, wallet, phase, txSig } = input
+  const { mint, name, imageUrl, fallbackThumbnailUrl, wallet, phase, txSig } = input
   const links = [
     `[Tx](https://solscan.io/tx/${encodeURIComponent(txSig)})`,
     `[Magic Eden](https://magiceden.io/item-details/${encodeURIComponent(mint)})`,
@@ -165,7 +192,11 @@ function buildMintEmbed(input: {
     color: PHASE_COLORS[phase] ?? STATUS_COLOR,
     description: `Minted in **${owlCenterPhaseLabel(phase)}** by [${shortWallet(wallet)}](https://solscan.io/account/${encodeURIComponent(wallet)})`,
     fields: [{ name: 'Links', value: links }],
-    ...(imageUrl ? { image: { url: imageUrl } } : {}),
+    ...(imageUrl
+      ? { image: { url: imageUrl } }
+      : fallbackThumbnailUrl
+        ? { thumbnail: { url: fallbackThumbnailUrl } }
+        : {}),
     timestamp: new Date().toISOString(),
   }
 }
@@ -193,7 +224,7 @@ function buildStatusEmbed(launch: OwlCenterLaunchPublic, snap: MintProgressSnaps
     title: '🦉 GEN2 Mint — Live Progress',
     color: STATUS_COLOR,
     description: `${phaseLines}\n\n${totalLine}`,
-    ...(launch.image_url?.trim() ? { thumbnail: { url: proxyImageUrl(launch.image_url)! } } : {}),
+    ...(launch.image_url?.trim() ? { thumbnail: { url: discordImageUrl(launch.image_url)! } } : {}),
     footer: { text: 'Owltopia • updates live as owls mint' },
     timestamp: new Date().toISOString(),
   }
@@ -275,22 +306,22 @@ export async function postGen2MintFeed(input: Gen2MintFeedInput): Promise<void> 
 
   const mints = input.mints.filter((m) => typeof m === 'string' && m.trim()).slice(0, MAX_MINT_EMBEDS)
   if (mints.length > 0) {
-    const embeds: DiscordIncomingEmbed[] = []
-    for (const mint of mints) {
-      // Mainnet DAS first (so art shows even if the app RPC is devnet), then on-chain fallback for
-      // freshly minted owls DAS hasn't indexed yet — otherwise the card has no name/image.
-      const meta = await resolveMintFeedMeta(mint)
-      embeds.push(
-        buildMintEmbed({
-          mint,
-          name: meta.name,
-          imageUrl: proxyImageUrl(meta.image),
-          wallet: input.wallet,
-          phase: input.phase,
-          txSig: input.txSignature,
-        })
-      )
-    }
+    const fallbackThumbnailUrl = launch.image_url?.trim()
+      ? discordImageUrl(launch.image_url)
+      : undefined
+    const metas = await Promise.all(mints.map((mint) => resolveMintFeedMeta(mint)))
+    const embeds: DiscordIncomingEmbed[] = mints.map((mint, i) => {
+      const meta = metas[i]!
+      return buildMintEmbed({
+        mint,
+        name: meta.name,
+        imageUrl: discordImageUrl(meta.image),
+        fallbackThumbnailUrl,
+        wallet: input.wallet,
+        phase: input.phase,
+        txSig: input.txSignature,
+      })
+    })
     await postDiscordIncomingWebhookEmbeds(webhookUrl, embeds, buildMintContentLine(input.phase, input.quantity, snapshot))
   }
 
@@ -319,7 +350,8 @@ export async function sendGen2MintFeedPreview(input: {
   const embed = buildMintEmbed({
     mint: input.mint,
     name: meta.name,
-    imageUrl: proxyImageUrl(meta.image),
+    imageUrl: discordImageUrl(meta.image),
+    fallbackThumbnailUrl: launch.image_url?.trim() ? discordImageUrl(launch.image_url) : undefined,
     wallet: input.wallet,
     phase: input.phase,
     txSig: input.txSignature,

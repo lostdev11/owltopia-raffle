@@ -93,12 +93,15 @@ export async function fetchWalletNftsInCollectionDas(
 
       if (items.length < limit) break
     }
+    if (tokenType === 'all' && byId.size > 0) break
   }
+
+  if (byId.size > 0) return [...byId.values()]
 
   const matchesCollection = (item: HeliusDasNftItem) =>
     dasAssetBelongsToCollection(item, collectionAddress)
 
-  // --- getAssetsByOwner (page — documented pagination + displayOptions for grouping fields)
+  // --- getAssetsByOwner (only when searchAssets found nothing)
   for (let page = 1; page <= maxPages; page++) {
     const res = await fetch(heliusRpcUrl, {
       method: 'POST',

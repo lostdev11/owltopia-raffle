@@ -195,6 +195,8 @@ function cacheMintMeta(
 export type FetchNftImageFromHeliusOptions = {
   /** Use mainnet Helius DAS (canonical for prod Owl Nest / TM assets when app RPC is devnet). */
   preferMainnet?: boolean
+  /** Skip in-process cache (e.g. Discord feed retries right after a fresh mint). */
+  bypassCache?: boolean
 }
 
 export type NftMintMetaFromHelius = {
@@ -219,9 +221,11 @@ export async function fetchNftMintMetaFromHelius(
   const heliusUrl = preferMainnet ? getHeliusMainnetRpcUrl() : getHeliusRpcUrl()
   if (!heliusUrl) return null
 
-  const cached = mintMetaCache.get(cacheLookupKey)
-  if (cached && cached.expiresAt > Date.now()) {
-    return { image: cached.image, name: cached.name }
+  if (options?.bypassCache !== true) {
+    const cached = mintMetaCache.get(cacheLookupKey)
+    if (cached && cached.expiresAt > Date.now()) {
+      return { image: cached.image, name: cached.name }
+    }
   }
 
   const controller = new AbortController()

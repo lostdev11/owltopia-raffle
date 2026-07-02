@@ -1,3 +1,4 @@
+import { applyPresaleDelegations } from '@/lib/db/gen2-presale-delegations'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 /** PostgREST when migrations 093+ are not applied yet (local / fresh DB). */
@@ -261,7 +262,7 @@ export async function listGen2PresaleMerkleWallets(): Promise<string[]> {
     if (rows.length < page) break
   }
 
-  return [...walletSet].sort()
+  return applyPresaleDelegations([...walletSet].sort())
 }
 
 export type Gen2PresaleParticipant = {

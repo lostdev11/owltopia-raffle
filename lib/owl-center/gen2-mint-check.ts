@@ -22,6 +22,7 @@ import {
   getWlClusterSummary,
 } from '@/lib/owl-center/gen2-mint-check-cluster'
 import { resolveGen1SnapshotForMint } from '@/lib/owl-center/gen2-mint-delegation'
+import { resolvePresaleBalanceForMint } from '@/lib/owl-center/gen2-presale-delegation'
 import { reconcileGen2WalletMints } from '@/lib/owl-center/reconcile-gen2-wallet-mints'
 import { isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
@@ -336,7 +337,8 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
 
     if (phase === 'PRESALE') {
       const overage = await getPresaleOverageAllocation(w)
-      const bal = await getBalanceByWallet(w)
+      const resolved = await resolvePresaleBalanceForMint(w)
+      const bal = resolved.balance
       const presaleMinted = await sumPhaseMintedForWallet(launch.id, w, 'PRESALE', network)
       const allowance = buildPresaleWalletAllowance({ balance: bal, pool })
       const presaleCredits = gen2PresalePhaseCreditsAvailable(bal, overage)
@@ -348,21 +350,28 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       const isActive = isPhaseMintLive(phase)
       const reserved_mints = presaleCredits
       const overageReserved = overageReservedGiftedMints(bal, overage)
-      const presaleReason = !bal || !isGen2PresaleCreditHolder(bal)
-        ? 'not_presale_participant'
-        : presaleCredits <= 0
-          ? overageReserved > 0
-            ? 'presale_credits_in_overage_phase'
-            : 'no_presale_credits'
-          : max <= 0 && isActive
-            ? 'presale_pool_exhausted'
-            : null
+      const presaleReason = resolved.delegated_away_to
+        ? 'presale_delegated_away'
+        : !bal || !isGen2PresaleCreditHolder(bal)
+          ? 'not_presale_participant'
+          : presaleCredits <= 0
+            ? overageReserved > 0
+              ? 'presale_credits_in_overage_phase'
+              : 'no_presale_credits'
+            : max <= 0 && isActive
+              ? 'presale_pool_exhausted'
+              : null
       const presaleGate = applyPhaseScheduleGate(
         isActive,
         scheduleOpen,
         max > 0 && isActive && !launch.is_paused,
         presaleReason
       )
+      const delegationNote = resolved.delegated_from
+        ? `Minting presale credits on behalf of ${shortWallet(resolved.delegated_from)} via admin wallet switch`
+        : resolved.delegated_away_to
+          ? `Presale credits delegated to ${shortWallet(resolved.delegated_away_to)} — connect that wallet to mint`
+          : null
       phases.push({
         phase,
         label,
@@ -376,9 +385,10 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         max_mintable: isActive ? max : reserved_mints,
         reserved_mints,
         phase_note:
-          reserved_mints > 0 && (!isActive || launch.is_paused)
+          delegationNote ??
+          (reserved_mints > 0 && (!isActive || launch.is_paused)
             ? phaseInactiveNote(phase, launch.active_phase, launch.is_paused, mint_operational)
-            : null,
+            : null),
         reason: presaleGate.reason,
         minted_in_phase: presaleMinted,
         presale: {
@@ -391,6 +401,8 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
           mint_cap: pool.mint_cap,
           credits_issued: pool.credits_issued,
           credits_overshoot: pool.credits_overshoot,
+          delegated_from: resolved.delegated_from,
+          delegated_away_to: resolved.delegated_away_to,
         },
       })
       continue

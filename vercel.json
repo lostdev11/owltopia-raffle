@@ -41,7 +41,7 @@
     },
     {
       "path": "/api/cron/gen2-metadata-fix",
-      "schedule": "*/2 * * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/owl-center-asset-upload",

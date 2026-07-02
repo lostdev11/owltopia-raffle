@@ -6,6 +6,7 @@ const REASON_LABELS: Record<string, string> = {
   gen1_pool_exhausted: '343 GEN1 mint cap reached globally',
   gen1_mint_limit: 'GEN1 mint limit reached for this wallet',
   not_presale_participant: 'This wallet did not pay during presale',
+  presale_delegated_away: 'Presale credits delegated to another wallet — connect that wallet to mint',
   no_paid_presale_credits: 'No paid presale credits left to mint',
   no_presale_credits: 'No presale credits left to mint',
   presale_credits_in_overage_phase: 'Presale+13 credits — mint when Presale+13 phase is live',

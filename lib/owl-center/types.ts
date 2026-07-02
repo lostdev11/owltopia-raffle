@@ -198,6 +198,10 @@ export type Gen2PresaleBalanceSlice = {
   /** Paid presale spots still redeemable (excludes gift-only balance). */
   purchased_available_mints?: number
   is_paid_participant?: boolean
+  /** Admin wallet switch: minting presale credits on behalf of this source wallet. */
+  delegated_from?: string | null
+  /** Admin wallet switch: presale credits delegated to this wallet. */
+  delegated_away_to?: string | null
 }
 
 export type Gen2EligibilityResponse = {

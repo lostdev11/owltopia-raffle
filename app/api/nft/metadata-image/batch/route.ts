@@ -37,7 +37,10 @@ export async function POST(request: NextRequest) {
       items[mint] = { image: meta?.image ?? null, name: meta?.name ?? null }
     }
 
-    return NextResponse.json({ items }, { status: 200 })
+    return NextResponse.json({ items }, {
+      status: 200,
+      headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' },
+    })
   } catch (e) {
     console.error('[nft/metadata-image/batch]', e)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
