@@ -11,12 +11,11 @@ import {
 import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { resolveGen1SnapshotForMint } from '@/lib/owl-center/gen2-mint-delegation'
 import { resolvePresaleBalanceForMint } from '@/lib/owl-center/gen2-presale-delegation'
-import { gen2PublicPoolCap } from '@/lib/owl-center/gen2-phase-advance'
+import { gen2PublicPoolCap, gen2PublicWalletLimitRemaining } from '@/lib/owl-center/gen2-phase-advance'
 import {
   gen1AirdropMaxMintable,
   presaleOverageMaxMintable,
   presaleRedemptionMaxMintable,
-  publicMaxMintable,
   whitelistMaxMintable,
 } from '@/lib/owl-center/phase-allowance'
 import {
@@ -389,24 +388,18 @@ export async function buildGen2Eligibility(
   if (phase === 'PUBLIC') {
     const usdc = launch.public_price_usdc ?? 40
     const quote = await getOptionalLamportsQuoteForUsdc(usdc)
-    const usedSum = await sumPhaseMintedForWallet(launch.id, w, 'PUBLIC', network)
     const [publicMintedGlobal, wlMintedGlobal] = await Promise.all([
       sumOwlCenterPhaseMinted(launch.id, 'PUBLIC', network),
       sumOwlCenterPhaseMinted(launch.id, 'WHITELIST', network),
     ])
     // Public pool absorbs unminted WL leftover (airdrop/presale leftover stays reserved for the team).
     const publicPoolRemaining = Math.max(0, gen2PublicPoolCap(launch, wlMintedGlobal) - publicMintedGlobal)
-    const cap = Math.max(0, launch.wallet_mint_limit - usedSum)
-    const max = publicMaxMintable({
-      walletLimitRemaining: cap,
-      publicPoolRemaining,
-      supplyRemaining: remaining,
-    })
+    const max = gen2PublicWalletLimitRemaining({ publicPoolRemaining, supplyRemaining: remaining })
     return {
       ...base,
       is_eligible: max > 0,
       max_mintable: max,
-      reason: max <= 0 ? (publicPoolRemaining <= 0 ? 'public_pool_exhausted' : 'wallet_mint_limit') : null,
+      reason: max <= 0 ? 'public_pool_exhausted' : null,
       unit_lamports_estimate: quote ? quote.unitLamports.toString() : null,
       sol_usd_price: quote?.solUsdPrice ?? null,
       price_usdc: usdc,

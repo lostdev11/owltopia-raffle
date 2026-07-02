@@ -1,6 +1,6 @@
 /**
  * Per-phase mint allowance caps (Owl Center Gen2).
- * Each phase uses its own allocation source; `wallet_mint_limit` applies to PUBLIC only.
+ * Each phase uses its own allocation source. Gen2 public has no per-wallet cap (see gen2PublicWalletLimitRemaining).
  *
  * - AIRDROP (343 OG): 1 mint per Gen1 NFT held on the connected wallet
  * - PRESALE: paid credits + early gifted (excludes Presale+13 reserved gifts)

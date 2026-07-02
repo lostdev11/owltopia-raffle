@@ -189,6 +189,14 @@ export function gen2PublicPoolCap(
   return Math.max(0, launch.total_supply - backstop - wlHeldBack)
 }
 
+/** Gen2 public has no per-wallet cap — only the public pool and total supply bound mints. */
+export function gen2PublicWalletLimitRemaining(input: {
+  publicPoolRemaining: number
+  supplyRemaining: number
+}): number {
+  return Math.min(Math.max(0, input.publicPoolRemaining), Math.max(0, input.supplyRemaining))
+}
+
 /**
  * True when WHITELIST lingers only as a concurrent (carried) phase — the primary phase already moved
  * on (e.g. to PUBLIC) — and its 48h window has elapsed. The cron then drops it from `active_phases`

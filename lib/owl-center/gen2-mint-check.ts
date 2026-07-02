@@ -26,12 +26,16 @@ import { resolvePresaleBalanceForMint } from '@/lib/owl-center/gen2-presale-dele
 import { reconcileGen2WalletMints } from '@/lib/owl-center/reconcile-gen2-wallet-mints'
 import { isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
-import { gen2PhaseWindowMs, gen2PublicPoolCap, isGen2WhitelistClosed } from '@/lib/owl-center/gen2-phase-advance'
+import {
+  gen2PhaseWindowMs,
+  gen2PublicPoolCap,
+  gen2PublicWalletLimitRemaining,
+  isGen2WhitelistClosed,
+} from '@/lib/owl-center/gen2-phase-advance'
 import {
   gen1AirdropMaxMintable,
   presaleOverageMaxMintable,
   presaleRedemptionMaxMintable,
-  publicMaxMintable,
   whitelistMaxMintable,
 } from '@/lib/owl-center/phase-allowance'
 import {
@@ -551,17 +555,12 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
     const mintedPublic = await sumPhaseMintedForWallet(launch.id, w, 'PUBLIC', network)
     // Public pool is unlimited (total minus GEN1 + presale backstop); unminted WL held until WL closes.
     const publicPoolCap = gen2PublicPoolCap(launch, wlMintedGlobal)
+    const supplyRemaining = Math.max(0, launch.total_supply - launch.minted_count)
     const publicPoolRemaining = Math.max(0, publicPoolCap - publicMintedGlobal)
-    const cap = Math.max(0, launch.wallet_mint_limit - mintedPublic)
-    const max = publicMaxMintable({
-      walletLimitRemaining: cap,
-      publicPoolRemaining,
-      supplyRemaining: Math.max(0, launch.total_supply - launch.minted_count),
-    })
+    const max = gen2PublicWalletLimitRemaining({ publicPoolRemaining, supplyRemaining })
     const isActive = isPhaseMintLive(phase)
-    const reserved_mints = Math.min(cap, publicPoolRemaining)
-    const publicReason =
-      reserved_mints <= 0 ? (publicPoolRemaining <= 0 ? 'public_pool_exhausted' : 'wallet_mint_limit') : null
+    const reserved_mints = max
+    const publicReason = max <= 0 ? 'public_pool_exhausted' : null
     const publicGate = applyPhaseScheduleGate(
       isActive,
       scheduleOpen,

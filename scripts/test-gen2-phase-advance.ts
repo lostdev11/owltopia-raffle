@@ -16,6 +16,7 @@ import {
   gen2PhasePoolCap,
   gen2PhaseWindowMs,
   gen2PublicPoolCap,
+  gen2PublicWalletLimitRemaining,
   gen2ReservedBackstopSupply,
   isConcurrentWhitelistWindowElapsed,
   isGen2WhitelistClosed,
@@ -155,6 +156,16 @@ check(
 check(
   'WL closed (800/800 minted) → PUBLIC pool = 987',
   gen2PublicPoolCap({ ...launch, active_phase: 'PUBLIC' }, 800) === 987
+)
+
+console.log('Public per-wallet cap (unlimited within pool):')
+check(
+  '616 left in pool + supply → wallet can mint 616',
+  gen2PublicWalletLimitRemaining({ publicPoolRemaining: 616, supplyRemaining: 616 }) === 616
+)
+check(
+  'pool larger than supply → capped by supply',
+  gen2PublicWalletLimitRemaining({ publicPoolRemaining: 616, supplyRemaining: 100 }) === 100
 )
 
 console.log('Concurrent WHITELIST auto-close at 48h:')

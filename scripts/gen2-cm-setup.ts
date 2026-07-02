@@ -108,7 +108,8 @@ const PHASE_SUPPLY = { gen1: 343, pre: 657, wl: 800, pub: 200 } as const
 const TOTAL_SUPPLY = Object.values(PHASE_SUPPLY).reduce((a, b) => a + b, 0) // 2000
 const PHASE_PRICE_USD = { wl: 30, pub: 40 } as const
 const GEN1_MINT_LIMIT = 25 // flat cap >= largest Gen1 holding (23 at snapshot); exact per-NFT count enforced server-side
-const PUB_MINT_LIMIT = 20 // launch wallet_mint_limit
+// Gen2 public is unlimited per wallet off-chain; on-chain backstop = full CM supply.
+const PUB_MINT_LIMIT = TOTAL_SUPPLY
 const WL_MINT_LIMIT = 2 // every WL wallet's owl_center_wl_allocations.allowed_mints is 2; hard-cap on-chain too
 // Flat backstop >= largest pre-group entitlement (max purchased+gifted is 20). Its real purpose is
 // to create the on-chain mint-counter PDA the cosign endpoint reads to enforce the EXACT per-wallet
