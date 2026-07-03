@@ -11,7 +11,7 @@ import {
 import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { resolveGen1SnapshotForMint } from '@/lib/owl-center/gen2-mint-delegation'
 import { resolvePresaleBalanceForMint } from '@/lib/owl-center/gen2-presale-delegation'
-import { gen2PublicPoolCap, gen2PublicWalletLimitRemaining } from '@/lib/owl-center/gen2-phase-advance'
+import { gen2PublicMintPoolRemaining, gen2PublicWalletLimitRemaining } from '@/lib/owl-center/gen2-phase-advance'
 import {
   gen1AirdropMaxMintable,
   presaleOverageMaxMintable,
@@ -392,8 +392,11 @@ export async function buildGen2Eligibility(
       sumOwlCenterPhaseMinted(launch.id, 'PUBLIC', network),
       sumOwlCenterPhaseMinted(launch.id, 'WHITELIST', network),
     ])
-    // Public pool absorbs unminted WL leftover (airdrop/presale leftover stays reserved for the team).
-    const publicPoolRemaining = Math.max(0, gen2PublicPoolCap(launch, wlMintedGlobal) - publicMintedGlobal)
+    const publicPoolRemaining = gen2PublicMintPoolRemaining({
+      launch,
+      publicMinted: publicMintedGlobal,
+      wlMinted: wlMintedGlobal,
+    })
     const max = gen2PublicWalletLimitRemaining({ publicPoolRemaining, supplyRemaining: remaining })
     return {
       ...base,

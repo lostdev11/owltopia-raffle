@@ -28,6 +28,7 @@ import { isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
 import {
   gen2PhaseWindowMs,
+  gen2PublicMintPoolRemaining,
   gen2PublicPhaseSupplyDisplay,
   gen2PublicPoolCap,
   gen2PublicWalletLimitRemaining,
@@ -554,10 +555,12 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
     }
 
     const mintedPublic = await sumPhaseMintedForWallet(launch.id, w, 'PUBLIC', network)
-    // Public pool is unlimited (total minus GEN1 + presale backstop); unminted WL held until WL closes.
-    const publicPoolCap = gen2PublicPoolCap(launch, wlMintedGlobal)
     const supplyRemaining = Math.max(0, launch.total_supply - launch.minted_count)
-    const publicPoolRemaining = Math.max(0, publicPoolCap - publicMintedGlobal)
+    const publicPoolRemaining = gen2PublicMintPoolRemaining({
+      launch,
+      publicMinted: publicMintedGlobal,
+      wlMinted: wlMintedGlobal,
+    })
     const max = gen2PublicWalletLimitRemaining({ publicPoolRemaining, supplyRemaining })
     const isActive = isPhaseMintLive(phase)
     const reserved_mints = max

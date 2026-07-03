@@ -172,20 +172,28 @@ check(
 
 console.log('PUBLIC supply display (shared pool progress bar):')
 check(
-  'WL concurrent → remaining subtracts WL + public mints from 987 cap',
+  'remaining subtracts WL + public mints from 987 cap (WL still concurrent)',
   gen2PublicPhaseSupplyDisplay({
-    launch: { ...launch, active_phase: 'PUBLIC', active_phases: ['WHITELIST'] },
+    launch,
     publicMinted: 389,
     wlMinted: 177,
   }).remaining === 421
 )
 check(
-  'WL closed → remaining is cap minus public mints only',
+  'remaining still subtracts WL mints after WL closes (177 WL + 403 public)',
   gen2PublicPhaseSupplyDisplay({
-    launch: { ...launch, active_phase: 'PUBLIC', active_phases: [] },
-    publicMinted: 389,
+    launch,
+    publicMinted: 403,
     wlMinted: 177,
-  }).remaining === 598
+  }).remaining === 407
+)
+check(
+  'WL sold out → only public mints left in the pool',
+  gen2PublicPhaseSupplyDisplay({
+    launch,
+    publicMinted: 187,
+    wlMinted: 800,
+  }).remaining === 0
 )
 
 console.log('Public per-wallet cap (unlimited within pool):')

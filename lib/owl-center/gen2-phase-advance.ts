@@ -208,11 +208,30 @@ export function gen2PublicWalletLimitRemaining(input: {
 }
 
 /**
- * PUBLIC progress bar: cap is the full non-backstop pool (987). While WL is still live, WL mints
- * consume that shared pool alongside public mints, so remaining = cap − public − wl. Once WL
- * closes, unminted WL rolls in and remaining = cap − public only.
+ * PUBLIC progress bar: cap is the full non-backstop pool (987). WL and PUBLIC share it — every WL
+ * mint permanently consumes a spot, so remaining = cap − public_minted − wl_minted (unminted WL
+ * leftover still counts toward "left" once WL closes because those spots roll into Public).
  */
 export function gen2PublicPhaseSupplyDisplay(input: {
+  launch: Pick<
+    OwlCenterLaunchPublic,
+    'airdrop_supply' | 'presale_supply' | 'presale_overage_supply' | 'wl_supply' | 'total_supply'
+  >
+  publicMinted: number
+  wlMinted: number
+}): { cap: number; minted: number; remaining: number } {
+  const cap = gen2PhasePoolCap(input.launch, 'PUBLIC')
+  const minted = Math.max(0, input.publicMinted)
+  const wlMinted = Math.max(0, input.wlMinted)
+  const remaining = Math.max(0, cap - minted - wlMinted)
+  return { cap, minted, remaining }
+}
+
+/**
+ * Spots left the PUBLIC phase can still mint: shared pool remaining (987 − public − wl), capped by
+ * the WL holdback while WHITELIST is still open.
+ */
+export function gen2PublicMintPoolRemaining(input: {
   launch: Pick<
     OwlCenterLaunchPublic,
     | 'active_phase'
@@ -225,14 +244,11 @@ export function gen2PublicPhaseSupplyDisplay(input: {
   >
   publicMinted: number
   wlMinted: number
-}): { cap: number; minted: number; remaining: number } {
-  const cap = gen2PhasePoolCap(input.launch, 'PUBLIC')
-  const minted = Math.max(0, input.publicMinted)
-  const wlMinted = Math.max(0, input.wlMinted)
-  const remaining = isGen2WhitelistClosed(input.launch)
-    ? Math.max(0, cap - minted)
-    : Math.max(0, cap - minted - wlMinted)
-  return { cap, minted, remaining }
+}): number {
+  const shared = gen2PublicPhaseSupplyDisplay(input).remaining
+  if (isGen2WhitelistClosed(input.launch)) return shared
+  const openRemaining = Math.max(0, gen2PublicPoolCap(input.launch, input.wlMinted) - input.publicMinted)
+  return Math.min(shared, openRemaining)
 }
 
 /**
