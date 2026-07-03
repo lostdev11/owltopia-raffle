@@ -4,7 +4,7 @@ import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import type { MintTerminalLine } from '@/lib/owl-center/types'
 import { collectMintedNftMintsForLaunch } from '@/lib/owl-center/hash-list'
 import { getPresaleMintPoolSnapshot, sumOwlCenterPhaseMinted } from '@/lib/owl-center/presale-mint-pool'
-import { gen2PhasePoolCap, gen2PublicPoolCap } from '@/lib/owl-center/gen2-phase-advance'
+import { gen2PhasePoolCap, gen2PublicPhaseSupplyDisplay, gen2PublicPoolCap } from '@/lib/owl-center/gen2-phase-advance'
 import { OWL_CENTER_MINTABLE_PHASES } from '@/lib/owl-center/phase-schedule'
 import { reconcileLaunchMintedCount } from '@/lib/owl-center/reconcile-gen2-minted-count'
 import { isGen2PresaleSoldOut } from '@/lib/gen2-presale/purchase-availability'
@@ -109,11 +109,20 @@ export async function GET(request: NextRequest) {
 
   const phase_breakdown = OWL_CENTER_MINTABLE_PHASES.map((phase) => {
     const phaseMinted = phaseMintedByPhase[phase] ?? 0
-    // Public is unlimited minus GEN1 + presale backstop; WL unminted spots held until WL closes.
-    const cap =
-      phase === 'PUBLIC'
-        ? gen2PublicPoolCap(launch, phaseMintedByPhase.WHITELIST ?? 0)
-        : gen2PhasePoolCap(launch, phase)
+    if (phase === 'PUBLIC') {
+      const view = gen2PublicPhaseSupplyDisplay({
+        launch,
+        publicMinted: phaseMinted,
+        wlMinted: phaseMintedByPhase.WHITELIST ?? 0,
+      })
+      return {
+        phase,
+        minted: view.minted,
+        cap: view.cap,
+        remaining: view.remaining,
+      }
+    }
+    const cap = gen2PhasePoolCap(launch, phase)
     return {
       phase,
       minted: phaseMinted,

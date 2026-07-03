@@ -28,6 +28,7 @@ import { isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
 import {
   gen2PhaseWindowMs,
+  gen2PublicPhaseSupplyDisplay,
   gen2PublicPoolCap,
   gen2PublicWalletLimitRemaining,
   isGen2WhitelistClosed,
@@ -591,6 +592,15 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
   // Stamp each phase's window close time (start + window) so the UI can show a countdown
   // (e.g. the WHITELIST 48h timer). Open-ended phases (PUBLIC) have an infinite window → null.
   for (const p of phases) {
+    if (p.phase === 'PUBLIC') {
+      const view = gen2PublicPhaseSupplyDisplay({
+        launch,
+        publicMinted: p.phase_minted,
+        wlMinted: wlMintedGlobal,
+      })
+      p.phase_supply = view.cap
+      p.phase_remaining = view.remaining
+    }
     const startMs = p.phase_starts_at ? new Date(p.phase_starts_at).getTime() : null
     const windowMs = gen2PhaseWindowMs(p.phase)
     p.window_ends_at =

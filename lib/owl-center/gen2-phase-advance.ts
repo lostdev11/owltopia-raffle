@@ -147,11 +147,15 @@ const GEN2_WHITELIST_CLOSED_PHASES: ReadonlySet<OwlCenterPhase> = new Set([
 ])
 
 /**
- * True once the sequential timeline has moved past WHITELIST — i.e. WHITELIST has either sold out or
- * its 48h window elapsed and the launch advanced to PUBLIC (or a terminal phase). Until then, WL is
- * still its own phase and its unminted spots are NOT rolled into PUBLIC.
+ * True once WHITELIST is fully done — sold out, its 48h window elapsed, or dropped from the
+ * concurrent `active_phases` set after the cron closes it. While WHITELIST is still carried as a
+ * concurrent phase (primary may already be PUBLIC), WL is NOT closed and its unminted spots stay
+ * held back from PUBLIC.
  */
-export function isGen2WhitelistClosed(launch: Pick<OwlCenterLaunchPublic, 'active_phase'>): boolean {
+export function isGen2WhitelistClosed(
+  launch: Pick<OwlCenterLaunchPublic, 'active_phase' | 'active_phases'>
+): boolean {
+  if (launch.active_phases?.includes('WHITELIST')) return false
   return GEN2_WHITELIST_CLOSED_PHASES.has(launch.active_phase)
 }
 
@@ -178,7 +182,13 @@ export function gen2WlLeftoverForPublic(
 export function gen2PublicPoolCap(
   launch: Pick<
     OwlCenterLaunchPublic,
-    'total_supply' | 'airdrop_supply' | 'presale_supply' | 'presale_overage_supply' | 'wl_supply' | 'active_phase'
+    | 'total_supply'
+    | 'airdrop_supply'
+    | 'presale_supply'
+    | 'presale_overage_supply'
+    | 'wl_supply'
+    | 'active_phase'
+    | 'active_phases'
   >,
   wlMintedGlobal: number
 ): number {
@@ -195,6 +205,34 @@ export function gen2PublicWalletLimitRemaining(input: {
   supplyRemaining: number
 }): number {
   return Math.min(Math.max(0, input.publicPoolRemaining), Math.max(0, input.supplyRemaining))
+}
+
+/**
+ * PUBLIC progress bar: cap is the full non-backstop pool (987). While WL is still live, WL mints
+ * consume that shared pool alongside public mints, so remaining = cap − public − wl. Once WL
+ * closes, unminted WL rolls in and remaining = cap − public only.
+ */
+export function gen2PublicPhaseSupplyDisplay(input: {
+  launch: Pick<
+    OwlCenterLaunchPublic,
+    | 'active_phase'
+    | 'active_phases'
+    | 'airdrop_supply'
+    | 'presale_supply'
+    | 'presale_overage_supply'
+    | 'wl_supply'
+    | 'total_supply'
+  >
+  publicMinted: number
+  wlMinted: number
+}): { cap: number; minted: number; remaining: number } {
+  const cap = gen2PhasePoolCap(input.launch, 'PUBLIC')
+  const minted = Math.max(0, input.publicMinted)
+  const wlMinted = Math.max(0, input.wlMinted)
+  const remaining = isGen2WhitelistClosed(input.launch)
+    ? Math.max(0, cap - minted)
+    : Math.max(0, cap - minted - wlMinted)
+  return { cap, minted, remaining }
 }
 
 /**

@@ -15,6 +15,7 @@ import {
   gen2PhaseOpenFloorOffsetMs,
   gen2PhasePoolCap,
   gen2PhaseWindowMs,
+  gen2PublicPhaseSupplyDisplay,
   gen2PublicPoolCap,
   gen2PublicWalletLimitRemaining,
   gen2ReservedBackstopSupply,
@@ -147,15 +148,44 @@ check(
   gen2PublicPoolCap({ ...launch, active_phase: 'WHITELIST' }, 300) === 487
 )
 check('isGen2WhitelistClosed false while active_phase=WHITELIST', isGen2WhitelistClosed({ active_phase: 'WHITELIST' }) === false)
-check('isGen2WhitelistClosed true once active_phase=PUBLIC', isGen2WhitelistClosed({ active_phase: 'PUBLIC' }) === true)
+check(
+  'isGen2WhitelistClosed false while WL still concurrent on PUBLIC',
+  isGen2WhitelistClosed({ active_phase: 'PUBLIC', active_phases: ['WHITELIST'] }) === false
+)
+check(
+  'isGen2WhitelistClosed true once WL dropped from active_phases',
+  isGen2WhitelistClosed({ active_phase: 'PUBLIC', active_phases: [] }) === true
+)
 // WL closed → full non-backstop supply is public (987), regardless of WL mint count.
 check(
   'WL closed (300/800 minted) → PUBLIC pool = 987',
-  gen2PublicPoolCap({ ...launch, active_phase: 'PUBLIC' }, 300) === 987
+  gen2PublicPoolCap({ ...launch, active_phase: 'PUBLIC', active_phases: [] }, 300) === 987
 )
 check(
   'WL closed (800/800 minted) → PUBLIC pool = 987',
-  gen2PublicPoolCap({ ...launch, active_phase: 'PUBLIC' }, 800) === 987
+  gen2PublicPoolCap({ ...launch, active_phase: 'PUBLIC', active_phases: [] }, 800) === 987
+)
+check(
+  'WL concurrent, 177 WL minted → PUBLIC pool holds back unminted WL',
+  gen2PublicPoolCap({ ...launch, active_phase: 'PUBLIC', active_phases: ['WHITELIST'] }, 177) === 364
+)
+
+console.log('PUBLIC supply display (shared pool progress bar):')
+check(
+  'WL concurrent → remaining subtracts WL + public mints from 987 cap',
+  gen2PublicPhaseSupplyDisplay({
+    launch: { ...launch, active_phase: 'PUBLIC', active_phases: ['WHITELIST'] },
+    publicMinted: 389,
+    wlMinted: 177,
+  }).remaining === 421
+)
+check(
+  'WL closed → remaining is cap minus public mints only',
+  gen2PublicPhaseSupplyDisplay({
+    launch: { ...launch, active_phase: 'PUBLIC', active_phases: [] },
+    publicMinted: 389,
+    wlMinted: 177,
+  }).remaining === 598
 )
 
 console.log('Public per-wallet cap (unlimited within pool):')

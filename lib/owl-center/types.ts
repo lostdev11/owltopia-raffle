@@ -257,6 +257,8 @@ export type Gen2MintCheckPhasePreview = {
   phase_supply: number
   /** NFTs minted in this phase across all wallets — drives the per-phase progress bar. */
   phase_minted: number
+  /** When set, overrides `phase_supply - phase_minted` for the progress bar (PUBLIC shared pool). */
+  phase_remaining?: number
   is_active: boolean
   is_eligible: boolean
   max_mintable: number

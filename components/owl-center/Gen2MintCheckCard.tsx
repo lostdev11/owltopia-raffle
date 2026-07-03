@@ -43,11 +43,19 @@ function shortWallet(w: string): string {
 }
 
 /** Slim per-phase supply progress bar — shows how much of the phase cap is left to mint. */
-function PhaseSupplyBar({ minted, total }: { minted: number; total: number }) {
+function PhaseSupplyBar({
+  minted,
+  total,
+  remaining: remainingOverride,
+}: {
+  minted: number
+  total: number
+  remaining?: number
+}) {
   const safeTotal = Math.max(0, total)
   const safeMinted = Math.max(0, Math.min(minted, safeTotal || minted))
   const pct = safeTotal > 0 ? Math.min(100, (safeMinted / safeTotal) * 100) : safeMinted > 0 ? 100 : 0
-  const remaining = Math.max(0, safeTotal - safeMinted)
+  const remaining = Math.max(0, remainingOverride ?? safeTotal - safeMinted)
   const soldOut = safeTotal > 0 && remaining === 0
   return (
     <div className="mt-2 space-y-1">
@@ -289,7 +297,11 @@ export function Gen2MintCheckCard({
                     · cap {p.phase_supply}
                   </p>
 
-                  <PhaseSupplyBar minted={p.phase_minted} total={p.phase_supply} />
+                  <PhaseSupplyBar
+                    minted={p.phase_minted}
+                    total={p.phase_supply}
+                    remaining={p.phase_remaining}
+                  />
 
                   {/* Only show the WL countdown while WHITELIST is the primary gating phase. Once
                       the primary phase is PUBLIC, the WL leftover has already rolled into public, so
