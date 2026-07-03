@@ -142,7 +142,17 @@ async function fetchMintFieldsFromMetadataJson(
 }
 
 /**
+ * Gen2 Candy Machine on-chain names use the 0-based config-line index (e.g. "Owltopia Gen2 #1145")
+ * while off-chain JSON uses the 1-based token number ("Owltopia G2 #1146"). Prefer JSON for display.
+ */
+function shouldPreferOffchainJsonName(dasName: string | null): boolean {
+  if (!dasName?.trim()) return false
+  return /^Owltopia Gen2 #\d+$/.test(dasName.trim())
+}
+
+/**
  * Inline DAS fields first, then optional single `json_uri` fetch (Metaplex Core / sparse indexer rows).
+ * When the indexer name looks like a 0-based CM config-line label, the off-chain JSON name wins.
  */
 export async function resolveMintMetaFromDasAssetPayload(
   result: unknown
@@ -151,12 +161,13 @@ export async function resolveMintMetaFromDasAssetPayload(
   let image = normalizeMediaUri(pickImageFromHeliusAsset(result), jsonUri)
   let name = pickNameFromHeliusAsset(result)
 
-  if (image && name) return { image, name }
+  const needsJson =
+    Boolean(jsonUri) && (!image || !name || shouldPreferOffchainJsonName(name))
 
-  if (jsonUri) {
+  if (needsJson && jsonUri) {
     const j = await fetchMintFieldsFromMetadataJson(jsonUri)
     if (!image && j.image) image = normalizeMediaUri(j.image, j.baseUri ?? jsonUri)
-    if (!name && j.name) name = j.name
+    if (j.name && (!name || shouldPreferOffchainJsonName(name))) name = j.name
   }
 
   return { image, name }
@@ -216,7 +227,7 @@ export async function fetchNftMintMetaFromHelius(
   if (!id) return null
 
   const preferMainnet = options?.preferMainnet === true
-  const cacheLookupKey = preferMainnet ? `m:${id}` : id
+  const cacheLookupKey = mintMetaCacheKey(id, preferMainnet)
 
   const heliusUrl = preferMainnet ? getHeliusMainnetRpcUrl() : getHeliusRpcUrl()
   if (!heliusUrl) return null
@@ -271,7 +282,8 @@ const BATCH_CHUNK_SIZE = 20
 const BATCH_JSON_RESOLVE_CONCURRENCY = 4
 
 function mintMetaCacheKey(assetId: string, preferMainnet: boolean): string {
-  return preferMainnet ? `m:${assetId}` : assetId
+  // v2: prefer off-chain JSON name for Gen2 CM index vs token-number mismatch
+  return `${preferMainnet ? 'm:' : ''}v2:${assetId}`
 }
 
 async function mapWithConcurrency<T, R>(
