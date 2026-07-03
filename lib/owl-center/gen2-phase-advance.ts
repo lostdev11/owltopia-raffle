@@ -146,15 +146,18 @@ const GEN2_WHITELIST_CLOSED_PHASES: ReadonlySet<OwlCenterPhase> = new Set([
   'TRADING_ACTIVE',
 ])
 
+/** `active_phases` is optional — callers may pass only `active_phase` (treated as no concurrent phases). */
+type Gen2LaunchWhitelistGate = Pick<OwlCenterLaunchPublic, 'active_phase'> & {
+  active_phases?: readonly OwlCenterPhase[]
+}
+
 /**
  * True once WHITELIST is fully done — sold out, its 48h window elapsed, or dropped from the
  * concurrent `active_phases` set after the cron closes it. While WHITELIST is still carried as a
  * concurrent phase (primary may already be PUBLIC), WL is NOT closed and its unminted spots stay
  * held back from PUBLIC.
  */
-export function isGen2WhitelistClosed(
-  launch: Pick<OwlCenterLaunchPublic, 'active_phase' | 'active_phases'>
-): boolean {
+export function isGen2WhitelistClosed(launch: Gen2LaunchWhitelistGate): boolean {
   if (launch.active_phases?.includes('WHITELIST')) return false
   return GEN2_WHITELIST_CLOSED_PHASES.has(launch.active_phase)
 }
@@ -180,16 +183,11 @@ export function gen2WlLeftoverForPublic(
  * sells out. Still globally bounded by `total_supply − minted_count` in callers and confirm-mint.
  */
 export function gen2PublicPoolCap(
-  launch: Pick<
-    OwlCenterLaunchPublic,
-    | 'total_supply'
-    | 'airdrop_supply'
-    | 'presale_supply'
-    | 'presale_overage_supply'
-    | 'wl_supply'
-    | 'active_phase'
-    | 'active_phases'
-  >,
+  launch: Gen2LaunchWhitelistGate &
+    Pick<
+      OwlCenterLaunchPublic,
+      'total_supply' | 'airdrop_supply' | 'presale_supply' | 'presale_overage_supply' | 'wl_supply'
+    >,
   wlMintedGlobal: number
 ): number {
   const backstop = gen2ReservedBackstopSupply(launch)
@@ -232,16 +230,11 @@ export function gen2PublicPhaseSupplyDisplay(input: {
  * the WL holdback while WHITELIST is still open.
  */
 export function gen2PublicMintPoolRemaining(input: {
-  launch: Pick<
-    OwlCenterLaunchPublic,
-    | 'active_phase'
-    | 'active_phases'
-    | 'airdrop_supply'
-    | 'presale_supply'
-    | 'presale_overage_supply'
-    | 'wl_supply'
-    | 'total_supply'
-  >
+  launch: Gen2LaunchWhitelistGate &
+    Pick<
+      OwlCenterLaunchPublic,
+      'airdrop_supply' | 'presale_supply' | 'presale_overage_supply' | 'wl_supply' | 'total_supply'
+    >
   publicMinted: number
   wlMinted: number
 }): number {

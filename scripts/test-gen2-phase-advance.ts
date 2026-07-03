@@ -127,7 +127,16 @@ check(
 )
 
 // Pool cap mapping (public is unlimited: total minus GEN1 + presale backstop).
-const launch = { total_supply: 2000, airdrop_supply: 343, presale_supply: 657, presale_overage_supply: 13, wl_supply: 800, public_supply: 200 }
+const launch = {
+  total_supply: 2000,
+  airdrop_supply: 343,
+  presale_supply: 657,
+  presale_overage_supply: 13,
+  wl_supply: 800,
+  public_supply: 200,
+  active_phase: 'PUBLIC' as const,
+  active_phases: [] as const,
+}
 const backstop = gen2ReservedBackstopSupply(launch)
 console.log('Pool cap mapping:')
 check('backstop = 343 + 657 + 13 = 1013', backstop === 1013)
