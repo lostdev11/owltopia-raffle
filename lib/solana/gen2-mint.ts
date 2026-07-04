@@ -73,6 +73,9 @@ function friendlyMintSimulationError(msg: string, collectPlatformMintFee?: boole
   if (low.includes('notenoughsol') || low.includes('not enough sol') || low.includes('insufficient funds')) {
     return 'Not enough SOL for the platform fee, NFT rent, and network fees.'
   }
+  if (low.includes('afterenddate') || low.includes('after the set end date')) {
+    return 'This free redemption window closed on-chain — you were only charged fees, not the mint price. The team is reopening it; refresh shortly or contact support.'
+  }
   if (
     low.includes('blocked') ||
     low.includes('malicious') ||

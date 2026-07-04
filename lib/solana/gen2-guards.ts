@@ -178,6 +178,19 @@ export async function buildGen2GuardMintPlan(
   let thirdPartySignerKey: string | null = null
   let mintPriceLamports = 0n
 
+  if (isSome(guards.endDate)) {
+    const endMs = Number(guards.endDate.value.date)
+    if (Number.isFinite(endMs) && Date.now() > endMs) {
+      return {
+        ok: false,
+        error:
+          phase === 'AIRDROP' || phase === 'PRESALE' || phase === 'PRESALE_OVERAGE'
+            ? 'This free redemption phase closed on-chain — the team is extending the window; refresh in a minute or contact support.'
+            : 'This mint phase closed on-chain — refresh the page or contact support.',
+      }
+    }
+  }
+
   if (isSome(guards.thirdPartySigner)) {
     // Placeholder signer reserves the co-signer's signature slot; the server fills it in the
     // cosign-mint round-trip after verifying the wallet's remaining credits.

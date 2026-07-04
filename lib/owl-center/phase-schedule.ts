@@ -117,18 +117,25 @@ export function isPhaseOpenBySchedule(
 }
 
 /**
- * GEN1 (airdrop) holders keep their free-claim right for a fixed 7-day window from when the
- * AIRDROP phase opened, independent of `active_phase`. This mirrors the on-chain `gen1` candy
- * guard group (start + 7 days), so Gen1 holders can still self-mint concurrently after the launch
- * has advanced to PRESALE / WHITELIST / PUBLIC. Off-chain airdrop backstop covers anyone who
- * still hasn't claimed when this window closes.
+ * Legacy fixed window from AIRDROP kickoff (used when no concurrent paid phase is admin-active).
+ * Gen1 + presale free redemption stay open while PRESALE / PUBLIC (etc.) are in `active_phases`;
+ * per-wallet caps are enforced by the cosigner + confirm RPC, not by this clock.
  */
 export const GEN1_AIRDROP_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
+const GEN1_CONCURRENT_BACKSTOP_PHASES: ReadonlySet<OwlCenterPhase> = new Set([
+  'PRESALE',
+  'PRESALE_OVERAGE',
+  'WHITELIST',
+  'PUBLIC',
+])
+
 export function isGen1AirdropWindowOpen(
-  launch: Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule'>,
+  launch: Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule' | 'active_phases'>,
   nowMs: number = Date.now()
 ): boolean {
+  if (launch.active_phases?.includes('AIRDROP')) return true
+  if (launch.active_phases?.some((p) => GEN1_CONCURRENT_BACKSTOP_PHASES.has(p))) return true
   const startMs = parseIsoMs(getPhaseStartsAt(launch, 'AIRDROP'))
   if (startMs == null) return false
   return nowMs >= startMs && nowMs <= startMs + GEN1_AIRDROP_WINDOW_MS

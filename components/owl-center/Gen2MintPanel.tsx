@@ -5,6 +5,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { Gen2MintWalletNotice } from '@/components/owl-center/Gen2MintWalletNotice'
 import { MintProgressOverlay } from '@/components/owl-center/MintProgressOverlay'
 import { MintQuantityInput, parseMintQuantityText } from '@/components/owl-center/MintQuantityInput'
 import { MintSuccessOverlay } from '@/components/owl-center/MintSuccessOverlay'
@@ -751,6 +752,8 @@ export function Gen2MintPanel({
               </div>
             </div>
           ) : null}
+
+          <Gen2MintWalletNotice className="mb-1" />
 
           <div className="flex flex-wrap items-end gap-4">
             <MintQuantityInput max={maxQ} value={qtyText} onChange={setQtyText} />

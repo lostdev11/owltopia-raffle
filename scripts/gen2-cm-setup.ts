@@ -224,9 +224,11 @@ async function setGuards(confirm: boolean) {
       label: 'gen1',
       guards: {
         startDate: some({ date: dateTime(PHASE_START_ISO.gen1) }),
-        // Team-mint mode extends the window and drops the per-wallet mintLimit so the team can
-        // mint the remainder; normal mode keeps the 7-day holder window + per-wallet cap.
-        endDate: some({ date: dateTime(GEN1_TEAM_MODE ? PHASE_END_ISO.gen1Team : PHASE_END_ISO.gen1) }),
+        // Team-mint mode uses an extended endDate; normal holder mode has no endDate — eligibility
+        // is enforced by allowList + cosigner + server caps while admin keeps the phase live.
+        ...(GEN1_TEAM_MODE
+          ? { endDate: some({ date: dateTime(PHASE_END_ISO.gen1Team) }) }
+          : {}),
         allowList: some({ merkleRoot: getMerkleRoot(gen1Wallets) }),
         // Normal holder window: flat backstop + per-wallet counter (read by the cosign endpoint to
         // enforce the EXACT Gen1 NFT count) + server co-sign gate. Team-mint mode intentionally
@@ -251,7 +253,8 @@ async function setGuards(confirm: boolean) {
     label: 'pre',
     guards: {
       startDate: some({ date: dateTime(PHASE_START_ISO.pre) }),
-      endDate: some({ date: dateTime(PHASE_END_ISO.pre) }),
+      // No endDate — presale redemption stays open for eligible wallets while admin keeps PRESALE
+      // live concurrently with PUBLIC; cosigner + confirm RPC enforce per-wallet credits.
       allowList: some({ merkleRoot: getMerkleRoot(preWallets) }),
       redeemedAmount: some({ maximum: BigInt(TOTAL_SUPPLY) }),
       // Free redemption (already paid in USDC); only $1 platform fee + rent + network at mint.
@@ -315,9 +318,9 @@ async function setGuards(confirm: boolean) {
   console.log(
     GEN1_TEAM_MODE
       ? `  gen1: TEAM-MINT wallets=${gen1Wallets.length} cap=${PHASE_SUPPLY.gen1} pay=free+${FREEZE_DEPOSIT_SOL} dep mintLimit=NONE thirdPartySigner=OFF start=${PHASE_START_ISO.gen1} end=${PHASE_END_ISO.gen1Team}`
-      : `  gen1: wallets=${gen1Wallets.length} cap=${PHASE_SUPPLY.gen1} pay=free+${FREEZE_DEPOSIT_SOL} dep mintLimit(id1)=${GEN1_MINT_LIMIT} thirdPartySigner=ON start=${PHASE_START_ISO.gen1} end=${PHASE_END_ISO.gen1} (7d)`
+      : `  gen1: wallets=${gen1Wallets.length} cap=${PHASE_SUPPLY.gen1} pay=free+${FREEZE_DEPOSIT_SOL} dep mintLimit(id1)=${GEN1_MINT_LIMIT} thirdPartySigner=ON start=${PHASE_START_ISO.gen1} end=none (cosigner + server caps)`
   )
-  console.log(`  pre : wallets=${preWallets.length} cap=${PHASE_SUPPLY.pre} pay=free+${FREEZE_DEPOSIT_SOL} dep mintLimit(id4)=${PRE_MINT_LIMIT} thirdPartySigner=ON start=${PHASE_START_ISO.pre} end=${PHASE_END_ISO.pre} (7d)`)
+  console.log(`  pre : wallets=${preWallets.length} cap=${PHASE_SUPPLY.pre} pay=free+${FREEZE_DEPOSIT_SOL} dep mintLimit(id4)=${PRE_MINT_LIMIT} thirdPartySigner=ON start=${PHASE_START_ISO.pre} end=none (cosigner + server caps)`)
   console.log(`  wl  : wallets=${wlWallets.length} cap=${PHASE_SUPPLY.wl} pay=${wlSol.toFixed(4)} SOL ($${PHASE_PRICE_USD.wl}) now +${FREEZE_DEPOSIT_SOL} dep mintLimit(id3)=${WL_MINT_LIMIT} start=${PHASE_START_ISO.wl}`)
   console.log(`  pub : cap=${PHASE_SUPPLY.pub} pay=${pubSol.toFixed(4)} SOL ($${PHASE_PRICE_USD.pub}) now +${FREEZE_DEPOSIT_SOL} dep mintLimit(id2)=${PUB_MINT_LIMIT} start=${PHASE_START_ISO.pub}`)
   if (TEST_GROUP_MODE) {
