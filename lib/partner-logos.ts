@@ -16,7 +16,6 @@ const LOGO_ASSETS = {
   shonenSol: { src: '/partners/shonen-sol.png', alt: 'Shonen Sol partner logo' },
   communityMark: { src: '/partners/partner-community-mark.png', alt: 'Partner community logo' },
   uglyApeSquad: { src: '/partners/ugly-ape-squad-logo.png', alt: 'Ugly Ape Squad partner logo' },
-  companeons: { src: '/partners/companeons-logo.png', alt: 'Companeons partner logo' },
   uglyMutantApeSquad: {
     src: '/partners/ugly-mutant-ape-squad-logo.png',
     alt: 'Ugly Mutant Ape Squad partner logo',
@@ -35,7 +34,6 @@ export const PARTNER_SPOTLIGHT_BRANDS: PartnerLogo[] = [
   LOGO_ASSETS.shonenSol,
   LOGO_ASSETS.communityMark,
   LOGO_ASSETS.uglyApeSquad,
-  LOGO_ASSETS.companeons,
   LOGO_ASSETS.uglyMutantApeSquad,
   LOGO_ASSETS.shaolinSaga,
 ]
@@ -56,7 +54,6 @@ const SPOTLIGHT_LABEL_MATCHES: { pattern: RegExp; logo: PartnerLogo }[] = [
   { pattern: /jester/i, logo: LOGO_ASSETS.jesterOwl },
   { pattern: /roaring\s*panda|panda\s*partner|^panda$/i, logo: LOGO_ASSETS.panda },
   { pattern: /fuddy/i, logo: LOGO_ASSETS.fuddy },
-  { pattern: /companeons?/i, logo: LOGO_ASSETS.companeons },
   { pattern: /shaolin\s*saga|\bshaolin\b/i, logo: LOGO_ASSETS.shaolinSaga },
   { pattern: /ugly\s*mutant\s*ape|mutant\s*ape\s*squad/i, logo: LOGO_ASSETS.uglyMutantApeSquad },
   { pattern: /ugly\s*ape\s*squad|\buas\b/i, logo: LOGO_ASSETS.uglyApeSquad },
