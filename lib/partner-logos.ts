@@ -21,6 +21,7 @@ const LOGO_ASSETS = {
     src: '/partners/ugly-mutant-ape-squad-logo.png',
     alt: 'Ugly Mutant Ape Squad partner logo',
   },
+  shaolinSaga: { src: '/partners/shaolin-saga-logo.png', alt: 'Shaolin Saga partner logo' },
 } as const satisfies Record<string, PartnerLogo>
 
 /** Fixed Partner Spotlight marquee order (smooth scroll strip). */
@@ -36,6 +37,7 @@ export const PARTNER_SPOTLIGHT_BRANDS: PartnerLogo[] = [
   LOGO_ASSETS.uglyApeSquad,
   LOGO_ASSETS.companeons,
   LOGO_ASSETS.uglyMutantApeSquad,
+  LOGO_ASSETS.shaolinSaga,
 ]
 
 export const PARTNER_LOGOS: PartnerLogo[] = Object.values(LOGO_ASSETS)
@@ -55,6 +57,7 @@ const SPOTLIGHT_LABEL_MATCHES: { pattern: RegExp; logo: PartnerLogo }[] = [
   { pattern: /roaring\s*panda|panda\s*partner|^panda$/i, logo: LOGO_ASSETS.panda },
   { pattern: /fuddy/i, logo: LOGO_ASSETS.fuddy },
   { pattern: /companeons?/i, logo: LOGO_ASSETS.companeons },
+  { pattern: /shaolin\s*saga|\bshaolin\b/i, logo: LOGO_ASSETS.shaolinSaga },
   { pattern: /ugly\s*mutant\s*ape|mutant\s*ape\s*squad/i, logo: LOGO_ASSETS.uglyMutantApeSquad },
   { pattern: /ugly\s*ape\s*squad|\buas\b/i, logo: LOGO_ASSETS.uglyApeSquad },
   /** Avoid matching arbitrary words containing "mile" / weak substrings; Smile QR branding */
