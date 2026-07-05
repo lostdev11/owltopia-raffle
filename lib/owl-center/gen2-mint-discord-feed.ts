@@ -11,6 +11,7 @@
 import {
   type DiscordIncomingEmbed,
   editDiscordIncomingWebhookEmbed,
+  postDiscordIncomingWebhookContentAndEmbed,
   postDiscordIncomingWebhookEmbedReturnId,
   postDiscordIncomingWebhookEmbeds,
 } from '@/lib/discord-incoming-webhook'
@@ -227,7 +228,7 @@ async function upsertStatusMessage(
   snap: MintProgressSnapshot,
   network: 'mainnet' | 'devnet',
   webhookUrl: string
-): Promise<void> {
+): Promise<boolean> {
   const db = getSupabaseAdmin()
   const rowId = `${launch.slug}-${network}`
   const embed = buildStatusEmbed(launch, snap)
@@ -258,15 +259,77 @@ async function upsertStatusMessage(
     const result = await editDiscordIncomingWebhookEmbed(webhookUrl, existingId, embed)
     if (result === 'ok') {
       await persist(existingId)
-      return
+      return true
     }
     // 'failed' = transient (rate limit / network); keep the id and try again next mint.
-    if (result === 'failed') return
+    if (result === 'failed') return false
     // 'not_found' = message was deleted in Discord; fall through and recreate it.
   }
 
   const newId = await postDiscordIncomingWebhookEmbedReturnId(webhookUrl, embed)
-  if (newId) await persist(newId)
+  if (newId) {
+    await persist(newId)
+    return true
+  }
+  return false
+}
+
+type Gen2MintEventForFeed = {
+  wallet_address: string
+  quantity: number
+  phase: OwlCenterPhase
+  minted_nft_mints: string[] | null
+  network: string
+}
+
+async function getGen2MintEventForDiscordFeed(txSignature: string): Promise<Gen2MintEventForFeed | null> {
+  const launch = await getOwlCenterLaunchBySlug(GEN2_SLUG)
+  if (!launch) return null
+
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('owl_center_mint_events')
+    .select('wallet_address, quantity, phase, minted_nft_mints, network')
+    .eq('launch_id', launch.id)
+    .eq('tx_signature', txSignature)
+    .maybeSingle()
+  if (error || !data) return null
+  return data as Gen2MintEventForFeed
+}
+
+/** Atomically mark a mint event as Discord-notified; returns false when already posted. */
+async function claimGen2MintDiscordFeedPost(txSignature: string): Promise<boolean> {
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('owl_center_mint_events')
+    .update({ discord_feed_posted_at: new Date().toISOString() })
+    .eq('tx_signature', txSignature)
+    .is('discord_feed_posted_at', null)
+    .select('tx_signature')
+    .maybeSingle()
+  return !error && Boolean(data)
+}
+
+async function releaseGen2MintDiscordFeedClaim(txSignature: string): Promise<void> {
+  const db = getSupabaseAdmin()
+  await db.from('owl_center_mint_events').update({ discord_feed_posted_at: null }).eq('tx_signature', txSignature)
+}
+
+async function listPendingGen2MintDiscordFeedTxs(limit: number): Promise<string[]> {
+  const launch = await getOwlCenterLaunchBySlug(GEN2_SLUG)
+  if (!launch) return []
+
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('owl_center_mint_events')
+    .select('tx_signature')
+    .eq('launch_id', launch.id)
+    .eq('network', 'mainnet')
+    .is('discord_feed_posted_at', null)
+    .order('created_at', { ascending: true })
+    .limit(Math.max(1, Math.min(limit, 50)))
+  if (error) return []
+  return (data ?? []).map((row) => String((row as { tx_signature: string }).tx_signature))
 }
 
 export type Gen2MintFeedInput = {
@@ -284,14 +347,15 @@ const MAX_MINT_EMBEDS = 10
 /**
  * Post the just-minted NFT(s) to the GEN2 mint channel and refresh the live progress message.
  * No-ops when not configured / not mainnet. Designed to be called inside `waitUntil(...)`.
+ * Returns true when at least the mint card or live status message was posted successfully.
  */
-export async function postGen2MintFeed(input: Gen2MintFeedInput): Promise<void> {
-  if (input.network !== 'mainnet') return
+export async function postGen2MintFeed(input: Gen2MintFeedInput): Promise<boolean> {
+  if (input.network !== 'mainnet') return false
   const webhookUrl = gen2MintFeedWebhookUrl()
-  if (!webhookUrl) return
+  if (!webhookUrl) return false
 
   const launch = await getOwlCenterLaunchBySlug(GEN2_SLUG)
-  if (!launch) return
+  if (!launch) return false
 
   const mints = input.mints.filter((m) => typeof m === 'string' && m.trim()).slice(0, MAX_MINT_EMBEDS)
   const fallbackThumbnailUrl = launch.image_url?.trim()
@@ -302,6 +366,9 @@ export async function postGen2MintFeed(input: Gen2MintFeedInput): Promise<void> 
     buildProgressSnapshot(launch, input.network),
     Promise.all(mints.map((mint) => resolveMintFeedMeta(mint))),
   ])
+
+  const contentLine = buildMintContentLine(input.phase, input.quantity, snapshot)
+  let mintCardPosted = false
 
   if (mints.length > 0) {
     const embeds: DiscordIncomingEmbed[] = mints.map((mint, i) => {
@@ -316,10 +383,76 @@ export async function postGen2MintFeed(input: Gen2MintFeedInput): Promise<void> 
         txSig: input.txSignature,
       })
     })
-    await postDiscordIncomingWebhookEmbeds(webhookUrl, embeds, buildMintContentLine(input.phase, input.quantity, snapshot))
+    mintCardPosted = await postDiscordIncomingWebhookEmbeds(webhookUrl, embeds, contentLine)
+  } else {
+    mintCardPosted = await postDiscordIncomingWebhookContentAndEmbed(
+      webhookUrl,
+      contentLine,
+      {
+        title: `🦉 ${input.quantity} GEN2 Owl${input.quantity > 1 ? 's' : ''} minted`,
+        color: PHASE_COLORS[input.phase] ?? STATUS_COLOR,
+        description: `Minted in **${owlCenterPhaseLabel(input.phase)}** by [${shortWallet(input.wallet)}](https://solscan.io/account/${encodeURIComponent(input.wallet)})`,
+        fields: [
+          {
+            name: 'Links',
+            value: `[Tx](https://solscan.io/tx/${encodeURIComponent(input.txSignature)})`,
+          },
+        ],
+        ...(fallbackThumbnailUrl ? { thumbnail: { url: fallbackThumbnailUrl } } : {}),
+        timestamp: new Date().toISOString(),
+      }
+    )
   }
 
-  await upsertStatusMessage(launch, snapshot, input.network, webhookUrl)
+  const statusUpdated = await upsertStatusMessage(launch, snapshot, input.network, webhookUrl)
+  return mintCardPosted || statusUpdated
+}
+
+/**
+ * Idempotent GEN2 mint-feed notify for one recorded tx. Safe from confirm-mint, reconcile backfill,
+ * and duplicate_tx retries — claims `discord_feed_posted_at` before posting so concurrent callers
+ * cannot double-post.
+ */
+export async function notifyGen2MintDiscordFeedForTx(txSignature: string): Promise<boolean> {
+  if (!gen2MintFeedWebhookUrl()) return false
+
+  const event = await getGen2MintEventForDiscordFeed(txSignature)
+  if (!event || event.network !== 'mainnet') return false
+
+  const claimed = await claimGen2MintDiscordFeedPost(txSignature)
+  if (!claimed) return false
+
+  try {
+    const posted = await postGen2MintFeed({
+      wallet: event.wallet_address,
+      phase: event.phase,
+      quantity: event.quantity,
+      txSignature,
+      mints: (event.minted_nft_mints ?? []).filter((m) => typeof m === 'string' && m.trim()),
+      network: 'mainnet',
+    })
+    if (!posted) {
+      await releaseGen2MintDiscordFeedClaim(txSignature)
+    }
+    return posted
+  } catch (e) {
+    await releaseGen2MintDiscordFeedClaim(txSignature)
+    console.error('[gen2-mint-discord-feed] notify failed', txSignature, e)
+    return false
+  }
+}
+
+/** Drain pending mainnet GEN2 mint events that never reached Discord (reconcile-first race, etc.). */
+export async function flushPendingGen2MintDiscordFeed(opts?: { limit?: number }): Promise<number> {
+  const sigs = await listPendingGen2MintDiscordFeedTxs(opts?.limit ?? 20)
+  let posted = 0
+  for (let i = 0; i < sigs.length; i++) {
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    }
+    if (await notifyGen2MintDiscordFeedForTx(sigs[i]!)) posted += 1
+  }
+  return posted
 }
 
 /**

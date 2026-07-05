@@ -8,7 +8,7 @@ import { buildGen2Eligibility } from '@/lib/owl-center/gen2-eligibility'
 
 import { evaluateGen2MintMilestones } from '@/lib/owl-center/gen2-milestones/evaluate'
 
-import { postGen2MintFeed } from '@/lib/owl-center/gen2-mint-discord-feed'
+import { notifyGen2MintDiscordFeedForTx } from '@/lib/owl-center/gen2-mint-discord-feed'
 
 import { getOwlCenterLaunchBySlug, getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 
@@ -355,6 +355,15 @@ export async function POST(request: NextRequest) {
 
     }
 
+    // Reconcile often records the mint first (mobile unload beacon / cron). Still announce it once.
+    if (err === 'duplicate_tx' && network === 'mainnet') {
+      waitUntil(
+        notifyGen2MintDiscordFeedForTx(txSig).catch((e) =>
+          console.error('[confirm-mint] discord mint feed (duplicate_tx)', e)
+        )
+      )
+    }
+
     return NextResponse.json({ error: human[err] ?? err }, { status })
 
   }
@@ -379,18 +388,10 @@ export async function POST(request: NextRequest) {
 
 
   // Best-effort: post the freshly minted owl(s) + a live phase/total progress bar to the GEN2
-  // mint-tracker Discord channel. Mainnet only; no-ops when the webhook env is unset. Never blocks
-  // or fails the mint confirmation.
+  // mint-tracker Discord channel. Mainnet only; idempotent via discord_feed_posted_at on mint events.
   if (network === 'mainnet') {
     waitUntil(
-      postGen2MintFeed({
-        wallet,
-        phase,
-        quantity: qty,
-        txSignature: txSig,
-        mints: mintedList,
-        network,
-      }).catch((e) => console.error('[confirm-mint] discord mint feed', e))
+      notifyGen2MintDiscordFeedForTx(txSig).catch((e) => console.error('[confirm-mint] discord mint feed', e))
     )
   }
 

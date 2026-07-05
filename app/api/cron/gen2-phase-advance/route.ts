@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { advanceGen2PhaseIfScheduled } from '@/lib/owl-center/gen2-phase-advance'
+import { flushPendingGen2MintDiscordFeed } from '@/lib/owl-center/gen2-mint-discord-feed'
 import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 import { reconcileGen2LaunchMintsFromChain } from '@/lib/owl-center/reconcile-gen2-wallet-mints'
 
@@ -45,7 +46,14 @@ export async function GET(request: NextRequest) {
       console.error('gen2-phase-advance reconcile', e)
     }
 
-    return NextResponse.json({ ...result, reconciled })
+    let discord_flushed = 0
+    try {
+      discord_flushed = await flushPendingGen2MintDiscordFeed({ limit: 25 })
+    } catch (e) {
+      console.error('gen2-phase-advance discord flush', e)
+    }
+
+    return NextResponse.json({ ...result, reconciled, discord_flushed })
   } catch (e) {
     console.error('gen2-phase-advance cron', e)
     return NextResponse.json({ error: 'server error' }, { status: 500 })

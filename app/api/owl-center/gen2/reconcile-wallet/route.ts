@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
+import { flushPendingGen2MintDiscordFeed } from '@/lib/owl-center/gen2-mint-discord-feed'
 import { reconcileGen2WalletMints } from '@/lib/owl-center/reconcile-gen2-wallet-mints'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { isDevnetMintEnabled, owlMintNetworkFromParam, type OwlMintNetwork } from '@/lib/solana/network'
@@ -47,7 +48,11 @@ export async function POST(request: NextRequest) {
 
   try {
     const { recorded, drift } = await reconcileGen2WalletMints({ launch, wallet, network })
-    return NextResponse.json({ ok: true, recorded, drift })
+    let discord_flushed = 0
+    if (network === 'mainnet' && recorded > 0) {
+      discord_flushed = await flushPendingGen2MintDiscordFeed({ limit: Math.min(50, recorded + 5) })
+    }
+    return NextResponse.json({ ok: true, recorded, drift, discord_flushed })
   } catch (e) {
     console.error('gen2 reconcile-wallet', e)
     return NextResponse.json({ ok: false, error: 'reconcile_failed' }, { status: 500 })
