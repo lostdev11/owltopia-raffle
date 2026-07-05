@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 
 import { buildGen2MintCheck } from '@/lib/owl-center/gen2-mint-check'
+import { flushPendingGen2MintDiscordFeed } from '@/lib/owl-center/gen2-mint-discord-feed'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -24,6 +26,11 @@ export async function GET(request: NextRequest) {
   if (!payload) {
     return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
   }
+  waitUntil(
+    flushPendingGen2MintDiscordFeed({ limit: 5 }).catch((e) =>
+      console.error('[gen2-mint-check] discord flush', e)
+    )
+  )
   return NextResponse.json(payload)
 }
 
@@ -47,5 +54,10 @@ export async function POST(request: NextRequest) {
   if (!payload) {
     return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
   }
+  waitUntil(
+    flushPendingGen2MintDiscordFeed({ limit: 5 }).catch((e) =>
+      console.error('[gen2-mint-check] discord flush', e)
+    )
+  )
   return NextResponse.json(payload)
 }

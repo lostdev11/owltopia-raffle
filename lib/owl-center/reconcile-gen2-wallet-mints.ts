@@ -16,7 +16,6 @@ import {
   type OwlMintNetwork,
 } from '@/lib/solana/network'
 import type { OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
-import { notifyGen2MintDiscordFeedForTx } from '@/lib/owl-center/gen2-mint-discord-feed'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 /**
@@ -175,11 +174,6 @@ export async function reconcileGen2WalletMints(args: {
     if (await recordReconciledMint(launch, cmId, network, entry.signature, mint, phase)) {
       recorded += mint.quantity
       knownSigs.add(entry.signature)
-      if (network === 'mainnet') {
-        void notifyGen2MintDiscordFeedForTx(entry.signature).catch((e) =>
-          console.error('[reconcile-gen2-wallet] discord mint feed', entry.signature, e)
-        )
-      }
     }
   }
 
@@ -255,11 +249,6 @@ export async function reconcileGen2LaunchMintsFromChain(
       recorded += mint.quantity
       mintedCount += mint.quantity
       knownSigs.add(entry.signature)
-      if (network === 'mainnet') {
-        void notifyGen2MintDiscordFeedForTx(entry.signature).catch((e) =>
-          console.error('[reconcile-gen2-launch] discord mint feed', entry.signature, e)
-        )
-      }
     }
   }
 

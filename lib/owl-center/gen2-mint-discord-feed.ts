@@ -1,3 +1,5 @@
+import 'server-only'
+
 /**
  * GEN2 mint → Discord feed.
  *
