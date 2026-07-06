@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
 import { listActiveStakingPools } from '@/lib/db/staking-pools'
+import { getAdminRole } from '@/lib/db/admins'
+import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { getNestingNftFreezeDelegateAddress } from '@/lib/nesting/nft-freeze'
 import { getNestingActionsPauseBreakdown } from '@/lib/nesting/policy'
@@ -19,10 +22,13 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET() {
   try {
-    const pools = await listActiveStakingPools()
+    const session = parseSessionCookieValue((await cookies()).get(SESSION_COOKIE_NAME)?.value)
+    const adminRole = session ? await getAdminRole(session.wallet) : null
+    const pools = await listActiveStakingPools({ includeAdminOnlyPools: Boolean(adminRole) })
     const pause = await getNestingActionsPauseBreakdown()
     return NextResponse.json({
       pools,
+      viewer_is_admin: Boolean(adminRole),
       nesting_nft_freeze_delegate: getNestingNftFreezeDelegateAddress() || null,
       nesting_disabled: pause.disabled,
       nesting_paused_by_deploy_env: pause.envKillSwitch,
