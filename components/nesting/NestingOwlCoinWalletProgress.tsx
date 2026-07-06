@@ -3,19 +3,27 @@
 import { Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
+export type NestingWalletAssetLabels = {
+  singular: string
+  plural: string
+}
+
 type Props = {
   /** Active nests + pending nests with freeze confirmed for this wallet/perch. */
   nestedCount: number
-  /** Wallet-owned coins in the perch collection (nested + still available). Null until scan finishes. */
+  /** Wallet-owned assets in the perch collection (nested + still available). Null until scan finishes. */
   totalCount: number | null
+  /** Per-perch copy (Gen 1 owls, Gen 2 owls, Owltopia coins, …). */
+  assetLabels: NestingWalletAssetLabels
   loading?: boolean
   className?: string
 }
 
-/** Per-wallet Owltopia coin nest coverage (nested coins vs collection coins in wallet). */
+/** Per-wallet nest coverage for the active NFT perch (nested vs collection assets in wallet). */
 export function NestingOwlCoinWalletProgress({
   nestedCount,
   totalCount,
+  assetLabels,
   loading = false,
   className,
 }: Props) {
@@ -26,18 +34,18 @@ export function NestingOwlCoinWalletProgress({
       : null
 
   const label = loading
-    ? 'Loading Owltopia coins from your wallet…'
+    ? `Loading ${assetLabels.plural} from your wallet…`
     : hasTotal
-      ? `${nestedCount} of ${totalCount} Owltopia coin${totalCount === 1 ? '' : 's'} nested`
+      ? `${nestedCount} of ${totalCount} ${totalCount === 1 ? assetLabels.singular : assetLabels.plural} nested`
       : nestedCount > 0
-        ? `${nestedCount} Owltopia coin${nestedCount === 1 ? '' : 's'} nested`
-        : 'Load your wallet to see how many Owltopia coins are nested'
+        ? `${nestedCount} ${nestedCount === 1 ? assetLabels.singular : assetLabels.plural} nested`
+        : `Load your wallet to see how many ${assetLabels.plural} are nested`
 
   return (
     <div className={cn('space-y-2', className)}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Your wallet · Owltopia coins
+          Your wallet · {assetLabels.plural}
         </p>
         <p className="text-sm font-semibold tabular-nums text-foreground/90">
           {loading ? (

@@ -5,6 +5,10 @@ export interface RevShareSchedule {
   next_date: string | null
   total_sol: number | null
   total_usdc: number | null
+  gen1_total_sol: number | null
+  gen1_total_usdc: number | null
+  gen2_total_sol: number | null
+  gen2_total_usdc: number | null
   updated_at: string
 }
 
@@ -17,7 +21,9 @@ export async function getRevShareSchedule(): Promise<RevShareSchedule | null> {
   const db = getSupabaseForServerRead(supabase)
   const { data, error } = await db
     .from('rev_share_schedule')
-    .select('next_date, total_sol, total_usdc, updated_at')
+    .select(
+      'next_date, total_sol, total_usdc, gen1_total_sol, gen1_total_usdc, gen2_total_sol, gen2_total_usdc, updated_at'
+    )
     .eq('id', ROW_ID)
     .single()
 
@@ -26,6 +32,10 @@ export async function getRevShareSchedule(): Promise<RevShareSchedule | null> {
     next_date: data.next_date ?? null,
     total_sol: data.total_sol != null ? Number(data.total_sol) : null,
     total_usdc: data.total_usdc != null ? Number(data.total_usdc) : null,
+    gen1_total_sol: data.gen1_total_sol != null ? Number(data.gen1_total_sol) : null,
+    gen1_total_usdc: data.gen1_total_usdc != null ? Number(data.gen1_total_usdc) : null,
+    gen2_total_sol: data.gen2_total_sol != null ? Number(data.gen2_total_sol) : null,
+    gen2_total_usdc: data.gen2_total_usdc != null ? Number(data.gen2_total_usdc) : null,
     updated_at: data.updated_at ?? new Date().toISOString(),
   }
 }
@@ -37,18 +47,28 @@ export async function updateRevShareSchedule(updates: {
   next_date?: string | null
   total_sol?: number | null
   total_usdc?: number | null
+  gen1_total_sol?: number | null
+  gen1_total_usdc?: number | null
+  gen2_total_sol?: number | null
+  gen2_total_usdc?: number | null
 }): Promise<RevShareSchedule | null> {
   const db = getSupabaseAdmin()
   const payload: Record<string, unknown> = {}
   if (updates.next_date !== undefined) payload.next_date = updates.next_date
   if (updates.total_sol !== undefined) payload.total_sol = updates.total_sol
   if (updates.total_usdc !== undefined) payload.total_usdc = updates.total_usdc
+  if (updates.gen1_total_sol !== undefined) payload.gen1_total_sol = updates.gen1_total_sol
+  if (updates.gen1_total_usdc !== undefined) payload.gen1_total_usdc = updates.gen1_total_usdc
+  if (updates.gen2_total_sol !== undefined) payload.gen2_total_sol = updates.gen2_total_sol
+  if (updates.gen2_total_usdc !== undefined) payload.gen2_total_usdc = updates.gen2_total_usdc
 
   const { data, error } = await db
     .from('rev_share_schedule')
     .update(payload)
     .eq('id', ROW_ID)
-    .select('next_date, total_sol, total_usdc, updated_at')
+    .select(
+      'next_date, total_sol, total_usdc, gen1_total_sol, gen1_total_usdc, gen2_total_sol, gen2_total_usdc, updated_at'
+    )
     .single()
 
   if (error) {
@@ -60,6 +80,10 @@ export async function updateRevShareSchedule(updates: {
     next_date: data.next_date ?? null,
     total_sol: data.total_sol != null ? Number(data.total_sol) : null,
     total_usdc: data.total_usdc != null ? Number(data.total_usdc) : null,
+    gen1_total_sol: data.gen1_total_sol != null ? Number(data.gen1_total_sol) : null,
+    gen1_total_usdc: data.gen1_total_usdc != null ? Number(data.gen1_total_usdc) : null,
+    gen2_total_sol: data.gen2_total_sol != null ? Number(data.gen2_total_sol) : null,
+    gen2_total_usdc: data.gen2_total_usdc != null ? Number(data.gen2_total_usdc) : null,
     updated_at: data.updated_at ?? new Date().toISOString(),
   }
 }

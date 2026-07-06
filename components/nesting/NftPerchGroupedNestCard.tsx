@@ -8,6 +8,7 @@ import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import { PositionNestRow } from '@/components/nesting/PositionCard'
 import { NestingStakedAssetThumb } from '@/components/nesting/NestingStakedAssetThumb'
 import { nestGalleryAnchorId } from '@/lib/nesting/nest-position-anchor'
+import { nestingNftAssetLabels } from '@/lib/nesting/gen1-staking-pools'
 import { isOpeningNftNestAbortable } from '@/lib/nesting/position-lifecycle'
 import type { NestingTxPhase } from '@/lib/nesting/tx-states'
 import { estimateClaimableRewards, hasClaimableRewardBalance } from '@/lib/staking/rewards'
@@ -86,6 +87,8 @@ export function NftPerchGroupedNestCard({
 
   const [expanded, setExpanded] = useState(() => needsAttention)
 
+  const assetLabels = useMemo(() => nestingNftAssetLabels(pool), [pool.slug])
+
   useEffect(() => {
     if (needsAttention) setExpanded(true)
   }, [needsAttention])
@@ -101,7 +104,7 @@ export function NftPerchGroupedNestCard({
 
   const contentId = `perch-group-${pool.id}`
   const collapsedSummaryParts: string[] = [
-    `${positions.length} coin${positions.length === 1 ? '' : 's'}`,
+    `${positions.length} ${positions.length === 1 ? assetLabels.singular : assetLabels.plural}`,
   ]
   if (claimSummary.claimableCount > 0) {
     collapsedSummaryParts.push(
@@ -142,7 +145,7 @@ export function NftPerchGroupedNestCard({
             <CardTitle className="text-base font-display text-theme-prime">{poolName}</CardTitle>
             <CardDescription className="text-xs text-muted-foreground leading-relaxed">
               {expanded
-                ? `${positions.length} Owltopia coin${positions.length === 1 ? '' : 's'} on this perch — claim or leave each row below.`
+                ? `${positions.length} ${positions.length === 1 ? assetLabels.singular : assetLabels.plural} on this perch — claim or leave each row below.`
                 : collapsedSummaryParts.join(' · ')}
             </CardDescription>
             {!expanded && visibleThumbs.length > 0 ? (
@@ -170,14 +173,16 @@ export function NftPerchGroupedNestCard({
             {expanded && needsWalletLock > 0 ? (
               <p className="text-xs text-amber-300/95 leading-relaxed pt-0.5">
                 {needsWalletLock === positions.length
-                  ? `Each row still needs the wallet lock: select coins in the nest form above, then Confirm nest — your wallet batches up to ${NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} coins per approval (Backpack, etc.).`
-                  : `${needsWalletLock} still need the wallet lock — use Confirm nest above for each coin that shows Opening.`}
+                  ? `Each row still needs the wallet lock: select ${assetLabels.plural} in the nest form above, then Confirm nest — your wallet batches up to ${NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} ${assetLabels.plural} per approval (Backpack, etc.).`
+                  : `${needsWalletLock} still need the wallet lock — use Confirm nest above for each ${assetLabels.singular} that shows Opening.`}
               </p>
             ) : null}
             {!expanded && needsWalletLock > 0 ? (
               <p className="text-xs text-amber-300/95 leading-relaxed pt-0.5">
                 Expand to finish wallet lock on{' '}
-                {needsWalletLock === positions.length ? 'each coin' : `${needsWalletLock} coin(s)`}.
+                {needsWalletLock === positions.length
+                  ? `each ${assetLabels.singular}`
+                  : `${needsWalletLock} ${assetLabels.singular}(s)`}.
               </p>
             ) : null}
           </div>
@@ -220,6 +225,7 @@ export function NftPerchGroupedNestCard({
                   securityAckRequired={securityAckRequired}
                   nestingPaused={nestingPaused}
                   claimsPaused={claimsPaused}
+                  nftAssetSingular={assetLabels.singular}
                   onResumeOpening={
                     onResumeOpening ? () => onResumeOpening(pos) : undefined
                   }

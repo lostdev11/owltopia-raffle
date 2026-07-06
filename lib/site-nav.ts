@@ -90,7 +90,7 @@ export const COMMUNITY_NAV_GROUP: SiteNavGroup = {
     {
       href: '/leaderboard',
       label: 'Leaderboard',
-      description: 'Rankings, XP, and seasonal standings',
+      description: 'Seasonal standings and ticket rankings',
       icon: Trophy,
     },
     {

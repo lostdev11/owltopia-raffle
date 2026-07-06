@@ -1,4 +1,5 @@
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
+import { getGenOwlGroupKeyForPoolSlug, resolveGenOwlGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
 import {
   defaultOwltopiaCoinPerch,
   findStakingPoolByIdOrSlug,
@@ -6,9 +7,18 @@ import {
 } from '@/lib/nesting/format'
 
 export function countNestedOwlCoinsForPool(positions: StakingPositionRow[], poolId: string): number {
+  return countNestedNftsForPools(positions, [poolId])
+}
+
+export function countNestedNftsForPools(
+  positions: StakingPositionRow[],
+  poolIds: string[]
+): number {
+  const ids = new Set(poolIds.map((id) => id.trim()).filter(Boolean))
+  if (ids.size === 0) return 0
   let count = 0
   for (const pos of positions) {
-    if (pos.pool_id !== poolId) continue
+    if (!ids.has(pos.pool_id)) continue
     if (pos.status === 'active') {
       count++
       continue
@@ -23,11 +33,27 @@ export function countNestedOwlCoinsForPool(positions: StakingPositionRow[], pool
   return count
 }
 
-/** Pick the Owl Nest / Owltopia coin NFT perch to measure wallet coverage against. */
+/** Gen 1 / Gen 2 tiers share one collection — count nests across the whole group. */
+export function poolIdsForNftWalletProgressStats(
+  pools: { id: string; slug: string }[],
+  poolId: string
+): string[] {
+  const pool = pools.find((p) => p.id === poolId.trim())
+  if (!pool) return [poolId]
+  const groupKey = getGenOwlGroupKeyForPoolSlug(pool.slug)
+  if (!groupKey) return [pool.id]
+  const tierIds = pools
+    .filter((p) => getGenOwlGroupKeyForPoolSlug(p.slug) === groupKey)
+    .map((p) => p.id)
+  return tierIds.length > 0 ? tierIds : [pool.id]
+}
+
+/** Pick the NFT perch to measure wallet coverage against. */
 export function resolveOwlCoinNftPoolId(
   pools: { id: string; slug: string; asset_type: string }[],
   options?: {
     preferredPoolId?: string | null
+    preferredGroupKey?: string | null
     positionLockedPoolId?: string | null
   }
 ): string | null {
@@ -40,6 +66,13 @@ export function resolveOwlCoinNftPoolId(
   if (locked) {
     const match = findStakingPoolByIdOrSlug(pools, locked)
     if (match && isNftStakingPool(match)) return match.id
+  }
+  const groupKey = resolveGenOwlGroupKey(options?.preferredGroupKey)
+  if (groupKey) {
+    const tier = pools
+      .filter((p) => isNftStakingPool(p) && getGenOwlGroupKeyForPoolSlug(p.slug) === groupKey)
+      .sort((a, b) => a.slug.localeCompare(b.slug))[0]
+    if (tier) return tier.id
   }
   const fallback = defaultOwltopiaCoinPerch(pools)
   return fallback?.id ?? null
@@ -64,11 +97,14 @@ export type OwlCoinWalletStakeStats = {
 
 export function buildOwlCoinWalletStakeStats(input: {
   poolId: string
+  poolIds?: string[]
   positions: StakingPositionRow[]
   eligibleMintCount: number | null
   scanLoading: boolean
 }): OwlCoinWalletStakeStats {
-  const nestedCount = countNestedOwlCoinsForPool(input.positions, input.poolId)
+  const poolIds =
+    input.poolIds && input.poolIds.length > 0 ? input.poolIds : [input.poolId]
+  const nestedCount = countNestedNftsForPools(input.positions, poolIds)
   const totalCount =
     input.eligibleMintCount !== null ? nestedCount + input.eligibleMintCount : null
   return {

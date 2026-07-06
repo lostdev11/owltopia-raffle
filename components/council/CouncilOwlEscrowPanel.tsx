@@ -18,6 +18,7 @@ import { Label } from '@/components/ui/label'
 import { ArrowDown, Landmark, Loader2 } from 'lucide-react'
 import { owlRawToDecimalString, owlUiToRawBigint } from '@/lib/council/owl-amount-format'
 import { OWL_TICKER } from '@/lib/council/owl-ticker'
+import { councilGovernanceNestingDashboardPath } from '@/lib/nesting/perch-catalog'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 
 const HEADER = 'X-Connected-Wallet'
@@ -506,7 +507,7 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
   }
 
   const escrowDepositsClosed = migration?.legacyEscrowDepositsClosed === true
-  const nestingHref = migration?.nestingDashboardUrl?.trim() || '/dashboard/nesting'
+  const nestingHref = migration?.nestingDashboardUrl?.trim() || councilGovernanceNestingDashboardPath()
   const cutoffDisplay = formatInstantLocal(
     typeof migration?.legacyEscrowDepositCutoffAtMs === 'number' ? migration.legacyEscrowDepositCutoffAtMs : null
   )
@@ -580,21 +581,23 @@ export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelPr
               href={nestingHref}
               className="mt-3 inline-flex min-h-[44px] items-center font-semibold text-emerald-200 touch-manipulation hover:underline"
             >
-              Open Owl Nesting →
+              Stake {OWL_TICKER} for council votes →
             </Link>
           </div>
         ) : null}
 
         {escrowDepositsClosed ? (
-          <div className="mt-3 rounded-xl border border-emerald-500/35 bg-black/35 px-3 py-3 text-xs leading-relaxed text-muted-foreground [&_a]:underline-offset-2">
-            <p className="font-medium text-emerald-100/95">Escrow deposits are closed</p>
-            <p className="mt-2">
-              Add voting weight in{' '}
-              <Link href={nestingHref} className="font-semibold text-emerald-200 touch-manipulation hover:underline">
-                Owl Nesting
-              </Link>
-              . Withdrawals from escrow below still work when your balance is not vote-locked.
-            </p>
+          <div className="mt-3 space-y-3 rounded-xl border border-emerald-500/35 bg-black/35 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
+            <div>
+              <p className="font-medium text-emerald-100/95">Escrow deposits are closed</p>
+              <p className="mt-2">
+                Council votes now use {OWL_TICKER} staked in the governance nest (not listed on the main nesting page).
+                Withdrawals from escrow below still work when your balance is not vote-locked.
+              </p>
+            </div>
+            <Button asChild variant="default" className="min-h-[48px] w-full touch-manipulation font-semibold">
+              <Link href={nestingHref}>Stake {OWL_TICKER} for council votes</Link>
+            </Button>
           </div>
         ) : null}
 

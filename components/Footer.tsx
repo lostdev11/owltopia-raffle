@@ -9,7 +9,6 @@ import { SocialGlassCard } from '@/components/SocialGlassCard'
 import { COMMUNITY_DISCORD_INVITE_URL, PLATFORM_NAME } from '@/lib/site-config'
 
 const externalLinks = [
-  { name: 'Staking', url: 'https://www.gotmlabz.io/nftstake/owltopia' },
   { name: 'X', url: 'https://x.com/Owltopia_sol' },
   { name: 'Whitepaper', url: 'https://tinyurl.com/owltopia' },
   { name: 'ME', url: 'https://magiceden.io/marketplace/owltopia' },
@@ -18,7 +17,6 @@ const externalLinks = [
 ]
 
 const iconByLink: Record<string, React.ReactNode> = {
-  Staking: <Coins className="h-6 w-6" />,
   X: <Twitter className="h-6 w-6" />,
   Whitepaper: <FileText className="h-6 w-6" />,
   ME: <MagicEdenIcon className="h-6 w-6" />,
@@ -36,6 +34,11 @@ const glassCardItems = [
     label: 'Leaderboard',
     href: '/leaderboard',
     icon: <Trophy className="h-6 w-6" />,
+  },
+  {
+    label: 'Nesting',
+    href: '/nesting',
+    icon: <Coins className="h-6 w-6" />,
   },
   {
     label: 'Partner program',

@@ -63,6 +63,8 @@ export type PositionNestRowProps = {
   nestingPaused?: boolean
   /** Blocks Claim OWL (deploy kill switch only — admin pause still allows claims). */
   claimsPaused?: boolean
+  /** Per-perch NFT label for freeze/resume copy (e.g. Gen 1 owl, Owltopia coin). */
+  nftAssetSingular?: string
   /** Scroll to nest form and pre-select this coin (pending open only). */
   onResumeOpening?: () => void
 }
@@ -85,6 +87,7 @@ export function PositionNestRow({
   securityAckRequired = false,
   nestingPaused = false,
   claimsPaused,
+  nftAssetSingular = 'Owltopia coin',
   onResumeOpening,
 }: PositionNestRowProps & { variant?: PositionNestRowVariant }) {
   const claimBlocked = claimsPaused ?? nestingPaused
@@ -279,7 +282,7 @@ export function PositionNestRow({
       ) : null}
       {!embedded && needsFreeze ? (
         <p className="w-full text-xs text-amber-300">
-          This nest is still opening: select the same Owltopia coin in the nest form above, then tap{' '}
+          This nest is still opening: select the same {nftAssetSingular} in the nest form above, then tap{' '}
           <span className="font-medium text-foreground/90">Confirm nest</span> to finish the wallet lock so the NFT
           cannot trade while nested.
           {cancelOpeningAllowed ? (

@@ -4,6 +4,13 @@
  * `owl-nest-365` perch also scans legacy + env addresses until production DB catches up.
  */
 
+import {
+  isGen1OwlStakingPoolSlug,
+  isGen2OwlStakingPoolSlug,
+  resolveGen1OwlCollectionAddress,
+  resolveGen2OwlCollectionAddress,
+} from '@/lib/nesting/gen1-staking-pools'
+
 /** On-chain Owltopia coin collection (migration 106+). */
 export const CANONICAL_OWL_NEST_365_COLLECTION_ADDRESS =
   'EZdgJQao3v33F723EsC1QqfwvuDRyVkCMsZTW8Z6JTpB'
@@ -26,11 +33,18 @@ export function resolvePrimaryWalletOwlNestCollectionAddress(pool: {
   slug?: string | null
   collection_key?: string | null
 }): string {
+  const poolKey = pool.collection_key?.trim()
+  if (isGen1OwlStakingPoolSlug(pool.slug)) {
+    return poolKey || resolveGen1OwlCollectionAddress() || ''
+  }
+  if (isGen2OwlStakingPoolSlug(pool.slug)) {
+    return poolKey || resolveGen2OwlCollectionAddress() || ''
+  }
   const env = resolveWalletOwlNestCollectionAddress()
   if (pool.slug === 'owl-nest-365') {
     return env || CANONICAL_OWL_NEST_365_COLLECTION_ADDRESS
   }
-  return pool.collection_key?.trim() || env
+  return poolKey || env
 }
 
 /** All collection pubkeys to query for wallet picker + ownership checks (deduped, stable order). */
@@ -46,6 +60,18 @@ export function resolveWalletOwlNestCollectionCandidates(pool: {
 
   const env = resolveWalletOwlNestCollectionAddress()
   const poolKey = pool.collection_key?.trim()
+
+  if (isGen1OwlStakingPoolSlug(pool.slug)) {
+    add(poolKey)
+    add(resolveGen1OwlCollectionAddress())
+    return out
+  }
+
+  if (isGen2OwlStakingPoolSlug(pool.slug)) {
+    add(poolKey)
+    add(resolveGen2OwlCollectionAddress())
+    return out
+  }
 
   if (pool.slug === 'owl-nest-365') {
     add(env)

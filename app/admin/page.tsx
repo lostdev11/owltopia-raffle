@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot, ShieldAlert, Rocket } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot, ShieldAlert, Rocket, Trophy } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -28,8 +28,12 @@ import type { HotCommunityRow } from '@/lib/db/hot-communities'
 import { DEV_TASK_MAX_SCREENSHOTS_TOTAL, type DevTask } from '@/lib/db/dev-tasks-model'
 import { DEV_TASK_SCREENSHOT_MAX_BYTES, DEV_TASK_SCREENSHOT_MAX_FILES } from '@/lib/dev-task-screenshot-limits'
 import { AdminCreatorBlacklist } from '@/components/AdminCreatorBlacklist'
+import { GenOwlRevShareAdminPreview } from '@/components/nesting/GenOwlRevShareNotice'
+import { genOwlStakingGroupLabel } from '@/lib/nesting/gen-owl-staking-groups'
+import { buildGenOwlRevSharePreview } from '@/lib/nesting/gen-owl-rev-share'
 import { AdminActionInboxTerminal } from '@/components/admin/AdminActionInboxTerminal'
 import { AdminReferralPerformanceSection } from '@/components/admin/AdminReferralPerformanceSection'
+import { AdminLeaderboardSnapshotSection } from '@/components/admin/AdminLeaderboardSnapshotSection'
 import { AdminGen2MintersSection } from '@/components/admin/AdminGen2MintersSection'
 
 interface DeletedEntry {
@@ -249,9 +253,26 @@ export default function AdminDashboardPage() {
   const [revenue, setRevenue] = useState<import('@/app/api/admin/projected-revenue/route').ProjectedRevenueResponse | null>(null)
   const [revenueLoadError, setRevenueLoadError] = useState<string | null>(null)
   const revenueHasDataRef = useRef(false)
-  const [revShareSchedule, setRevShareSchedule] = useState<{ next_date: string | null; total_sol: number | null; total_usdc: number | null } | null>(null)
+  const [revShareSchedule, setRevShareSchedule] = useState<{
+    next_date: string | null
+    total_sol: number | null
+    total_usdc: number | null
+    gen1_total_sol: number | null
+    gen1_total_usdc: number | null
+    gen2_total_sol: number | null
+    gen2_total_usdc: number | null
+  } | null>(null)
   const [revShareScheduleSaving, setRevShareScheduleSaving] = useState(false)
-  const [revShareScheduleEdit, setRevShareScheduleEdit] = useState({ next_date: '', total_sol: '', total_usdc: '' })
+  const [revShareScheduleEdit, setRevShareScheduleEdit] = useState({
+    next_date: '',
+    total_sol: '',
+    total_usdc: '',
+    gen1_total_sol: '',
+    gen1_total_usdc: '',
+    gen2_total_sol: '',
+    gen2_total_usdc: '',
+  })
+  const [genOwlRevShareNestCounts, setGenOwlRevShareNestCounts] = useState({ gen1: 0, gen2: 0 })
   const [loadingRevenue, setLoadingRevenue] = useState(false)
   const [autoRefreshTick, setAutoRefreshTick] = useState(0)
 
@@ -977,13 +998,31 @@ export default function AdminDashboardPage() {
             next_date: data.next_date ?? '',
             total_sol: data.total_sol != null ? String(data.total_sol) : '',
             total_usdc: data.total_usdc != null ? String(data.total_usdc) : '',
+            gen1_total_sol: data.gen1_total_sol != null ? String(data.gen1_total_sol) : '',
+            gen1_total_usdc: data.gen1_total_usdc != null ? String(data.gen1_total_usdc) : '',
+            gen2_total_sol: data.gen2_total_sol != null ? String(data.gen2_total_sol) : '',
+            gen2_total_usdc: data.gen2_total_usdc != null ? String(data.gen2_total_usdc) : '',
           })
         }
       } catch (e) {
         console.error('Error fetching rev share schedule:', e)
       }
     }
-    fetchRevShareSchedule()
+    const fetchGenOwlRevShareCounts = async () => {
+      try {
+        const res = await fetch('/api/nesting/gen-owl-rev-share', { cache: 'no-store' })
+        if (!res.ok) return
+        const data = await res.json()
+        setGenOwlRevShareNestCounts({
+          gen1: data?.gen1?.active_nest_count ?? 0,
+          gen2: data?.gen2?.active_nest_count ?? 0,
+        })
+      } catch (e) {
+        console.error('Error fetching Gen owl rev share counts:', e)
+      }
+    }
+    void fetchRevShareSchedule()
+    void fetchGenOwlRevShareCounts()
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
   useEffect(() => {
@@ -1025,6 +1064,50 @@ export default function AdminDashboardPage() {
     }
   }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick])
 
+  const gen1RevSharePreview = useMemo(
+    () =>
+      buildGenOwlRevSharePreview({
+        group: 'gen1-owl',
+        label: genOwlStakingGroupLabel('gen1-owl'),
+        activeNestCount: genOwlRevShareNestCounts.gen1,
+        totalSol:
+          revShareScheduleEdit.gen1_total_sol.trim() === ''
+            ? null
+            : Number.parseFloat(revShareScheduleEdit.gen1_total_sol),
+        totalUsdc:
+          revShareScheduleEdit.gen1_total_usdc.trim() === ''
+            ? null
+            : Number.parseFloat(revShareScheduleEdit.gen1_total_usdc),
+      }),
+    [
+      genOwlRevShareNestCounts.gen1,
+      revShareScheduleEdit.gen1_total_sol,
+      revShareScheduleEdit.gen1_total_usdc,
+    ]
+  )
+
+  const gen2RevSharePreview = useMemo(
+    () =>
+      buildGenOwlRevSharePreview({
+        group: 'gen2-owl',
+        label: genOwlStakingGroupLabel('gen2-owl'),
+        activeNestCount: genOwlRevShareNestCounts.gen2,
+        totalSol:
+          revShareScheduleEdit.gen2_total_sol.trim() === ''
+            ? null
+            : Number.parseFloat(revShareScheduleEdit.gen2_total_sol),
+        totalUsdc:
+          revShareScheduleEdit.gen2_total_usdc.trim() === ''
+            ? null
+            : Number.parseFloat(revShareScheduleEdit.gen2_total_usdc),
+      }),
+    [
+      genOwlRevShareNestCounts.gen2,
+      revShareScheduleEdit.gen2_total_sol,
+      revShareScheduleEdit.gen2_total_usdc,
+    ]
+  )
+
   const saveRevShareSchedule = async () => {
     if (!publicKey) return
     setRevShareScheduleSaving(true)
@@ -1037,6 +1120,14 @@ export default function AdminDashboardPage() {
           next_date: revShareScheduleEdit.next_date.trim() || null,
           total_sol: revShareScheduleEdit.total_sol === '' ? null : parseFloat(revShareScheduleEdit.total_sol),
           total_usdc: revShareScheduleEdit.total_usdc === '' ? null : parseFloat(revShareScheduleEdit.total_usdc),
+          gen1_total_sol:
+            revShareScheduleEdit.gen1_total_sol === '' ? null : parseFloat(revShareScheduleEdit.gen1_total_sol),
+          gen1_total_usdc:
+            revShareScheduleEdit.gen1_total_usdc === '' ? null : parseFloat(revShareScheduleEdit.gen1_total_usdc),
+          gen2_total_sol:
+            revShareScheduleEdit.gen2_total_sol === '' ? null : parseFloat(revShareScheduleEdit.gen2_total_sol),
+          gen2_total_usdc:
+            revShareScheduleEdit.gen2_total_usdc === '' ? null : parseFloat(revShareScheduleEdit.gen2_total_usdc),
         }),
       })
       if (res.ok) {
@@ -2410,7 +2501,9 @@ export default function AdminDashboardPage() {
           }
         >
           <CardDescription className="mb-4">
-            Set the date and total amounts for the next rev share. Shown on the main page. Not auto-calculated — add and edit as needed.
+            Set the date and total amounts for the next rev share (homepage holder pool). Gen 1 and Gen 2 nesting
+            pools are separate — each total is split evenly across active nests in that generation. Not auto-calculated
+            from revenue; enter totals when you are ready to pay out.
           </CardDescription>
           <div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
@@ -2452,6 +2545,90 @@ export default function AdminDashboardPage() {
                 />
               </div>
             </div>
+
+            <div className="mt-8 max-w-3xl space-y-6 border-t border-border/60 pt-6">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Gen 1 nest rev share</h3>
+                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                  Total SOL/USDC for Gen 1 owl stakers — divided evenly across every active Gen 1 nest (90d and 180d
+                  tiers combined).
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+                <div>
+                  <Label htmlFor="rev-gen1-sol">Gen 1 total SOL</Label>
+                  <Input
+                    id="rev-gen1-sol"
+                    type="number"
+                    step="any"
+                    min="0"
+                    placeholder="e.g. 1.5"
+                    value={revShareScheduleEdit.gen1_total_sol}
+                    onChange={(e) =>
+                      setRevShareScheduleEdit((p) => ({ ...p, gen1_total_sol: e.target.value }))
+                    }
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="rev-gen1-usdc">Gen 1 total USDC (optional)</Label>
+                  <Input
+                    id="rev-gen1-usdc"
+                    type="number"
+                    step="any"
+                    min="0"
+                    placeholder="e.g. 50"
+                    value={revShareScheduleEdit.gen1_total_usdc}
+                    onChange={(e) =>
+                      setRevShareScheduleEdit((p) => ({ ...p, gen1_total_usdc: e.target.value }))
+                    }
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+              <GenOwlRevShareAdminPreview preview={gen1RevSharePreview} />
+
+              <div className="pt-2">
+                <h3 className="text-sm font-semibold text-foreground">Gen 2 nest rev share</h3>
+                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                  Separate pool for Gen 2 owl stakers — same even split across active Gen 2 nests.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+                <div>
+                  <Label htmlFor="rev-gen2-sol">Gen 2 total SOL</Label>
+                  <Input
+                    id="rev-gen2-sol"
+                    type="number"
+                    step="any"
+                    min="0"
+                    placeholder="e.g. 0.75"
+                    value={revShareScheduleEdit.gen2_total_sol}
+                    onChange={(e) =>
+                      setRevShareScheduleEdit((p) => ({ ...p, gen2_total_sol: e.target.value }))
+                    }
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="rev-gen2-usdc">Gen 2 total USDC (optional)</Label>
+                  <Input
+                    id="rev-gen2-usdc"
+                    type="number"
+                    step="any"
+                    min="0"
+                    placeholder="e.g. 25"
+                    value={revShareScheduleEdit.gen2_total_usdc}
+                    onChange={(e) =>
+                      setRevShareScheduleEdit((p) => ({ ...p, gen2_total_usdc: e.target.value }))
+                    }
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+              <GenOwlRevShareAdminPreview preview={gen2RevSharePreview} />
+            </div>
+
             <Button
               onClick={saveRevShareSchedule}
               disabled={revShareScheduleSaving}
@@ -2496,6 +2673,21 @@ export default function AdminDashboardPage() {
             }
           >
             <AdminReferralPerformanceSection />
+          </OwlVisionDisclosure>
+        )}
+
+        {adminRole === 'full' && (
+          <OwlVisionDisclosure
+            className="mb-8"
+            variant="green"
+            title={
+              <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+                <Trophy className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                Leaderboard snapshot
+              </span>
+            }
+          >
+            <AdminLeaderboardSnapshotSection />
           </OwlVisionDisclosure>
         )}
 

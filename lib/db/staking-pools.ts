@@ -41,11 +41,18 @@ export interface StakingPoolRow {
   reward_mint?: string | null
   requires_onchain_sync?: boolean
   lock_enforcement_source?: LockEnforcementSource
+  /** When true, only site admins can see and use this pool (migration 184). */
+  admin_only?: boolean
 }
 
-export async function listActiveStakingPools(): Promise<StakingPoolRow[]> {
+export async function listActiveStakingPools(options?: {
+  /** Include admin-preview pools (visible only when viewer is a site admin). */
+  includeAdminOnlyPools?: boolean
+}): Promise<StakingPoolRow[]> {
   const { ensureOwlCouncilGovernancePoolReady } = await import('@/lib/nesting/ensure-council-governance-pool')
+  const { ensureTieredOwlStakingPoolsReady } = await import('@/lib/nesting/gen1-staking-pools')
   await ensureOwlCouncilGovernancePoolReady()
+  await ensureTieredOwlStakingPoolsReady()
 
   const db = getSupabaseForServerRead(supabase)
   const { data, error } = await db
@@ -59,7 +66,9 @@ export async function listActiveStakingPools(): Promise<StakingPoolRow[]> {
     console.error('[staking-pools] listActive:', error.message)
     return []
   }
-  return (data || []) as StakingPoolRow[]
+  const rows = (data || []) as StakingPoolRow[]
+  if (options?.includeAdminOnlyPools) return rows
+  return rows.filter((p) => p.admin_only !== true)
 }
 
 export async function listAllStakingPoolsAdmin(): Promise<StakingPoolRow[]> {
@@ -187,6 +196,7 @@ export interface PatchStakingPoolInput {
   reward_mint?: string | null
   requires_onchain_sync?: boolean
   lock_enforcement_source?: LockEnforcementSource
+  admin_only?: boolean
 }
 
 export async function updateStakingPool(id: string, patch: PatchStakingPoolInput): Promise<StakingPoolRow> {
@@ -217,6 +227,7 @@ export async function updateStakingPool(id: string, patch: PatchStakingPoolInput
   if (patch.reward_mint !== undefined) row.reward_mint = patch.reward_mint?.trim() || null
   if (patch.requires_onchain_sync !== undefined) row.requires_onchain_sync = patch.requires_onchain_sync
   if (patch.lock_enforcement_source !== undefined) row.lock_enforcement_source = patch.lock_enforcement_source
+  if (patch.admin_only !== undefined) row.admin_only = patch.admin_only
 
   const { data, error } = await db.from('staking_pools').update(row).eq('id', id).select().single()
 

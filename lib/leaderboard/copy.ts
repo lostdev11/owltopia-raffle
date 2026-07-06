@@ -40,7 +40,7 @@ export function leaderboardTableDescriptions(meta: LeaderboardTableCopyMeta | nu
   const purchased =
     meta == null || meta.kind === 'all'
       ? `Players who have bought the most tickets across all raffles (paid, confirmed entries). ${antiAbuse}`
-      : `Players who bought the most tickets in this period (${scope}), ranked by confirmation time. ${antiAbuse}`
+      : `Players who bought the most tickets in this period (${scope}), ranked by total ticket count (per-wallet-per-raffle cap applied in confirmation order). ${antiAbuse}`
 
   const created =
     meta == null || meta.kind === 'all'

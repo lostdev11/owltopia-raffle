@@ -521,6 +521,22 @@ export function AdminNestingClient() {
     await fetchPools()
   }
 
+  const toggleAdminPreview = async (pool: StakingPoolRow, next: boolean) => {
+    setSaveError(null)
+    const res = await fetch(`/api/admin/staking/pools/${pool.id}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ admin_only: next }),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setSaveError(typeof json?.error === 'string' ? json.error : 'Update failed')
+      return
+    }
+    await fetchPools()
+  }
+
   const runReconcile = async () => {
     setReconciling(true)
     setReconcileMsg(null)
@@ -1726,7 +1742,10 @@ export function AdminNestingClient() {
       </section>
 
       <section>
-        <SectionHeader title="All pools" description="Toggle active, adapter mode, and on-chain metadata per pool." />
+        <SectionHeader
+          title="All pools"
+          description="Toggle public listing, admin preview (admins-only stake until you open it), adapter mode, and on-chain metadata per pool."
+        />
         {loadingPools ? (
           <div className="flex items-center gap-2 text-muted-foreground py-8">
             <Loader2 className="h-5 w-5 animate-spin" />
@@ -1739,18 +1758,35 @@ export function AdminNestingClient() {
             {pools.map((pool) => (
               <li key={pool.id} className="space-y-3">
                 <StakingPoolCard pool={pool} compact />
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="text-sm text-muted-foreground">Public listing</span>
-                  <Switch
-                    id={`pool-active-${pool.id}`}
-                    ariaLabel={`Toggle active: ${pool.name}`}
-                    checked={pool.is_active}
-                    onCheckedChange={(v) => void toggleActive(pool, v)}
-                  />
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-sm text-muted-foreground">Public listing</span>
+                    <Switch
+                      id={`pool-active-${pool.id}`}
+                      ariaLabel={`Toggle active: ${pool.name}`}
+                      checked={pool.is_active}
+                      onCheckedChange={(v) => void toggleActive(pool, v)}
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-sm text-muted-foreground">Admin preview only</span>
+                    <Switch
+                      id={`pool-admin-only-${pool.id}`}
+                      ariaLabel={`Toggle admin preview: ${pool.name}`}
+                      checked={pool.admin_only === true}
+                      onCheckedChange={(v) => void toggleAdminPreview(pool, v)}
+                    />
+                  </div>
                   <Button variant="outline" size="sm" className="min-h-[44px]" asChild>
                     <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.id)}`}>Test stake UI</Link>
                   </Button>
                 </div>
+                {pool.admin_only ? (
+                  <p className="text-xs text-muted-foreground leading-relaxed max-w-2xl">
+                    While on, only site admins can see and stake on this perch. Turn off when you are ready for all
+                    holders (e.g. Gen 1 / Gen 2 launch).
+                  </p>
+                ) : null}
                 <PoolOnChainSettingsForm
                   pool={pool}
                   isSaving={savingPoolId === pool.id}

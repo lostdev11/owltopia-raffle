@@ -7,9 +7,12 @@ import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import { NestingOwlCoinWalletProgress } from '@/components/nesting/NestingOwlCoinWalletProgress'
 import {
   buildOwlCoinWalletStakeStats,
+  poolIdsForNftWalletProgressStats,
   positionLockedPoolIdFromRows,
   resolveOwlCoinNftPoolId,
 } from '@/lib/nesting/owl-coin-wallet-stake-stats'
+import { nestingNftAssetLabels } from '@/lib/nesting/gen1-staking-pools'
+import { findStakingPoolByIdOrSlug } from '@/lib/nesting/format'
 
 type MintScanState = {
   status: 'idle' | 'loading' | 'done'
@@ -21,6 +24,8 @@ type Props = {
   pools: { id: string; slug: string; asset_type: string }[]
   /** When set (e.g. dashboard `?pool=`), prefer this NFT perch. */
   preferredPoolId?: string | null
+  /** When set (e.g. dashboard `?group=gen1-owl`), prefer this Gen 1 / Gen 2 group. */
+  preferredGroupKey?: string | null
   /** Bumps when parent nest rows change so this panel stays in sync without a full page reload. */
   positionsVersion?: string | null
   className?: string
@@ -32,6 +37,7 @@ type Props = {
 export function NestingOwlCoinWalletProgressPanel({
   pools,
   preferredPoolId = null,
+  preferredGroupKey = null,
   positionsVersion = null,
   className,
 }: Props) {
@@ -54,9 +60,22 @@ export function NestingOwlCoinWalletProgressPanel({
     () =>
       resolveOwlCoinNftPoolId(pools, {
         preferredPoolId,
+        preferredGroupKey,
         positionLockedPoolId: lockedFromPositions,
       }),
-    [pools, preferredPoolId, lockedFromPositions]
+    [pools, preferredPoolId, preferredGroupKey, lockedFromPositions]
+  )
+
+  const activePool = useMemo(
+    () => (poolId ? findStakingPoolByIdOrSlug(pools, poolId) : null),
+    [pools, poolId]
+  )
+
+  const assetLabels = useMemo(() => nestingNftAssetLabels(activePool), [activePool])
+
+  const statsPoolIds = useMemo(
+    () => (poolId ? poolIdsForNftWalletProgressStats(pools, poolId) : []),
+    [pools, poolId]
   )
 
   const loadPositions = useCallback(async () => {
@@ -152,11 +171,12 @@ export function NestingOwlCoinWalletProgressPanel({
     const scanDone = mintScan.status === 'done' && mintScan.configured
     return buildOwlCoinWalletStakeStats({
       poolId,
+      poolIds: statsPoolIds,
       positions,
       eligibleMintCount: scanDone ? mintScan.mints.length : null,
       scanLoading: mintScan.status === 'loading',
     })
-  }, [poolId, positions, mintScan.status, mintScan.configured, mintScan.mints.length])
+  }, [poolId, statsPoolIds, positions, mintScan.status, mintScan.configured, mintScan.mints.length])
 
   if (!connected || !publicKey || !poolId || !stats) return null
 
@@ -166,6 +186,7 @@ export function NestingOwlCoinWalletProgressPanel({
         <NestingOwlCoinWalletProgress
           nestedCount={stats.nestedCount}
           totalCount={null}
+          assetLabels={assetLabels}
           loading={false}
         />
         <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
@@ -173,7 +194,7 @@ export function NestingOwlCoinWalletProgressPanel({
           <Link href="/dashboard/nesting" className="font-medium text-theme-prime underline-offset-4 hover:underline">
             sign in on My nest
           </Link>{' '}
-          to scan Owltopia coins in your wallet.
+          to scan {assetLabels.plural} in your wallet.
         </p>
       </div>
     )
@@ -183,6 +204,7 @@ export function NestingOwlCoinWalletProgressPanel({
     <NestingOwlCoinWalletProgress
       nestedCount={stats.nestedCount}
       totalCount={stats.totalCount}
+      assetLabels={assetLabels}
       loading={stats.loading}
       className={className}
     />

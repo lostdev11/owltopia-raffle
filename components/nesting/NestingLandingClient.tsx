@@ -11,15 +11,20 @@ import { NestingHero } from '@/components/nesting/NestingHero'
 import { NestingGlobalOwlNestProgress } from '@/components/nesting/NestingGlobalOwlNestProgress'
 import type { OwlNest365PublicStats } from '@/lib/nesting/owl-nest-365-stats'
 import { StakingPoolCard } from '@/components/nesting/StakingPoolCard'
+import { ConsolidatedGenOwlStakingCard } from '@/components/nesting/ConsolidatedGenOwlStakingCard'
+import { buildNestingPerchDisplayList } from '@/lib/nesting/gen-owl-staking-groups'
+import { filterPoolsForPublicNestingCatalog } from '@/lib/nesting/perch-catalog'
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { EmptyState } from '@/components/council/EmptyState'
 import { nestingMutedActionButtonClass } from '@/lib/nesting/ui-classes'
+import { NestingGomtMigrationNotice } from '@/components/nesting/NestingGomtMigrationNotice'
 import { cn } from '@/lib/utils'
 
 /** One perch per dashboard visit — multi-perch sites start at the perch list. */
 function defaultDashboardNestingHref(pools: StakingPoolRow[]): string {
-  if (pools.length === 1) {
-    return `/dashboard/nesting?pool=${encodeURIComponent(pools[0]!.slug)}`
+  const publicPools = filterPoolsForPublicNestingCatalog(pools)
+  if (publicPools.length === 1) {
+    return `/dashboard/nesting?pool=${encodeURIComponent(publicPools[0]!.slug)}`
   }
   return '/nesting#perches'
 }
@@ -31,6 +36,8 @@ type Props = {
   nestingDisabled?: boolean
   nestingPausedByDeployEnv?: boolean
   nestingPausedByAdmin?: boolean
+  /** True when viewer is a site admin (admin-preview perches may be included). */
+  viewerIsAdmin?: boolean
 }
 
 export function NestingLandingClient({
@@ -39,13 +46,19 @@ export function NestingLandingClient({
   nestingDisabled = false,
   nestingPausedByDeployEnv = false,
   nestingPausedByAdmin = false,
+  viewerIsAdmin = false,
 }: Props) {
   const { connected, publicKey } = useWallet()
+  const hasAdminPreviewPools = viewerIsAdmin && initialPools.some((p) => p.admin_only === true)
   /** null = loading / idle; -1 = need SIWS; >= 0 active count */
   const [positionPreview, setPositionPreview] = useState<number | null>(null)
   const [claimableOwlPreview, setClaimableOwlPreview] = useState<number | null>(null)
   const dashboardNestHref = useMemo(
     () => defaultDashboardNestingHref(initialPools),
+    [initialPools]
+  )
+  const displayPerches = useMemo(
+    () => buildNestingPerchDisplayList(filterPoolsForPublicNestingCatalog(initialPools)),
     [initialPools]
   )
 
@@ -158,6 +171,21 @@ export function NestingLandingClient({
           </p>
         </div>
       ) : null}
+      <NestingGomtMigrationNotice />
+      {hasAdminPreviewPools ? (
+        <div
+          className="rounded-xl border border-violet-500/40 bg-violet-500/[0.08] px-4 py-3 text-sm text-foreground"
+          role="status"
+        >
+          <p className="font-medium text-foreground">Admin preview — Gen 1 &amp; Gen 2 perches</p>
+          <p className="mt-1 text-muted-foreground leading-relaxed">
+            Gen 1 and Gen 2 owl nesting is visible only to admins until launch. Tap{' '}
+            <span className="font-medium text-foreground">Nest here</span>, pick 90 or 180 days when you stake, and
+            use <span className="font-medium text-foreground">My nest</span> to test freeze, claim, and unstake on
+            mobile and desktop.
+          </p>
+        </div>
+      ) : null}
       <NestingHero />
 
       <NestingGlobalOwlNestProgress initialStats={initialOwlNest365Stats} />
@@ -238,11 +266,21 @@ export function NestingLandingClient({
           />
         ) : (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {initialPools.map((pool) => (
-              <li key={pool.id}>
-                <StakingPoolCard pool={pool} nestingPaused={nestingDisabled} />
-              </li>
-            ))}
+            {displayPerches.map((item) =>
+              item.kind === 'gen_owl_group' ? (
+                <li key={item.groupKey}>
+                  <ConsolidatedGenOwlStakingCard
+                    groupKey={item.groupKey}
+                    tiers={item.tiers}
+                    nestingPaused={nestingDisabled}
+                  />
+                </li>
+              ) : (
+                <li key={item.pool.id}>
+                  <StakingPoolCard pool={item.pool} nestingPaused={nestingDisabled} />
+                </li>
+              )
+            )}
           </ul>
         )}
       </section>
@@ -251,6 +289,10 @@ export function NestingLandingClient({
         <SectionHeader title="FAQ" />
         <div className="rounded-xl border border-border/60 bg-background/40 divide-y divide-border/60">
           {[
+            {
+              q: 'Is there a platform fee for nesting?',
+              a: 'Yes — when enabled, each nest action (stake, claim OWL, or leave nest) includes a small SOL platform fee per NFT. Your wallet will ask you to approve it before the action completes.',
+            },
             {
               q: 'Does my wallet send tokens somewhere when I nest?',
               a: 'Not at first for every perch—we note your nest inside Owltopia so rewards spin up smoothly; stronger wallet vault upgrades roll out perch by perch.',

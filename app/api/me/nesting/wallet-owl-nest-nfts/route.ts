@@ -3,6 +3,7 @@ import { requireSession } from '@/lib/auth-server'
 import { fetchWalletNftsInCollectionDas } from '@/lib/helius/fetch-wallet-nfts-in-collection'
 import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
+import { ensureTieredOwlStakingPoolsReady } from '@/lib/nesting/gen1-staking-pools'
 import { listStakingPositionsByWallet } from '@/lib/db/staking-positions'
 import {
   resolvePrimaryWalletOwlNestCollectionAddress,
@@ -11,6 +12,7 @@ import {
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { resolveImageUriFromDasAssetPayload } from '@/lib/nft-helius-image'
+import { enrichWalletNestMintsWithStakeEligibility } from '@/lib/nesting/nft-stake-eligibility'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,6 +44,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Valid pool_id query param is required.' }, { status: 400 })
     }
 
+    await ensureTieredOwlStakingPoolsReady()
+
     const pool = await getStakingPoolById(poolId)
     if (!pool || pool.asset_type !== 'nft') {
       return NextResponse.json({ error: 'Pool not found or not an NFT perch.' }, { status: 404 })
@@ -50,12 +54,17 @@ export async function GET(request: NextRequest) {
     const collectionCandidates = resolveWalletOwlNestCollectionCandidates(pool)
     const collectionAddress = resolvePrimaryWalletOwlNestCollectionAddress(pool)
     if (collectionCandidates.length === 0) {
+      const isGen1 = pool.slug?.startsWith('gen1-owl-')
+      const isGen2 = pool.slug?.startsWith('gen2-owl-')
       return NextResponse.json({
         configured: false,
         collectionAddress: null,
         mints: [] as { mint: string; name: string | null; image: string | null }[],
-        message:
-          'Set collection_key on this perch or OWLTOPIA_COLLECTION_ADDRESS / NESTING_OWLTOPIA_COIN_COLLECTION_ADDRESS so we can find Owl Nest NFTs.',
+        message: isGen1
+          ? 'Set OWLTOPIA_COLLECTION_ADDRESS in the server environment so Gen 1 owl NFTs can be detected.'
+          : isGen2
+            ? 'Set NEXT_PUBLIC_GEN2_COLLECTION_MINT in the server environment so Gen 2 owl NFTs can be detected.'
+            : 'Set collection_key on this perch or OWLTOPIA_COLLECTION_ADDRESS / NESTING_OWLTOPIA_COIN_COLLECTION_ADDRESS so we can find Owl Nest NFTs.',
       })
     }
 
@@ -98,7 +107,7 @@ export async function GET(request: NextRequest) {
         .map((p) => p.asset_identifier!.trim()),
     )
 
-    const mintRows = await Promise.all(
+    const mintRowsRaw = await Promise.all(
       allItems.map(async (item) => {
         const mint = item.id?.trim()
         if (!mint || item.burnt === true) return null
@@ -117,9 +126,11 @@ export async function GET(request: NextRequest) {
       })
     )
 
-    const mints = mintRows.filter((row): row is NonNullable<typeof row> => row !== null)
+    const mintRows = mintRowsRaw.filter((row): row is NonNullable<typeof row> => row !== null)
 
-    mints.sort((a, b) => (a.name || a.mint).localeCompare(b.name || b.mint))
+    mintRows.sort((a, b) => (a.name || a.mint).localeCompare(b.name || b.mint))
+
+    const mints = await enrichWalletNestMintsWithStakeEligibility(mintRows, wallet)
 
     return NextResponse.json({
       configured: true,

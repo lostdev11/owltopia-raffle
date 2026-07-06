@@ -50,7 +50,9 @@ import {
   verifyActiveNestLocksForClaimAll,
   assertPoolConfiguredForOnChainNftFreeze,
 } from '@/lib/nesting/nft-nest-onchain-lock'
+import { assertAdminOnlyStakingPoolAccess } from '@/lib/nesting/gen1-staking-pools'
 import { tryClearCrossWalletBlockerForMint } from '@/lib/nesting/clear-cross-wallet-stale-nests'
+import { assertNftEligibleForOwltopiaStake } from '@/lib/nesting/nft-stake-eligibility'
 import {
   commitStakingPlatformFeeLinked,
   requireStakingPlatformFeeLinked,
@@ -71,12 +73,16 @@ export async function executeStake(params: {
     throw new StakingUserError('Invalid pool_id', 400)
   }
 
+  const { ensureTieredOwlStakingPoolsReady } = await import('@/lib/nesting/gen1-staking-pools')
+  await ensureTieredOwlStakingPoolsReady()
+
   const pool = await getStakingPoolById(pool_id)
   if (!pool || !pool.is_active) {
     throw new StakingUserError('Pool not found or inactive', 400)
   }
   validatePoolAgainstNestingEmissionPolicy(pool)
   assertPoolConfiguredForOnChainNftFreeze(pool)
+  await assertAdminOnlyStakingPoolAccess(pool, params.wallet)
 
   let amount =
     params.rawAmount !== undefined && params.rawAmount !== null ? Number(params.rawAmount) : NaN
@@ -117,6 +123,12 @@ export async function executeStake(params: {
         return { position: existing, pool }
       }
       throw new StakingUserError('This NFT is already in an open staking position.', 400)
+    }
+    if (pool.adapter_mode === 'onchain_enabled') {
+      await assertNftEligibleForOwltopiaStake({
+        assetId: asset_identifier,
+        ownerWallet: params.wallet,
+      })
     }
   }
 

@@ -46,7 +46,7 @@ export default async function NestingPage() {
   }
 
   const [pools, pause, owlNest365Stats] = await Promise.all([
-    listActiveStakingPools(),
+    listActiveStakingPools({ includeAdminOnlyPools: Boolean(role) }),
     getNestingActionsPauseBreakdown(),
     getOwlNest365PublicStats(),
   ])
@@ -57,6 +57,7 @@ export default async function NestingPage() {
       nestingDisabled={pause.disabled}
       nestingPausedByDeployEnv={pause.envKillSwitch}
       nestingPausedByAdmin={pause.adminDbPaused}
+      viewerIsAdmin={Boolean(role)}
     />
   )
 }

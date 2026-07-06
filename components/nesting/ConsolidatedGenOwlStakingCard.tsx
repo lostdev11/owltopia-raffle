@@ -8,6 +8,18 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 
+import {
+
+  type GenOwlStakingGroupKey,
+
+  genOwlGroupDashboardHref,
+
+  genOwlStakingGroupDescription,
+
+  genOwlStakingGroupLabel,
+
+} from '@/lib/nesting/gen-owl-staking-groups'
+
 import { formatRewardRate, perchAssetKindLabel } from '@/lib/nesting/format'
 
 import { nestingMutedActionButtonClass } from '@/lib/nesting/ui-classes'
@@ -19,18 +31,17 @@ import { PoolStatusBadge } from '@/components/nesting/PoolStatusBadge'
 import { NestingPlatformFeeNotice } from '@/components/nesting/NestingPlatformFeeNotice'
 
 import { NestingPerchLogoMark } from '@/components/nesting/NestingPerchLogoMark'
+import { GenOwlRevShareNotice } from '@/components/nesting/GenOwlRevShareNotice'
 
 
 
 type Props = {
 
-  pool: StakingPoolRow
+  groupKey: GenOwlStakingGroupKey
 
-  /** Landing page passes false when showing inactive admin preview — default true */
+  tiers: StakingPoolRow[]
 
   compact?: boolean
-
-  /** Kill switch: hide “Nest here” CTAs, show a short pause note */
 
   nestingPaused?: boolean
 
@@ -38,15 +49,27 @@ type Props = {
 
 
 
-export function StakingPoolCard({ pool, compact = false, nestingPaused = false }: Props) {
+export function ConsolidatedGenOwlStakingCard({
 
-  const minMax =
+  groupKey,
 
-    pool.minimum_stake != null || pool.maximum_stake != null
+  tiers,
 
-      ? `${pool.minimum_stake ?? '—'} → ${pool.maximum_stake ?? '—'}`
+  compact = false,
 
-      : '—'
+  nestingPaused = false,
+
+}: Props) {
+
+  const label = genOwlStakingGroupLabel(groupKey)
+
+  const adminPreview = tiers.some((t) => t.admin_only === true)
+
+  const allActive = tiers.every((t) => t.is_active)
+
+  const dashboardHref = genOwlGroupDashboardHref(groupKey)
+
+  const sample = tiers[0]
 
 
 
@@ -58,33 +81,29 @@ export function StakingPoolCard({ pool, compact = false, nestingPaused = false }
 
         <div className="flex flex-wrap items-start justify-between gap-2">
 
-          <CardTitle className="font-display text-lg tracking-wide text-theme-prime">
-
-            {pool.name}
-
-          </CardTitle>
+          <CardTitle className="font-display text-lg tracking-wide text-theme-prime">{label}</CardTitle>
 
           <div className="flex flex-wrap gap-1.5">
 
-            {pool.admin_only ? (
+            {adminPreview ? (
 
               <Badge className="bg-violet-600/90 hover:bg-violet-600 text-white border-0">Admin preview</Badge>
 
             ) : null}
 
-            <PoolStatusBadge active={pool.is_active} />
+            <PoolStatusBadge active={allActive} />
 
           </div>
 
         </div>
 
-        <p className="text-sm text-muted-foreground leading-snug">{pool.description}</p>
+        <p className="text-sm text-muted-foreground leading-snug">{genOwlStakingGroupDescription(groupKey)}</p>
 
         <NestingPlatformFeeNotice className="text-xs text-muted-foreground leading-relaxed pt-1" stakeBundled />
 
       </CardHeader>
 
-      <CardContent className="flex-1 space-y-2 text-sm">
+      <CardContent className="flex-1 space-y-3 text-sm">
 
         <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs sm:text-sm">
 
@@ -92,53 +111,43 @@ export function StakingPoolCard({ pool, compact = false, nestingPaused = false }
 
             <dt className="text-muted-foreground">Nest type</dt>
 
-            <dd className="font-medium">{perchAssetKindLabel(pool.asset_type)}</dd>
+            <dd className="font-medium">{sample ? perchAssetKindLabel(sample.asset_type) : 'NFTs'}</dd>
 
           </div>
 
           <div>
 
-            <dt className="text-muted-foreground">Lock</dt>
+            <dt className="text-muted-foreground">Lock options</dt>
 
-            <dd className="font-medium">{pool.lock_period_days === 0 ? 'None' : `${pool.lock_period_days} days`}</dd>
-
-          </div>
-
-          <div>
-
-            <dt className="text-muted-foreground">Reward</dt>
-
-            <dd className="font-medium tabular-nums">
-
-              {pool.reward_token ? `${pool.reward_token} · ` : ''}
-
-              {formatRewardRate(Number(pool.reward_rate), pool.reward_rate_unit)}
-
-            </dd>
+            <dd className="font-medium">90 or 180 days</dd>
 
           </div>
-
-          <div>
-
-            <dt className="text-muted-foreground">Amount range</dt>
-
-            <dd className="font-mono text-xs">{minMax}</dd>
-
-          </div>
-
-          {pool.partner_project_slug ? (
-
-            <div className="col-span-2">
-
-              <dt className="text-muted-foreground">Partner</dt>
-
-              <dd className="font-medium truncate">{pool.partner_project_slug}</dd>
-
-            </div>
-
-          ) : null}
 
         </dl>
+
+        <ul className="space-y-2 rounded-lg border border-border/60 bg-muted/15 p-3 text-xs sm:text-sm" role="list">
+
+          {tiers.map((tier) => (
+
+            <li key={tier.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+
+              <span className="font-medium text-foreground">{tier.lock_period_days}-day nest</span>
+
+              <span className="tabular-nums text-muted-foreground">
+
+                {tier.reward_token ? `${tier.reward_token} · ` : ''}
+
+                {formatRewardRate(Number(tier.reward_rate), tier.reward_rate_unit)}
+
+              </span>
+
+            </li>
+
+          ))}
+
+        </ul>
+
+        <GenOwlRevShareNotice groupKey={groupKey} />
 
       </CardContent>
 
@@ -166,7 +175,7 @@ export function StakingPoolCard({ pool, compact = false, nestingPaused = false }
 
                 <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
 
-                  <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}`}>My nest</Link>
+                  <Link href={dashboardHref}>My nest</Link>
 
                 </Button>
 
@@ -178,13 +187,13 @@ export function StakingPoolCard({ pool, compact = false, nestingPaused = false }
 
                 <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
 
-                  <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}`}>Nest here</Link>
+                  <Link href={dashboardHref}>Nest here</Link>
 
                 </Button>
 
                 <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
 
-                  <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}`}>My nest</Link>
+                  <Link href={dashboardHref}>My nest</Link>
 
                 </Button>
 

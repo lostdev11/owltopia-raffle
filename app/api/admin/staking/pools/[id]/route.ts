@@ -118,6 +118,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
       patch.lock_enforcement_source = body.lock_enforcement_source
     }
+    if (body?.admin_only !== undefined) patch.admin_only = Boolean(body.admin_only)
 
     validatePoolAgainstNestingEmissionPolicy({
       asset_type: (patch.asset_type ?? existing.asset_type) as 'nft' | 'token',

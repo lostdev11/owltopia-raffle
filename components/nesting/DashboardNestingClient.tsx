@@ -46,6 +46,7 @@ import {
 } from '@/lib/nesting/claim-plan'
 import { sendStakingPlatformFeeTransaction } from '@/lib/nesting/client/staking-platform-fee-tx'
 import {
+  formatStakingPlatformFeePerNestLabel,
   formatStakingPlatformFeeTotalLabel,
 } from '@/lib/nesting/staking-platform-fee'
 import type { StakingPlatformFeeTxConfig } from '@/lib/nesting/client/staking-platform-fee-tx'
@@ -59,6 +60,20 @@ type PendingClaimLedgerSync = {
 }
 import { PositionCard } from '@/components/nesting/PositionCard'
 import { NftPerchGroupedNestCard } from '@/components/nesting/NftPerchGroupedNestCard'
+import { nestingNftAssetLabels } from '@/lib/nesting/gen1-staking-pools'
+import {
+  buildNestingPerchDisplayList,
+  genOwlGroupDashboardHref,
+  genOwlStakingGroupLabel,
+  getGenOwlGroupKeyForPoolSlug,
+  resolveGenOwlGroupKey,
+  resolveGenOwlTierPool,
+  tiersForGenOwlGroup,
+} from '@/lib/nesting/gen-owl-staking-groups'
+import { filterPoolsForPublicNestingCatalog } from '@/lib/nesting/perch-catalog'
+import { NestingLockTierPicker } from '@/components/nesting/NestingLockTierPicker'
+import { GenOwlRevShareNotice } from '@/components/nesting/GenOwlRevShareNotice'
+import { GenOwlRevShareClaimPanel } from '@/components/nesting/GenOwlRevShareClaimPanel'
 import { nestGalleryAnchorId } from '@/lib/nesting/nest-position-anchor'
 import { NestingStakedAssetThumb } from '@/components/nesting/NestingStakedAssetThumb'
 import { SectionHeader } from '@/components/council/SectionHeader'
@@ -72,6 +87,8 @@ import {
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { NestingActionStatusLine } from '@/components/nesting/NestingActionStatusLine'
 import { NestingOwlCoinWalletProgressPanel } from '@/components/nesting/NestingOwlCoinWalletProgressPanel'
+import { NestingGomtMigrationNotice } from '@/components/nesting/NestingGomtMigrationNotice'
+import { NestingPlatformFeeNotice } from '@/components/nesting/NestingPlatformFeeNotice'
 import { NestingSecurityNotice } from '@/components/nesting/NestingSecurityNotice'
 import { NestingClaimLedger } from '@/components/nesting/NestingClaimLedger'
 import { NestingClaimAllPanel } from '@/components/nesting/NestingClaimAllPanel'
@@ -145,6 +162,8 @@ export function DashboardNestingClient() {
   const { setVisible } = useWalletModal()
   const searchParams = useSearchParams()
   const preselectedPoolId = searchParams.get('pool')
+  const preselectedGroupKey = resolveGenOwlGroupKey(searchParams.get('group'))
+  const [selectedLockTierSlug, setSelectedLockTierSlug] = useState<string | null>(null)
 
   const [pools, setPools] = useState<StakingPoolRow[]>([])
   const [nestingDisabled, setNestingDisabled] = useState(false)
@@ -189,7 +208,13 @@ export function DashboardNestingClient() {
   const [adminBypassSellout, setAdminBypassSellout] = useState(false)
   const [owlNestMintScan, setOwlNestMintScan] = useState<{
     status: 'idle' | 'loading' | 'done'
-    mints: { mint: string; name: string | null; image?: string | null }[]
+    mints: {
+      mint: string
+      name: string | null
+      image?: string | null
+      stake_blocked?: boolean
+      stake_block_reason?: string | null
+    }[]
     configured: boolean
     hint?: string
     /** From API when configured — helps verify the NFT matches this collection mint. */
@@ -271,6 +296,7 @@ export function DashboardNestingClient() {
       const json = await res.json().catch(() => ({}))
       if (!res.ok) return
       setPools(Array.isArray(json.pools) ? json.pools : [])
+      if (json.viewer_is_admin === true) setViewerIsAdmin(true)
       setNestingDisabled(json.nesting_disabled === true)
       setNestingPausedByDeployEnv(json.nesting_paused_by_deploy_env === true)
       setNestingPausedByAdmin(json.nesting_paused_by_admin === true)
@@ -319,8 +345,8 @@ export function DashboardNestingClient() {
           title: healedCount === 1 ? 'Nest opened successfully' : 'Nests opened successfully',
           message:
             healedCount === 1
-              ? 'Your Owltopia coin is nested and the wallet lock is confirmed on-chain.'
-              : `${healedCount} Owltopia coins are nested and wallet locks are confirmed on-chain.`,
+              ? 'Your nest lock is confirmed on-chain.'
+              : `${healedCount} nest locks are confirmed on-chain.`,
           hint: 'OWL rewards are accruing. Claim anytime in Your nests below.',
         })
       }
@@ -533,6 +559,11 @@ export function DashboardNestingClient() {
     return m
   }, [pools])
 
+  const displayPerches = useMemo(
+    () => buildNestingPerchDisplayList(filterPoolsForPublicNestingCatalog(pools)),
+    [pools]
+  )
+
   /** Active + in-progress nests — closed (`unstaked`) rows stay in state but hide from the list. */
   const openPositions = useMemo(
     () => positions.filter((p) => isOpenStakingPosition(p)),
@@ -589,6 +620,11 @@ export function DashboardNestingClient() {
     return formatStakingPlatformFeeTotalLabel(claimableNestCount)
   }, [platformFeeActive, claimAllReady, claimableNestCount])
 
+  const platformFeePerNestLabel = useMemo(() => {
+    if (!platformFeeActive) return null
+    return formatStakingPlatformFeePerNestLabel()
+  }, [platformFeeActive])
+
   const claimAllBusy = claimAllTxPhase !== 'idle'
 
   /** Deploy kill switch only — admin “pause holder actions” still allows claims. */
@@ -624,9 +660,28 @@ export function DashboardNestingClient() {
   /** True when the URL chose this perch (`?pool=slug` or id) — one perch session, no picker. */
   const perchChosenInUrl = Boolean(preselectedPoolId?.trim())
 
+  const activeGenGroupKey = useMemo(() => {
+    if (preselectedGroupKey) return preselectedGroupKey
+    if (preselectedPoolId) {
+      const fromUrl = findStakingPoolByIdOrSlug(pools, preselectedPoolId)
+      return fromUrl ? getGenOwlGroupKeyForPoolSlug(fromUrl.slug) : null
+    }
+    if (positionLockedPoolId) {
+      const fromPositions = poolById.get(positionLockedPoolId)
+      return fromPositions ? getGenOwlGroupKeyForPoolSlug(fromPositions.slug) : null
+    }
+    return null
+  }, [preselectedGroupKey, preselectedPoolId, pools, positionLockedPoolId, poolById])
+
+  const genGroupTiers = useMemo(
+    () => (activeGenGroupKey ? tiersForGenOwlGroup(activeGenGroupKey, pools) : []),
+    [activeGenGroupKey, pools]
+  )
+
   /**
    * Perch locked for this visit. One perch per session: explicit `?pool=`, the only
    * live pool, or all open nests on the same pool — never mix Owltopia coins + council UI.
+   * Gen 1 / Gen 2 group links (`?group=`) defer tier choice to the stake form.
    */
   const lockedPerch = useMemo(() => {
     if (solePerch) return solePerch
@@ -634,33 +689,84 @@ export function DashboardNestingClient() {
       const fromUrl = findStakingPoolByIdOrSlug(pools, preselectedPoolId)
       if (fromUrl) return fromUrl
     }
+    if (preselectedGroupKey) {
+      if (positionLockedPoolId) {
+        const fromPositions = findStakingPoolByIdOrSlug(pools, positionLockedPoolId)
+        const posGroup = fromPositions ? getGenOwlGroupKeyForPoolSlug(fromPositions.slug) : null
+        if (fromPositions && posGroup === preselectedGroupKey) return fromPositions
+      }
+      return null
+    }
     if (positionLockedPoolId) {
       const fromPositions = findStakingPoolByIdOrSlug(pools, positionLockedPoolId)
       if (fromPositions) return fromPositions
     }
     return null
-  }, [solePerch, preselectedPoolId, pools, positionLockedPoolId])
+  }, [solePerch, preselectedPoolId, preselectedGroupKey, pools, positionLockedPoolId])
+
+  useEffect(() => {
+    if (activeGenGroupKey) {
+      if (lockedPerch && getGenOwlGroupKeyForPoolSlug(lockedPerch.slug) === activeGenGroupKey) {
+        setSelectedLockTierSlug(lockedPerch.slug)
+        return
+      }
+      if (positionLockedPoolId) {
+        const fromPositions = poolById.get(positionLockedPoolId)
+        if (
+          fromPositions &&
+          getGenOwlGroupKeyForPoolSlug(fromPositions.slug) === activeGenGroupKey
+        ) {
+          setSelectedLockTierSlug((prev) => prev ?? fromPositions.slug)
+        }
+      }
+      return
+    }
+    if (lockedPerch) {
+      setSelectedLockTierSlug(lockedPerch.slug)
+    }
+  }, [lockedPerch?.slug, positionLockedPoolId, activeGenGroupKey, poolById])
 
   const preselectedPerchMissing =
-    perchChosenInUrl && !loading && pools.length > 0 && !lockedPerch
+    perchChosenInUrl && !loading && pools.length > 0 && !lockedPerch && !activeGenGroupKey
 
-  const showPerchPicker = !lockedPerch && pools.length > 0
+  const showPerchPicker = !lockedPerch && !activeGenGroupKey && displayPerches.length > 0
+  const hasAdminPreviewPools = viewerIsAdmin === true && pools.some((p) => p.admin_only === true)
 
-  const otherPerches = useMemo(() => {
-    if (!lockedPerch) return []
-    return pools.filter((p) => p.id !== lockedPerch.id)
-  }, [lockedPerch, pools])
+  const selectedGenTierPool = useMemo(
+    () => resolveGenOwlTierPool(pools, activeGenGroupKey, selectedLockTierSlug),
+    [pools, activeGenGroupKey, selectedLockTierSlug]
+  )
 
-  const selectedPerch = useMemo(() => lockedPerch ?? undefined, [lockedPerch])
+  const selectedPerch = useMemo(() => {
+    if (selectedGenTierPool) return selectedGenTierPool
+    if (lockedPerch) return lockedPerch
+    return undefined
+  }, [selectedGenTierPool, lockedPerch])
 
-  const nftMintRequired = selectedPerch ? isNftStakingPool(selectedPerch) : false
+  const nftScanPerch = useMemo(() => {
+    if (activeGenGroupKey && genGroupTiers.length > 0) {
+      return selectedGenTierPool ?? genGroupTiers[0]
+    }
+    if (selectedPerch) return selectedPerch
+    return undefined
+  }, [activeGenGroupKey, genGroupTiers, selectedGenTierPool, selectedPerch])
+
+  const nftAssetLabels = useMemo(() => {
+    if (activeGenGroupKey === 'gen1-owl') return { singular: 'Gen 1 owl', plural: 'Gen 1 owls' }
+    if (activeGenGroupKey === 'gen2-owl') return { singular: 'Gen 2 owl', plural: 'Gen 2 owls' }
+    if (selectedPerch) return nestingNftAssetLabels(selectedPerch)
+    return nestingNftAssetLabels(null)
+  }, [selectedPerch, activeGenGroupKey])
+
+  const nftMintRequired = nftScanPerch ? isNftStakingPool(nftScanPerch) : false
   const tokenStakeRequired = selectedPerch ? !isNftStakingPool(selectedPerch) : false
 
   const owlCoinProgressPreferredPoolId = useMemo(() => {
-    if (selectedPerch && isNftStakingPool(selectedPerch)) return selectedPerch.id
+    const nftPerch = selectedPerch ?? nftScanPerch
+    if (nftPerch && isNftStakingPool(nftPerch)) return nftPerch.id
     if (preselectedPoolId) return preselectedPoolId
     return null
-  }, [selectedPerch, preselectedPoolId])
+  }, [selectedPerch, nftScanPerch, preselectedPoolId])
 
   /**
    * Mint address used to fund a token-type perch. Prefers the perch's own
@@ -723,7 +829,7 @@ export function DashboardNestingClient() {
   useEffect(() => {
     owlNestFetchAbortRef.current?.abort()
     owlNestLastLoadedPoolIdRef.current = null
-    const poolId = selectedPerch?.id ?? ''
+    const poolId = nftScanPerch?.id ?? ''
     if (!nftMintRequired || !poolId) {
       setOwlNestMintScan({ status: 'idle', mints: [], configured: true })
       return
@@ -731,7 +837,7 @@ export function DashboardNestingClient() {
     setOwlNestMintScan({ status: 'idle', mints: [], configured: true })
     setStakeAssetId('')
     setStakeAssetIds([])
-  }, [nftMintRequired, selectedPerch?.id])
+  }, [nftMintRequired, nftScanPerch?.id])
 
   useEffect(() => {
     return () => owlNestFetchAbortRef.current?.abort()
@@ -739,7 +845,7 @@ export function DashboardNestingClient() {
 
   const loadOwlNestNftsFromWallet = useCallback(async () => {
     if (!connected || !publicKey || needsSignIn || loading || error !== null) return
-    const poolId = selectedPerch?.id
+    const poolId = nftScanPerch?.id
     if (!nftMintRequired || !poolId) return
 
     owlNestFetchAbortRef.current?.abort()
@@ -777,7 +883,7 @@ export function DashboardNestingClient() {
           status: 'done',
           mints: [],
           configured: true,
-          hint: typeof raw?.error === 'string' ? raw.error : 'Could not scan wallet for Owltopia coins.',
+          hint: typeof raw?.error === 'string' ? raw.error : `Could not scan wallet for ${nftAssetLabels.plural}.`,
           resolvedCollectionAddress: undefined,
         })
         return
@@ -831,7 +937,9 @@ export function DashboardNestingClient() {
     loading,
     error,
     nftMintRequired,
-    selectedPerch?.id,
+    nftScanPerch?.id,
+    nftScanPerch?.slug,
+    nftAssetLabels.plural,
   ])
 
   /** Refresh nest rows + eligible coin list after stake/unstake without a full page reload. */
@@ -840,11 +948,11 @@ export function DashboardNestingClient() {
       const heal = opts?.heal !== false
       await loadPositions({ heal: false, silent: true })
       if (heal) await loadPositions({ heal: true, silent: true })
-      if (nftMintRequired && owlNestLastLoadedPoolIdRef.current === selectedPerch?.id) {
+      if (nftMintRequired && owlNestLastLoadedPoolIdRef.current === nftScanPerch?.id) {
         void loadOwlNestNftsRef.current()
       }
     },
-    [loadPositions, nftMintRequired, selectedPerch?.id]
+    [loadPositions, nftMintRequired, nftScanPerch?.id]
   )
 
   const loadOwlNestNftsRef = useRef(loadOwlNestNftsFromWallet)
@@ -957,7 +1065,7 @@ export function DashboardNestingClient() {
 
   /** After stake/unstake, refresh eligible NFTs (only if user already loaded for this perch). */
   useEffect(() => {
-    const poolId = selectedPerch?.id
+    const poolId = nftScanPerch?.id
     if (!nftMintRequired || !poolId) return
     if (!connected || !publicKey || needsSignIn || loading || error !== null) return
     if (owlNestScanStatusRef.current !== 'done') return
@@ -966,7 +1074,7 @@ export function DashboardNestingClient() {
     void loadOwlNestNftsRef.current()
     // Intentionally keyed on nested set + perch only — avoids re-scan when `loading` flips during unrelated dashboard refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
-  }, [nestedActiveMintKey, nftMintRequired, selectedPerch?.id])
+  }, [nestedActiveMintKey, nftMintRequired, nftScanPerch?.id])
 
   const loadPerchTokenRef = useRef(loadPerchTokenFromWallet)
   loadPerchTokenRef.current = loadPerchTokenFromWallet
@@ -996,7 +1104,7 @@ export function DashboardNestingClient() {
   /** Auto-load Owltopia coins for NFT perches (needs SIWS) so the wallet nest bar can show X / Y. */
   useEffect(() => {
     if (!connected || !publicKey || needsSignIn || loading || error !== null) return
-    if (!nftMintRequired || !selectedPerch?.id) return
+    if (!nftMintRequired || !nftScanPerch?.id) return
     if (owlNestMintScan.status !== 'idle') return
     void loadOwlNestNftsRef.current()
   }, [
@@ -1006,7 +1114,7 @@ export function DashboardNestingClient() {
     loading,
     error,
     nftMintRequired,
-    selectedPerch?.id,
+    nftScanPerch?.id,
     owlNestMintScan.status,
   ])
 
@@ -1065,18 +1173,23 @@ export function DashboardNestingClient() {
     }
     if (selectedNftStakeAssetIds.length > 0) {
       parts.push(
-        `${selectedNftStakeAssetIds.length} coin${selectedNftStakeAssetIds.length === 1 ? '' : 's'} selected`
+        `${selectedNftStakeAssetIds.length} ${selectedNftStakeAssetIds.length === 1 ? nftAssetLabels.singular : nftAssetLabels.plural} selected`
       )
     } else if (stakeAmount.trim()) {
       parts.push(`${stakeAmount.trim()} ready to nest`)
     }
     if (parts.length > 0) return parts.join(' · ')
-    return 'Tap to tuck in tokens or Owltopia coins'
+    return lockedPerch && isNftStakingPool(lockedPerch)
+      ? `Tap to tuck in ${nftAssetLabels.plural}`
+      : 'Tap to tuck in tokens or NFTs'
   }, [
     openingNestsNeedingWalletLock.length,
     stakeTxPhase,
     selectedNftStakeAssetIds.length,
     stakeAmount,
+    nftAssetLabels.plural,
+    nftAssetLabels.singular,
+    lockedPerch,
   ])
 
   const resumeOpeningNest = useCallback(
@@ -1115,32 +1228,38 @@ export function DashboardNestingClient() {
 
   const confirmNestDisabledReason = useMemo(() => {
     if (stakeTxPhase !== 'idle') return null
+    if (activeGenGroupKey && !selectedLockTierSlug) return 'Pick 90 or 180 days first.'
     if (!selectedPerch) return 'Choose a perch first.'
     if (!securityAck) return 'Sign the nesting safeguards with your wallet above before confirming.'
     if (nestingDisabled && !canOnlyResumeFreeze) {
       return 'Nesting is paused — you can only finish nests that are already opening.'
     }
     if (nftMintRequired && selectedNftStakeAssetIds.length === 0) {
-      return 'Select at least one Owltopia coin from the list.'
+      return `Select at least one ${nftAssetLabels.singular} from the list.`
     }
     if (nftMintRequired && selectedNftStakeAssetIds.length > NESTING_NFT_STAKE_MAX_PER_RUN) {
-      return `You can confirm up to ${NESTING_NFT_STAKE_MAX_PER_RUN} coins at a time (${selectedNftStakeAssetIds.length} selected).`
+      return `You can confirm up to ${NESTING_NFT_STAKE_MAX_PER_RUN} ${nftAssetLabels.plural} at a time (${selectedNftStakeAssetIds.length} selected).`
     }
     return null
   }, [
     stakeTxPhase,
+    activeGenGroupKey,
+    selectedLockTierSlug,
     selectedPerch,
     securityAck,
     nestingDisabled,
     canOnlyResumeFreeze,
     nftMintRequired,
     selectedNftStakeAssetIds.length,
+    nftAssetLabels.singular,
+    nftAssetLabels.plural,
   ])
 
   const nestableOwlMintIds = useMemo(() => {
     const pool = selectedPerch?.asset_type === 'nft' ? selectedPerch : null
     if (!pool || owlNestMintScan.status !== 'done') return []
     return owlNestMintScan.mints
+      .filter((row) => row.stake_blocked !== true)
       .filter((row) => !nftMintBlocksDuplicateStakeExceptResume(row.mint, pool, positions))
       .map((m) => m.mint)
   }, [selectedPerch, owlNestMintScan.status, owlNestMintScan.mints, positions])
@@ -1177,6 +1296,11 @@ export function DashboardNestingClient() {
   const toggleSelectedOwlNestMint = useCallback(
     (mint: string) => {
       const pool = selectedPerch
+      const row = owlNestMintScan.mints.find((m) => m.mint === mint)
+      if (row?.stake_blocked) {
+        setActionError(row.stake_block_reason ?? 'This NFT cannot be nested while it is frozen elsewhere.')
+        return
+      }
       if (
         pool?.asset_type === 'nft' &&
         nftMintBlocksDuplicateStakeExceptResume(mint, pool, positions)
@@ -1186,7 +1310,7 @@ export function DashboardNestingClient() {
       const exists = stakeAssetIds.includes(mint)
       if (!exists && stakeAssetIds.length >= NESTING_NFT_STAKE_MAX_PER_RUN) {
         setActionError(
-          `Up to ${NESTING_NFT_STAKE_MAX_PER_RUN} coins per confirm — finish this batch in your wallet, then select more.`
+          `Up to ${NESTING_NFT_STAKE_MAX_PER_RUN} ${nestingNftAssetLabels(selectedPerch).plural} per confirm — finish this batch in your wallet, then select more.`
         )
         return
       }
@@ -1195,7 +1319,7 @@ export function DashboardNestingClient() {
       setStakeAssetIds(next)
       setStakeAssetId(next[0] ?? '')
     },
-    [stakeAssetIds, positions, selectedPerch]
+    [stakeAssetIds, positions, selectedPerch, owlNestMintScan.mints]
   )
 
   useEffect(() => {
@@ -1211,7 +1335,8 @@ export function DashboardNestingClient() {
       if (
         pool &&
         m0 &&
-        nftMintBlocksDuplicateStakeExceptResume(m0, pool, positions)
+        (owlNestMintScan.mints[0].stake_blocked === true ||
+          nftMintBlocksDuplicateStakeExceptResume(m0, pool, positions))
       ) {
         setStakeAssetId('')
         setStakeAssetIds([])
@@ -1228,6 +1353,8 @@ export function DashboardNestingClient() {
         prev.filter((id) => {
           const idtrim = id.trim()
           if (!validMints.has(id)) return false
+          const row = owlNestMintScan.mints.find((m) => m.mint === id)
+          if (row?.stake_blocked) return false
           if (
             pool?.asset_type === 'nft' &&
             idtrim &&
@@ -1491,11 +1618,11 @@ export function DashboardNestingClient() {
         return
       }
     } else if (nftAssetIds.length === 0) {
-      setActionError('Choose at least one Owltopia coin from the list.')
+      setActionError(`Choose at least one ${nftAssetLabels.singular} from the list.`)
       return
     } else if (nftAssetIds.length > NESTING_NFT_STAKE_MAX_PER_RUN) {
       setActionError(
-        `Choose up to ${NESTING_NFT_STAKE_MAX_PER_RUN} coins per confirm (${nftAssetIds.length} selected). Tap Select all or deselect extras.`
+        `Choose up to ${NESTING_NFT_STAKE_MAX_PER_RUN} ${nftAssetLabels.plural} per confirm (${nftAssetIds.length} selected). Tap Select all or deselect extras.`
       )
       return
     }
@@ -1779,7 +1906,7 @@ export function DashboardNestingClient() {
               if (totalNests > 1) {
                 setNftStakeBatchHint(
                   walletApprovals > 1
-                    ? `Approve nest batch ${chunkIdx + 1} of ${walletApprovals} in your wallet (${chunkPreps.length} coins${platformFeeActive ? `, ${chunkFeeLabel} included` : ''})…`
+                    ? `Approve nest batch ${chunkIdx + 1} of ${walletApprovals} in your wallet (${chunkPreps.length} ${nftAssetLabels.plural}${platformFeeActive ? `, ${chunkFeeLabel} included` : ''})…`
                     : `Approve in your wallet to confirm ${chunkPreps.length} nest${chunkPreps.length === 1 ? '' : 's'}${platformFeeActive ? ` (${chunkFeeLabel} included)` : ''}…`
                 )
               } else if (platformFeeActive && chunkFeeLabel) {
@@ -1840,14 +1967,14 @@ export function DashboardNestingClient() {
         message:
           pool.asset_type === 'nft'
             ? nestedCount === 1
-              ? 'Your Owltopia coin is nested and the wallet lock is confirmed.'
-              : `${nestedCount} Owltopia coins are nested and wallet locks are confirmed.`
+              ? `Your ${nftAssetLabels.singular} is nested and the wallet lock is confirmed.`
+              : `${nestedCount} ${nftAssetLabels.plural} are nested and wallet locks are confirmed.`
             : 'Your stake is confirmed for this perch.',
         hint:
           pool.asset_type === 'nft'
             ? nestedCount === 1
-              ? 'Your coin stays in your wallet while rewards accrue. Claim OWL anytime in Your nests below.'
-              : 'Your coins stay in your wallet while rewards accrue. Claim OWL anytime in Your nests below.'
+              ? `Your ${nftAssetLabels.singular} stays in your wallet while rewards accrue. Claim OWL anytime in Your nests below.`
+              : `Your ${nftAssetLabels.plural} stay in your wallet while rewards accrue. Claim OWL anytime in Your nests below.`
             : 'OWL rewards accrue on this perch. Claim anytime in Your nests below.',
       })
       if (typeof document !== 'undefined') {
@@ -2452,6 +2579,20 @@ export function DashboardNestingClient() {
 
   return (
     <main className="container mx-auto px-3 sm:px-4 py-6 sm:py-10 pb-16 max-w-4xl space-y-8">
+      <NestingGomtMigrationNotice />
+      {hasAdminPreviewPools ? (
+        <div
+          className="rounded-xl border border-violet-500/40 bg-violet-500/[0.08] px-4 py-3 text-sm text-foreground"
+          role="status"
+        >
+          <p className="font-medium text-foreground">Admin preview — Gen 1 &amp; Gen 2 perches</p>
+          <p className="mt-1 text-muted-foreground leading-relaxed">
+            Pick <span className="font-medium text-foreground">Gen 1 Owl</span> or{' '}
+            <span className="font-medium text-foreground">Gen 2 Owl</span> below, then choose 90 or 180 days when
+            you open a nest. Only admin wallets can stake until launch.
+          </p>
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1 min-w-0">
           <div className="flex flex-wrap gap-x-3 gap-y-2 mb-2">
@@ -2479,8 +2620,14 @@ export function DashboardNestingClient() {
           <NestingOwlCoinWalletProgressPanel
             pools={pools}
             preferredPoolId={owlCoinProgressPreferredPoolId}
+            preferredGroupKey={activeGenGroupKey}
             positionsVersion={nestedActiveMintKey}
             className="mt-3 max-w-md rounded-xl border border-emerald-500/20 bg-black/30 px-3 py-3"
+          />
+          <GenOwlRevShareClaimPanel
+            connected={connected}
+            needsSignIn={needsSignIn}
+            className="mt-3 max-w-md"
           />
         </div>
         <Button
@@ -2577,7 +2724,7 @@ export function DashboardNestingClient() {
                 leaving a nest are blocked for everyone. The admin “pause holder actions” switch cannot override this.
                 Remove the variable for this environment in Vercel (or <span className="font-mono">.env.local</span> when
                 developing), deploy again, then refresh. If you were partway through opening a nest, select the same
-                Owltopia coin in the nest form and use Confirm nest to finish the wallet lock (only for nests that are
+                {lockedPerch && isNftStakingPool(lockedPerch) ? ` ${nftAssetLabels.singular}` : ' NFT'} in the nest form and use Confirm nest to finish the wallet lock (only for nests that are
                 still opening).
               </>
             ) : nestingPausedByAdmin ? (
@@ -2586,13 +2733,15 @@ export function DashboardNestingClient() {
                 <span className="font-medium text-foreground">Claim all</span> and per-nest{' '}
                 <span className="font-medium text-foreground">Claim OWL</span> still work for rewards you already earned.
                 Turn off “pause holder actions” in Admin → Nesting when you want to open or leave nests again. If you were
-                partway through opening a nest, select the same Owltopia coin in the nest form and use Confirm nest to
+                partway through opening a nest, select the same
+                {lockedPerch && isNftStakingPool(lockedPerch) ? ` ${nftAssetLabels.singular}` : ' NFT'} in the nest form and use Confirm nest to
                 finish the wallet lock (only for nests that are still opening).
               </>
             ) : (
               <>
                 New nests, claims, and leaving a nest are off for the moment. If you were partway through opening a nest,
-                select the same Owltopia coin in the nest form and use Confirm nest to finish the wallet lock (only for
+                select the same
+                {lockedPerch && isNftStakingPool(lockedPerch) ? ` ${nftAssetLabels.singular}` : ' NFT'} in the nest form and use Confirm nest to finish the wallet lock (only for
                 nests that are still opening).
               </>
             )}
@@ -2686,7 +2835,7 @@ export function DashboardNestingClient() {
               The wallet lock step did not finish. We try to fix this automatically when you load the page; if a nest
               still shows <span className="font-medium text-foreground/90">Opening…</span>, tap below and approve each
               prompt in your wallet — <span className="font-medium text-foreground/90">batched approvals</span> (up to{' '}
-              {NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} coins per transaction on Backpack, Phantom, etc.). The count
+              {NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} {nftAssetLabels.plural} per transaction on Backpack, Phantom, etc.). The count
               here updates as each batch completes; stay on this page until the list is clear.
             </p>
           </div>
@@ -2773,7 +2922,7 @@ export function DashboardNestingClient() {
                     <p className="text-xs text-muted-foreground leading-relaxed">
                       {selectedNftStakeAssetIds.length > 0
                         ? `nest${selectedNftStakeAssetIds.length === 1 ? '' : 's'} selected`
-                        : 'Select Owltopia coins below'}
+                        : `Select ${nftAssetLabels.plural} below`}
                     </p>
                   </>
                 ) : (
@@ -2857,24 +3006,26 @@ export function DashboardNestingClient() {
                       </p>
                     ) : null}
                   </div>
-                ) : !selectedPerch ? (
+                ) : !selectedPerch && !activeGenGroupKey ? (
                   <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
                     Choose a perch below to load assets from your wallet.
                   </p>
-                ) : lockedPerch?.asset_type === 'nft' ? (
+                ) : nftMintRequired ? (
                   <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-                    One coin = one nest. Load your wallet, then pick coins below.
+                    One {nftAssetLabels.singular} = one nest. Load your wallet, then pick {nftAssetLabels.plural} below.
                   </p>
                 ) : null}
               </div>
               <NestSwapAssetChip
-                label={nftMintRequired ? 'Owltopia coin' : tokenStakeSymbol}
+                label={nftMintRequired ? nftAssetLabels.singular : tokenStakeSymbol}
                 sublabel={
                   selectedPerch
                     ? perchAssetKindLabel(selectedPerch.asset_type)
-                    : lockedPerch
-                      ? perchAssetKindLabel(lockedPerch.asset_type)
-                      : 'Pick perch'
+                    : activeGenGroupKey
+                      ? 'NFTs'
+                      : lockedPerch
+                        ? perchAssetKindLabel(lockedPerch.asset_type)
+                        : 'Pick perch'
                 }
                 icon={
                   nftMintRequired ? (
@@ -2888,7 +3039,7 @@ export function DashboardNestingClient() {
             </div>
           }
           receivePanel={
-            lockedPerch ? (
+            lockedPerch && !activeGenGroupKey ? (
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-2xl font-semibold tabular-nums text-foreground sm:text-[1.75rem]">
@@ -2902,7 +3053,7 @@ export function DashboardNestingClient() {
                     ) : null}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                    {isNftStakingPool(lockedPerch) ? 'Per Owltopia coin nested' : 'Reward rate on this perch'}
+                    {isNftStakingPool(lockedPerch) ? `Per ${nftAssetLabels.singular} nested` : 'Reward rate on this perch'}
                     {' · '}
                     Lock{' '}
                     <span className="font-medium text-foreground/85">
@@ -2914,6 +3065,13 @@ export function DashboardNestingClient() {
                       {lockedPerch.description}
                     </p>
                   ) : null}
+                  {platformFeePerNestLabel ? (
+                    <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+                      Platform fee:{' '}
+                      <span className="font-medium text-foreground/90">{platformFeePerNestLabel}</span> per nest — included
+                      in your nest lock approval when staking; separate when you claim OWL or leave.
+                    </p>
+                  ) : null}
                 </div>
                 <NestSwapAssetChip
                   label={lockedPerch.name ?? 'Perch'}
@@ -2921,6 +3079,36 @@ export function DashboardNestingClient() {
                   icon={<Egg className="h-4 w-4 text-theme-prime" aria-hidden />}
                   aria-label="Earning perch"
                 />
+              </div>
+            ) : activeGenGroupKey ? (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-lg font-semibold text-foreground">{genOwlStakingGroupLabel(activeGenGroupKey)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                    Load your {nftAssetLabels.plural} below, then pick 90 or 180 days before you confirm.
+                  </p>
+                </div>
+                <NestingLockTierPicker
+                  tiers={genGroupTiers}
+                  selectedSlug={selectedLockTierSlug}
+                  onSelect={setSelectedLockTierSlug}
+                  required={Boolean(activeGenGroupKey && !selectedLockTierSlug)}
+                />
+                <GenOwlRevShareNotice groupKey={activeGenGroupKey} />
+                {selectedGenTierPool ? (
+                  <div className="rounded-lg border border-emerald-500/20 bg-black/20 px-3 py-3 text-xs text-muted-foreground leading-relaxed">
+                    <span className="font-medium text-foreground">
+                      {selectedGenTierPool.lock_period_days}-day nest
+                    </span>
+                    {' · '}
+                    {selectedGenTierPool.reward_token ? `${selectedGenTierPool.reward_token} · ` : ''}
+                    {formatRewardRate(
+                      Number(selectedGenTierPool.reward_rate),
+                      selectedGenTierPool.reward_rate_unit
+                    )}{' '}
+                    per {nftAssetLabels.singular}
+                  </div>
+                ) : null}
               </div>
             ) : preselectedPerchMissing ? (
               <div className="space-y-3">
@@ -2933,70 +3121,83 @@ export function DashboardNestingClient() {
                   .
                 </p>
                 <ul className="list-none space-y-2 p-0" role="list">
-                  {pools.map((p) => (
-                    <li key={p.id}>
-                      <Link
-                        href={`/dashboard/nesting?pool=${encodeURIComponent(p.slug)}`}
-                        className={cn(
-                          'flex min-h-[48px] w-full touch-manipulation items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-[#1c2620]/80 px-3 py-3 text-left text-base font-medium text-foreground',
-                          'hover:border-emerald-500/30 hover:bg-[#243328] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-prime/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#121a15]'
-                        )}
-                      >
-                        <span className="min-w-0 truncate">{p.name}</span>
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {perchAssetKindLabel(p.asset_type)}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
+                  {displayPerches.map((item) =>
+                    item.kind === 'gen_owl_group' ? (
+                      <li key={item.groupKey}>
+                        <Link
+                          href={genOwlGroupDashboardHref(item.groupKey)}
+                          className={cn(
+                            'flex min-h-[48px] w-full touch-manipulation items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-[#1c2620]/80 px-3 py-3 text-left text-base font-medium text-foreground',
+                            'hover:border-emerald-500/30 hover:bg-[#243328] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-prime/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#121a15]'
+                          )}
+                        >
+                          <span className="min-w-0 truncate">{genOwlStakingGroupLabel(item.groupKey)}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">90 / 180 days</span>
+                        </Link>
+                      </li>
+                    ) : (
+                      <li key={item.pool.id}>
+                        <Link
+                          href={`/dashboard/nesting?pool=${encodeURIComponent(item.pool.slug)}`}
+                          className={cn(
+                            'flex min-h-[48px] w-full touch-manipulation items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-[#1c2620]/80 px-3 py-3 text-left text-base font-medium text-foreground',
+                            'hover:border-emerald-500/30 hover:bg-[#243328] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-prime/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#121a15]'
+                          )}
+                        >
+                          <span className="min-w-0 truncate">{item.pool.name}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {perchAssetKindLabel(item.pool.asset_type)}
+                          </span>
+                        </Link>
+                      </li>
+                    )
+                  )}
                 </ul>
               </div>
             ) : showPerchPicker ? (
               <div className="space-y-3">
                 <p className="text-sm font-medium text-foreground">Choose a perch</p>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Each nest belongs to one perch. Pick one row—this page will stay on that perch only.
+                  Gen 1 and Gen 2 use one card each—you pick 90 or 180 days when you stake. Other perches stay separate.
                 </p>
+                <NestingPlatformFeeNotice className="text-xs text-muted-foreground leading-relaxed" />
                 <ul className="list-none space-y-2 p-0" role="list">
-                  {pools.map((p) => (
-                    <li key={p.id}>
-                      <Link
-                        href={`/dashboard/nesting?pool=${encodeURIComponent(p.slug)}`}
-                        className={cn(
-                          'flex min-h-[48px] w-full touch-manipulation items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-[#1c2620]/80 px-3 py-3 text-left text-base font-medium text-foreground',
-                          'hover:border-emerald-500/30 hover:bg-[#243328] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-prime/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#121a15]'
-                        )}
-                      >
-                        <span className="min-w-0 truncate">{p.name}</span>
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {perchAssetKindLabel(p.asset_type)}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
+                  {displayPerches.map((item) =>
+                    item.kind === 'gen_owl_group' ? (
+                      <li key={item.groupKey}>
+                        <Link
+                          href={genOwlGroupDashboardHref(item.groupKey)}
+                          className={cn(
+                            'flex min-h-[48px] w-full touch-manipulation items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-[#1c2620]/80 px-3 py-3 text-left text-base font-medium text-foreground',
+                            'hover:border-emerald-500/30 hover:bg-[#243328] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-prime/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#121a15]'
+                          )}
+                        >
+                          <span className="min-w-0 truncate">{genOwlStakingGroupLabel(item.groupKey)}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">90 / 180 days</span>
+                        </Link>
+                      </li>
+                    ) : (
+                      <li key={item.pool.id}>
+                        <Link
+                          href={`/dashboard/nesting?pool=${encodeURIComponent(item.pool.slug)}`}
+                          className={cn(
+                            'flex min-h-[48px] w-full touch-manipulation items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-[#1c2620]/80 px-3 py-3 text-left text-base font-medium text-foreground',
+                            'hover:border-emerald-500/30 hover:bg-[#243328] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-prime/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#121a15]'
+                          )}
+                        >
+                          <span className="min-w-0 truncate">{item.pool.name}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {perchAssetKindLabel(item.pool.asset_type)}
+                          </span>
+                        </Link>
+                      </li>
+                    )
+                  )}
                 </ul>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">Select a perch to see what you earn.</p>
             )
-          }
-          details={
-            lockedPerch && otherPerches.length > 0 ? (
-              <p>
-                Different perch?{' '}
-                {otherPerches.map((p, i) => (
-                  <span key={p.id}>
-                    {i > 0 ? ' · ' : null}
-                    <Link
-                      href={`/dashboard/nesting?pool=${encodeURIComponent(p.slug)}`}
-                      className="font-medium text-theme-prime underline-offset-4 hover:underline"
-                    >
-                      {p.name}
-                    </Link>
-                  </span>
-                ))}
-              </p>
-            ) : null
           }
           payFooter={
             <div className="space-y-2">
@@ -3110,22 +3311,22 @@ export function DashboardNestingClient() {
               </>
             ) : !nftMintRequired ? (
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Choose a perch above to load your token balance or Owltopia coins from this wallet.
+                Choose a perch above to load your token balance or NFTs from this wallet.
               </p>
             ) : (
               <>
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Wallet · Owltopia coins
+                  Wallet · {nftAssetLabels.plural}
                 </p>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Load coins from this collection, then select one or more to nest.
+                  Load {nftAssetLabels.plural} from this collection, then select one or more to nest.
                 </p>
 
                 {selectedNftStakeAssetIds.length > 0 ? (
                   <div className="space-y-2 rounded-lg border border-emerald-500/20 bg-black/25 p-3 touch-manipulation">
                     <p className="text-xs font-medium text-muted-foreground">
                       You&apos;re nesting {selectedNftStakeAssetIds.length}{' '}
-                      {selectedNftStakeAssetIds.length === 1 ? 'coin' : 'coins'}
+                      {selectedNftStakeAssetIds.length === 1 ? nftAssetLabels.singular : nftAssetLabels.plural}
                     </p>
                     <div className="grid gap-2 sm:grid-cols-2">
                       {(selectedOwlNestMintRows.length > 0
@@ -3141,7 +3342,7 @@ export function DashboardNestingClient() {
                           />
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-medium text-foreground">
-                              {m.name?.trim() || 'Owltopia coin'}
+                              {m.name?.trim() || nftAssetLabels.singular}
                             </p>
                             <p className="truncate font-mono text-[11px] text-muted-foreground">
                               {shortenAddress(m.mint, 6)}
@@ -3162,13 +3363,13 @@ export function DashboardNestingClient() {
                       disabled={!connected || needsSignIn || loading || error !== null}
                       onClick={() => void loadOwlNestNftsFromWallet()}
                     >
-                      Load Owltopia coins from wallet
+                      Load {nftAssetLabels.plural} from wallet
                     </Button>
                     {!connected ? (
                       <p className="text-xs text-muted-foreground text-center">Connect your wallet first.</p>
                     ) : needsSignIn ? (
                       <p className="text-xs text-muted-foreground text-center">
-                        Sign in with your wallet to load Owltopia coins.
+                        Sign in with your wallet to load {nftAssetLabels.plural}.
                       </p>
                     ) : loading ? (
                       <p className="text-xs text-muted-foreground text-center">Loading dashboard…</p>
@@ -3181,7 +3382,7 @@ export function DashboardNestingClient() {
                 {owlNestMintScan.status === 'loading' ? (
                   <div className="flex min-h-[44px] items-center gap-2 text-xs text-muted-foreground touch-manipulation">
                     <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                    <span>Loading Owltopia coins from your wallet…</span>
+                    <span>Loading {nftAssetLabels.plural} from your wallet…</span>
                   </div>
                 ) : null}
 
@@ -3232,10 +3433,10 @@ export function DashboardNestingClient() {
                       </Button>
                     </div>
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      <span className="font-medium text-foreground/85">Recommended:</span> select every coin you want,
-                      then tap confirm below — your wallet signs{' '}
+                      <span className="font-medium text-foreground/85">Recommended:</span> select every{' '}
+                      {nftAssetLabels.singular} you want, then tap confirm below — your wallet signs{' '}
                       <span className="font-medium text-foreground/85">
-                        up to {NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} coins per transaction
+                        up to {NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} {nftAssetLabels.plural} per transaction
                       </span>{' '}
                       (large flocks may need a few approvals). Stay on this page until finished; the opening count
                       updates after each batch.
@@ -3245,19 +3446,23 @@ export function DashboardNestingClient() {
                       nftMintBlocksDuplicateStakeExceptResume(row.mint, selectedPerch, positions)
                     ) ? (
                       <p className="text-xs text-muted-foreground/85 leading-relaxed">
-                        Coins <span className="font-medium text-foreground/80">already nested</span> on this perch stay
+                        {nftAssetLabels.plural.charAt(0).toUpperCase() + nftAssetLabels.plural.slice(1)}{' '}
+                        <span className="font-medium text-foreground/80">already nested</span> on this perch stay
                         listed for reference — they&apos;re skipped for new nests unless you&apos;re finishing a nest that
                         is still waiting on a wallet freeze step.
                       </p>
                     ) : null}
                     <div className="grid gap-2 sm:grid-cols-2">
                       {owlNestMintScan.mints.map((m) => {
+                        const externallyBlocked = m.stake_blocked === true
                         const alreadyNestedHere =
+                          !externallyBlocked &&
                           selectedPerch?.asset_type === 'nft' &&
                           nftMintBlocksDuplicateStakeExceptResume(m.mint, selectedPerch, positions)
                         const resumeFreezeOnly =
                           selectedPerch?.asset_type === 'nft' &&
                           !alreadyNestedHere &&
+                          !externallyBlocked &&
                           positions.some(
                             (p) =>
                               isOpeningNftNestAbortable(p, selectedPerch) &&
@@ -3265,17 +3470,18 @@ export function DashboardNestingClient() {
                               p.asset_identifier?.trim() === m.mint.trim()
                           )
                         const checked = stakeAssetIds.includes(m.mint)
+                        const disabled = Boolean(alreadyNestedHere || externallyBlocked)
                         return (
                           <button
                             key={m.mint}
                             type="button"
-                            disabled={Boolean(alreadyNestedHere)}
+                            disabled={disabled}
                             aria-pressed={checked}
-                            aria-disabled={alreadyNestedHere ? true : undefined}
+                            aria-disabled={disabled ? true : undefined}
                             onClick={() => toggleSelectedOwlNestMint(m.mint)}
                             className={cn(
                               'flex min-h-[56px] items-center gap-3 rounded-xl border px-3 py-2 text-left touch-manipulation transition-colors',
-                              alreadyNestedHere
+                              disabled
                                 ? 'cursor-not-allowed border-white/[0.06] bg-black/20 opacity-70'
                                 : checked
                                   ? 'border-emerald-500/50 bg-emerald-500/12'
@@ -3285,7 +3491,7 @@ export function DashboardNestingClient() {
                             <span
                               className={cn(
                                 'flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[11px] font-bold',
-                                alreadyNestedHere
+                                disabled
                                   ? 'border-muted-foreground/30 bg-muted/40 text-muted-foreground/50'
                                   : checked
                                     ? 'border-emerald-400 bg-emerald-400 text-black'
@@ -3297,12 +3503,16 @@ export function DashboardNestingClient() {
                             </span>
                             <span className="min-w-0">
                               <span className="block truncate text-sm font-medium text-foreground">
-                                {(m.name?.trim() && m.name.trim().slice(0, 88)) || 'Owltopia coin'}
+                                {(m.name?.trim() && m.name.trim().slice(0, 88)) || nftAssetLabels.singular}
                               </span>
                               <span className="block truncate font-mono text-[11px] text-muted-foreground">
                                 {shortenAddress(m.mint, 6)}
                               </span>
-                              {alreadyNestedHere ? (
+                              {externallyBlocked ? (
+                                <span className="mt-1 block text-[11px] font-medium leading-snug text-amber-400/95">
+                                  Frozen elsewhere — unstake on GOMT Labz (or wait for lock) first
+                                </span>
+                              ) : alreadyNestedHere ? (
                                 <span className="mt-1 block truncate text-[11px] font-medium text-amber-400/95">
                                   Already nested
                                 </span>
@@ -3321,19 +3531,25 @@ export function DashboardNestingClient() {
 
                 {owlNestMintScan.status === 'done' && owlNestMintScan.mints.length === 1 ? (
                   <div className="space-y-2">
-                    {selectedPerch?.asset_type === 'nft' &&
+                    {owlNestMintScan.mints[0].stake_blocked ? (
+                      <p className="text-xs text-amber-400/95 leading-relaxed">
+                        This {nftAssetLabels.singular} is{' '}
+                        <span className="font-semibold text-foreground/90">frozen elsewhere</span> (for example on GOMT
+                        Labz). Unstake or wait for the lock to end there before nesting on Owltopia.
+                      </p>
+                    ) : selectedPerch?.asset_type === 'nft' &&
                     nftMintBlocksDuplicateStakeExceptResume(
                       owlNestMintScan.mints[0].mint,
                       selectedPerch,
                       positions
                     ) ? (
                       <p className="text-xs text-amber-400/95 leading-relaxed">
-                        This coin is{' '}
+                        This {nftAssetLabels.singular} is{' '}
                         <span className="font-semibold text-foreground/90">already nested</span> on this perch. Manage or
                         claim rewards from{' '}
                         <span className="font-medium text-foreground/90">Your nests</span> below — you don&apos;t need to open
                         a new nest for it unless you left a nest halfway through and still need to finish the wallet freeze
-                        step for this same coin.
+                        step for this same {nftAssetLabels.singular}.
                       </p>
                     ) : (
                       <p className="text-xs text-muted-foreground leading-relaxed">
@@ -3342,7 +3558,7 @@ export function DashboardNestingClient() {
                         {owlNestMintScan.mints[0].name?.trim() ? (
                           <>{owlNestMintScan.mints[0].name.trim()}</>
                         ) : (
-                          <>your Owltopia coin </>
+                          <>your {nftAssetLabels.singular} </>
                         )}
                         <span className="font-mono text-theme-prime/85">{` (${shortenAddress(owlNestMintScan.mints[0].mint, 5)})`}</span>
                         .
@@ -3354,7 +3570,7 @@ export function DashboardNestingClient() {
                 {owlNestMintScan.status === 'done' && owlNestMintScan.configured && owlNestMintScan.mints.length === 0 ? (
                   <div className="space-y-2">
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      No Owltopia coins from this perch&apos;s collection showed up for the wallet we queried (
+                      No {nftAssetLabels.plural} from this perch&apos;s collection showed up for the wallet we queried (
                       <span className="font-mono text-foreground/80">{shortenAddress(walletAddr, 5)}</span>
                       ){owlNestMintScan.resolvedCollectionAddress ? (
                         <>
@@ -3379,7 +3595,7 @@ export function DashboardNestingClient() {
                     onClick={() => void loadOwlNestNftsFromWallet()}
                   >
                     <RefreshCw className="h-4 w-4 shrink-0" aria-hidden />
-                    Reload Owltopia coins
+                    Reload {nftAssetLabels.plural}
                   </Button>
                 ) : null}
               </>
@@ -3389,18 +3605,32 @@ export function DashboardNestingClient() {
           actions={
             <>
             <NestingActionStatusLine phase={stakeTxPhase} className="min-h-[1.25rem] text-center sm:text-left" />
+            {nftMintRequired && stakeTxPhase === 'idle' ? (
+              <p className="text-xs text-center text-muted-foreground leading-relaxed px-1" role="note">
+                {selectedNftStakeAssetIds.length > 1 ? (
+                  <>
+                    Your wallet may ask{' '}
+                    {chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length === 1
+                      ? 'once'
+                      : `${chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length} times`}{' '}
+                    (up to {NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} {nftAssetLabels.plural} per approval).{' '}
+                  </>
+                ) : null}
+                One approval locks your {nftAssetLabels.singular}
+                {selectedNftStakeAssetIds.length > 1 ? 's' : ''}
+                {platformFeePerNestLabel ? (
+                  <>
+                    {' '}
+                    and includes the <span className="font-medium text-foreground/90">{platformFeePerNestLabel}</span>{' '}
+                    platform fee
+                  </>
+                ) : null}{' '}
+                in the same transaction. Stay on this page until you see success.
+              </p>
+            ) : null}
             {nftStakeBatchHint ? (
               <p className="text-xs text-center text-muted-foreground leading-relaxed px-1" role="status">
                 {nftStakeBatchHint}
-              </p>
-            ) : nftMintRequired && selectedNftStakeAssetIds.length > 1 && stakeTxPhase === 'idle' ? (
-              <p className="text-xs text-center text-muted-foreground leading-relaxed px-1" role="note">
-                Your wallet may ask{' '}
-                {chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length === 1
-                  ? 'once'
-                  : `${chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length} times`}{' '}
-                (up to {NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} coins per approval). Platform fee and nest lock
-                are in the same transaction. Stay on this page until you see the success message.
               </p>
             ) : null}
             <Button
@@ -3439,7 +3669,7 @@ export function DashboardNestingClient() {
       <section id="nesting-your-nests">
         <SectionHeader
           title="Your nests"
-          description="Claim OWL anytime—use it in raffles right away or let it stack. Many Owltopia coins on the same perch show in one card—tap the header to expand or collapse."
+          description="Claim OWL anytime—use it in raffles right away or let it stack. Many nests on the same perch show in one card—tap the header to expand or collapse."
         />
         <NestingClaimAllPanel
           id="nesting-claim-all-inline"
