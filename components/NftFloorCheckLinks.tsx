@@ -1,9 +1,10 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { MagicEdenIcon } from '@/components/icons/MagicEdenIcon'
 import { OrbisIcon } from '@/components/icons/OrbisIcon'
 import { TensorIcon } from '@/components/icons/TensorIcon'
-import { magicEdenNftUrl, orbisNftUrl, tensorNftUrl, hasNftMarketplaceMint } from '@/lib/nft-marketplace-links'
+import { magicEdenNftUrl, tensorNftUrl, hasNftMarketplaceMint } from '@/lib/nft-marketplace-links'
 import { cn } from '@/lib/utils'
 
 type Variant = 'default' | 'compact' | 'ghost' | 'inline'
@@ -21,7 +22,28 @@ export function NftFloorCheckLinks({
   const mint = mintAddress!.trim()
   const me = magicEdenNftUrl(mint)
   const tensor = tensorNftUrl(mint)
-  const orbis = orbisNftUrl(mint)
+  const [orbisHref, setOrbisHref] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const ac = new AbortController()
+    void (async () => {
+      try {
+        const res = await fetch(`/api/nft-marketplace/orbis-url?mint=${encodeURIComponent(mint)}`, {
+          signal: ac.signal,
+        })
+        if (!res.ok) return
+        const json = (await res.json()) as { found?: boolean; url?: string | null }
+        if (!cancelled && json.found && json.url) setOrbisHref(json.url)
+      } catch {
+        /* abort / network — keep Orbis hidden */
+      }
+    })()
+    return () => {
+      cancelled = true
+      ac.abort()
+    }
+  }, [mint])
 
   const iconClass =
     variant === 'inline'
@@ -130,30 +152,32 @@ export function NftFloorCheckLinks({
           <span className="ml-1.5 text-xs font-medium hidden sm:inline">Tensor</span>
         )}
       </a>
-      <a
-        href={orbis}
-        target="_blank"
-        rel="noopener noreferrer"
-        title="Orbis — view listing and collection floor"
-        aria-label="View prize NFT on Orbis"
-        className={
-          variant === 'inline'
-            ? inlineLink
-            : variant === 'ghost'
-              ? ghostLink
-              : cn(
-                  'touch-manipulation inline-flex items-center justify-center text-foreground',
-                  floatingChip,
-                  pad,
-                )
-        }
-        onClick={(e) => e.stopPropagation()}
-      >
-        <OrbisIcon className={iconClass} floatingOverlay={variant !== 'ghost' && variant !== 'inline'} />
-        {variant === 'default' && (
-          <span className="ml-1.5 text-xs font-medium hidden sm:inline">Orbis</span>
-        )}
-      </a>
+      {orbisHref ? (
+        <a
+          href={orbisHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Orbis — view listing and collection floor"
+          aria-label="View prize NFT on Orbis"
+          className={
+            variant === 'inline'
+              ? inlineLink
+              : variant === 'ghost'
+                ? ghostLink
+                : cn(
+                    'touch-manipulation inline-flex items-center justify-center text-foreground',
+                    floatingChip,
+                    pad,
+                  )
+          }
+          onClick={(e) => e.stopPropagation()}
+        >
+          <OrbisIcon className={iconClass} floatingOverlay={variant !== 'ghost' && variant !== 'inline'} />
+          {variant === 'default' && (
+            <span className="ml-1.5 text-xs font-medium hidden sm:inline">Orbis</span>
+          )}
+        </a>
+      ) : null}
     </div>
   )
 }
