@@ -1,7 +1,7 @@
 import { OWLTOPIA_COLLECTION_ADDRESS } from '@/lib/config/raffles'
 import { getAdminRole } from '@/lib/db/admins'
 import { getStakingPoolBySlug, updateStakingPool } from '@/lib/db/staking-pools'
-import type { StakingPoolRow } from '@/lib/db/staking-pools'
+import type { StakingPoolRow, NftLockStandard } from '@/lib/db/staking-pools'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { getGen2CollectionMint } from '@/lib/solana/network'
 
@@ -52,26 +52,29 @@ export function resolveGen2OwlCollectionAddress(): string | null {
 
 async function bindStakingPoolCollection(
   slugs: readonly string[],
-  resolveCollection: () => string | null
+  resolveCollection: () => string | null,
+  nftLockStandard?: NftLockStandard
 ): Promise<void> {
   const collection = resolveCollection()
-  if (!collection) return
+  if (!collection && !nftLockStandard) return
 
   try {
     for (const slug of slugs) {
       const pool = await getStakingPoolBySlug(slug)
       if (!pool || pool.asset_type !== 'nft') continue
 
-      const needsCollection = pool.collection_key?.trim() !== collection
+      const needsCollection = collection ? pool.collection_key?.trim() !== collection : false
       const needsOnchain =
         pool.adapter_mode !== 'onchain_enabled' ||
         pool.is_onchain_enabled !== true ||
         pool.lock_enforcement_source !== 'hybrid'
+      const needsLockStandard =
+        nftLockStandard != null && pool.nft_lock_standard?.trim() !== nftLockStandard
 
-      if (!needsCollection && !needsOnchain) continue
+      if (!needsCollection && !needsOnchain && !needsLockStandard) continue
 
       await updateStakingPool(pool.id, {
-        ...(needsCollection ? { collection_key: collection } : {}),
+        ...(needsCollection && collection ? { collection_key: collection } : {}),
         ...(needsOnchain
           ? {
               adapter_mode: 'onchain_enabled',
@@ -80,6 +83,7 @@ async function bindStakingPoolCollection(
               lock_enforcement_source: 'hybrid',
             }
           : {}),
+        ...(needsLockStandard && nftLockStandard ? { nft_lock_standard: nftLockStandard } : {}),
       })
     }
   } catch (e) {
@@ -89,12 +93,16 @@ async function bindStakingPoolCollection(
 
 /** Bind Gen 1 pool rows to OWLTOPIA_COLLECTION_ADDRESS when configured in env. */
 export async function ensureGen1StakingPoolsReady(): Promise<void> {
-  await bindStakingPoolCollection(GEN1_OWL_STAKING_POOL_SLUGS, resolveGen1OwlCollectionAddress)
+  await bindStakingPoolCollection(GEN1_OWL_STAKING_POOL_SLUGS, resolveGen1OwlCollectionAddress, 'auto')
 }
 
 /** Bind Gen 2 pool rows to NEXT_PUBLIC_GEN2_COLLECTION_MINT when configured in env. */
 export async function ensureGen2StakingPoolsReady(): Promise<void> {
-  await bindStakingPoolCollection(GEN2_OWL_STAKING_POOL_SLUGS, resolveGen2OwlCollectionAddress)
+  await bindStakingPoolCollection(
+    GEN2_OWL_STAKING_POOL_SLUGS,
+    resolveGen2OwlCollectionAddress,
+    'spl_token_account_freeze'
+  )
 }
 
 export async function ensureTieredOwlStakingPoolsReady(): Promise<void> {

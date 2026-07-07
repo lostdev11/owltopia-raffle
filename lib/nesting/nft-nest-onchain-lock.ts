@@ -5,6 +5,10 @@ import {
   assertWalletNftFrozenForNesting,
   readOwlClaimNftNestLockEligibilityWithRetry,
 } from '@/lib/nesting/nft-freeze'
+import {
+  readNestLockEligibilityForPoolWithRetry,
+  assertWalletNftFrozenForPool,
+} from '@/lib/nesting/nft-lock-service'
 
 /** NFT perches that use MPL Core FreezeDelegate (holder wallet, non-transferable while nested). */
 export function poolUsesOnChainNftFreezeLock(
@@ -30,6 +34,7 @@ export async function assertNftNestOnChainLockHeld(params: {
   ownerWallet: string
   assetId: string
   collectionMint?: string | null
+  pool?: Pick<StakingPoolRow, 'nft_lock_standard' | 'asset_type' | 'collection_key'> | null
   repairMissingFreeze?: boolean
   /** Pay OWL rewards without forcing a wallet re-lock when the coin uses Owner freeze (thawed). */
   allowOwnerThawedForClaim?: boolean
@@ -40,20 +45,38 @@ export async function assertNftNestOnChainLockHeld(params: {
     throw new StakingUserError('NFT asset id and wallet are required for nest lock checks.', 400)
   }
 
+  const pool = params.pool ?? null
+
   if (params.repairMissingFreeze) {
-    await assertWalletNftFrozenForNesting({
-      ownerWallet,
-      assetId,
-      collectionMint: params.collectionMint,
-    })
+    if (pool) {
+      await assertWalletNftFrozenForPool({
+        pool,
+        ownerWallet,
+        assetId,
+        collectionMint: params.collectionMint,
+      })
+    } else {
+      await assertWalletNftFrozenForNesting({
+        ownerWallet,
+        assetId,
+        collectionMint: params.collectionMint,
+      })
+    }
     return
   }
 
-  const lockState = await readOwlClaimNftNestLockEligibilityWithRetry({
-    assetId,
-    ownerWallet,
-    collectionMint: params.collectionMint,
-  })
+  const lockState = pool
+    ? await readNestLockEligibilityForPoolWithRetry({
+        pool,
+        assetId,
+        ownerWallet,
+        collectionMint: params.collectionMint,
+      })
+    : await readOwlClaimNftNestLockEligibilityWithRetry({
+        assetId,
+        ownerWallet,
+        collectionMint: params.collectionMint,
+      })
   if (lockState?.locked) return
   if (params.allowOwnerThawedForClaim && lockState?.ownerThawedEligible) return
 
@@ -81,6 +104,7 @@ export async function assertActiveNftNestOnChainLock(
     ownerWallet: position.wallet_address,
     assetId: position.asset_identifier!,
     collectionMint: pool.collection_key,
+    pool,
     repairMissingFreeze: options?.repairMissingFreeze ?? false,
     allowOwnerThawedForClaim: options?.allowOwnerThawedForClaim ?? false,
   })

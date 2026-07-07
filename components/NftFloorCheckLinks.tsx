@@ -1,8 +1,9 @@
 'use client'
 
 import { MagicEdenIcon } from '@/components/icons/MagicEdenIcon'
+import { OrbisIcon } from '@/components/icons/OrbisIcon'
 import { TensorIcon } from '@/components/icons/TensorIcon'
-import { magicEdenNftUrl, tensorNftUrl, hasNftMarketplaceMint } from '@/lib/nft-marketplace-links'
+import { magicEdenNftUrl, orbisNftUrl, tensorNftUrl, hasNftMarketplaceMint } from '@/lib/nft-marketplace-links'
 import { cn } from '@/lib/utils'
 
 type Variant = 'default' | 'compact' | 'ghost' | 'inline'
@@ -20,6 +21,7 @@ export function NftFloorCheckLinks({
   const mint = mintAddress!.trim()
   const me = magicEdenNftUrl(mint)
   const tensor = tensorNftUrl(mint)
+  const orbis = orbisNftUrl(mint)
 
   const iconClass =
     variant === 'inline'
@@ -126,6 +128,30 @@ export function NftFloorCheckLinks({
         <TensorIcon className={iconClass} floatingOverlay={variant !== 'ghost' && variant !== 'inline'} />
         {variant === 'default' && (
           <span className="ml-1.5 text-xs font-medium hidden sm:inline">Tensor</span>
+        )}
+      </a>
+      <a
+        href={orbis}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Orbis — view listing and collection floor"
+        aria-label="View prize NFT on Orbis"
+        className={
+          variant === 'inline'
+            ? inlineLink
+            : variant === 'ghost'
+              ? ghostLink
+              : cn(
+                  'touch-manipulation inline-flex items-center justify-center text-foreground',
+                  floatingChip,
+                  pad,
+                )
+        }
+        onClick={(e) => e.stopPropagation()}
+      >
+        <OrbisIcon className={iconClass} floatingOverlay={variant !== 'ghost' && variant !== 'inline'} />
+        {variant === 'default' && (
+          <span className="ml-1.5 text-xs font-medium hidden sm:inline">Orbis</span>
         )}
       </a>
     </div>

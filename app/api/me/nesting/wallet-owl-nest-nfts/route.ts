@@ -12,7 +12,7 @@ import {
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { resolveImageUriFromDasAssetPayload } from '@/lib/nft-helius-image'
-import { enrichWalletNestMintsWithStakeEligibility } from '@/lib/nesting/nft-stake-eligibility'
+import { enrichWalletNestMintsForPool } from '@/lib/nesting/nft-lock-service'
 
 export const dynamic = 'force-dynamic'
 
@@ -130,7 +130,7 @@ export async function GET(request: NextRequest) {
 
     mintRows.sort((a, b) => (a.name || a.mint).localeCompare(b.name || b.mint))
 
-    const mints = await enrichWalletNestMintsWithStakeEligibility(mintRows, wallet)
+    const mints = await enrichWalletNestMintsForPool(pool, mintRows, wallet)
 
     return NextResponse.json({
       configured: true,

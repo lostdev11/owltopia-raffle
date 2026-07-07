@@ -16,7 +16,10 @@ import {
   isPendingNftNestFreezeConfirmedButNotActive,
   sortStakingPositionsOldestFirst,
 } from '@/lib/nesting/position-lifecycle'
-import { assertWalletNftFrozenForNesting, isWalletNftFrozenForNestingDelegate } from '@/lib/nesting/nft-freeze'
+import {
+  assertWalletNftFrozenForPool,
+  isWalletNftFrozenForPool,
+} from '@/lib/nesting/nft-lock-service'
 import { StakingUserError } from '@/lib/nesting/errors'
 
 const HEAL_MAX_PER_PASS = 10
@@ -73,14 +76,16 @@ export async function tryHealPendingNftNestPosition(
 
   const freezeRefConfirmed = (position.external_reference ?? '').startsWith('nft_freeze_confirmed:')
   if (freezeRefConfirmed) {
-    const frozenOnChain = await isWalletNftFrozenForNestingDelegate({
+    const frozenOnChain = await isWalletNftFrozenForPool({
+      pool,
       assetId: position.asset_identifier!,
       collectionMint: pool.collection_key,
       ownerWallet: position.wallet_address,
     })
     if (!frozenOnChain) {
       try {
-        await assertWalletNftFrozenForNesting({
+        await assertWalletNftFrozenForPool({
+          pool,
           ownerWallet: position.wallet_address,
           assetId: position.asset_identifier!,
           collectionMint: pool.collection_key,
@@ -104,7 +109,8 @@ export async function tryHealPendingNftNestPosition(
   }
 
   try {
-    const frozen = await assertWalletNftFrozenForNesting({
+    const frozen = await assertWalletNftFrozenForPool({
+      pool,
       ownerWallet: position.wallet_address,
       assetId: position.asset_identifier!,
       collectionMint: pool.collection_key,

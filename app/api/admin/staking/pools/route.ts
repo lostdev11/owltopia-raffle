@@ -7,7 +7,9 @@ import {
   type RewardRateUnit,
   type NestingAdapterMode,
   type LockEnforcementSource,
+  type NftLockStandard,
 } from '@/lib/db/staking-pools'
+import { isNftLockStandard } from '@/lib/nesting/nft-lock/types'
 import { validatePoolAgainstNestingEmissionPolicy } from '@/lib/nesting/policy'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -98,6 +100,11 @@ export async function POST(request: NextRequest) {
         ? body.lock_enforcement_source
         : undefined
 
+    const nft_lock_standard =
+      body?.nft_lock_standard !== undefined && isNftLockStandard(body.nft_lock_standard)
+        ? (body.nft_lock_standard as NftLockStandard)
+        : undefined
+
     validatePoolAgainstNestingEmissionPolicy({
       asset_type: body.asset_type,
       reward_token: body.reward_token ?? null,
@@ -134,6 +141,7 @@ export async function POST(request: NextRequest) {
       requires_onchain_sync:
         body?.requires_onchain_sync !== undefined ? Boolean(body.requires_onchain_sync) : undefined,
       lock_enforcement_source,
+      nft_lock_standard,
     })
 
     return NextResponse.json({ pool })

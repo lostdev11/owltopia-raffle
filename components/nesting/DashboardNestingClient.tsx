@@ -1736,6 +1736,7 @@ export function DashboardNestingClient() {
             delegateAddress: string
             stakeSignature: string | null
             needsWalletFreeze: boolean
+            needsServerFreeze: boolean
           }
 
           const confirmNftNestFreezeForPrep = async (
@@ -1777,6 +1778,7 @@ export function DashboardNestingClient() {
               throw new NestingStakeFlowError('Stake was prepared, but the NFT position was missing.')
             }
             const needsWalletFreeze = json.execution?.path === 'onchain_nft_freeze_required'
+            const needsServerFreeze = json.execution?.path === 'onchain_nft_server_freeze'
             const delegateAddress = json.execution?.freeze_delegate?.trim() || ''
             if (needsWalletFreeze && !delegateAddress) {
               throw new NestingStakeFlowError('Freeze delegate is not configured for this perch.')
@@ -1787,6 +1789,7 @@ export function DashboardNestingClient() {
               delegateAddress,
               stakeSignature: json.position?.stake_signature ?? null,
               needsWalletFreeze,
+              needsServerFreeze,
             }
           }
 
@@ -1795,7 +1798,7 @@ export function DashboardNestingClient() {
             walletSig: string | null,
             platformFeeSignature?: string | null
           ) => {
-            if (!prep.needsWalletFreeze) return
+            if (!prep.needsWalletFreeze && !prep.needsServerFreeze) return
             await confirmNftNestFreezeForPrep(prep, walletSig ?? prep.stakeSignature, platformFeeSignature)
           }
 
@@ -1880,7 +1883,33 @@ export function DashboardNestingClient() {
             }
 
             const freezePreps = prepared.filter((p) => p.needsWalletFreeze)
-            let completed = prepared.length - freezePreps.length
+            const serverFreezePreps = prepared.filter((p) => p.needsServerFreeze)
+            let completed = prepared.length - freezePreps.length - serverFreezePreps.length
+
+            if (serverFreezePreps.length > 0) {
+              setStakeTxPhase('syncing')
+              for (let i = 0; i < serverFreezePreps.length; i++) {
+                const prep = serverFreezePreps[i]!
+                throwIfNestingAborted(signal)
+                if (serverFreezePreps.length > 1) {
+                  setNftStakeBatchHint(
+                    `Applying nest lock in your wallet (${i + 1} of ${serverFreezePreps.length}) — your NFT stays put, only transfers are blocked…`
+                  )
+                } else {
+                  setNftStakeBatchHint(
+                    'Applying nest lock in your wallet — your NFT stays put; only transfers are blocked for your chosen lock…'
+                  )
+                }
+                let platformFeeSig: string | null = null
+                if (platformFeeActive) {
+                  setStakeTxPhase('awaiting_wallet_signature')
+                  platformFeeSig = await sendStakingPlatformFee(1)
+                }
+                await completeNftNestWithWalletSig(prep, null, platformFeeSig)
+                completed += 1
+                await refreshNestingUiAfterChange({ heal: false })
+              }
+            }
 
             if (freezePreps.length === 0) {
               return { nestedCount: completed }

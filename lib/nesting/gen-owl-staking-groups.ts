@@ -31,10 +31,16 @@ export function genOwlStakingGroupLabel(key: GenOwlStakingGroupKey): string {
   return key === 'gen1-owl' ? 'Gen 1 Owl' : 'Gen 2 Owl'
 }
 
+/** Plain-language guarantee for all NFT nest perches (MPL Core + legacy SPL freeze). */
+export const NESTING_NFT_WALLET_HELD_LOCK_LINE =
+  'Your NFT stays in your wallet the whole time—it is only frozen (non-transferable) for the lock tier you choose. Owltopia never takes custody.'
+
 export function genOwlStakingGroupDescription(key: GenOwlStakingGroupKey): string {
-  return key === 'gen1-owl'
-    ? 'Stake an original Owltopia Gen 1 owl. Pick a 90- or 180-day lock when you open a nest.'
-    : 'Stake an Owltopia Gen 2 owl. Pick a 90- or 180-day lock when you open a nest.'
+  const tierLine =
+    key === 'gen1-owl'
+      ? 'Stake an original Owltopia Gen 1 owl. Pick a 90- or 180-day lock when you open a nest.'
+      : 'Stake an Owltopia Gen 2 owl. Pick a 90- or 180-day lock when you open a nest.'
+  return `${tierLine} ${NESTING_NFT_WALLET_HELD_LOCK_LINE}`
 }
 
 export function tiersForGenOwlGroup(

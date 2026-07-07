@@ -1,6 +1,9 @@
 /**
  * Deep links to Solana NFT listings on major marketplaces (by mint).
  * Item pages show collection context so users can verify floor vs. raffle listing.
+ *
+ * Orbis web UI: https://www.orbisonsol.io/marketplace/item/{mint}
+ * API reference: https://www.orbisonsol.io/marketplace/developer
  */
 export function magicEdenNftUrl(mint: string): string {
   const m = mint.trim()
@@ -10,6 +13,11 @@ export function magicEdenNftUrl(mint: string): string {
 export function tensorNftUrl(mint: string): string {
   const m = mint.trim()
   return `https://www.tensor.trade/item/${encodeURIComponent(m)}`
+}
+
+export function orbisNftUrl(mint: string): string {
+  const m = mint.trim()
+  return `https://www.orbisonsol.io/marketplace/item/${encodeURIComponent(m)}`
 }
 
 export function hasNftMarketplaceMint(mint: string | null | undefined): boolean {

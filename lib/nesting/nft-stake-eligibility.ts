@@ -17,6 +17,7 @@ export const GOMT_LABZ_STAKING_URL = 'https://www.gotmlabz.io/nftstake/owltopia'
 export type NftStakeEligibilityCode =
   | 'externally_frozen'
   | 'incompatible_freeze_delegate'
+  | 'mint_collection_frozen'
   | 'owltopia_lock_held'
   | 'wrong_owner'
 

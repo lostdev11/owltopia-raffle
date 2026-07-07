@@ -13,7 +13,7 @@ import {
   positionRequiresOnChainNftFreezeLock,
   poolUsesOnChainNftFreezeLock,
 } from '@/lib/nesting/nft-nest-onchain-lock'
-import { isWalletNftFrozenForNestingDelegate } from '@/lib/nesting/nft-freeze'
+import { isWalletNftFrozenForPool } from '@/lib/nesting/nft-lock-service'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { sortStakingPositionsOldestFirst } from '@/lib/nesting/position-lifecycle'
 
@@ -110,7 +110,8 @@ export async function reconcileAllActiveNftFreezeLocksAdmin(params?: {
     if (!assetId || !wallet) continue
 
     try {
-      const wasFrozen = await isWalletNftFrozenForNestingDelegate({
+      const wasFrozen = await isWalletNftFrozenForPool({
+        pool,
         assetId,
         collectionMint: pool.collection_key,
         ownerWallet: wallet,
@@ -119,6 +120,7 @@ export async function reconcileAllActiveNftFreezeLocksAdmin(params?: {
         ownerWallet: wallet,
         assetId,
         collectionMint: pool.collection_key,
+        pool,
         repairMissingFreeze: true,
       })
       if (!wasFrozen) repaired += 1

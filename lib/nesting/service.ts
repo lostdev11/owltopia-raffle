@@ -52,7 +52,7 @@ import {
 } from '@/lib/nesting/nft-nest-onchain-lock'
 import { assertAdminOnlyStakingPoolAccess } from '@/lib/nesting/gen1-staking-pools'
 import { tryClearCrossWalletBlockerForMint } from '@/lib/nesting/clear-cross-wallet-stale-nests'
-import { assertNftEligibleForOwltopiaStake } from '@/lib/nesting/nft-stake-eligibility'
+import { assertNftEligibleForPoolStake } from '@/lib/nesting/nft-lock-service'
 import {
   commitStakingPlatformFeeLinked,
   requireStakingPlatformFeeLinked,
@@ -125,7 +125,8 @@ export async function executeStake(params: {
       throw new StakingUserError('This NFT is already in an open staking position.', 400)
     }
     if (pool.adapter_mode === 'onchain_enabled') {
-      await assertNftEligibleForOwltopiaStake({
+      await assertNftEligibleForPoolStake({
+        pool,
         assetId: asset_identifier,
         ownerWallet: params.wallet,
       })

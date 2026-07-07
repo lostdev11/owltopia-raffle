@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import { getStakingPositionForWallet, patchStakingPosition } from '@/lib/db/staking-positions'
-import { assertWalletNftFrozenForNesting } from '@/lib/nesting/nft-freeze'
+import { assertWalletNftFrozenForPool } from '@/lib/nesting/nft-lock-service'
 import { requireStakingPlatformFeeLinked } from '@/lib/nesting/link-staking-platform-fee'
 import { StakingUserError, isStakingUserError } from '@/lib/nesting/errors'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -48,7 +48,8 @@ export async function POST(request: NextRequest) {
       throw new StakingUserError('This nest is not configured for NFT freeze locks.', 400)
     }
 
-    const frozen = await assertWalletNftFrozenForNesting({
+    const frozen = await assertWalletNftFrozenForPool({
+      pool,
       ownerWallet: session.wallet,
       assetId: position.asset_identifier,
       collectionMint: pool.collection_key,

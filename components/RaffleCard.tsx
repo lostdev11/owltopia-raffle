@@ -44,7 +44,6 @@ import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { LinkifiedText, LinkifiedTextInsideLinkProvider } from '@/components/LinkifiedText'
 import { ReferralComplimentaryHint } from '@/components/ReferralComplimentaryHint'
-import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
 import {
   RaffleOverThresholdPngButton,
@@ -768,9 +767,6 @@ export function RaffleCard({
                     <CreatorModerationBuyerWarning raffle={raffle} variant="badge" />
                   )}
                 </Link>
-                {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
-                  <NftFloorCheckLinks variant="inline" mintAddress={raffle.nft_mint_address} />
-                )}
               </div>
             {!isActive && !isFuture && raffle.winner_wallet && (
               <Link
@@ -1011,12 +1007,6 @@ export function RaffleCard({
             </div>
               </LinkifiedTextInsideLinkProvider>
             </Link>
-            {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
-              <div className="relative z-20 flex flex-col gap-2 px-2 py-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-2 sm:px-3 border-t border-border/50 bg-background/90 backdrop-blur-sm">
-                <span className={`${classes.footer} text-muted-foreground shrink-0`}>Check floor</span>
-                <NftFloorCheckLinks variant="compact" mintAddress={raffle.nft_mint_address} className="min-w-0" />
-              </div>
-            )}
             </>
           )}
           {/* Fallback if no usable image */}
@@ -1161,12 +1151,6 @@ export function RaffleCard({
                       )}
                     </span>
                   </Link>
-                )}
-                {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
-                  <div className="mt-2 flex w-full flex-col gap-2 border-t border-border/50 pt-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                    <span className={`${classes.footer} text-muted-foreground shrink-0`}>Check floor</span>
-                    <NftFloorCheckLinks variant="compact" mintAddress={raffle.nft_mint_address} className="min-w-0" />
-                  </div>
                 )}
                 {!showQuickBuy && (
                   <>

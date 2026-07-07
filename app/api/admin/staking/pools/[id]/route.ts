@@ -8,7 +8,9 @@ import {
   type RewardRateUnit,
   type NestingAdapterMode,
   type LockEnforcementSource,
+  type NftLockStandard,
 } from '@/lib/db/staking-pools'
+import { isNftLockStandard } from '@/lib/nesting/nft-lock/types'
 import { validatePoolAgainstNestingEmissionPolicy } from '@/lib/nesting/policy'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -119,6 +121,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       patch.lock_enforcement_source = body.lock_enforcement_source
     }
     if (body?.admin_only !== undefined) patch.admin_only = Boolean(body.admin_only)
+    if (body?.nft_lock_standard !== undefined) {
+      if (!isNftLockStandard(body.nft_lock_standard)) {
+        return NextResponse.json({ error: 'invalid nft_lock_standard' }, { status: 400 })
+      }
+      patch.nft_lock_standard = body.nft_lock_standard as NftLockStandard
+    }
 
     validatePoolAgainstNestingEmissionPolicy({
       asset_type: (patch.asset_type ?? existing.asset_type) as 'nft' | 'token',

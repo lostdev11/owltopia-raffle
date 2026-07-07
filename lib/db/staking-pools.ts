@@ -10,6 +10,13 @@ export type NestingAdapterMode = 'mock' | 'solana_ready' | 'onchain_enabled'
 /** Where lock/unlock rules are enforced once on-chain staking ships. */
 export type LockEnforcementSource = 'database' | 'onchain' | 'hybrid'
 
+/** On-chain nest lock mechanism for NFT perches (migration 188). */
+export type NftLockStandard =
+  | 'auto'
+  | 'mpl_core_freeze_delegate'
+  | 'spl_token_account_freeze'
+  | 'database_only'
+
 export interface StakingPoolRow {
   id: string
   name: string
@@ -43,6 +50,8 @@ export interface StakingPoolRow {
   lock_enforcement_source?: LockEnforcementSource
   /** When true, only site admins can see and use this pool (migration 184). */
   admin_only?: boolean
+  /** NFT lock adapter: auto-detect, MPL Core, SPL token freeze, or DB-only (migration 188). */
+  nft_lock_standard?: NftLockStandard
 }
 
 export async function listActiveStakingPools(options?: {
@@ -129,6 +138,7 @@ export interface InsertStakingPoolInput {
   reward_mint?: string | null
   requires_onchain_sync?: boolean
   lock_enforcement_source?: LockEnforcementSource
+  nft_lock_standard?: NftLockStandard
 }
 
 export async function insertStakingPool(input: InsertStakingPoolInput): Promise<StakingPoolRow> {
@@ -162,6 +172,7 @@ export async function insertStakingPool(input: InsertStakingPoolInput): Promise<
       reward_mint: input.reward_mint?.trim() || null,
       requires_onchain_sync: input.requires_onchain_sync ?? false,
       lock_enforcement_source: input.lock_enforcement_source ?? 'database',
+      nft_lock_standard: input.nft_lock_standard ?? 'auto',
     })
     .select()
     .single()
@@ -197,6 +208,7 @@ export interface PatchStakingPoolInput {
   requires_onchain_sync?: boolean
   lock_enforcement_source?: LockEnforcementSource
   admin_only?: boolean
+  nft_lock_standard?: NftLockStandard
 }
 
 export async function updateStakingPool(id: string, patch: PatchStakingPoolInput): Promise<StakingPoolRow> {
@@ -228,6 +240,7 @@ export async function updateStakingPool(id: string, patch: PatchStakingPoolInput
   if (patch.requires_onchain_sync !== undefined) row.requires_onchain_sync = patch.requires_onchain_sync
   if (patch.lock_enforcement_source !== undefined) row.lock_enforcement_source = patch.lock_enforcement_source
   if (patch.admin_only !== undefined) row.admin_only = patch.admin_only
+  if (patch.nft_lock_standard !== undefined) row.nft_lock_standard = patch.nft_lock_standard
 
   const { data, error } = await db.from('staking_pools').update(row).eq('id', id).select().single()
 

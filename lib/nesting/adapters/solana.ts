@@ -15,7 +15,7 @@ import {
   transferNestingTokenFromVaultToWallet,
 } from '@/lib/nesting/token-stake-transfer'
 import { runGuardedOwlRewardClaim } from '@/lib/nesting/guarded-owl-reward-claim'
-import { thawWalletNftForNesting } from '@/lib/nesting/nft-freeze'
+import { thawWalletNftForPool } from '@/lib/nesting/nft-lock-service'
 
 async function stakeOnChain(input: Parameters<StakingMutationAdapter['stakeIntoPool']>[0]) {
   if (input.pool.asset_type === 'token') {
@@ -110,7 +110,8 @@ export const solanaStakingAdapterStub: StakingMutationAdapter = {
     if (!row.asset_identifier?.trim()) {
       throw new StakingUserError('NFT asset id is missing for this nest.', 400)
     }
-    const thawed = await thawWalletNftForNesting({
+    const thawed = await thawWalletNftForPool({
+      pool,
       assetId: row.asset_identifier,
       ownerWallet: input.wallet,
       /** Wrong pool.collection_key breaks Helius grouping + thaw; recovery uses on-chain asset authority. */
