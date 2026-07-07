@@ -23,6 +23,7 @@ import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
 import { PLATFORM_NAME, getSiteBaseUrl } from '@/lib/site-config'
 import { resolveRaffleShareOgImage } from '@/lib/resolve-raffle-share-og-image'
+import { lookupOrbisNftUrl } from '@/lib/nft-marketplace-orbis'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
@@ -204,6 +205,12 @@ export default async function RaffleDetailPage({
     viewerReferralCode = summary?.activeCode ?? null
   }
 
+  let orbisHref: string | null = null
+  if (enrichedRaffle.prize_type === 'nft' && enrichedRaffle.nft_mint_address?.trim()) {
+    const orbis = await lookupOrbisNftUrl(enrichedRaffle.nft_mint_address)
+    orbisHref = orbis.found ? orbis.url : null
+  }
+
   return (
     <>
       {referralEnabled ? (
@@ -223,6 +230,7 @@ export default async function RaffleDetailPage({
         referralPromoters={referralStats.promoters}
         isCreatorViewer={isCreator}
         viewerReferralCode={viewerReferralCode}
+        orbisHref={orbisHref}
       />
     </>
   )

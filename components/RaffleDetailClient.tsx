@@ -203,6 +203,8 @@ interface RaffleDetailClientProps {
   referralPromoters?: RaffleReferralPromoterRow[]
   isCreatorViewer?: boolean
   viewerReferralCode?: string | null
+  /** Pre-resolved Orbis item URL (null = not indexed); avoids client lookup delay. */
+  orbisHref?: string | null
 }
 
 export function RaffleDetailClient({
@@ -215,6 +217,7 @@ export function RaffleDetailClient({
   referralPromoters = [],
   isCreatorViewer = false,
   viewerReferralCode = null,
+  orbisHref = undefined,
 }: RaffleDetailClientProps) {
   const router = useRouter()
   const walletCtx = useWallet()
@@ -4018,7 +4021,11 @@ export function RaffleDetailClient({
                 {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
                   <div className="mt-4 pt-4 border-t border-border/60">
                     <p className={classes.labelText + ' text-muted-foreground mb-2'}>Check collection floor</p>
-                    <NftFloorCheckLinks mintAddress={raffle.nft_mint_address} className="min-w-0" />
+                    <NftFloorCheckLinks
+                      mintAddress={raffle.nft_mint_address}
+                      orbisHref={orbisHref}
+                      className="min-w-0"
+                    />
                   </div>
                 )}
               </div>

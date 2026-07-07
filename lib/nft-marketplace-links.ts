@@ -2,8 +2,8 @@
  * Deep links to Solana NFT listings on major marketplaces (by mint).
  * Item pages show collection context so users can verify floor vs. raffle listing.
  *
- * Orbis web UI (preferred): https://www.orbisonsol.io/marketplace/{collectionPathname}/{mint}
- * Mint-only fallback: https://www.orbisonsol.io/marketplace/item/{mint} (SSR when indexed)
+ * Orbis item-only (preferred when indexed): https://www.orbisonsol.io/marketplace/item/{mint}
+ * Collection + mint (modal over grid): https://www.orbisonsol.io/marketplace/{collectionPathname}/{mint}
  * API reference: https://www.orbisonsol.io/marketplace/developer
  */
 export function magicEdenNftUrl(mint: string): string {

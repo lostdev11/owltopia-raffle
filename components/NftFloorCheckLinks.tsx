@@ -11,10 +11,13 @@ type Variant = 'default' | 'compact' | 'ghost' | 'inline'
 
 export function NftFloorCheckLinks({
   mintAddress,
+  orbisHref: orbisHrefProp,
   variant = 'default',
   className,
 }: {
   mintAddress: string | null | undefined
+  /** When set (including null), skips client lookup. Pass from server for instant render. */
+  orbisHref?: string | null
   variant?: Variant
   className?: string
 }) {
@@ -22,9 +25,10 @@ export function NftFloorCheckLinks({
   const mint = mintAddress!.trim()
   const me = magicEdenNftUrl(mint)
   const tensor = tensorNftUrl(mint)
-  const [orbisHref, setOrbisHref] = useState<string | null>(null)
+  const [orbisHref, setOrbisHref] = useState<string | null>(orbisHrefProp ?? null)
 
   useEffect(() => {
+    if (orbisHrefProp !== undefined) return
     let cancelled = false
     const ac = new AbortController()
     void (async () => {
@@ -43,7 +47,7 @@ export function NftFloorCheckLinks({
       cancelled = true
       ac.abort()
     }
-  }, [mint])
+  }, [mint, orbisHrefProp])
 
   const iconClass =
     variant === 'inline'
