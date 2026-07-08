@@ -6,6 +6,11 @@ import { Button } from '@/components/ui/button'
 import { computePromoPngArtDrawRect } from '@/lib/promo-png-art-draw'
 import { loadPromoPngArt, loadPromoPngSiteAsset } from '@/lib/promo-png-load-image'
 import { buildRaffleImageAttemptChain } from '@/lib/raffle-display-image-url'
+import {
+  formatWinnerPnlAmount,
+  formatWinnerPnlRoi,
+  type WinnerPnlDisplay,
+} from '@/lib/raffles/winner-pnl'
 import { useSaveImage } from '@/components/use-save-image'
 
 type RaffleWinnerPngButtonProps = {
@@ -19,6 +24,8 @@ type RaffleWinnerPngButtonProps = {
   winnerWallet: string
   /** Platform display name when already known (skips lookup). */
   winnerDisplayName?: string | null
+  /** Winner-only spend → prize → net / ROI block (omit on public winner announcements). */
+  winnerPnl?: WinnerPnlDisplay | null
   className?: string
   buttonLabel?: string
   fullWidth?: boolean
@@ -120,6 +127,71 @@ async function resolveMintImageAttemptUrls(mint: string): Promise<string[]> {
   }
 }
 
+function drawWinnerPnlBlock(
+  ctx: CanvasRenderingContext2D,
+  pnl: WinnerPnlDisplay,
+  x: number,
+  y: number,
+  maxWidth: number
+): number {
+  const blockH = pnl.isFreeWin ? 88 : 118
+  const blockW = Math.min(maxWidth, 560)
+
+  ctx.save()
+  roundRectPath(ctx, x, y, blockW, blockH, 16)
+  ctx.fillStyle = 'rgba(250, 204, 21, 0.1)'
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(250, 204, 21, 0.45)'
+  ctx.lineWidth = 1.5
+  ctx.stroke()
+  ctx.restore()
+
+  const padX = 22
+  const innerW = blockW - padX * 2
+
+  if (pnl.isFreeWin) {
+    ctx.fillStyle = '#facc15'
+    ctx.font = `700 24px ${FONT_SANS}`
+    ctx.fillText('FREE WIN', x + padX, y + 38)
+    ctx.fillStyle = '#fde68a'
+    ctx.font = `600 26px ${FONT_SANS}`
+    const prizeLabel = pnl.prizeValueKind === 'floor' ? 'floor' : 'prize'
+    const line = `Prize: ${formatWinnerPnlAmount(pnl.prizeValue, pnl.currency)} (${prizeLabel})`
+    ctx.fillText(fitSingleLineText(ctx, line, innerW), x + padX, y + 72)
+    return blockH
+  }
+
+  const colW = innerW / 3
+  const labels = ['Spent', pnl.prizeValueKind === 'floor' ? 'Won (floor)' : 'Won', 'Net']
+  const values = [
+    formatWinnerPnlAmount(pnl.amountSpent, pnl.currency),
+    formatWinnerPnlAmount(pnl.prizeValue, pnl.currency),
+    `${pnl.netProfit >= 0 ? '+' : ''}${formatWinnerPnlAmount(pnl.netProfit, pnl.currency)}`,
+  ]
+
+  ctx.fillStyle = 'rgba(253, 230, 138, 0.75)'
+  ctx.font = `600 20px ${FONT_SANS}`
+  labels.forEach((label, i) => {
+    ctx.fillText(label, x + padX + colW * i, y + 32)
+  })
+
+  ctx.fillStyle = '#fff6d5'
+  ctx.font = `700 28px ${FONT_SANS}`
+  values.forEach((value, i) => {
+    ctx.fillText(fitSingleLineText(ctx, value, colW - 8), x + padX + colW * i, y + 68)
+  })
+
+  if (pnl.roiPercent != null) {
+    const roiText = formatWinnerPnlRoi(pnl.roiPercent)
+    const roiColor = pnl.roiPercent >= 0 ? '#4ade80' : '#f87171'
+    ctx.fillStyle = roiColor
+    ctx.font = `700 22px ${FONT_SANS}`
+    ctx.fillText(roiText, x + padX + colW * 2, y + 102)
+  }
+
+  return blockH
+}
+
 async function resolveWinnerPngArtCandidates(
   imageAttemptUrls: string[] | null | undefined,
   imageUrl: string | null | undefined,
@@ -147,6 +219,7 @@ export function RaffleWinnerPngButton({
   nftMintAddress,
   winnerWallet,
   winnerDisplayName,
+  winnerPnl,
   className,
   buttonLabel = 'Winner PNG',
   fullWidth = false,
@@ -179,6 +252,8 @@ export function RaffleWinnerPngButton({
 
       const safeTitle = clampText(title || 'Owltopia Raffle', 110)
       const winnerLabel = await resolveWinnerDisplayLabel(winnerWallet, winnerDisplayName)
+      const showPnl = winnerPnl != null && winnerPnl.prizeValue > 0
+      const maxTitleLines = showPnl ? 2 : 3
 
       const bg = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT)
       bg.addColorStop(0, '#1a1200')
@@ -282,15 +357,23 @@ export function RaffleWinnerPngButton({
         else {
           if (current) lines.push(current)
           current = word
-          if (lines.length >= 2) break
+          if (lines.length >= maxTitleLines - 1) break
         }
       }
-      if (current && lines.length < 3) lines.push(current)
-      lines.slice(0, 3).forEach((line, i) => {
+      if (current && lines.length < maxTitleLines) lines.push(current)
+      const titleLineCount = lines.slice(0, maxTitleLines).length
+      lines.slice(0, maxTitleLines).forEach((line, i) => {
         ctx.fillText(line, textX, panelY + 170 + i * 72)
       })
 
-      const badgeY = panelY + panelH - 140
+      let contentBottomY = panelY + 170 + Math.max(titleLineCount, 1) * 72 + 8
+      if (showPnl && winnerPnl) {
+        const pnlY = contentBottomY + 12
+        const pnlH = drawWinnerPnlBlock(ctx, winnerPnl, textX, pnlY, textMaxW)
+        contentBottomY = pnlY + pnlH
+      }
+
+      const badgeY = Math.max(panelY + panelH - 140, contentBottomY + 28)
       ctx.save()
       roundRectPath(ctx, textX, badgeY, Math.min(textMaxW, 520), 62, 999)
       ctx.fillStyle = 'rgba(250, 204, 21, 0.16)'

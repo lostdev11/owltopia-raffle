@@ -170,6 +170,7 @@ import {
 } from '@/lib/raffles/creator-prize-return-eligibility'
 import { normalizeSolanaWalletAddress, walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import { shareRaffleFromBrowser } from '@/lib/client/raffle-share'
+import { computeWinnerPnlDisplay } from '@/lib/raffles/winner-pnl'
 
 function solscanClusterQuery(): string {
   return /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
@@ -812,6 +813,22 @@ export function RaffleDetailClient({
   /** Large headline count: include pending so users do not see "0 tickets" while Solana verification runs. */
   const userTicketsHeadline =
     userPendingTickets > 0 ? userTickets + userPendingTickets : userTickets
+
+  const winnerPnlForConnectedWinner = useMemo(() => {
+    const winner = raffle.winner_wallet?.trim()
+    if (!connected || !publicKey || !winner) return null
+    if (!walletsEqualSolana(publicKey.toBase58(), winner)) return null
+    return computeWinnerPnlDisplay(
+      raffle,
+      entries.map((entry) => ({
+        amount_paid: entry.amount_paid,
+        currency: entry.currency,
+        status: entry.status,
+        wallet_address: entry.wallet_address,
+      })),
+      winner
+    )
+  }, [connected, publicKey, raffle, entries])
 
   const showCreatorRefundCandidates =
     isCreator &&
@@ -2695,6 +2712,7 @@ export function RaffleDetailClient({
               imageFallbackUrl={raffle.image_fallback_url}
               nftMintAddress={raffle.nft_mint_address}
               winnerWallet={raffle.winner_wallet}
+              winnerPnl={winnerPnlForConnectedWinner}
               buttonLabel="Winner PNG"
               fullWidth={false}
             />
@@ -4934,6 +4952,7 @@ export function RaffleDetailClient({
                     imageFallbackUrl={raffle.image_fallback_url}
                     nftMintAddress={raffle.nft_mint_address}
                     winnerWallet={raffle.winner_wallet.trim()}
+                    winnerPnl={winnerPnlForConnectedWinner}
                     buttonLabel="Download winner PNG"
                     fullWidth
                   />

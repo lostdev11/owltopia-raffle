@@ -71,6 +71,10 @@ import {
   GIVEAWAY_NFT_CLAIM_SUCCESS_DETAIL,
 } from '@/lib/raffles/claim-prize-success-copy'
 import { buildRaffleImageAttemptChain } from '@/lib/raffle-display-image-url'
+import {
+  computeWinnerPnlDisplay,
+  type WinnerPnlDisplay,
+} from '@/lib/raffles/winner-pnl'
 
 type WinnerPngArtParams = {
   imageAttemptUrls?: string[]
@@ -96,6 +100,32 @@ function winnerPngArtFromRaffle(raffle: {
 function winnerPngArtFromMint(nftMintAddress?: string | null): WinnerPngArtParams {
   const mint = nftMintAddress?.trim()
   return mint ? { nftMintAddress: mint } : {}
+}
+
+function winnerPnlFromMyEntries(
+  raffleId: string,
+  winnerWallet: string,
+  myEntries: EntryWithRaffle[]
+): WinnerPnlDisplay | null {
+  const rows = myEntries.filter((row) => row.raffle.id === raffleId)
+  if (rows.length === 0) return null
+  const raffle = rows[0].raffle
+  const spendEntries = rows.map((row) => ({
+    amount_paid: row.entry.amount_paid,
+    currency: row.entry.currency,
+    status: row.entry.status,
+  }))
+  return computeWinnerPnlDisplay(
+    {
+      prize_type: raffle.prize_type,
+      prize_amount: raffle.prize_amount,
+      prize_currency: raffle.prize_currency,
+      floor_price: raffle.floor_price,
+      currency: raffle.currency,
+    },
+    spendEntries,
+    winnerWallet
+  )
 }
 
 type FeeTier = { feeBps: number; reason: string }
@@ -158,6 +188,8 @@ type EntryWithRaffle = {
     prize_type?: string | null
     prize_amount?: number | null
     prize_currency?: string | null
+    floor_price?: string | null
+    currency?: string | null
     nft_mint_address?: string | null
     image_url?: string | null
     image_fallback_url?: string | null
@@ -446,6 +478,7 @@ export default function DashboardPage() {
     imageFallbackUrl?: string | null
     nftMintAddress?: string | null
     winnerDisplayName?: string | null
+    winnerPnl?: WinnerPnlDisplay | null
   } | null>(null)
   const [walletReady, setWalletReady] = useState(false)
   const [claimTrackerRefreshing, setClaimTrackerRefreshing] = useState(false)
@@ -763,6 +796,7 @@ export default function DashboardPage() {
       imageFallbackUrl?: string | null
       nftMintAddress?: string | null
       winnerDisplayName?: string | null
+      winnerPnl?: WinnerPnlDisplay | null
     }) => {
       setClaimSuccess({
         tx: params.tx?.trim() ?? '',
@@ -776,6 +810,7 @@ export default function DashboardPage() {
         imageFallbackUrl: params.imageFallbackUrl ?? null,
         nftMintAddress: params.nftMintAddress ?? null,
         winnerDisplayName: params.winnerDisplayName ?? null,
+        winnerPnl: params.winnerPnl ?? null,
       })
     },
     [walletAddr]
@@ -827,7 +862,10 @@ export default function DashboardPage() {
       title: string
       winner_wallet?: string | null
       prize_type?: string | null
+      prize_amount?: number | null
       prize_currency?: string | null
+      floor_price?: string | null
+      currency?: string | null
       image_url?: string | null
       image_fallback_url?: string | null
       nft_mint_address?: string | null
@@ -850,11 +888,12 @@ export default function DashboardPage() {
           return
         }
         const alreadyClaimed = (json as { alreadyClaimed?: boolean }).alreadyClaimed === true
+        const winnerWallet = raffle.winner_wallet?.trim() ?? walletAddr
         presentClaimSuccess({
           tx: extractTransactionSignature(json),
           title: raffle.title,
           slug: raffle.slug,
-          winnerWallet: raffle.winner_wallet?.trim() ?? walletAddr,
+          winnerWallet,
           heading: alreadyClaimed ? 'Prize already sent' : 'Prize claimed!',
           message: alreadyClaimed
             ? getEscrowPrizeClaimSuccessCopy({
@@ -868,13 +907,18 @@ export default function DashboardPage() {
           showWinnerPng: true,
           ...winnerPngArtFromRaffle(raffle),
           winnerDisplayName: data?.displayName?.trim() || undefined,
+          winnerPnl: winnerPnlFromMyEntries(
+            raffle.id,
+            winnerWallet,
+            Array.isArray(data?.myEntries) ? data.myEntries : []
+          ),
         })
         await loadDashboard({ silent: true })
       } finally {
         setClaimPrizeLoadingId(null)
       }
     },
-    [loadDashboard, presentClaimSuccess, walletAddr, data?.displayName]
+    [data?.myEntries, data?.displayName, loadDashboard, presentClaimSuccess, walletAddr]
   )
 
   const handleClaimMilestoneBonus = useCallback(
@@ -4270,6 +4314,7 @@ export default function DashboardPage() {
                 imageFallbackUrl: claimSuccess.imageFallbackUrl,
                 nftMintAddress: claimSuccess.nftMintAddress,
                 winnerDisplayName: claimSuccess.winnerDisplayName,
+                winnerPnl: claimSuccess.winnerPnl,
               }
             : undefined
         }
