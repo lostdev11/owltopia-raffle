@@ -216,7 +216,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const addItem = useCallback(
     (raffle: Raffle, quantity: number) => {
       const q = Math.min(MAX_TICKET_QUANTITY_PER_ENTRY, Math.max(0, Math.floor(quantity)))
-      const block = raffleCheckoutBlockedReason(raffle)
+      const block = raffleCheckoutBlockedReason(raffle, publicKey?.toBase58())
       if (block) return { ok: false as const, error: block }
 
       let conflict: string | undefined
@@ -255,7 +255,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       if (conflict) return { ok: false as const, error: conflict }
       return { ok: true as const }
     },
-    [setLines]
+    [setLines, publicKey]
   )
 
   const checkout = useCallback(async () => {
@@ -311,7 +311,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        const block = raffleCheckoutBlockedReason(fresh)
+        const block = raffleCheckoutBlockedReason(fresh, publicKey.toBase58())
         if (block) {
           setCheckoutError(`${fresh.title}: ${block}`)
           setLines(initialSnapshot)

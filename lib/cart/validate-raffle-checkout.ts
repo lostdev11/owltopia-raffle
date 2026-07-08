@@ -2,12 +2,26 @@ import type { Raffle } from '@/lib/types'
 import { nftRaffleExemptFromEscrowRequirement } from '@/lib/raffles/visibility'
 import { isOwlEnabled } from '@/lib/tokens'
 import { raffleAcceptsSolAndBambooTickets } from '@/lib/raffles/dual-ticket-payment'
+import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
+
+/** True when `wallet` is the raffle's creator (creators cannot buy their own tickets). */
+export function isRaffleCreatorWallet(raffle: Raffle, wallet: string | null | undefined): boolean {
+  const creator = (raffle.creator_wallet || raffle.created_by || '').trim()
+  return !!wallet && !!creator && walletsEqualSolana(creator, wallet)
+}
 
 /** Friendly block reason or null when purchase may proceed (subject to server/create). */
-export function raffleCheckoutBlockedReason(raffle: Raffle): string | null {
+export function raffleCheckoutBlockedReason(
+  raffle: Raffle,
+  viewerWallet?: string | null
+): string | null {
   const purchasesBlockedAt = (raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
   if (purchasesBlockedAt) {
     return 'Purchases are temporarily blocked for this raffle.'
+  }
+
+  if (isRaffleCreatorWallet(raffle, viewerWallet)) {
+    return 'You cannot buy tickets in your own raffle.'
   }
 
   if (!raffle.is_active) return 'This raffle is not active.'

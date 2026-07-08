@@ -999,6 +999,11 @@ export function RaffleDetailClient({
       return
     }
 
+    if (isCreator) {
+      setError('You cannot buy tickets in your own raffle.')
+      return
+    }
+
     if (ticketPaymentCurrency === 'OWL' && !isOwlEnabled()) {
       setError('OWL entry is not enabled yet — mint address pending.')
       return
@@ -4377,6 +4382,11 @@ export function RaffleDetailClient({
                     Ticket purchases are temporarily blocked. Please check back later.
                   </p>
                 )}
+                {isCreator && !purchasesBlocked && (
+                  <p className="text-sm text-muted-foreground">
+                    This is your raffle — creators can&apos;t buy tickets in their own raffles.
+                  </p>
+                )}
                 {raffle.creator_restricted_listing && (
                   <CreatorModerationBuyerWarning raffle={raffle} variant="banner" />
                 )}
@@ -4392,18 +4402,24 @@ export function RaffleDetailClient({
                 />
                 <Button
                   onClick={handleOpenEnterRaffleDialog}
-                  disabled={purchasesBlocked || (availableTickets !== null && availableTickets <= 0)}
+                  disabled={
+                    purchasesBlocked ||
+                    isCreator ||
+                    (availableTickets !== null && availableTickets <= 0)
+                  }
                   size={classes.buttonSize as any}
                   style={
-                    purchasesBlocked
+                    purchasesBlocked || isCreator
                       ? undefined
                       : { backgroundColor: themeColor, color: '#000' }
                   }
-                  variant={purchasesBlocked ? 'secondary' : 'default'}
-                  className={`w-full touch-manipulation min-h-[44px] text-sm sm:text-base px-4 sm:px-6 ${purchasesBlocked ? 'opacity-70' : ''}`}
+                  variant={purchasesBlocked || isCreator ? 'secondary' : 'default'}
+                  className={`w-full touch-manipulation min-h-[44px] text-sm sm:text-base px-4 sm:px-6 ${purchasesBlocked || isCreator ? 'opacity-70' : ''}`}
                 >
                   {purchasesBlocked
                     ? 'Purchases Blocked'
+                    : isCreator
+                    ? 'Your Raffle'
                     : availableTickets !== null && availableTickets <= 0
                     ? 'Sold Out'
                     : 'Enter Raffle'}
@@ -4865,7 +4881,10 @@ export function RaffleDetailClient({
               variant="secondary"
               onClick={handleAddToCart}
               disabled={
-                (availableTickets !== null && availableTickets <= 0) || !connected || isProcessing
+                (availableTickets !== null && availableTickets <= 0) ||
+                !connected ||
+                isCreator ||
+                isProcessing
               }
               className="w-full sm:w-auto touch-manipulation min-h-[44px] text-base sm:text-sm gap-2"
             >
@@ -4875,8 +4894,9 @@ export function RaffleDetailClient({
             <Button
               onClick={handlePurchase}
               disabled={
-                availableTickets !== null && availableTickets <= 0 ||
+                (availableTickets !== null && availableTickets <= 0) ||
                 !connected ||
+                isCreator ||
                 isProcessing
               }
               style={{

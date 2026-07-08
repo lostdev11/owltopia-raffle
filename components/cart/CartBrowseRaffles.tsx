@@ -67,13 +67,13 @@ export function CartBrowseRaffles() {
     if (!list) return []
     const rows: Raffle[] = []
     for (const r of list) {
-      if (raffleCheckoutBlockedReason(r)) continue
+      if (raffleCheckoutBlockedReason(r, viewerWallet)) continue
       if (cartCurrency && String(r.currency || 'SOL') !== String(cartCurrency)) continue
       rows.push(r)
     }
     rows.sort(sortPurchasable)
     return rows
-  }, [list, cartCurrency])
+  }, [list, cartCurrency, viewerWallet])
 
   const getQty = useCallback(
     (id: string) => {
