@@ -4,12 +4,16 @@ import { useState } from 'react'
 import { ImageDown, Trophy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { computePromoPngArtDrawRect } from '@/lib/promo-png-art-draw'
+import { ensurePromoPngFontsReady, getPromoPngFontFamily } from '@/lib/promo-png-fonts'
 import { loadPromoPngArt, loadPromoPngSiteAsset } from '@/lib/promo-png-load-image'
 import { buildRaffleImageAttemptChain } from '@/lib/raffle-display-image-url'
 import {
+  computeWinnerPnlDisplay,
   formatWinnerPnlAmount,
   formatWinnerPnlRoi,
   type WinnerPnlDisplay,
+  type WinnerPnlRaffleLike,
+  type WinnerSpendEntryLike,
 } from '@/lib/raffles/winner-pnl'
 import { useSaveImage } from '@/components/use-save-image'
 
@@ -24,8 +28,10 @@ type RaffleWinnerPngButtonProps = {
   winnerWallet: string
   /** Platform display name when already known (skips lookup). */
   winnerDisplayName?: string | null
-  /** Winner-only spend → prize → net / ROI block (omit on public winner announcements). */
-  winnerPnl?: WinnerPnlDisplay | null
+  /** Raffle fields used to compute P&L when the PNG is generated (winner-only). */
+  pnlRaffle?: WinnerPnlRaffleLike | null
+  /** Confirmed entries for the winner wallet on this raffle (same raffle as `pnlRaffle`). */
+  pnlEntries?: WinnerSpendEntryLike[] | null
   className?: string
   buttonLabel?: string
   fullWidth?: boolean
@@ -33,7 +39,6 @@ type RaffleWinnerPngButtonProps = {
 
 const WIDTH = 1200
 const HEIGHT = 675
-const FONT_SANS = '"Plus Jakarta Sans", system-ui, sans-serif'
 
 function shortWallet(wallet: string): string {
   const w = wallet.trim()
@@ -110,6 +115,77 @@ function watermarkIconUrl(): string {
   return new URL('/icon.png', window.location.origin).href
 }
 
+function winnerPnlBlockHeight(pnl: WinnerPnlDisplay): number {
+  return pnl.isFreeWin ? 92 : 132
+}
+
+function drawWinnerPnlBlock(
+  ctx: CanvasRenderingContext2D,
+  fontFamily: string,
+  pnl: WinnerPnlDisplay,
+  x: number,
+  y: number,
+  maxWidth: number
+): number {
+  const blockH = winnerPnlBlockHeight(pnl)
+  const blockW = Math.min(maxWidth, 560)
+
+  ctx.save()
+  roundRectPath(ctx, x, y, blockW, blockH, 16)
+  ctx.fillStyle = 'rgba(250, 204, 21, 0.14)'
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(250, 204, 21, 0.55)'
+  ctx.lineWidth = 2
+  ctx.stroke()
+  ctx.restore()
+
+  const padX = 22
+  const innerW = blockW - padX * 2
+  ctx.textBaseline = 'alphabetic'
+
+  if (pnl.isFreeWin) {
+    ctx.fillStyle = '#facc15'
+    ctx.font = `700 24px ${fontFamily}`
+    ctx.fillText('FREE WIN', x + padX, y + 40)
+    ctx.fillStyle = '#fff6d5'
+    ctx.font = `700 28px ${fontFamily}`
+    const prizeLabel = pnl.prizeValueKind === 'floor' ? 'floor' : 'prize'
+    const line = `Prize: ${formatWinnerPnlAmount(pnl.prizeValue, pnl.currency)} (${prizeLabel})`
+    ctx.fillText(fitSingleLineText(ctx, line, innerW), x + padX, y + 78)
+    return blockH
+  }
+
+  const colW = innerW / 3
+  const labels = ['Spent', pnl.prizeValueKind === 'floor' ? 'Won (floor)' : 'Won', 'Net']
+  const values = [
+    formatWinnerPnlAmount(pnl.amountSpent, pnl.currency),
+    formatWinnerPnlAmount(pnl.prizeValue, pnl.currency),
+    `${pnl.netProfit >= 0 ? '+' : ''}${formatWinnerPnlAmount(pnl.netProfit, pnl.currency)}`,
+  ]
+
+  ctx.fillStyle = '#fde68a'
+  ctx.font = `600 22px ${fontFamily}`
+  labels.forEach((label, i) => {
+    ctx.fillText(fitSingleLineText(ctx, label, colW - 6), x + padX + colW * i, y + 34)
+  })
+
+  ctx.fillStyle = '#ffffff'
+  ctx.font = `700 32px ${fontFamily}`
+  values.forEach((value, i) => {
+    ctx.fillText(fitSingleLineText(ctx, value, colW - 6), x + padX + colW * i, y + 78)
+  })
+
+  if (pnl.roiPercent != null) {
+    const roiText = formatWinnerPnlRoi(pnl.roiPercent)
+    const roiColor = pnl.roiPercent >= 0 ? '#4ade80' : '#f87171'
+    ctx.fillStyle = roiColor
+    ctx.font = `700 24px ${fontFamily}`
+    ctx.fillText(roiText, x + padX + colW * 2, y + 114)
+  }
+
+  return blockH
+}
+
 async function resolveMintImageAttemptUrls(mint: string): Promise<string[]> {
   const trimmed = mint.trim()
   if (!trimmed) return []
@@ -125,71 +201,6 @@ async function resolveMintImageAttemptUrls(mint: string): Promise<string[]> {
   } catch {
     return []
   }
-}
-
-function drawWinnerPnlBlock(
-  ctx: CanvasRenderingContext2D,
-  pnl: WinnerPnlDisplay,
-  x: number,
-  y: number,
-  maxWidth: number
-): number {
-  const blockH = pnl.isFreeWin ? 88 : 118
-  const blockW = Math.min(maxWidth, 560)
-
-  ctx.save()
-  roundRectPath(ctx, x, y, blockW, blockH, 16)
-  ctx.fillStyle = 'rgba(250, 204, 21, 0.1)'
-  ctx.fill()
-  ctx.strokeStyle = 'rgba(250, 204, 21, 0.45)'
-  ctx.lineWidth = 1.5
-  ctx.stroke()
-  ctx.restore()
-
-  const padX = 22
-  const innerW = blockW - padX * 2
-
-  if (pnl.isFreeWin) {
-    ctx.fillStyle = '#facc15'
-    ctx.font = `700 24px ${FONT_SANS}`
-    ctx.fillText('FREE WIN', x + padX, y + 38)
-    ctx.fillStyle = '#fde68a'
-    ctx.font = `600 26px ${FONT_SANS}`
-    const prizeLabel = pnl.prizeValueKind === 'floor' ? 'floor' : 'prize'
-    const line = `Prize: ${formatWinnerPnlAmount(pnl.prizeValue, pnl.currency)} (${prizeLabel})`
-    ctx.fillText(fitSingleLineText(ctx, line, innerW), x + padX, y + 72)
-    return blockH
-  }
-
-  const colW = innerW / 3
-  const labels = ['Spent', pnl.prizeValueKind === 'floor' ? 'Won (floor)' : 'Won', 'Net']
-  const values = [
-    formatWinnerPnlAmount(pnl.amountSpent, pnl.currency),
-    formatWinnerPnlAmount(pnl.prizeValue, pnl.currency),
-    `${pnl.netProfit >= 0 ? '+' : ''}${formatWinnerPnlAmount(pnl.netProfit, pnl.currency)}`,
-  ]
-
-  ctx.fillStyle = 'rgba(253, 230, 138, 0.75)'
-  ctx.font = `600 20px ${FONT_SANS}`
-  labels.forEach((label, i) => {
-    ctx.fillText(label, x + padX + colW * i, y + 32)
-  })
-
-  ctx.fillStyle = '#fff6d5'
-  ctx.font = `700 28px ${FONT_SANS}`
-  values.forEach((value, i) => {
-    ctx.fillText(fitSingleLineText(ctx, value, colW - 8), x + padX + colW * i, y + 68)
-  })
-
-  if (pnl.roiPercent != null) {
-    const roiText = formatWinnerPnlRoi(pnl.roiPercent)
-    const roiColor = pnl.roiPercent >= 0 ? '#4ade80' : '#f87171'
-    ctx.fillStyle = roiColor
-    ctx.font = `700 22px ${FONT_SANS}`
-    ctx.fillText(roiText, x + padX + colW * 2, y + 102)
-  }
-
-  return blockH
 }
 
 async function resolveWinnerPngArtCandidates(
@@ -219,7 +230,8 @@ export function RaffleWinnerPngButton({
   nftMintAddress,
   winnerWallet,
   winnerDisplayName,
-  winnerPnl,
+  pnlRaffle,
+  pnlEntries,
   className,
   buttonLabel = 'Winner PNG',
   fullWidth = false,
@@ -237,13 +249,9 @@ export function RaffleWinnerPngButton({
     setBusy(true)
     setMessage(null)
     try {
-      if (typeof document !== 'undefined' && document.fonts?.ready) {
-        try {
-          await document.fonts.ready
-        } catch {
-          /* keep going */
-        }
-      }
+      await ensurePromoPngFontsReady()
+      const fontFamily = getPromoPngFontFamily()
+
       const canvas = document.createElement('canvas')
       canvas.width = WIDTH
       canvas.height = HEIGHT
@@ -252,8 +260,11 @@ export function RaffleWinnerPngButton({
 
       const safeTitle = clampText(title || 'Owltopia Raffle', 110)
       const winnerLabel = await resolveWinnerDisplayLabel(winnerWallet, winnerDisplayName)
-      const showPnl = winnerPnl != null && winnerPnl.prizeValue > 0
-      const maxTitleLines = showPnl ? 2 : 3
+      const pnl =
+        pnlRaffle != null
+          ? computeWinnerPnlDisplay(pnlRaffle, pnlEntries ?? [], winnerWallet)
+          : null
+      const showPnl = pnl != null && pnl.prizeValue > 0
 
       const bg = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT)
       bg.addColorStop(0, '#1a1200')
@@ -276,7 +287,6 @@ export function RaffleWinnerPngButton({
       ctx.fill()
       ctx.restore()
 
-      // Large centered Owltopia logo in the panel background (gold card stays readable on top).
       {
         const wm = await loadPromoPngSiteAsset(watermarkIconUrl())
         if (wm) {
@@ -341,13 +351,27 @@ export function RaffleWinnerPngButton({
 
       const textX = panelX + 72
       const textMaxW = artX - textX - 44
+      ctx.textBaseline = 'alphabetic'
+
+      const badgeH = 62
+      const badgeW = Math.min(textMaxW, 520)
+      const badgeY = panelY + panelH - badgeH - 36
+      const pnlBlockH = showPnl && pnl ? winnerPnlBlockHeight(pnl) : 0
+      const pnlY = showPnl && pnl ? badgeY - 20 - pnlBlockH : 0
+      const titleLineH = 72
+      const titleStartY = panelY + 170
+      const titleMaxBottom = showPnl ? pnlY - 14 : badgeY - 18
+      const maxTitleLines = Math.min(
+        showPnl ? 2 : 3,
+        Math.max(1, Math.floor((titleMaxBottom - titleStartY) / titleLineH))
+      )
 
       ctx.fillStyle = '#facc15'
-      ctx.font = `700 28px ${FONT_SANS}`
+      ctx.font = `700 28px ${fontFamily}`
       ctx.fillText('WINNER SELECTED', textX, panelY + 96)
 
       ctx.fillStyle = '#fff6d5'
-      ctx.font = `800 62px ${FONT_SANS}`
+      ctx.font = `800 62px ${fontFamily}`
       const titleWords = safeTitle.split(' ')
       const lines: string[] = []
       let current = ''
@@ -361,21 +385,16 @@ export function RaffleWinnerPngButton({
         }
       }
       if (current && lines.length < maxTitleLines) lines.push(current)
-      const titleLineCount = lines.slice(0, maxTitleLines).length
       lines.slice(0, maxTitleLines).forEach((line, i) => {
-        ctx.fillText(line, textX, panelY + 170 + i * 72)
+        ctx.fillText(line, textX, titleStartY + i * titleLineH)
       })
 
-      let contentBottomY = panelY + 170 + Math.max(titleLineCount, 1) * 72 + 8
-      if (showPnl && winnerPnl) {
-        const pnlY = contentBottomY + 12
-        const pnlH = drawWinnerPnlBlock(ctx, winnerPnl, textX, pnlY, textMaxW)
-        contentBottomY = pnlY + pnlH
+      if (showPnl && pnl) {
+        drawWinnerPnlBlock(ctx, fontFamily, pnl, textX, pnlY, textMaxW)
       }
 
-      const badgeY = Math.max(panelY + panelH - 140, contentBottomY + 28)
       ctx.save()
-      roundRectPath(ctx, textX, badgeY, Math.min(textMaxW, 520), 62, 999)
+      roundRectPath(ctx, textX, badgeY, badgeW, badgeH, 999)
       ctx.fillStyle = 'rgba(250, 204, 21, 0.16)'
       ctx.fill()
       ctx.strokeStyle = 'rgba(250, 204, 21, 0.65)'
@@ -383,8 +402,8 @@ export function RaffleWinnerPngButton({
       ctx.stroke()
       ctx.restore()
       ctx.fillStyle = '#fde68a'
-      ctx.font = `600 30px ${FONT_SANS}`
-      const badgeInnerW = Math.min(textMaxW, 520) - 40
+      ctx.font = `600 30px ${fontFamily}`
+      const badgeInnerW = badgeW - 40
       const winnerPrefix = 'Winner: '
       const winnerNameMaxW = badgeInnerW - ctx.measureText(winnerPrefix).width
       const winnerLine = `${winnerPrefix}${fitSingleLineText(ctx, winnerLabel, winnerNameMaxW)}`

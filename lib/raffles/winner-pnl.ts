@@ -3,6 +3,7 @@ import {
   type RaffleCurrency,
 } from '@/lib/raffle-profit'
 import { lenientParseNftFloorAmount } from '@/lib/raffles/nft-raffle-economics'
+import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
 export type WinnerPnlDisplay = {
   amountSpent: number
@@ -67,7 +68,8 @@ export function sumConfirmedSpendForWallet(
   let total = 0
   for (const e of entries) {
     if ((e.status || '').toLowerCase() !== 'confirmed') continue
-    if (e.wallet_address?.trim() && e.wallet_address.trim() !== w) continue
+    const entryWallet = e.wallet_address?.trim()
+    if (entryWallet && !walletsEqualSolana(entryWallet, w)) continue
     const cur = normalizeRaffleTicketCurrency(e.currency)
     if (cur !== targetCurrency) continue
     const amt = Number(e.amount_paid)

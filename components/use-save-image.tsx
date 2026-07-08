@@ -1,14 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { Download } from 'lucide-react'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Download, X } from 'lucide-react'
 
 /**
  * Coarse "is this a touch device" check. ~75% of users are on mobile crypto
@@ -116,38 +109,51 @@ export function useSaveImage() {
     []
   )
 
-  const savePngOverlay = (
-    <Dialog open={!!preview} onOpenChange={(open) => (open ? null : closePreview())}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Save image</DialogTitle>
-          <DialogDescription>
-            Press and hold the image, then tap “Save Image” (or “Download image”) to add it to your
-            device.
-          </DialogDescription>
-        </DialogHeader>
-        {preview ? (
-          <>
-            {/* eslint-disable-next-line @next/next/no-img-element -- local object URL for long-press save */}
-            <img
-              src={preview.url}
-              alt="Generated image — long-press to save"
-              className="w-full rounded-md border border-border"
-              draggable={false}
-            />
-            <a
-              href={preview.url}
-              download={preview.fileName}
-              className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-2 rounded-md border border-border bg-muted px-4 text-sm font-medium hover:bg-muted/80"
-            >
-              <Download className="h-4 w-4" />
-              Download image
-            </a>
-          </>
-        ) : null}
-      </DialogContent>
-    </Dialog>
-  )
+  const savePngOverlay = preview ? (
+    <div
+      className="fixed inset-0 z-[250] flex items-center justify-center bg-background/90 backdrop-blur-sm p-4 safe-area-bottom"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="save-png-overlay-title"
+    >
+      <div className="w-full max-w-sm rounded-xl border bg-card p-4 shadow-lg space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1 text-left">
+            <h2 id="save-png-overlay-title" className="text-lg font-semibold text-foreground">
+              Save image
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Press and hold the image, then tap “Save Image” (or “Download image”) to add it to your
+              device.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={closePreview}
+            className="inline-flex min-h-[44px] min-w-[44px] shrink-0 touch-manipulation items-center justify-center rounded-md border border-border bg-muted/50"
+            aria-label="Close save preview"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element -- local object URL for long-press save */}
+        <img
+          src={preview.url}
+          alt="Generated image — long-press to save"
+          className="w-full rounded-md border border-border"
+          draggable={false}
+        />
+        <a
+          href={preview.url}
+          download={preview.fileName}
+          className="inline-flex min-h-[44px] w-full touch-manipulation items-center justify-center gap-2 rounded-md border border-border bg-muted px-4 text-sm font-medium hover:bg-muted/80"
+        >
+          <Download className="h-4 w-4" />
+          Download image
+        </a>
+      </div>
+    </div>
+  ) : null
 
   return { saveImage, savePngOverlay, isMobile: isLikelyMobile }
 }

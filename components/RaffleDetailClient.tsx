@@ -170,7 +170,7 @@ import {
 } from '@/lib/raffles/creator-prize-return-eligibility'
 import { normalizeSolanaWalletAddress, walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import { shareRaffleFromBrowser } from '@/lib/client/raffle-share'
-import { computeWinnerPnlDisplay } from '@/lib/raffles/winner-pnl'
+import type { WinnerSpendEntryLike } from '@/lib/raffles/winner-pnl'
 
 function solscanClusterQuery(): string {
   return /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
@@ -814,21 +814,23 @@ export function RaffleDetailClient({
   const userTicketsHeadline =
     userPendingTickets > 0 ? userTickets + userPendingTickets : userTickets
 
-  const winnerPnlForConnectedWinner = useMemo(() => {
-    const winner = raffle.winner_wallet?.trim()
-    if (!connected || !publicKey || !winner) return null
-    if (!walletsEqualSolana(publicKey.toBase58(), winner)) return null
-    return computeWinnerPnlDisplay(
-      raffle,
-      entries.map((entry) => ({
+  const connectedWinnerWallet =
+    connected && publicKey && raffle.winner_wallet?.trim()
+      ? walletsEqualSolana(publicKey.toBase58(), raffle.winner_wallet.trim())
+      : false
+
+  const winnerPnlEntriesForPng = useMemo((): WinnerSpendEntryLike[] => {
+    if (!connectedWinnerWallet || !publicKey) return []
+    const wallet = publicKey.toBase58()
+    return entries
+      .filter((entry) => walletsEqualSolana(entry.wallet_address ?? '', wallet))
+      .map((entry) => ({
         amount_paid: entry.amount_paid,
         currency: entry.currency,
         status: entry.status,
         wallet_address: entry.wallet_address,
-      })),
-      winner
-    )
-  }, [connected, publicKey, raffle, entries])
+      }))
+  }, [connectedWinnerWallet, entries, publicKey])
 
   const showCreatorRefundCandidates =
     isCreator &&
@@ -2717,7 +2719,8 @@ export function RaffleDetailClient({
               imageFallbackUrl={raffle.image_fallback_url}
               nftMintAddress={raffle.nft_mint_address}
               winnerWallet={raffle.winner_wallet}
-              winnerPnl={winnerPnlForConnectedWinner}
+              pnlRaffle={connectedWinnerWallet ? raffle : null}
+              pnlEntries={connectedWinnerWallet ? winnerPnlEntriesForPng : null}
               buttonLabel="Winner PNG"
               fullWidth={false}
             />
@@ -4972,7 +4975,8 @@ export function RaffleDetailClient({
                     imageFallbackUrl={raffle.image_fallback_url}
                     nftMintAddress={raffle.nft_mint_address}
                     winnerWallet={raffle.winner_wallet.trim()}
-                    winnerPnl={winnerPnlForConnectedWinner}
+                    pnlRaffle={connectedWinnerWallet ? raffle : null}
+                    pnlEntries={connectedWinnerWallet ? winnerPnlEntriesForPng : null}
                     buttonLabel="Download winner PNG"
                     fullWidth
                   />

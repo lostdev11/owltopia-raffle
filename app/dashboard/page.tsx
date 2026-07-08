@@ -72,8 +72,8 @@ import {
 } from '@/lib/raffles/claim-prize-success-copy'
 import { buildRaffleImageAttemptChain } from '@/lib/raffle-display-image-url'
 import {
-  computeWinnerPnlDisplay,
-  type WinnerPnlDisplay,
+  type WinnerPnlRaffleLike,
+  type WinnerSpendEntryLike,
 } from '@/lib/raffles/winner-pnl'
 
 type WinnerPngArtParams = {
@@ -102,30 +102,27 @@ function winnerPngArtFromMint(nftMintAddress?: string | null): WinnerPngArtParam
   return mint ? { nftMintAddress: mint } : {}
 }
 
-function winnerPnlFromMyEntries(
+function winnerPngPnlFromMyEntries(
   raffleId: string,
-  winnerWallet: string,
   myEntries: EntryWithRaffle[]
-): WinnerPnlDisplay | null {
+): { pnlRaffle: WinnerPnlRaffleLike | null; pnlEntries: WinnerSpendEntryLike[] } {
   const rows = myEntries.filter((row) => row.raffle.id === raffleId)
-  if (rows.length === 0) return null
+  if (rows.length === 0) return { pnlRaffle: null, pnlEntries: [] }
   const raffle = rows[0].raffle
-  const spendEntries = rows.map((row) => ({
-    amount_paid: row.entry.amount_paid,
-    currency: row.entry.currency,
-    status: row.entry.status,
-  }))
-  return computeWinnerPnlDisplay(
-    {
+  return {
+    pnlRaffle: {
       prize_type: raffle.prize_type,
       prize_amount: raffle.prize_amount,
       prize_currency: raffle.prize_currency,
       floor_price: raffle.floor_price,
       currency: raffle.currency,
     },
-    spendEntries,
-    winnerWallet
-  )
+    pnlEntries: rows.map((row) => ({
+      amount_paid: row.entry.amount_paid,
+      currency: row.entry.currency,
+      status: row.entry.status,
+    })),
+  }
 }
 
 type FeeTier = { feeBps: number; reason: string }
@@ -478,7 +475,8 @@ export default function DashboardPage() {
     imageFallbackUrl?: string | null
     nftMintAddress?: string | null
     winnerDisplayName?: string | null
-    winnerPnl?: WinnerPnlDisplay | null
+    pnlRaffle?: WinnerPnlRaffleLike | null
+    pnlEntries?: WinnerSpendEntryLike[] | null
   } | null>(null)
   const [walletReady, setWalletReady] = useState(false)
   const [claimTrackerRefreshing, setClaimTrackerRefreshing] = useState(false)
@@ -796,7 +794,8 @@ export default function DashboardPage() {
       imageFallbackUrl?: string | null
       nftMintAddress?: string | null
       winnerDisplayName?: string | null
-      winnerPnl?: WinnerPnlDisplay | null
+      pnlRaffle?: WinnerPnlRaffleLike | null
+      pnlEntries?: WinnerSpendEntryLike[] | null
     }) => {
       setClaimSuccess({
         tx: params.tx?.trim() ?? '',
@@ -810,7 +809,8 @@ export default function DashboardPage() {
         imageFallbackUrl: params.imageFallbackUrl ?? null,
         nftMintAddress: params.nftMintAddress ?? null,
         winnerDisplayName: params.winnerDisplayName ?? null,
-        winnerPnl: params.winnerPnl ?? null,
+        pnlRaffle: params.pnlRaffle ?? null,
+        pnlEntries: params.pnlEntries ?? null,
       })
     },
     [walletAddr]
@@ -889,6 +889,10 @@ export default function DashboardPage() {
         }
         const alreadyClaimed = (json as { alreadyClaimed?: boolean }).alreadyClaimed === true
         const winnerWallet = raffle.winner_wallet?.trim() ?? walletAddr
+        const pnl = winnerPngPnlFromMyEntries(
+          raffle.id,
+          Array.isArray(data?.myEntries) ? data.myEntries : []
+        )
         presentClaimSuccess({
           tx: extractTransactionSignature(json),
           title: raffle.title,
@@ -907,11 +911,7 @@ export default function DashboardPage() {
           showWinnerPng: true,
           ...winnerPngArtFromRaffle(raffle),
           winnerDisplayName: data?.displayName?.trim() || undefined,
-          winnerPnl: winnerPnlFromMyEntries(
-            raffle.id,
-            winnerWallet,
-            Array.isArray(data?.myEntries) ? data.myEntries : []
-          ),
+          ...pnl,
         })
         await loadDashboard({ silent: true })
       } finally {
@@ -4314,7 +4314,8 @@ export default function DashboardPage() {
                 imageFallbackUrl: claimSuccess.imageFallbackUrl,
                 nftMintAddress: claimSuccess.nftMintAddress,
                 winnerDisplayName: claimSuccess.winnerDisplayName,
-                winnerPnl: claimSuccess.winnerPnl,
+                pnlRaffle: claimSuccess.pnlRaffle,
+                pnlEntries: claimSuccess.pnlEntries,
               }
             : undefined
         }

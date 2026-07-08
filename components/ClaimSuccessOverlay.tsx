@@ -3,7 +3,7 @@
 import { ExternalLink, Trophy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { RaffleWinnerPngButton } from '@/components/RaffleWinnerPngButton'
-import type { WinnerPnlDisplay } from '@/lib/raffles/winner-pnl'
+import type { WinnerPnlRaffleLike, WinnerSpendEntryLike } from '@/lib/raffles/winner-pnl'
 
 export type ClaimSuccessOverlayProps = {
   open: boolean
@@ -21,7 +21,8 @@ export type ClaimSuccessOverlayProps = {
     imageFallbackUrl?: string | null
     nftMintAddress?: string | null
     winnerDisplayName?: string | null
-    winnerPnl?: WinnerPnlDisplay | null
+    pnlRaffle?: WinnerPnlRaffleLike | null
+    pnlEntries?: WinnerSpendEntryLike[] | null
   }
   onClose: () => void
 }
@@ -75,7 +76,8 @@ export function ClaimSuccessOverlay({
             nftMintAddress={winnerPng.nftMintAddress}
             winnerDisplayName={winnerPng.winnerDisplayName}
             winnerWallet={winnerPng.winnerWallet}
-            winnerPnl={winnerPng.winnerPnl}
+            pnlRaffle={winnerPng.pnlRaffle}
+            pnlEntries={winnerPng.pnlEntries}
             buttonLabel="Download winner PNG"
             fullWidth
           />
