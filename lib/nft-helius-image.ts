@@ -342,6 +342,29 @@ async function heliusGetAssetBatch(
 }
 
 /**
+ * Raw Helius DAS getAssetBatch payloads (chunked). Used for trait-based Gen 1 1/1 classification.
+ */
+export async function fetchDasAssetBatchFromHelius(
+  assetIds: string[],
+  options?: FetchNftImageFromHeliusOptions
+): Promise<Map<string, unknown>> {
+  const preferMainnet = options?.preferMainnet === true
+  const heliusUrl = preferMainnet ? getHeliusMainnetRpcUrl() : getHeliusRpcUrl()
+  const out = new Map<string, unknown>()
+  if (!heliusUrl) return out
+
+  const unique = [...new Set(assetIds.map((id) => id.trim()).filter(Boolean))]
+  for (let i = 0; i < unique.length; i += BATCH_CHUNK_SIZE) {
+    const chunk = unique.slice(i, i + BATCH_CHUNK_SIZE)
+    const payloads = await heliusGetAssetBatch(heliusUrl, chunk)
+    for (const [id, payload] of payloads) {
+      out.set(id, payload)
+    }
+  }
+  return out
+}
+
+/**
  * Resolve metadata for many mints via Helius DAS getAssetBatch (chunked, cached).
  */
 export async function fetchNftMintMetaBatchFromHelius(

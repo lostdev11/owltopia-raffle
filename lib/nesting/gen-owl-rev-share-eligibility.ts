@@ -6,6 +6,7 @@ import {
   GEN1_OWL_STAKING_POOL_SLUGS,
   GEN2_OWL_STAKING_POOL_SLUGS,
 } from '@/lib/nesting/gen1-staking-pools'
+import { classifyGen1OneOfOneMints } from '@/lib/nesting/gen1-one-of-one'
 import { endOfPeriodMonthUtc, groupKeyForPoolSlug } from '@/lib/nesting/gen-owl-rev-share-month'
 
 const GROUP_SLUGS: Record<GenOwlStakingGroupKey, readonly string[]> = {
@@ -80,6 +81,38 @@ export function countEligibleByGroup(nests: GenOwlEligibleNest[]): Record<GenOwl
     else gen2++
   }
   return { 'gen1-owl': gen1, 'gen2-owl': gen2 }
+}
+
+export function listGen1EligibleMints(nests: GenOwlEligibleNest[]): string[] {
+  const mints: string[] = []
+  for (const n of nests) {
+    if (n.group !== 'gen1-owl') continue
+    const mint = n.position.asset_identifier?.trim()
+    if (mint) mints.push(mint)
+  }
+  return mints
+}
+
+export async function countGen1EligibleByRevShareBucket(
+  nests: GenOwlEligibleNest[]
+): Promise<{ standard: number; one_of_one: number }> {
+  const gen1Mints = listGen1EligibleMints(nests)
+  if (!gen1Mints.length) return { standard: 0, one_of_one: 0 }
+
+  const classification = await classifyGen1OneOfOneMints(gen1Mints)
+  let standard = 0
+  let one_of_one = 0
+  for (const n of nests) {
+    if (n.group !== 'gen1-owl') continue
+    const mint = n.position.asset_identifier?.trim()
+    if (!mint) {
+      standard++
+      continue
+    }
+    if (classification.get(mint) === 'one-of-one') one_of_one++
+    else standard++
+  }
+  return { standard, one_of_one }
 }
 
 export function poolSlugsForGroup(group: GenOwlStakingGroupKey): readonly string[] {

@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import {
   Award,
   BarChart3,
@@ -9,6 +10,7 @@ import {
   Gift,
   Landmark,
   LayoutDashboard,
+  Sparkles,
   Ticket,
   Trophy,
 } from 'lucide-react'
@@ -16,6 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Check } from 'lucide-react'
 import type { DashboardEngagementPayload } from '@/lib/xp/engagement-payload'
+import { MILESTONE_BETA_NOTICE } from '@/lib/raffles/milestones/copy'
 import { DashboardCollapsible } from '@/components/dashboard/DashboardCollapsible'
 
 export type DashboardOverviewStats = {
@@ -213,6 +216,73 @@ export function DashboardOverviewSection({
           onClick={() => onNavigateTab('winnings')}
         />
       </div>
+
+      <Card className="rounded-xl border-amber-500/25 bg-gradient-to-br from-amber-500/[0.07] to-violet-500/[0.04] shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Sparkles className="h-4 w-4 text-amber-400" aria-hidden />
+            Creator tools
+          </CardTitle>
+          <CardDescription>
+            Grow ticket sales with milestone bonuses and track performance in Analytics.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-amber-500/20 bg-background/60 p-4 space-y-2">
+              <p className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <Gift className="h-4 w-4 text-amber-400" aria-hidden />
+                Milestone Rewards
+              </p>
+              <p className="text-xs text-muted-foreground leading-relaxed">{MILESTONE_BETA_NOTICE}</p>
+              <Button asChild size="sm" className="min-h-[44px] w-full touch-manipulation sm:w-auto">
+                <Link href="/create">Add milestones to a raffle</Link>
+              </Button>
+            </div>
+            <div className="rounded-lg border border-violet-500/20 bg-background/60 p-4 space-y-2">
+              <p className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <BarChart3 className="h-4 w-4 text-violet-400" aria-hidden />
+                Creator Analytics
+              </p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Views, sell-through, referral traffic, and estimated net revenue after your {feeLabel} platform fee.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-h-[44px] w-full touch-manipulation sm:w-auto"
+                onClick={() => onNavigateTab('analytics')}
+              >
+                Open Analytics
+              </Button>
+            </div>
+          </div>
+          {feeTier.reason === 'partner_community' ? (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Partner Pro: use SPL ticket currencies and partner raffles from{' '}
+              <Link
+                href="/partners/dashboard"
+                className="inline-flex min-h-[44px] items-center text-primary underline-offset-4 hover:underline touch-manipulation"
+              >
+                Partner dashboard
+              </Link>
+              .
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Want lower fees and partner tooling?{' '}
+              <Link
+                href="/partner-program"
+                className="inline-flex min-h-[44px] items-center text-primary underline-offset-4 hover:underline touch-manipulation"
+              >
+                Apply to the partner program
+              </Link>
+              .
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="rounded-xl border-border/60 bg-card/90 shadow-sm">
         <CardHeader className="pb-2">

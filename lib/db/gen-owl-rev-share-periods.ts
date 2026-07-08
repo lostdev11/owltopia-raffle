@@ -9,8 +9,14 @@ export type GenOwlRevSharePeriodRow = {
   gen2_total_usdc: number | null
   gen1_eligible_count: number | null
   gen2_eligible_count: number | null
+  gen1_standard_eligible_count: number | null
+  gen1_one_of_one_eligible_count: number | null
   gen1_per_nest_sol: number | null
   gen1_per_nest_usdc: number | null
+  gen1_standard_per_nest_sol: number | null
+  gen1_standard_per_nest_usdc: number | null
+  gen1_one_of_one_per_nest_sol: number | null
+  gen1_one_of_one_per_nest_usdc: number | null
   gen2_per_nest_sol: number | null
   gen2_per_nest_usdc: number | null
   finalized_at: string | null
@@ -26,8 +32,20 @@ function mapPeriodRow(data: Record<string, unknown>): GenOwlRevSharePeriodRow {
     gen2_total_usdc: data.gen2_total_usdc != null ? Number(data.gen2_total_usdc) : null,
     gen1_eligible_count: data.gen1_eligible_count != null ? Number(data.gen1_eligible_count) : null,
     gen2_eligible_count: data.gen2_eligible_count != null ? Number(data.gen2_eligible_count) : null,
+    gen1_standard_eligible_count:
+      data.gen1_standard_eligible_count != null ? Number(data.gen1_standard_eligible_count) : null,
+    gen1_one_of_one_eligible_count:
+      data.gen1_one_of_one_eligible_count != null ? Number(data.gen1_one_of_one_eligible_count) : null,
     gen1_per_nest_sol: data.gen1_per_nest_sol != null ? Number(data.gen1_per_nest_sol) : null,
     gen1_per_nest_usdc: data.gen1_per_nest_usdc != null ? Number(data.gen1_per_nest_usdc) : null,
+    gen1_standard_per_nest_sol:
+      data.gen1_standard_per_nest_sol != null ? Number(data.gen1_standard_per_nest_sol) : null,
+    gen1_standard_per_nest_usdc:
+      data.gen1_standard_per_nest_usdc != null ? Number(data.gen1_standard_per_nest_usdc) : null,
+    gen1_one_of_one_per_nest_sol:
+      data.gen1_one_of_one_per_nest_sol != null ? Number(data.gen1_one_of_one_per_nest_sol) : null,
+    gen1_one_of_one_per_nest_usdc:
+      data.gen1_one_of_one_per_nest_usdc != null ? Number(data.gen1_one_of_one_per_nest_usdc) : null,
     gen2_per_nest_sol: data.gen2_per_nest_sol != null ? Number(data.gen2_per_nest_sol) : null,
     gen2_per_nest_usdc: data.gen2_per_nest_usdc != null ? Number(data.gen2_per_nest_usdc) : null,
     finalized_at: data.finalized_at != null ? String(data.finalized_at) : null,
@@ -90,8 +108,14 @@ export async function finalizeGenOwlRevSharePeriod(input: {
   period_month: string
   gen1_eligible_count: number
   gen2_eligible_count: number
+  gen1_standard_eligible_count: number
+  gen1_one_of_one_eligible_count: number
   gen1_per_nest_sol: number | null
   gen1_per_nest_usdc: number | null
+  gen1_standard_per_nest_sol: number | null
+  gen1_standard_per_nest_usdc: number | null
+  gen1_one_of_one_per_nest_sol: number | null
+  gen1_one_of_one_per_nest_usdc: number | null
   gen2_per_nest_sol: number | null
   gen2_per_nest_usdc: number | null
 }): Promise<GenOwlRevSharePeriodRow | null> {
@@ -101,8 +125,14 @@ export async function finalizeGenOwlRevSharePeriod(input: {
     .update({
       gen1_eligible_count: input.gen1_eligible_count,
       gen2_eligible_count: input.gen2_eligible_count,
+      gen1_standard_eligible_count: input.gen1_standard_eligible_count,
+      gen1_one_of_one_eligible_count: input.gen1_one_of_one_eligible_count,
       gen1_per_nest_sol: input.gen1_per_nest_sol,
       gen1_per_nest_usdc: input.gen1_per_nest_usdc,
+      gen1_standard_per_nest_sol: input.gen1_standard_per_nest_sol,
+      gen1_standard_per_nest_usdc: input.gen1_standard_per_nest_usdc,
+      gen1_one_of_one_per_nest_sol: input.gen1_one_of_one_per_nest_sol,
+      gen1_one_of_one_per_nest_usdc: input.gen1_one_of_one_per_nest_usdc,
       gen2_per_nest_sol: input.gen2_per_nest_sol,
       gen2_per_nest_usdc: input.gen2_per_nest_usdc,
       finalized_at: new Date().toISOString(),

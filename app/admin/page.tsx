@@ -30,7 +30,11 @@ import { DEV_TASK_SCREENSHOT_MAX_BYTES, DEV_TASK_SCREENSHOT_MAX_FILES } from '@/
 import { AdminCreatorBlacklist } from '@/components/AdminCreatorBlacklist'
 import { GenOwlRevShareAdminPreview } from '@/components/nesting/GenOwlRevShareNotice'
 import { genOwlStakingGroupLabel } from '@/lib/nesting/gen-owl-staking-groups'
-import { buildGenOwlRevSharePreview } from '@/lib/nesting/gen-owl-rev-share'
+import {
+  buildGenOwlRevSharePreview,
+  computeGen1RevShareBucketAmounts,
+  type Gen1RevShareBucketPreview,
+} from '@/lib/nesting/gen-owl-rev-share'
 import { AdminActionInboxTerminal } from '@/components/admin/AdminActionInboxTerminal'
 import { AdminReferralPerformanceSection } from '@/components/admin/AdminReferralPerformanceSection'
 import { AdminLeaderboardSnapshotSection } from '@/components/admin/AdminLeaderboardSnapshotSection'
@@ -273,6 +277,9 @@ export default function AdminDashboardPage() {
     gen2_total_usdc: '',
   })
   const [genOwlRevShareNestCounts, setGenOwlRevShareNestCounts] = useState({ gen1: 0, gen2: 0 })
+  const [gen1RevShareBucketPreview, setGen1RevShareBucketPreview] = useState<Gen1RevShareBucketPreview | null>(
+    null
+  )
   const [loadingRevenue, setLoadingRevenue] = useState(false)
   const [autoRefreshTick, setAutoRefreshTick] = useState(0)
 
@@ -1017,6 +1024,7 @@ export default function AdminDashboardPage() {
           gen1: data?.gen1?.active_nest_count ?? 0,
           gen2: data?.gen2?.active_nest_count ?? 0,
         })
+        setGen1RevShareBucketPreview(data?.gen1?.gen1_buckets ?? null)
       } catch (e) {
         console.error('Error fetching Gen owl rev share counts:', e)
       }
@@ -1064,27 +1072,38 @@ export default function AdminDashboardPage() {
     }
   }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick])
 
-  const gen1RevSharePreview = useMemo(
-    () =>
-      buildGenOwlRevSharePreview({
-        group: 'gen1-owl',
-        label: genOwlStakingGroupLabel('gen1-owl'),
-        activeNestCount: genOwlRevShareNestCounts.gen1,
-        totalSol:
-          revShareScheduleEdit.gen1_total_sol.trim() === ''
-            ? null
-            : Number.parseFloat(revShareScheduleEdit.gen1_total_sol),
-        totalUsdc:
-          revShareScheduleEdit.gen1_total_usdc.trim() === ''
-            ? null
-            : Number.parseFloat(revShareScheduleEdit.gen1_total_usdc),
-      }),
-    [
-      genOwlRevShareNestCounts.gen1,
-      revShareScheduleEdit.gen1_total_sol,
-      revShareScheduleEdit.gen1_total_usdc,
-    ]
-  )
+  const gen1RevSharePreview = useMemo(() => {
+    const totalSol =
+      revShareScheduleEdit.gen1_total_sol.trim() === ''
+        ? null
+        : Number.parseFloat(revShareScheduleEdit.gen1_total_sol)
+    const totalUsdc =
+      revShareScheduleEdit.gen1_total_usdc.trim() === ''
+        ? null
+        : Number.parseFloat(revShareScheduleEdit.gen1_total_usdc)
+    const gen1Buckets = gen1RevShareBucketPreview
+      ? computeGen1RevShareBucketAmounts({
+          totalSol,
+          totalUsdc,
+          standardCount: gen1RevShareBucketPreview.standard_count,
+          oneOfOneCount: gen1RevShareBucketPreview.one_of_one_count,
+        })
+      : undefined
+
+    return buildGenOwlRevSharePreview({
+      group: 'gen1-owl',
+      label: genOwlStakingGroupLabel('gen1-owl'),
+      activeNestCount: genOwlRevShareNestCounts.gen1,
+      totalSol,
+      totalUsdc,
+      gen1Buckets,
+    })
+  }, [
+    genOwlRevShareNestCounts.gen1,
+    revShareScheduleEdit.gen1_total_sol,
+    revShareScheduleEdit.gen1_total_usdc,
+    gen1RevShareBucketPreview,
+  ])
 
   const gen2RevSharePreview = useMemo(
     () =>
@@ -2502,8 +2521,8 @@ export default function AdminDashboardPage() {
         >
           <CardDescription className="mb-4">
             Set the date and total amounts for the next rev share (homepage holder pool). Gen 1 and Gen 2 nesting
-            pools are separate — each total is split evenly across active nests in that generation. Not auto-calculated
-            from revenue; enter totals when you are ready to pay out.
+            pools are separate. Gen 1 uses a 90% / 10% split (all staked vs 1/1 staked); Gen 2 is an even split
+            across active nests. Not auto-calculated from revenue; enter totals when you are ready to pay out.
           </CardDescription>
           <div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
@@ -2550,8 +2569,8 @@ export default function AdminDashboardPage() {
               <div>
                 <h3 className="text-sm font-semibold text-foreground">Gen 1 nest rev share</h3>
                 <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                  Total SOL/USDC for Gen 1 owl stakers — divided evenly across every active Gen 1 nest (90d and 180d
-                  tiers combined).
+                  Total SOL/USDC for Gen 1 owl stakers — 90% divided evenly across all staked Gen 1 owls; 10% divided
+                  evenly across staked Gen 1 1/1s (90d and 180d tiers combined).
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">

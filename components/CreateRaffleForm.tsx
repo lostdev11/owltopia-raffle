@@ -2329,7 +2329,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 className="mt-1 h-5 w-5"
               />
               <span>
-                <span className="text-sm font-medium text-foreground">Add bonus milestone(s)</span>
+                <span className="text-sm font-medium text-foreground">Milestone Rewards — bonus prizes at ticket goals</span>
                 <span className="block text-xs text-amber-200/90 mt-0.5">{MILESTONE_BETA_NOTICE}</span>
                 <span className="block text-xs text-muted-foreground mt-0.5">
                   Bonuses in the same currency as your prize are charged in the same wallet step as the main prize.

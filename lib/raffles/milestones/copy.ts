@@ -5,9 +5,9 @@ import type {
 } from '@/lib/types'
 import { MILESTONE_MAX_PRIZE_SOL, milestoneMaxPrizeUsdc } from '@/lib/raffles/milestones/constants'
 
-/** Shown on create form, raffle detail, and How it works while milestones are in beta. */
+/** Shown on create form, raffle detail, and How it works. */
 export const MILESTONE_BETA_NOTICE =
-  'Bonus milestones are in beta: SOL or USDC side prizes only (no NFT bonuses yet). Rules and UI may change.'
+  'Add SOL or USDC bonus prizes at ticket milestones — prefunded in escrow before your raffle goes live. NFT bonuses coming soon.'
 
 export function milestoneWinnerModeLabel(mode: RaffleMilestoneWinnerMode): string {
   switch (mode) {

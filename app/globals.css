@@ -722,10 +722,10 @@ body.mobile-wallet-context .wallet-connect-wrapper button {
   }
 }
 
-/* Scroll reveal for raffle list (mobile): visible by default; animate slide-up when card enters viewport */
+/* Scroll reveal for raffle list (mobile): no layout offset — cards render in place while scrolling */
 .raffle-scroll-reveal {
   opacity: 1;
-  transform: translateY(14px);
+  transform: none;
 }
 .raffle-scroll-reveal.raffle-scroll-visible {
   animation: raffle-scroll-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;

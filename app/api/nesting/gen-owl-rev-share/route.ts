@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/nesting/gen-owl-rev-share
- * Public. Founder-set Gen 1 / Gen 2 rev share totals + even split per active nest.
+ * Public. Founder-set Gen 1 / Gen 2 rev share totals + per-bucket preview for Gen 1 (90/10).
  */
 export async function GET() {
   try {

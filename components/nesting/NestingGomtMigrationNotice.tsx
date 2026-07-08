@@ -4,6 +4,10 @@ import Link from 'next/link'
 import { ArrowRight, ExternalLink } from 'lucide-react'
 
 import { GOMT_LABZ_STAKING_URL } from '@/lib/nesting/nft-stake-eligibility'
+import {
+  GOMT_MIGRATION_OPTIONAL,
+  GOMT_RESTAKE_REQUIRED_IF_CONTINUING,
+} from '@/lib/nesting/gomt-migration-copy'
 
 /**
  * Holder-facing notice: staking moved from GOMT Labz to Owltopia Nesting.
@@ -16,8 +20,9 @@ export function NestingGomtMigrationNotice() {
       role="status"
     >
       <p className="font-medium text-foreground">Staking now lives on Owltopia</p>
-      <p className="mt-1 text-muted-foreground leading-relaxed">
-        If you were nesting on{' '}
+      <p className="mt-1 text-muted-foreground leading-relaxed">{GOMT_MIGRATION_OPTIONAL}</p>
+      <p className="mt-2 text-muted-foreground leading-relaxed">
+        If you want to keep nesting and your owl is still on{' '}
         <a
           href={GOMT_LABZ_STAKING_URL}
           target="_blank"
@@ -28,8 +33,7 @@ export function NestingGomtMigrationNotice() {
           <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
         </a>
         , finish there first: <span className="font-medium text-foreground/90">unstake</span> or wait until your lock
-        period ends. You cannot hold the same NFT in both places — Owltopia nests start fresh with a new lock timer and
-        new rewards.
+        period ends. {GOMT_RESTAKE_REQUIRED_IF_CONTINUING}
       </p>
       <p className="mt-2 text-muted-foreground leading-relaxed">
         On mobile, connect your wallet in the header, open{' '}

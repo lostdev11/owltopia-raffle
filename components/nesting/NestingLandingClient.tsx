@@ -14,7 +14,7 @@ import { StakingPoolCard } from '@/components/nesting/StakingPoolCard'
 import { ConsolidatedGenOwlStakingCard } from '@/components/nesting/ConsolidatedGenOwlStakingCard'
 import { buildNestingPerchDisplayList } from '@/lib/nesting/gen-owl-staking-groups'
 import { filterPoolsForPublicNestingCatalog } from '@/lib/nesting/perch-catalog'
-import { SectionHeader } from '@/components/council/SectionHeader'
+import { GOMT_MIGRATION_FAQ } from '@/lib/nesting/gomt-migration-copy'
 import { EmptyState } from '@/components/council/EmptyState'
 import { nestingMutedActionButtonClass } from '@/lib/nesting/ui-classes'
 import { NestingGomtMigrationNotice } from '@/components/nesting/NestingGomtMigrationNotice'
@@ -289,6 +289,7 @@ export function NestingLandingClient({
         <SectionHeader title="FAQ" />
         <div className="rounded-xl border border-border/60 bg-background/40 divide-y divide-border/60">
           {[
+            ...GOMT_MIGRATION_FAQ,
             {
               q: 'Is there a platform fee for nesting?',
               a: 'Yes — when enabled, each nest action (stake, claim OWL, or leave nest) includes a small SOL platform fee per NFT. Your wallet will ask you to approve it before the action completes.',
@@ -299,7 +300,7 @@ export function NestingLandingClient({
             },
             {
               q: 'When can I claim OWL rewards?',
-              a: 'Anytime you have a balance waiting. Claim OWL daily for raffle tickets—or let it pile up and grab it in one swoop.',
+              a: 'OWL accrues daily while nested, but you claim it yourself from My nest when you are ready — at least 1 OWL per nest claim, or use Claim all on mobile when multiple nests are ready.',
             },
             {
               q: 'Why do you ask me to sign a message on the dashboard?',

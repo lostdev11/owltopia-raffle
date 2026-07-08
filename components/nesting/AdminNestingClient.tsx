@@ -15,6 +15,7 @@ import type {
   RewardRateUnit,
   NestingAdapterMode,
   LockEnforcementSource,
+  NftLockStandard,
 } from '@/lib/db/staking-pools'
 import { getCachedAdmin, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
@@ -45,6 +46,7 @@ const emptyForm = () => ({
   display_order: '0',
   is_active: true,
   partner_project_slug: '',
+  nft_lock_standard: 'auto' as NftLockStandard,
   adapter_mode: 'mock' as NestingAdapterMode,
   lock_enforcement_source: 'database' as LockEnforcementSource,
   is_onchain_enabled: false,
@@ -75,6 +77,8 @@ export function AdminNestingClient() {
   const [quickLocked, setQuickLocked] = useState(true)
   const [quickMaxLockDays, setQuickMaxLockDays] = useState('365')
   const [quickMinLockDays, setQuickMinLockDays] = useState('30')
+  const [quickPartnerSlug, setQuickPartnerSlug] = useState('')
+  const [quickLockStandard, setQuickLockStandard] = useState<NftLockStandard>('auto')
   const [savingPoolId, setSavingPoolId] = useState<string | null>(null)
   const [reconciling, setReconciling] = useState(false)
   const [reconcileMsg, setReconcileMsg] = useState<string | null>(null)
@@ -419,6 +423,11 @@ export function AdminNestingClient() {
 
     setSaving(true)
     try {
+      const onchain =
+        quickLockStandard !== 'database_only' &&
+        (quickLockStandard === 'auto' ||
+          quickLockStandard === 'mpl_core_freeze_delegate' ||
+          quickLockStandard === 'spl_token_account_freeze')
       const res = await fetch('/api/admin/staking/pools', {
         method: 'POST',
         credentials: 'include',
@@ -439,10 +448,11 @@ export function AdminNestingClient() {
           platform_fee_bps: 0,
           display_order: 0,
           is_active: true,
-          partner_project_slug: null,
-          adapter_mode: 'mock',
-          lock_enforcement_source: 'database',
-          is_onchain_enabled: false,
+          partner_project_slug: quickPartnerSlug.trim() || null,
+          nft_lock_standard: quickLockStandard,
+          adapter_mode: onchain ? 'onchain_enabled' : 'mock',
+          lock_enforcement_source: onchain ? 'hybrid' : 'database',
+          is_onchain_enabled: onchain,
           requires_onchain_sync: false,
         }),
       })
@@ -456,6 +466,8 @@ export function AdminNestingClient() {
       setQuickLocked(true)
       setQuickMaxLockDays('365')
       setQuickMinLockDays('30')
+      setQuickPartnerSlug('')
+      setQuickLockStandard('auto')
       await fetchPools()
     } finally {
       setSaving(false)
@@ -487,6 +499,7 @@ export function AdminNestingClient() {
           display_order: Number(form.display_order),
           is_active: form.is_active,
           partner_project_slug: form.partner_project_slug || null,
+          nft_lock_standard: form.nft_lock_standard,
           adapter_mode: form.adapter_mode,
           lock_enforcement_source: form.lock_enforcement_source,
           is_onchain_enabled: form.is_onchain_enabled,
@@ -1102,6 +1115,37 @@ export function AdminNestingClient() {
                 </div>
               </div>
             ) : null}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="qk-partner">Partner slug (optional)</Label>
+                <Input
+                  id="qk-partner"
+                  autoComplete="off"
+                  placeholder="e.g. lesharx"
+                  value={quickPartnerSlug}
+                  onChange={(e) => setQuickPartnerSlug(e.target.value)}
+                  className="min-h-[44px] touch-manipulation"
+                />
+                <p className="text-xs text-muted-foreground">Shown on nest cards for partner-branded perches.</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="qk-lock-standard">NFT lock standard</Label>
+                <select
+                  id="qk-lock-standard"
+                  value={quickLockStandard}
+                  onChange={(e) => setQuickLockStandard(e.target.value as NftLockStandard)}
+                  className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-sm touch-manipulation"
+                >
+                  <option value="auto">Auto-detect (Helius)</option>
+                  <option value="mpl_core_freeze_delegate">Metaplex Core freeze</option>
+                  <option value="spl_token_account_freeze">SPL token account freeze</option>
+                  <option value="database_only">Preview only (DB lock)</option>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Partner collections should use Core or SPL freeze — not preview mode. Run freeze-readiness after create.
+                </p>
+              </div>
+            </div>
             <div className="flex flex-wrap gap-3">
               <Button
                 type="button"
@@ -1208,6 +1252,22 @@ export function AdminNestingClient() {
             <div className="space-y-2">
               <Label htmlFor="np-partner">Partner slug (optional)</Label>
               <Input id="np-partner" value={form.partner_project_slug} onChange={(e) => setForm((f) => ({ ...f, partner_project_slug: e.target.value }))} className="min-h-[44px]" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="np-lock-standard">NFT lock standard</Label>
+              <select
+                id="np-lock-standard"
+                className="flex h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[44px]"
+                value={form.nft_lock_standard}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, nft_lock_standard: e.target.value as NftLockStandard }))
+                }
+              >
+                <option value="auto">auto</option>
+                <option value="mpl_core_freeze_delegate">mpl_core_freeze_delegate</option>
+                <option value="spl_token_account_freeze">spl_token_account_freeze</option>
+                <option value="database_only">database_only</option>
+              </select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="np-adapter">Default adapter mode</Label>

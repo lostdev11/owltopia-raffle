@@ -80,6 +80,8 @@ function LeaderboardTable({
   valueLabel,
   icon: Icon,
   displayNames,
+  defaultOpen = false,
+  flatHeader = false,
 }: {
   title: string
   description: string
@@ -87,25 +89,41 @@ function LeaderboardTable({
   valueLabel: string
   icon: React.ElementType
   displayNames: Record<string, string>
+  defaultOpen?: boolean
+  /** When true, title + description always visible (mobile single-table view). */
+  flatHeader?: boolean
 }) {
+  const titleRow = (
+    <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+      <Icon className="h-5 w-5 text-green-500 shrink-0" aria-hidden />
+      <span className={flatHeader ? undefined : 'underline-offset-2 group-open:underline hover:underline'}>
+        {title}
+      </span>
+      {!flatHeader ? (
+        <ChevronDown
+          className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180 ml-auto"
+          aria-hidden
+        />
+      ) : null}
+    </CardTitle>
+  )
+
   return (
     <Card className="border-green-500/20 bg-black/40 overflow-visible">
       <CardHeader className="pb-2 sm:pb-6">
-        <details className="group">
-          <summary className="list-none cursor-pointer touch-manipulation min-h-[44px] [&::-webkit-details-marker]:hidden">
-            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-              <Icon className="h-5 w-5 text-green-500 shrink-0" aria-hidden />
-              <span className="underline-offset-2 group-open:underline hover:underline">{title}</span>
-              <ChevronDown
-                className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180 ml-auto"
-                aria-hidden
-              />
-            </CardTitle>
-          </summary>
-          <CardDescription className="text-xs sm:text-sm mt-2 leading-relaxed break-words">
-            {description}
-          </CardDescription>
-        </details>
+        {flatHeader ? (
+          <div className="space-y-2">
+            {titleRow}
+            <CardDescription className="text-xs sm:text-sm leading-relaxed break-words">{description}</CardDescription>
+          </div>
+        ) : (
+          <details className="group" defaultOpen={defaultOpen || undefined}>
+            <summary className="list-none cursor-pointer touch-manipulation min-h-[44px] [&::-webkit-details-marker]:hidden">
+              {titleRow}
+            </summary>
+            <CardDescription className="text-xs sm:text-sm mt-2 leading-relaxed break-words">{description}</CardDescription>
+          </details>
+        )}
       </CardHeader>
       <CardContent>
         {entries.length === 0 ? (
@@ -176,6 +194,57 @@ const MONTH_OPTIONS = [
   { value: 12, label: 'December' },
 ]
 
+type LeaderboardCategory =
+  | 'ticketsPurchased'
+  | 'rafflesEntered'
+  | 'rafflesCreated'
+  | 'rafflesWon'
+  | 'ticketsSold'
+
+const LEADERBOARD_CATEGORIES: {
+  key: LeaderboardCategory
+  title: string
+  valueLabel: string
+  icon: React.ElementType
+  descriptionKey: keyof ReturnType<typeof leaderboardTableDescriptions>
+}[] = [
+  {
+    key: 'ticketsPurchased',
+    title: 'Most tickets purchased',
+    valueLabel: 'Tickets',
+    icon: ShoppingCart,
+    descriptionKey: 'ticketsPurchased',
+  },
+  {
+    key: 'rafflesEntered',
+    title: 'Most raffles entered',
+    valueLabel: 'Raffles',
+    icon: Ticket,
+    descriptionKey: 'rafflesEntered',
+  },
+  {
+    key: 'rafflesCreated',
+    title: 'Most raffles created',
+    valueLabel: 'Raffles',
+    icon: PlusCircle,
+    descriptionKey: 'rafflesCreated',
+  },
+  {
+    key: 'rafflesWon',
+    title: 'Most raffles won',
+    valueLabel: 'Wins',
+    icon: Crown,
+    descriptionKey: 'rafflesWon',
+  },
+  {
+    key: 'ticketsSold',
+    title: 'Most tickets sold',
+    valueLabel: 'Tickets',
+    icon: Trophy,
+    descriptionKey: 'ticketsSold',
+  },
+]
+
 export default function LeaderboardPage() {
   const initial = useMemo(() => utcNowYm(), [])
   const [periodKind, setPeriodKind] = useState<PeriodKind>('month')
@@ -185,6 +254,7 @@ export default function LeaderboardPage() {
   const [data, setData] = useState<LeaderboardData | null>(null)
   const [periodMeta, setPeriodMeta] = useState<LeaderboardPeriodMeta | null>(null)
   const [displayNames, setDisplayNames] = useState<Record<string, string>>({})
+  const [mobileCategory, setMobileCategory] = useState<LeaderboardCategory>('ticketsPurchased')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -255,6 +325,19 @@ export default function LeaderboardPage() {
 
   const descriptions = leaderboardTableDescriptions(periodMeta)
 
+  const leaderboardEntries = useMemo(() => {
+    if (!data) return null
+    return {
+      ticketsPurchased: data.ticketsPurchased ?? [],
+      rafflesEntered: data.rafflesEntered,
+      rafflesCreated: data.rafflesCreated,
+      rafflesWon: data.rafflesWon,
+      ticketsSold: data.ticketsSold,
+    }
+  }, [data])
+
+  const mobileCategoryConfig = LEADERBOARD_CATEGORIES.find((c) => c.key === mobileCategory)!
+
   return (
     <div className="container mx-auto py-6 sm:py-8 px-3 sm:px-4 max-w-5xl min-h-0">
       <div className="flex items-center gap-3 sm:gap-4 mb-6">
@@ -298,7 +381,8 @@ export default function LeaderboardPage() {
         )}
       </div>
 
-      <div className="flex flex-col gap-3 sm:gap-4 mb-6 sm:mb-8">
+      <div className="sticky top-0 z-10 -mx-3 mb-6 sm:-mx-4 sm:mb-8 border-b border-border/40 bg-background/95 px-3 py-3 backdrop-blur-md sm:px-4">
+        <div className="flex flex-col gap-3 sm:gap-4">
         <div className="flex flex-wrap gap-2" role="tablist" aria-label="Leaderboard period">
           {(
             [
@@ -392,6 +476,32 @@ export default function LeaderboardPage() {
             </select>
           </label>
         )}
+
+        {!loading && !error && data ? (
+          <div className="md:hidden space-y-2 pt-1 border-t border-border/30">
+            <p className="text-xs text-muted-foreground">Category</p>
+            <div
+              className="flex gap-2 overflow-x-auto pb-0.5 -mx-1 px-1 scrollbar-themed snap-x snap-mandatory"
+              role="tablist"
+              aria-label="Leaderboard category"
+            >
+              {LEADERBOARD_CATEGORIES.map(({ key, title }) => (
+                <Button
+                  key={key}
+                  type="button"
+                  variant={mobileCategory === key ? 'default' : 'outline'}
+                  size="sm"
+                  className="shrink-0 snap-start touch-manipulation min-h-[44px] px-3 text-xs max-w-[85vw] truncate"
+                  onClick={() => setMobileCategory(key)}
+                  aria-pressed={mobileCategory === key}
+                >
+                  {title}
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        </div>
       </div>
 
       {loading && (
@@ -403,8 +513,21 @@ export default function LeaderboardPage() {
 
       {error && <p className="text-destructive py-4">{error}</p>}
 
-      {!loading && !error && data && (
-        <div className="grid gap-4 sm:gap-6 grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+      {!loading && !error && data && leaderboardEntries && (
+        <>
+          <div className="md:hidden">
+            <LeaderboardTable
+              title={mobileCategoryConfig.title}
+              description={descriptions[mobileCategoryConfig.descriptionKey]}
+              entries={leaderboardEntries[mobileCategory]}
+              valueLabel={mobileCategoryConfig.valueLabel}
+              icon={mobileCategoryConfig.icon}
+              displayNames={displayNames}
+              flatHeader
+            />
+          </div>
+
+          <div className="hidden md:grid gap-4 sm:gap-6 grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
           <LeaderboardTable
             title="Most raffles entered"
             description={descriptions.rafflesEntered}
@@ -420,6 +543,7 @@ export default function LeaderboardPage() {
             valueLabel="Tickets"
             icon={ShoppingCart}
             displayNames={displayNames}
+            defaultOpen
           />
           <LeaderboardTable
             title="Most raffles created"
@@ -446,6 +570,7 @@ export default function LeaderboardPage() {
             displayNames={displayNames}
           />
         </div>
+        </>
       )}
     </div>
   )

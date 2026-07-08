@@ -58,6 +58,12 @@ function formatMultiCurrency(by: Record<string, number>): string {
     .join(' · ')
 }
 
+function estimateNetByCurrency(gross: Record<string, number>, feeBps: number): Record<string, number> {
+  if (feeBps <= 0) return { ...gross }
+  const factor = 1 - feeBps / 10_000
+  return Object.fromEntries(Object.entries(gross).map(([cur, v]) => [cur, v * factor]))
+}
+
 function formatCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 10_000) return `${(n / 1_000).toFixed(1)}k`
@@ -346,6 +352,77 @@ function ReferrerAvatar({ name }: { name: string }) {
   )
 }
 
+function RaffleMobileCard({ row }: { row: CreatorRaffleAnalyticsRow }) {
+  const status = raffleStatusLabel(row.status, row.endTime)
+  const isActive = status === 'Active'
+  const isRefund = status === 'Refunding' || status === 'Min not met'
+
+  return (
+    <Link
+      href={`/raffles/${encodeURIComponent(row.slug)}`}
+      className="flex min-h-[44px] flex-col gap-3 rounded-xl border border-border/60 bg-background/50 p-3 touch-manipulation transition-colors hover:bg-muted/20"
+    >
+      <div className="flex items-start gap-3">
+        <span className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-muted ring-1 ring-border/50">
+          {row.imageUrl ? (
+            <Image src={row.imageUrl} alt="" fill className="object-cover" sizes="44px" unoptimized />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center">
+              <Bird className="h-4 w-4 text-emerald-500/70" aria-hidden />
+            </span>
+          )}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">{row.title}</p>
+          <p className="text-[11px] text-muted-foreground">{raffleTimeHint(row.endTime, row.status)}</p>
+          <span
+            className={`mt-1.5 inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
+              isActive
+                ? 'bg-blue-500/15 text-blue-400 ring-1 ring-blue-500/30'
+                : isRefund
+                  ? 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/30'
+                  : 'bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30'
+            }`}
+          >
+            {status}
+          </span>
+        </div>
+      </div>
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+        <div>
+          <dt className="text-muted-foreground">Views</dt>
+          <dd className="font-medium tabular-nums">{row.views.toLocaleString()}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Tickets</dt>
+          <dd className="font-medium tabular-nums">{row.confirmedTickets.toLocaleString()}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Buyers</dt>
+          <dd className="font-medium tabular-nums">{row.uniqueBuyers.toLocaleString()}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Sell-through</dt>
+          <dd className="font-medium tabular-nums">{pct(row.sellThroughRate)}</dd>
+        </div>
+        <div className="col-span-2">
+          <dt className="text-muted-foreground">Revenue</dt>
+          <dd className="font-medium tabular-nums">{formatMultiCurrency(row.grossRevenueByCurrency)}</dd>
+        </div>
+        {row.referralTickets > 0 ? (
+          <div className="col-span-2">
+            <dt className="text-muted-foreground">Referrals</dt>
+            <dd className="font-medium tabular-nums">
+              {row.referralTickets.toLocaleString()} tickets ·{' '}
+              {formatMultiCurrency(row.referralRevenueByCurrency)}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </Link>
+  )
+}
+
 function RaffleRow({ row }: { row: CreatorRaffleAnalyticsRow }) {
   const status = raffleStatusLabel(row.status, row.endTime)
   const isActive = status === 'Active'
@@ -401,7 +478,7 @@ function RaffleRow({ row }: { row: CreatorRaffleAnalyticsRow }) {
   )
 }
 
-export function CreatorAnalyticsSection() {
+export function CreatorAnalyticsSection({ feeBps = 600 }: { feeBps?: number }) {
   const [period, setPeriod] = useState<string>('30')
   const [data, setData] = useState<CreatorAnalyticsPayload | null>(null)
   const [loading, setLoading] = useState(true)
@@ -472,6 +549,15 @@ export function CreatorAnalyticsSection() {
   }
 
   const { totals, growth, funnel, referralInsights, dailySeries, topReferrers, raffles } = data
+  const estimatedNet = estimateNetByCurrency(totals.grossRevenueByCurrency, feeBps)
+  const feeLabel = feeBps === 300 ? '3%' : feeBps === 600 ? '6%' : `${(feeBps / 100).toFixed(1)}%`
+  const updatedLabel = (() => {
+    try {
+      return formatDistanceToNow(parseISO(data.updatedAt), { addSuffix: true })
+    } catch {
+      return null
+    }
+  })()
 
   return (
     <div className="space-y-6">
@@ -487,6 +573,9 @@ export function CreatorAnalyticsSection() {
           <p className="text-sm text-muted-foreground">
             Track your raffle performance, referrals, and growth on Owltopia.
           </p>
+          {updatedLabel ? (
+            <p className="text-xs text-muted-foreground">Updated {updatedLabel}</p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="sr-only" htmlFor="analytics-period">
@@ -525,7 +614,7 @@ export function CreatorAnalyticsSection() {
       ) : null}
 
       {/* KPI row */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         <MetricCard
           icon={<Eye className="h-4 w-4 text-violet-300" aria-hidden />}
           label="Views"
@@ -553,6 +642,13 @@ export function CreatorAnalyticsSection() {
           value={formatMultiCurrency(totals.grossRevenueByCurrency)}
           growth={growth.grossRevenue}
           accent="bg-amber-500/15"
+        />
+        <MetricCard
+          icon={<Coins className="h-4 w-4 text-emerald-300" aria-hidden />}
+          label={`Est. net (${feeLabel} fee)`}
+          value={formatMultiCurrency(estimatedNet)}
+          growth={null}
+          accent="bg-emerald-500/15"
         />
         <MetricCard
           icon={<Share2 className="h-4 w-4 text-indigo-300" aria-hidden />}
@@ -635,7 +731,12 @@ export function CreatorAnalyticsSection() {
           <CardDescription>{periodLabel} · sell-through and referral breakdown per raffle</CardDescription>
         </CardHeader>
         <CardContent className="px-3 pb-3 sm:px-6 sm:pb-6">
-          <table className="w-full table-fixed text-sm">
+          <div className="space-y-3 md:hidden">
+            {raffles.map((r) => (
+              <RaffleMobileCard key={r.raffleId} row={r} />
+            ))}
+          </div>
+          <table className="hidden w-full table-fixed text-sm md:table">
             <colgroup>
               <col className="w-[26%]" />
               <col className="w-[7%]" />
@@ -706,7 +807,8 @@ export function CreatorAnalyticsSection() {
             </div>
           </div>
           <p className="mt-3 text-[11px] text-muted-foreground">
-            Data for {periodLabel.toLowerCase()}. Refreshes when you open this tab.
+            Data for {periodLabel.toLowerCase()}.
+            {updatedLabel ? ` Last refreshed ${updatedLabel}.` : ' Refreshes when you open this tab.'}
           </p>
         </CardContent>
       </Card>

@@ -20,6 +20,8 @@ import {
   type PurchaseCompletedDetail,
 } from '@/lib/cart/purchase-complete-events'
 import { fetchEntriesByRaffleIdsClient } from '@/lib/raffles/fetch-entries-bulk-client'
+import { fetchMintNftMetadata } from '@/lib/client/nft-metadata-client'
+import { isMobileDevice } from '@/lib/utils'
 
 type CardSize = 'small' | 'medium' | 'large'
 type SortOption = 'days-left' | 'date' | 'ticket-price'
@@ -117,8 +119,13 @@ export function RafflesList({
   const list = rafflesWithEntries ?? []
   const [filteredRaffles, setFilteredRaffles] = useState(list)
   const [sortBy, setSortBy] = useState<SortOption>('days-left')
+  const [isMobile, setIsMobile] = useState(false)
   // Always use 'small' size as the only option
   const size: CardSize = 'small'
+
+  useEffect(() => {
+    setIsMobile(isMobileDevice())
+  }, [])
 
   // Use ref to track current raffles without causing re-renders
   const rafflesRef = useRef(list)
@@ -174,6 +181,18 @@ export function RafflesList({
     }),
     [sortedRaffles]
   )
+
+  // Parent effect runs before child RaffleCards — batch-warm mint metadata for NFT fallback thumbs.
+  // On mobile, cap upfront prefetch so scroll stays responsive; off-screen cards load via viewport gate.
+  useEffect(() => {
+    const nftRaffles = sortedRaffles.filter(
+      ({ raffle }) => raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim()
+    )
+    const prefetchCap = isMobile ? 8 : nftRaffles.length
+    for (const { raffle } of nftRaffles.slice(0, prefetchCap)) {
+      void fetchMintNftMetadata(raffle.nft_mint_address!.trim(), true)
+    }
+  }, [sortedRaffles, isMobile])
 
   // Notify parent when “flex” raffles change: above listed floor when parseable, else composite threshold.
   useEffect(() => {
@@ -448,7 +467,7 @@ export function RafflesList({
           section={section}
           profitInfo={profitInfo}
           onDeleted={handleRaffleDeleted}
-          priority={flatIndex < 6}
+          priority={flatIndex < (isMobile ? 3 : 6)}
           serverNow={serverNow}
           isPartnerCommunity={isPartnerCommunity}
         />

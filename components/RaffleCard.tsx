@@ -62,6 +62,8 @@ import {
 import { useCart } from '@/components/cart/CartProvider'
 import { shareRaffleFromBrowser } from '@/lib/client/raffle-share'
 import { useImageAttemptTimeout } from '@/lib/use-image-attempt-timeout'
+import { fetchMintNftMetadata } from '@/lib/client/nft-metadata-client'
+import { useNearViewportOnce } from '@/hooks/use-near-viewport-once'
 
 /** GIF/animated WebP: avoid Next image optimizer for proxy URLs (matches RaffleDetailClient). */
 function raffleImageUnoptimized(src: string): boolean {
@@ -186,6 +188,10 @@ export function RaffleCard({
     setNow(new Date())
   }, [])
 
+  const enableThumbViewportGate = size === 'small' && !priority
+  const { ref: thumbViewportRef, visible: thumbNearViewport } = useNearViewportOnce('400px 0px')
+  const imageLoadActive = !enableThumbViewportGate || thumbNearViewport
+
   const canListMintThumb =
     raffle.prize_type === 'nft' && !!(raffle.nft_mint_address && raffle.nft_mint_address.trim())
 
@@ -201,17 +207,17 @@ export function RaffleCard({
   }, [imageModalOpen])
 
   useEffect(() => {
+    if (!imageLoadActive) return
     if (thumbIdx < imageAttemptChain.length) return
     if (!canListMintThumb || listMintThumbSrc || listMintThumbLoading) return
     const mint = raffle.nft_mint_address?.trim()
     if (!mint) return
     setListMintThumbLoading(true)
     let cancelled = false
-    fetch(`/api/nft/metadata-image?mint=${encodeURIComponent(mint)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { image?: string | null } | null) => {
+    fetchMintNftMetadata(mint, true)
+      .then((data) => {
         if (cancelled) return
-        const raw = typeof data?.image === 'string' ? data.image.trim() : ''
+        const raw = data.image?.trim() ?? ''
         if (!raw) {
           setListMintThumbLoading(false)
           return
@@ -234,6 +240,7 @@ export function RaffleCard({
     raffle.nft_mint_address,
     listMintThumbSrc,
     listMintThumbLoading,
+    imageLoadActive,
   ])
 
   const tryNextThumb = useCallback(() => {
@@ -287,7 +294,7 @@ export function RaffleCard({
     listThumbSrc === '/solana-mark.svg' || listThumbSrc === '/usdc.png'
   const listThumbMintLoading =
     thumbIdx >= imageAttemptChain.length && listMintThumbLoading && !listMintThumbSrc
-  const listThumbDead = !listThumbSrc && !listThumbMintLoading
+  const listThumbDead = imageLoadActive && !listThumbSrc && !listThumbMintLoading
 
   const promoPngImageAttemptUrls = useMemo(() => {
     const urls = [...imageAttemptChain]
@@ -296,9 +303,10 @@ export function RaffleCard({
   }, [imageAttemptChain, listMintThumbSrc])
 
   useImageAttemptTimeout(
-    Boolean(listThumbSrc) && !listThumbMintLoading && !thumbLoaded,
+    imageLoadActive && Boolean(listThumbSrc) && !listThumbMintLoading && !thumbLoaded,
     `${thumbIdx}:${listThumbSrc}`,
-    onThumbTimeout
+    onThumbTimeout,
+    size === 'small' ? 4000 : 8000
   )
 
   const owlVisionScore = calculateOwlVisionScore(raffle, entries)
@@ -560,6 +568,7 @@ export function RaffleCard({
 
     return (
       <div
+        ref={enableThumbViewportGate ? thumbViewportRef : undefined}
         className="relative z-10 flex h-full min-h-0 w-full min-w-0 flex-col md:hover:z-50"
         onTouchStart={(e) => {
           touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
@@ -606,7 +615,7 @@ export function RaffleCard({
                   <div className="absolute inset-0 flex items-center justify-center bg-muted/60" aria-hidden>
                     <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                   </div>
-                ) : (
+                ) : imageLoadActive && listThumbSrc ? (
                   /* eslint-disable-next-line @next/next/no-img-element -- list row: next/image often fails on proxy/GIF in tight layout */
                   <img
                     key={`thumb-${thumbIdx}-${listThumbSrc}`}
@@ -614,13 +623,14 @@ export function RaffleCard({
                     alt=""
                     width={160}
                     height={160}
-                    loading="eager"
+                    loading={priority ? 'eager' : 'lazy'}
                     decoding="async"
+                    fetchPriority={priority ? 'high' : 'auto'}
                     className={`pointer-events-none absolute inset-0 h-full w-full ${listThumbUseContain ? 'object-contain p-3' : 'object-cover object-center'}`}
                     onError={handleThumbLoadOrError}
                     onLoad={handleThumbLoadOrError}
                   />
-                )}
+                ) : null}
               </div>
             )}
             {listThumbDead && (

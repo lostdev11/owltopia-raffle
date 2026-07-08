@@ -2607,7 +2607,12 @@ export function DashboardNestingClient() {
   }
 
   return (
-    <main className="container mx-auto px-3 sm:px-4 py-6 sm:py-10 pb-16 max-w-4xl space-y-8">
+    <main
+      className={cn(
+        'container mx-auto px-3 sm:px-4 py-6 sm:py-10 max-w-4xl space-y-8',
+        activeOwlNestCount >= 1 ? 'pb-[calc(7rem+env(safe-area-inset-bottom))] sm:pb-10' : 'pb-10'
+      )}
+    >
       <NestingGomtMigrationNotice />
       {hasAdminPreviewPools ? (
         <div
@@ -3765,7 +3770,10 @@ export function DashboardNestingClient() {
             })}
           </ul>
         )}
-        <NestingClaimLedger events={claimLedgerEvents} className="mt-6" />
+        <NestingClaimLedger
+          events={claimLedgerEvents}
+          className={cn('mt-6', activeOwlNestCount >= 1 ? 'mb-2 sm:mb-0' : undefined)}
+        />
       </section>
 
       <p className="text-xs text-muted-foreground text-center">

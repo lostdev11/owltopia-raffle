@@ -3,26 +3,34 @@ import type { GenOwlRevSharePeriodRow } from '@/lib/db/gen-owl-rev-share-periods
 import { getStakingPositionForWallet } from '@/lib/db/staking-positions'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import { StakingUserError } from '@/lib/nesting/errors'
+import { classifyGen1OneOfOneMints } from '@/lib/nesting/gen1-one-of-one'
 import { isPositionEligibleForRevSharePeriod } from '@/lib/nesting/gen-owl-rev-share-eligibility'
 import { ensureGenOwlRevSharePeriodFinalized } from '@/lib/nesting/gen-owl-rev-share-finalize'
 import { claimsOpenForPeriod, groupKeyForPoolSlug } from '@/lib/nesting/gen-owl-rev-share-month'
 import { payoutGenOwlRevShareClaim } from '@/lib/nesting/gen-owl-rev-share-payout'
+import { resolveGen1PerNestAmounts } from '@/lib/nesting/gen-owl-rev-share'
 import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
 
-function perNestAmountsForGroup(
+async function perNestAmountsForPosition(
   period: GenOwlRevSharePeriodRow,
-  group: GenOwlStakingGroupKey
-): { sol: number; usdc: number } {
-  if (group === 'gen1-owl') {
+  group: GenOwlStakingGroupKey,
+  assetIdentifier: string | null
+): Promise<{ sol: number; usdc: number }> {
+  if (group === 'gen2-owl') {
     return {
-      sol: period.gen1_per_nest_sol ?? 0,
-      usdc: period.gen1_per_nest_usdc ?? 0,
+      sol: period.gen2_per_nest_sol ?? 0,
+      usdc: period.gen2_per_nest_usdc ?? 0,
     }
   }
-  return {
-    sol: period.gen2_per_nest_sol ?? 0,
-    usdc: period.gen2_per_nest_usdc ?? 0,
+
+  const mint = assetIdentifier?.trim()
+  if (!mint) {
+    return resolveGen1PerNestAmounts(period, 'standard')
   }
+
+  const classification = await classifyGen1OneOfOneMints([mint])
+  const bucket = classification.get(mint) === 'one-of-one' ? 'one-of-one' : 'standard'
+  return resolveGen1PerNestAmounts(period, bucket)
 }
 
 export async function executeGenOwlRevShareClaim(params: {
@@ -72,7 +80,7 @@ export async function executeGenOwlRevShareClaim(params: {
     throw new StakingUserError('This nest is not on a Gen 1 / Gen 2 rev share perch.', 400)
   }
 
-  const amounts = perNestAmountsForGroup(period, group)
+  const amounts = await perNestAmountsForPosition(period, group, position.asset_identifier)
   if (amounts.sol <= 0 && amounts.usdc <= 0) {
     throw new StakingUserError('No rev share amount configured for this generation this month.', 400)
   }

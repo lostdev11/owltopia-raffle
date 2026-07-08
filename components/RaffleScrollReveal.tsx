@@ -44,7 +44,7 @@ export function RaffleScrollReveal({ children, delay = 0 }: RaffleScrollRevealPr
       },
       {
         root: null,
-        rootMargin: '0px 0px 60px 0px',
+        rootMargin: '280px 0px 120px 0px',
         threshold: 0.05,
       }
     )

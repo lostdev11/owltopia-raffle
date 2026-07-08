@@ -2761,7 +2761,7 @@ export default function DashboardPage() {
         </TabsContent>
 
         <TabsContent value="analytics" className="mt-0 space-y-6 focus-visible:outline-none">
-          <CreatorAnalyticsSection />
+          <CreatorAnalyticsSection feeBps={feeTier.feeBps} />
         </TabsContent>
 
         <TabsContent value="hosting" className="mt-0 space-y-6 focus-visible:outline-none">

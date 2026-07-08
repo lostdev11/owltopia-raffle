@@ -41,3 +41,39 @@ export async function countActiveGenOwlNestsByGroup(): Promise<Record<GenOwlStak
   ])
   return { 'gen1-owl': gen1, 'gen2-owl': gen2 }
 }
+
+/** Active nest mint addresses for Gen 1 / Gen 2 rev share bucket previews. */
+export async function listActiveGenOwlNestMintsByGroup(
+  group: GenOwlStakingGroupKey
+): Promise<string[]> {
+  const slugs = [...GROUP_SLUGS[group]]
+  const db = getSupabaseAdmin()
+
+  const { data: pools, error: poolError } = await db.from('staking_pools').select('id').in('slug', slugs)
+  if (poolError) {
+    console.error('[gen-owl-rev-share] pool lookup:', poolError.message)
+    return []
+  }
+
+  const poolIds = (pools ?? []).map((p) => p.id).filter(Boolean)
+  if (poolIds.length === 0) return []
+
+  const { data, error } = await db
+    .from('staking_positions')
+    .select('asset_identifier')
+    .in('pool_id', poolIds)
+    .eq('status', 'active')
+    .not('asset_identifier', 'is', null)
+
+  if (error) {
+    console.error('[gen-owl-rev-share] nest mints:', error.message)
+    return []
+  }
+
+  const mints: string[] = []
+  for (const row of data ?? []) {
+    const mint = String((row as { asset_identifier?: string }).asset_identifier ?? '').trim()
+    if (mint) mints.push(mint)
+  }
+  return mints
+}
