@@ -93,6 +93,8 @@ function LeaderboardTable({
   /** When true, title + description always visible (mobile single-table view). */
   flatHeader?: boolean
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(defaultOpen)
+
   const titleRow = (
     <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
       <Icon className="h-5 w-5 text-green-500 shrink-0" aria-hidden />
@@ -117,7 +119,11 @@ function LeaderboardTable({
             <CardDescription className="text-xs sm:text-sm leading-relaxed break-words">{description}</CardDescription>
           </div>
         ) : (
-          <details className="group" defaultOpen={defaultOpen || undefined}>
+          <details
+            className="group"
+            open={detailsOpen}
+            onToggle={(e) => setDetailsOpen(e.currentTarget.open)}
+          >
             <summary className="list-none cursor-pointer touch-manipulation min-h-[44px] [&::-webkit-details-marker]:hidden">
               {titleRow}
             </summary>

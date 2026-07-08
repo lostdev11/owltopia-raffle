@@ -15,6 +15,7 @@ import { ConsolidatedGenOwlStakingCard } from '@/components/nesting/Consolidated
 import { buildNestingPerchDisplayList } from '@/lib/nesting/gen-owl-staking-groups'
 import { filterPoolsForPublicNestingCatalog } from '@/lib/nesting/perch-catalog'
 import { GOMT_MIGRATION_FAQ } from '@/lib/nesting/gomt-migration-copy'
+import { SectionHeader } from '@/components/council/SectionHeader'
 import { EmptyState } from '@/components/council/EmptyState'
 import { nestingMutedActionButtonClass } from '@/lib/nesting/ui-classes'
 import { NestingGomtMigrationNotice } from '@/components/nesting/NestingGomtMigrationNotice'
