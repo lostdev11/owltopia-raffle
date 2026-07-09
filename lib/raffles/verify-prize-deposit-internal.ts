@@ -22,6 +22,25 @@ import { publicKey as umiPublicKey } from '@metaplex-foundation/umi'
 import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
 import { getAssetWithProof, mplBubblegum } from '@metaplex-foundation/mpl-bubblegum'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
+
+const RPC_RATE_LIMIT_VERIFY_ERROR =
+  'Solana RPC rate limit reached while verifying your deposit. Wait a moment and try Verify again — we also retry automatically in the background.'
+
+function rpcRateLimitVerifyFailure(): VerifyPrizeDepositInternalResult {
+  return { ok: false, httpStatus: 429, error: RPC_RATE_LIMIT_VERIFY_ERROR }
+}
+
+async function checkMplCoreInEscrowOrRateLimit(
+  mint: string
+): Promise<{ inEscrow: boolean } | { rateLimited: true }> {
+  try {
+    return { inEscrow: await isMplCoreAssetInEscrow(mint) }
+  } catch (err) {
+    if (isSolanaRpcRateLimitError(err)) return { rateLimited: true }
+    return { inEscrow: false }
+  }
+}
 
 export type VerifyPrizeDepositInternalResult =
   | {
@@ -238,11 +257,9 @@ export async function verifyPrizeDepositInternal(
         return { ok: false, httpStatus: 400, error: 'Missing NFT mint address' }
       }
       let inCoreEscrow = false
-      try {
-        inCoreEscrow = await isMplCoreAssetInEscrow(raffle.nft_mint_address)
-      } catch {
-        inCoreEscrow = false
-      }
+      const coreCheck = await checkMplCoreInEscrowOrRateLimit(raffle.nft_mint_address)
+      if ('rateLimited' in coreCheck) return rpcRateLimitVerifyFailure()
+      inCoreEscrow = coreCheck.inEscrow
       if (inCoreEscrow) {
         const now = new Date().toISOString()
         await updateRaffle(raffleId, {
@@ -279,7 +296,9 @@ export async function verifyPrizeDepositInternal(
           if (!ata) {
             ata = await getEscrowTokenAccountForMint(mintPkFromTx)
           }
-          const inCoreEscrow = ata ? true : await isMplCoreAssetInEscrow(mintFromTx).catch(() => false)
+          const coreFromTx = ata ? null : await checkMplCoreInEscrowOrRateLimit(mintFromTx)
+          if (coreFromTx && 'rateLimited' in coreFromTx) return rpcRateLimitVerifyFailure()
+          const inCoreEscrow = ata ? true : (coreFromTx?.inEscrow ?? false)
           if (ata || inCoreEscrow) {
             if (ata) {
               const frozen = await assertEscrowSplPrizeNotFrozen(mintPkFromTx)
@@ -431,9 +450,9 @@ export async function verifyPrizeDepositInternal(
         )
       )
       for (const assetId of coreCandidates) {
-        try {
-          const inCoreEscrow = await isMplCoreAssetInEscrow(assetId)
-          if (!inCoreEscrow) continue
+        const coreCheck = await checkMplCoreInEscrowOrRateLimit(assetId)
+        if ('rateLimited' in coreCheck) return rpcRateLimitVerifyFailure()
+        if (!coreCheck.inEscrow) continue
           const now = new Date().toISOString()
           await updateRaffle(raffleId, {
             prize_deposited_at: now,
@@ -448,9 +467,6 @@ export async function verifyPrizeDepositInternal(
             nftMintAddress: assetId,
             prizeStandard: 'mpl_core',
           }
-        } catch {
-          // continue trying other candidates
-        }
       }
       return {
         ok: false,
@@ -477,10 +493,9 @@ export async function verifyPrizeDepositInternal(
         // - the prize is compressed (bubblegum), which is not represented as SPL token accounts.
         //
         // Try MPL Core first (by asset owner), then compressed (bubblegum leafOwner) as a fallback.
-        try {
-          // MPL Core verification: escrow may hold a Core asset even if SPL token accounts list doesn't include it.
-          const inCoreEscrow = await isMplCoreAssetInEscrow(preferredMint)
-          if (inCoreEscrow) {
+        const corePreferred = await checkMplCoreInEscrowOrRateLimit(preferredMint)
+        if ('rateLimited' in corePreferred) return rpcRateLimitVerifyFailure()
+        if (corePreferred.inEscrow) {
             const now = new Date().toISOString()
             await updateRaffle(raffleId, {
               prize_deposited_at: now,
@@ -497,9 +512,6 @@ export async function verifyPrizeDepositInternal(
               prizeStandard: 'mpl_core',
             }
           }
-        } catch {
-          // Ignore and try compressed fallback below
-        }
 
         // Compressed NFTs are not represented as SPL/Token-2022 token accounts.
         // If escrow holds a mix (SPL + compressed), `held` may be non-empty but still miss the expected prize.
@@ -585,6 +597,9 @@ export async function verifyPrizeDepositInternal(
       nftMintAddress: mintToSet,
     }
   } catch (error) {
+    if (isSolanaRpcRateLimitError(error)) {
+      return rpcRateLimitVerifyFailure()
+    }
     console.error('Verify prize deposit error:', error)
     return { ok: false, httpStatus: 500, error: safeErrorMessage(error) }
   }

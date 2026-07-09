@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo, type CSSProperties } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
@@ -142,6 +142,9 @@ import {
   VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS,
   type FrozenEscrowDiagnostics,
 } from '@/lib/raffles/verify-prize-deposit-client'
+import { registerDepositTxAndVerifyWithRetries } from '@/lib/raffles/register-and-verify-prize-deposit-client'
+import { assertWalletReadyForSigning } from '@/lib/solana/assert-wallet-ready-for-signing'
+import { sendTransactionWithTimeout } from '@/lib/solana/send-transaction-with-timeout'
 import { useRealtimeEntries } from '@/lib/hooks/useRealtimeEntries'
 import { RAFFLE_DETAIL_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import { useServerTime } from '@/lib/hooks/useServerTime'
@@ -221,6 +224,9 @@ export function RaffleDetailClient({
   orbisHref = undefined,
 }: RaffleDetailClientProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const depositPanelRef = useRef<HTMLDivElement | null>(null)
+  const keepDepositProgressOpenRef = useRef(false)
   const walletCtx = useWallet()
   const { publicKey, connected, wallet, signMessage } = walletCtx
   const sendTransaction = useSendTransactionForWallet()
@@ -1522,6 +1528,14 @@ export function RaffleDetailClient({
     (isCreator || isAdmin) &&
     ((raffle.prize_type === 'nft' && !!raffle.nft_mint_address?.trim()) || isPartnerSplPrizeRaffle(raffle))
 
+  useEffect(() => {
+    if (searchParams.get('deposit') !== '1') return
+    if (!showDepositEscrow) return
+    requestAnimationFrame(() => {
+      depositPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }, [searchParams, showDepositEscrow])
+
   const handleTransferNftToEscrow = useCallback(async () => {
     if (!publicKey || !escrowAddress) return
     if (!isPartnerSplPrizeRaffle(raffle) && !raffle.nft_mint_address?.trim()) return
@@ -1556,6 +1570,23 @@ export function RaffleDetailClient({
     setDepositEscrowProgressStep('wallet')
     setDepositVerifyAttemptLabel({ current: 0, max: VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS })
     setDepositEscrowLoading(true)
+    keepDepositProgressOpenRef.current = false
+
+    try {
+      await assertWalletReadyForSigning({
+        connected,
+        publicKey,
+        walletAdapter,
+        connection,
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Wallet not ready'
+      setDepositEscrowError(msg)
+      setShowManualEscrowFallback(true)
+      keepDepositProgressOpenRef.current = true
+      setDepositEscrowLoading(false)
+      return
+    }
 
     const signInForSession = async (): Promise<boolean> => {
       if (!publicKey || !signMessage) {
@@ -1611,42 +1642,31 @@ export function RaffleDetailClient({
       }
       setDepositEscrowProgressStep('verify')
       try {
-        let res = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ deposit_tx: depositTx?.trim() || '' }),
+        let outcome = await registerDepositTxAndVerifyWithRetries(raffle.id, depositTx?.trim() || '', {
+          onVerifyAttempt: (current, max) => {
+            setDepositVerifyAttemptLabel({ current, max })
+          },
         })
-        let data = (await res.json().catch(() => ({}))) as {
-          verified?: boolean
-          pendingReason?: string
-          error?: string
-          frozenEscrowDiagnostics?: FrozenEscrowDiagnostics
-        }
-        if (!res.ok && res.status === 401) {
+        if (!outcome.ok && outcome.status === 401) {
           setDepositEscrowProgressStep('sign_in')
           const signedIn = await signInForSession()
           if (!signedIn) return false
           setDepositEscrowProgressStep('verify')
-          res = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ deposit_tx: depositTx?.trim() || '' }),
+          outcome = await registerDepositTxAndVerifyWithRetries(raffle.id, depositTx?.trim() || '', {
+            onVerifyAttempt: (current, max) => {
+              setDepositVerifyAttemptLabel({ current, max })
+            },
           })
-          data = (await res.json().catch(() => ({}))) as typeof data
         }
-        if (!res.ok) {
-          const msg =
-            typeof data.error === 'string' && data.error.trim()
-              ? data.error.trim()
-              : 'Could not save deposit'
+        if (!outcome.ok) {
+          const msg = outcome.error?.trim() || 'Could not save deposit'
           setDepositEscrowError(msg)
-          setDepositEscrowFrozenDiagnostics(null)
+          setDepositEscrowFrozenDiagnostics(outcome.frozenEscrowDiagnostics ?? null)
+          setShowManualEscrowFallback(true)
           logEscrowDepositVerify(depositLogCtx, false, msg)
           return false
         }
-        if (data.verified) {
+        if (outcome.verified) {
           setDepositEscrowSuccess(true)
           setDepositEscrowError(null)
           setDepositEscrowFrozenDiagnostics(null)
@@ -1656,20 +1676,22 @@ export function RaffleDetailClient({
           return true
         }
         setDepositEscrowSuccess(false)
-        if (data.pendingReason && isEscrowSplPrizeFrozenVerifyError(data.pendingReason)) {
-          setDepositEscrowError(data.pendingReason)
-          setDepositEscrowFrozenDiagnostics(data.frozenEscrowDiagnostics ?? null)
-        } else {
+        const pending = (outcome.pendingReason || outcome.error || '').trim()
+        if (pending && isEscrowSplPrizeFrozenVerifyError(pending)) {
+          setDepositEscrowError(pending)
+          setDepositEscrowFrozenDiagnostics(outcome.frozenEscrowDiagnostics ?? null)
+        } else if (pending) {
           setDepositEscrowError(null)
           setDepositEscrowFrozenDiagnostics(null)
         }
         router.refresh()
-        logEscrowDepositVerify(depositLogCtx, false, data.pendingReason)
+        logEscrowDepositVerify(depositLogCtx, false, pending || undefined)
         return false
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Could not register deposit'
         setDepositEscrowError(msg)
         setDepositEscrowFrozenDiagnostics(null)
+        setShowManualEscrowFallback(true)
         logEscrowDepositVerify(depositLogCtx, false, msg)
         return false
       }
@@ -1711,7 +1733,7 @@ export function RaffleDetailClient({
               lamports: Number(rawNeed),
             })
           )
-          const sig = await sendTransaction(tx, connection)
+          const sig = await sendTransactionWithTimeout(sendTransaction, tx, connection)
           await afterWalletSignature(sig, 'spl_transfer')
           return
         }
@@ -1782,7 +1804,7 @@ export function RaffleDetailClient({
           setDepositEscrowError('Connect a wallet that can sign token transfers.')
           return
         }
-        const sig = await sendTransaction(tx, connection)
+        const sig = await sendTransactionWithTimeout(sendTransaction, tx, connection)
         await afterWalletSignature(sig, 'spl_transfer')
         return
       }
@@ -1984,7 +2006,7 @@ export function RaffleDetailClient({
         sourceTokenAccount: sourceTokenAccount.toBase58(),
         escrowAta: escrowAta.toBase58(),
       })
-      const sig = await sendTransaction(tx, connection)
+      const sig = await sendTransactionWithTimeout(sendTransaction, tx, connection)
       await afterWalletSignature(sig, 'spl_transfer')
       } catch (e) {
         logEscrowDepositError(depositLogCtx, e)
@@ -2001,13 +2023,22 @@ export function RaffleDetailClient({
         } else {
           setDepositEscrowError(baseMessage)
           setShowManualEscrowFallback(true)
+          if (
+            baseMessage.toLowerCase().includes('timed out') ||
+            baseMessage.toLowerCase().includes('wallet approval')
+          ) {
+            keepDepositProgressOpenRef.current = true
+          }
         }
       }
     } finally {
       setDepositEscrowLoading(false)
-      setDepositEscrowProgressOpen(false)
-      setDepositEscrowProgressStep('idle')
-      setDepositVerifyAttemptLabel({ current: 0, max: VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS })
+      if (!keepDepositProgressOpenRef.current) {
+        setDepositEscrowProgressOpen(false)
+        setDepositEscrowProgressStep('idle')
+        setDepositVerifyAttemptLabel({ current: 0, max: VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS })
+      }
+      keepDepositProgressOpenRef.current = false
     }
   }, [
     publicKey,
@@ -2100,42 +2131,30 @@ export function RaffleDetailClient({
 
       const manualNorm = normalizeDepositTxSignatureInput(manualTx)
       if (manualNorm) {
-        let res = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ deposit_tx: manualNorm }),
+        let outcome = await registerDepositTxAndVerifyWithRetries(raffle.id, manualNorm, {
+          onVerifyAttempt: (current, max) => {
+            setDepositVerifyAttemptLabel({ current, max })
+          },
         })
-        let data = (await res.json().catch(() => ({}))) as {
-          verified?: boolean
-          pendingReason?: string
-          error?: string
-          frozenEscrowDiagnostics?: FrozenEscrowDiagnostics
-        }
-        if (!res.ok && res.status === 401) {
+        if (!outcome.ok && outcome.status === 401) {
           setDepositEscrowProgressStep('sign_in')
           const signedIn = await signInForSession()
           if (!signedIn) return
           setDepositEscrowProgressStep('verify')
-          res = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ deposit_tx: manualNorm }),
+          outcome = await registerDepositTxAndVerifyWithRetries(raffle.id, manualNorm, {
+            onVerifyAttempt: (current, max) => {
+              setDepositVerifyAttemptLabel({ current, max })
+            },
           })
-          data = (await res.json().catch(() => ({}))) as typeof data
         }
-        if (!res.ok) {
-          const msg =
-            typeof data.error === 'string' && data.error.trim()
-              ? data.error.trim()
-              : 'Could not save deposit'
+        if (!outcome.ok) {
+          const msg = outcome.error?.trim() || 'Could not save deposit'
           setDepositEscrowError(msg)
-          setDepositEscrowFrozenDiagnostics(null)
+          setDepositEscrowFrozenDiagnostics(outcome.frozenEscrowDiagnostics ?? null)
           setShowManualEscrowFallback(true)
           return
         }
-        if (data.verified) {
+        if (outcome.verified) {
           setDepositEscrowSuccess(true)
           setDepositEscrowError(null)
           setDepositEscrowFrozenDiagnostics(null)
@@ -2144,16 +2163,18 @@ export function RaffleDetailClient({
           router.refresh()
           return
         }
-        const pr = typeof data.pendingReason === 'string' ? data.pendingReason : ''
+        const pr = (outcome.pendingReason || outcome.error || '').trim()
         if (pr && isEscrowSplPrizeFrozenVerifyError(pr)) {
           setDepositEscrowError(pr)
-          setDepositEscrowFrozenDiagnostics(data.frozenEscrowDiagnostics ?? null)
+          setDepositEscrowFrozenDiagnostics(outcome.frozenEscrowDiagnostics ?? null)
           setShowManualEscrowFallback(true)
           return
         }
-        setDepositEscrowError(null)
+        setDepositEscrowError(pr || null)
         setDepositEscrowFrozenDiagnostics(null)
+        setDepositLastTxSignature(manualNorm)
         setManualDepositTx('')
+        setShowManualEscrowFallback(true)
         router.refresh()
         return
       }
@@ -3122,7 +3143,7 @@ export function RaffleDetailClient({
         </div>
         {showDepositEscrow && (
           <>
-            <Card className="border-amber-500/50 bg-amber-500/5">
+            <Card ref={depositPanelRef} id="raffle-prize-deposit-panel" className="border-amber-500/50 bg-amber-500/5">
               <CardHeader>
                 <CardTitle className="text-lg">Prize in escrow required</CardTitle>
                 <CardDescription>
@@ -3623,6 +3644,25 @@ export function RaffleDetailClient({
                     </div>
                   </DialogDescription>
                 </DialogHeader>
+                {depositEscrowProgressStep === 'wallet' && depositEscrowLoading && (
+                  <div className="flex flex-col gap-2 pt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="min-h-[44px] w-full touch-manipulation"
+                      onClick={() => {
+                        keepDepositProgressOpenRef.current = false
+                        setDepositEscrowProgressOpen(false)
+                        setDepositEscrowProgressStep('idle')
+                        setDepositEscrowLoading(false)
+                        setShowManualEscrowFallback(true)
+                        depositPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      }}
+                    >
+                      Wallet didn&apos;t open — use manual deposit
+                    </Button>
+                  </div>
+                )}
               </DialogContent>
             </Dialog>
           </>
