@@ -434,18 +434,22 @@ export function WalletNftPicker({
             Browse your wallet NFTs or paste a mint address to select a prize.
           </p>
         )}
-        <Button
-          type="button"
-          variant="default"
-          className="w-full min-h-[48px] touch-manipulation text-base"
-          onClick={() => setBrowseOpen(true)}
-        >
-          <Image className="h-5 w-5 mr-2 shrink-0" aria-hidden />
-          Browse {nfts.length} NFT{nfts.length === 1 ? '' : 's'}
+        <div className="space-y-1.5">
+          <Button
+            type="button"
+            variant="default"
+            className="w-full min-h-[48px] touch-manipulation text-base"
+            onClick={() => setBrowseOpen(true)}
+          >
+            <Image className="h-5 w-5 mr-2 shrink-0" aria-hidden />
+            Browse {nfts.length} NFT{nfts.length === 1 ? '' : 's'}
+          </Button>
           {collectionSummary ? (
-            <span className="ml-1 font-normal text-primary-foreground/85">· {collectionSummary}</span>
+            <p className="text-xs text-muted-foreground text-center leading-snug px-1">
+              Collections: {collectionSummary}
+            </p>
           ) : null}
-        </Button>
+        </div>
         <Dialog open={browseOpen} onOpenChange={setBrowseOpen}>
           <DialogContent className="left-0 top-0 flex h-[100dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 p-0 sm:left-[50%] sm:top-[50%] sm:h-auto sm:max-h-[90vh] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:border sm:p-4">
             <DialogHeader className="shrink-0 border-b px-4 py-3 text-left sm:border-0 sm:px-0 sm:pt-0">
