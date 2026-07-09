@@ -51,8 +51,13 @@ import {
 import { DateTimePicker } from '@/components/DateTimePicker'
 import { formatDateTimeWithTimezone, localDateTimeToUtc, utcToLocalDateTime } from '@/lib/utils'
 import type { DuplicateNftPrizeConflictReason } from '@/lib/raffles/duplicate-nft-prize-conflict'
-import type { NftHolderInWallet, WalletNft } from '@/lib/solana/wallet-tokens'
-import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
+import {
+  minimalWalletNftForEscrowTransfer,
+  type NftHolderInWallet,
+  type WalletNft,
+} from '@/lib/solana/wallet-tokens'
+import { walletNftMintMatches } from '@/lib/raffles/wallet-nft-picker'
+import { WalletNftPicker } from '@/components/WalletNftPicker'
 import {
   NFT_DEFAULT_SUGGEST_TICKET_COUNT,
   suggestTicketPriceFromFloor,
@@ -215,8 +220,17 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   const [partnerPrizeAmount, setPartnerPrizeAmount] = useState('')
   const [partnerMinTickets, setPartnerMinTickets] = useState('')
   const [selectedNft, setSelectedNft] = useState<WalletNft | null>(null)
+  const [nftMintInput, setNftMintInput] = useState('')
   const [walletNfts, setWalletNfts] = useState<WalletNft[] | null>(null)
   const [nftSearchQuery, setNftSearchQuery] = useState('')
+  const prizeNft = useMemo((): WalletNft | null => {
+    if (selectedNft) return selectedNft
+    const mint = nftMintInput.trim()
+    if (!mint) return null
+    const fromWallet = walletNfts?.find((nft) => walletNftMintMatches(nft.mint, mint))
+    if (fromWallet) return fromWallet
+    return minimalWalletNftForEscrowTransfer(mint)
+  }, [selectedNft, nftMintInput, walletNfts])
   const [loadingWalletAssets, setLoadingWalletAssets] = useState(false)
   const [walletAssetsError, setWalletAssetsError] = useState<string | null>(null)
   /** Inline message for POST /api/raffles failures — avoids a blocking alert that can feel like a brief “flash” on mobile. */
@@ -447,7 +461,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     setFloorPrice('')
     setTicketPrice('')
     lastAutofillTicketRef.current = null
-  }, [prizeMode, selectedNft?.mint])
+  }, [prizeMode, prizeNft?.mint])
 
   const derivedDrawGoal = useMemo(() => {
     const fp = parseNftFloorPrice(floorPrice)
@@ -531,6 +545,33 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     return dec <= 6 ? 'e.g. 100 or 50.25' : 'e.g. 1000 or 250.5'
   }, [tokenPrizeCurrency])
 
+  const handleNftMintInputChange = useCallback(
+    (mint: string) => {
+      setNftMintInput(mint)
+      const trimmed = mint.trim()
+      if (!trimmed) {
+        setSelectedNft(null)
+        setImageUrl(null)
+        return
+      }
+      const match = walletNfts?.find((nft) => walletNftMintMatches(nft.mint, trimmed))
+      if (match) {
+        setSelectedNft(match)
+        setImageUrl(match.image?.trim() ? match.image.trim() : null)
+      } else {
+        setSelectedNft(null)
+        setImageUrl(null)
+      }
+    },
+    [walletNfts]
+  )
+
+  const handleNftPickerSelect = useCallback((nft: WalletNft) => {
+    setSelectedNft(nft)
+    setNftMintInput(nft.mint)
+    setImageUrl(nft.image?.trim() ? nft.image.trim() : null)
+  }, [])
+
   const loadWalletAssets = async () => {
     if (!publicKey) return
     setLoadingWalletAssets(true)
@@ -573,6 +614,9 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       }
       setWalletNfts(nfts)
       setNftSearchQuery('')
+      setNftMintInput('')
+      setSelectedNft(null)
+      setImageUrl(null)
     } catch (e) {
       console.error('Load wallet assets:', e)
       setWalletAssetsError(e instanceof Error ? e.message : 'Failed to load wallet assets')
@@ -674,8 +718,8 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     const formData = new FormData(e.currentTarget)
     const isPartner = prizeMode === 'token'
 
-    if (!isPartner && !selectedNft) {
-      alert('Please select an NFT from your wallet for an NFT raffle.')
+    if (!isPartner && !prizeNft) {
+      alert('Please select an NFT from your wallet or paste its mint / asset id for an NFT raffle.')
       focusFormField('nft-prize-section')
       return
     }
@@ -700,8 +744,8 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
 
     const isNftPrizeMode = prizeMode === 'nft'
     const titleTrimmed = isNftPrizeMode
-      ? selectedNft
-        ? nftPrizeRaffleTitleFromWalletSelection(selectedNft.name, selectedNft.mint)
+      ? prizeNft
+        ? nftPrizeRaffleTitleFromWalletSelection(prizeNft.name, prizeNft.mint)
         : ''
       : ((formData.get('title') as string) ?? '').trim()
     if (!titleTrimmed) {
@@ -726,9 +770,9 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       return
     }
 
-    if (!isPartner && selectedNft) {
+    if (!isPartner && prizeNft) {
       try {
-        const mintPk = new PublicKey(selectedNft.mint)
+        const mintPk = new PublicKey(prizeNft.mint)
         const stakedCheck = await getNftHolderInWallet(connection, mintPk, publicKey, 'confirmed')
         if (stakedCheck && 'delegated' in stakedCheck && stakedCheck.delegated) {
           alert(
@@ -864,10 +908,10 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       data.prize_amount = parseFloat(partnerPrizeAmount.trim())
       data.min_tickets = partnerMinTicketsParsed
     } else {
-      data.nft_mint_address = selectedNft!.mint
-      data.nft_token_id = selectedNft!.mint
-      data.nft_metadata_uri = selectedNft!.metadataUri ?? undefined
-      data.nft_collection_name = selectedNft!.collectionName ?? undefined
+      data.nft_mint_address = prizeNft!.mint
+      data.nft_token_id = prizeNft!.mint
+      data.nft_metadata_uri = prizeNft!.metadataUri ?? undefined
+      data.nft_collection_name = prizeNft!.collectionName ?? undefined
     }
     if (hideFromPublicBrowse) {
       data.list_on_platform = false
@@ -938,7 +982,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
         if (
           raffle.prize_type === 'nft' &&
           raffle.nft_mint_address &&
-          selectedNft &&
+          prizeNft &&
           publicKey &&
           (connected && wallet?.adapter)
         ) {
@@ -983,14 +1027,14 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               raffleId: raffle.id,
               raffleSlug: raffle.slug,
               nftMint: raffle.nft_mint_address,
-              transferAssetId: selectedNft.mint,
+              transferAssetId: prizeNft.mint,
               escrowAddress,
               fromWallet: publicKey.toBase58(),
             }
             logEscrowDepositStart({
               ...depositLogCtx,
               dbPrizeStandard: raffle.prize_standard ?? null,
-              displayLabel: selectedNft.name,
+              displayLabel: prizeNft.name,
             })
 
             // Mobile RPC can lag behind the NFT list API — retry like the raffle page deposit flow.
@@ -998,11 +1042,11 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             // Helius DAS sets tokenAccount === mint (asset id). That is not an SPL token account; skip
             // or we can mis-resolve and never try compressed.
             if (
-              selectedNft?.tokenAccount &&
-              selectedNft.tokenAccount !== selectedNft.mint
+              prizeNft?.tokenAccount &&
+              prizeNft.tokenAccount !== prizeNft.mint
             ) {
               try {
-                const selectedTokenAccount = new PublicKey(selectedNft.tokenAccount)
+                const selectedTokenAccount = new PublicKey(prizeNft.tokenAccount)
                 const selectedInfo = await connection.getParsedAccountInfo(selectedTokenAccount, 'processed')
                 const ownerProgram = selectedInfo.value?.owner
                 const isSplProgram = ownerProgram?.equals(TOKEN_PROGRAM_ID) ?? false
@@ -1151,7 +1195,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 depositSig = await transferCompressedNftToEscrow({
                   connection,
                   wallet: walletAdapter,
-                  assetId: selectedNft.mint,
+                  assetId: prizeNft.mint,
                   escrowAddress,
                 })
                 logEscrowDepositSigned(depositLogCtx, 'fallback_compressed', depositSig)
@@ -1167,7 +1211,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   depositSig = await transferMplCoreToEscrow({
                     connection,
                     wallet: walletAdapter,
-                    assetId: selectedNft.mint,
+                    assetId: prizeNft.mint,
                     escrowAddress,
                   })
                   logEscrowDepositSigned(depositLogCtx, 'fallback_mpl_core', depositSig)
@@ -1183,16 +1227,16 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               if (!depositSig) {
                 logEscrowDepositAbort(depositLogCtx, 'no_path_create_form')
                 const mintShort =
-                  selectedNft.mint.length > 16
-                    ? `${selectedNft.mint.slice(0, 4)}…${selectedNft.mint.slice(-4)}`
-                    : selectedNft.mint
+                  prizeNft.mint.length > 16
+                    ? `${prizeNft.mint.slice(0, 4)}…${prizeNft.mint.slice(-4)}`
+                    : prizeNft.mint
                 if (
                   lastMplCoreEscrowError &&
                   isMplCoreNoApprovalsError(lastMplCoreEscrowError)
                 ) {
                   alert(
                     mplCoreNoApprovalsEscrowMessage(mintShort, {
-                      fullAssetId: selectedNft.mint,
+                      fullAssetId: prizeNft.mint,
                     })
                   )
                 } else {
@@ -1372,7 +1416,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 raffleId: raffle.id,
                 raffleSlug: raffle.slug,
                 nftMint: raffle.nft_mint_address,
-                transferAssetId: selectedNft.mint,
+                transferAssetId: prizeNft.mint,
                 fromWallet: publicKey.toBase58(),
               },
               transferErr
@@ -2024,92 +2068,33 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     <>
                       <p>No NFTs found in this wallet.</p>
                       <p>If you&apos;re on <strong>Devnet</strong>, set Phantom to Devnet and ensure this wallet holds at least one NFT (mint or receive one, then click Load again).</p>
+                      <p>You can still paste a mint / asset id below if you know the address.</p>
                     </>
                   )}
                 </div>
               )}
-              {walletNfts && walletNfts.length > 0 && (
-                <>
-                  <div className="space-y-1">
-                    <Label htmlFor="nft-search" className="text-xs">Search NFTs</Label>
-                    <Input
-                      id="nft-search"
-                      type="text"
-                      placeholder="Search by name, collection, or mint…"
-                      value={nftSearchQuery}
-                      onChange={(e) => setNftSearchQuery(e.target.value)}
-                      className="text-sm"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[280px] overflow-y-auto">
-                  {(() => {
-                    const q = nftSearchQuery.trim().toLowerCase()
-                    const filtered = q
-                      ? walletNfts.filter(
-                          (nft) =>
-                            (nft.name?.toLowerCase().includes(q)) ||
-                            (nft.collectionName?.toLowerCase().includes(q)) ||
-                            nft.mint.toLowerCase().includes(q)
-                        )
-                      : walletNfts
-                    return filtered.length === 0 ? (
-                      <p className="col-span-full text-sm text-muted-foreground py-2">
-                        {q ? 'No NFTs match your search.' : 'No NFTs to show.'}
-                      </p>
-                    ) : (
-                      filtered.map((nft) => (
-                    <button
-                      key={nft.tokenAccount}
-                      type="button"
-                      onClick={() => {
-                        setSelectedNft(nft)
-                        setImageUrl(nft.image?.trim() ? nft.image.trim() : null)
-                      }}
-                      className={`rounded-lg border-2 p-2 text-left transition-colors ${
-                        selectedNft?.mint === nft.mint
-                          ? 'border-primary bg-primary/10'
-                          : 'border-border hover:border-muted-foreground/50'
-                      }`}
-                    >
-                      <div className="aspect-square rounded overflow-hidden bg-muted mb-2">
-                        {nft.image ? (
-                          <img
-                            src={getRaffleDisplayImageUrl(nft.image) ?? nft.image}
-                            alt={nft.name ?? nft.mint}
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                              const el = e.currentTarget
-                              const fallback = nft.image
-                              if (fallback && el.src !== fallback) {
-                                el.src = fallback
-                              }
-                            }}
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-xs text-muted-foreground">
-                            No image
-                          </div>
-                        )}
-                      </div>
-                      <p className="text-xs font-medium truncate" title={nft.name ?? nft.mint}>
-                        {nft.name ?? `${nft.mint.slice(0, 4)}…`}
-                      </p>
-                    </button>
-                      ))
-                    )
-                  })()}
-                </div>
-                </>
+              {walletNfts && (
+                <WalletNftPicker
+                  nfts={walletNfts}
+                  selectedMint={prizeNft?.mint ?? null}
+                  onSelect={handleNftPickerSelect}
+                  searchQuery={nftSearchQuery}
+                  onSearchQueryChange={setNftSearchQuery}
+                  showMintPaste
+                  mintInput={nftMintInput}
+                  onMintInputChange={handleNftMintInputChange}
+                />
               )}
-              {selectedNft && (
+              {prizeNft && (
                 <p className="text-sm text-muted-foreground">
-                  Selected: {selectedNft.name ?? selectedNft.mint}
+                  Selected: {prizeNft.name ?? prizeNft.mint}
+                  {prizeNft.collectionName ? ` · ${prizeNft.collectionName}` : ''}
                 </p>
               )}
               {prizeMode === 'nft' ? (
                 <div className="space-y-2 pt-2">
                   <Label htmlFor="title">Title *</Label>
-                  {selectedNft ? (
+                  {prizeNft ? (
                     <>
                       <Input
                         id="title"
@@ -2117,8 +2102,8 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                         readOnly
                         required
                         value={nftPrizeRaffleTitleFromWalletSelection(
-                          selectedNft.name,
-                          selectedNft.mint
+                          prizeNft.name,
+                          prizeNft.mint
                         )}
                         className="bg-muted/50"
                         aria-readonly="true"
