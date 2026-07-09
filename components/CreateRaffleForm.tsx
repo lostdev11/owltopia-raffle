@@ -56,7 +56,7 @@ import {
   type NftHolderInWallet,
   type WalletNft,
 } from '@/lib/solana/wallet-tokens'
-import { walletNftMintMatches } from '@/lib/raffles/wallet-nft-picker'
+import { walletNftCollectionDisplayLabel, walletNftMintMatches } from '@/lib/raffles/wallet-nft-picker'
 import { WalletNftPicker } from '@/components/WalletNftPicker'
 import {
   NFT_DEFAULT_SUGGEST_TICKET_COUNT,
@@ -2088,7 +2088,8 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               {prizeNft && (
                 <p className="text-sm text-muted-foreground">
                   Selected: {prizeNft.name ?? prizeNft.mint}
-                  {prizeNft.collectionName ? ` · ${prizeNft.collectionName}` : ''}
+                  {' · '}
+                  {walletNftCollectionDisplayLabel(prizeNft)}
                 </p>
               )}
               {prizeMode === 'nft' ? (

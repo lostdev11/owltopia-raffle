@@ -17,6 +17,17 @@ export function walletNftCollectionLabel(key: string): string {
   return key === UNCATEGORIZED_KEY ? 'Other / no collection' : key
 }
 
+/** Human-readable collection label for picker rows (name, else short mint, else fallback). */
+export function walletNftCollectionDisplayLabel(nft: WalletNft): string {
+  const name = nft.collectionName?.trim()
+  if (name) return name
+  const mint = nft.collectionMint?.trim()
+  if (mint) {
+    return mint.length > 16 ? `${mint.slice(0, 4)}…${mint.slice(-4)}` : mint
+  }
+  return 'No collection'
+}
+
 export interface WalletNftCollectionOption {
   key: string
   label: string

@@ -21,6 +21,7 @@ import {
   groupWalletNftsByCollection,
   paginateWalletNfts,
   sortWalletNfts,
+  walletNftCollectionDisplayLabel,
   walletNftMintMatches,
   type WalletNftSort,
   type WalletNftViewMode,
@@ -233,7 +234,7 @@ function WalletNftPickerBody({
         </div>
       </div>
 
-      {collections.length > 1 && (
+      {collections.length > 0 && (
         <div className="space-y-1.5">
           <Label htmlFor="nft-collection-filter" className="text-xs">
             Collection
@@ -314,11 +315,12 @@ function WalletNftPickerBody({
               <p className="text-xs font-medium truncate" title={nft.name ?? nft.mint}>
                 {nft.name ?? `${nft.mint.slice(0, 4)}…`}
               </p>
-              {nft.collectionName ? (
-                <p className="text-[10px] text-muted-foreground truncate" title={nft.collectionName}>
-                  {nft.collectionName}
-                </p>
-              ) : null}
+              <p
+                className="text-[10px] text-muted-foreground truncate"
+                title={walletNftCollectionDisplayLabel(nft)}
+              >
+                {walletNftCollectionDisplayLabel(nft)}
+              </p>
             </button>
           ))}
         </div>
@@ -341,7 +343,7 @@ function WalletNftPickerBody({
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium truncate">{nft.name ?? 'Unnamed NFT'}</p>
                     <p className="text-xs text-muted-foreground truncate">
-                      {nft.collectionName ?? 'No collection'}
+                      {walletNftCollectionDisplayLabel(nft)}
                       {nft.symbol ? ` · ${nft.symbol}` : ''}
                     </p>
                     <p className="text-[10px] font-mono text-muted-foreground truncate">{nft.mint}</p>
@@ -379,6 +381,17 @@ export function WalletNftPicker({
   const mobilePageSize = Math.min(pageSize, MOBILE_PAGE_SIZE)
   const defaultViewMode: WalletNftViewMode = coarsePointer ? 'list' : 'grid'
 
+  const collections = useMemo(() => groupWalletNftsByCollection(nfts), [nfts])
+  const collectionSummary = useMemo(() => {
+    if (collections.length === 0) return null
+    const named = collections
+      .filter((c) => c.key !== '__uncategorized__')
+      .map((c) => c.label)
+    if (named.length === 0) return null
+    if (named.length <= 2) return named.join(', ')
+    return `${named.slice(0, 2).join(', ')} +${named.length - 2} more`
+  }, [collections])
+
   const selectedNft = useMemo(
     () => (selectedMint ? nfts.find((nft) => walletNftMintMatches(nft.mint, selectedMint)) ?? null : null),
     [nfts, selectedMint]
@@ -412,7 +425,7 @@ export function WalletNftPicker({
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium truncate">{selectedNft.name ?? 'Selected NFT'}</p>
               <p className="text-xs text-muted-foreground truncate">
-                {selectedNft.collectionName ?? 'No collection'}
+                {walletNftCollectionDisplayLabel(selectedNft)}
               </p>
             </div>
           </div>
@@ -429,6 +442,9 @@ export function WalletNftPicker({
         >
           <Image className="h-5 w-5 mr-2 shrink-0" aria-hidden />
           Browse {nfts.length} NFT{nfts.length === 1 ? '' : 's'}
+          {collectionSummary ? (
+            <span className="ml-1 font-normal text-primary-foreground/85">· {collectionSummary}</span>
+          ) : null}
         </Button>
         <Dialog open={browseOpen} onOpenChange={setBrowseOpen}>
           <DialogContent className="left-0 top-0 flex h-[100dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 p-0 sm:left-[50%] sm:top-[50%] sm:h-auto sm:max-h-[90vh] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:border sm:p-4">

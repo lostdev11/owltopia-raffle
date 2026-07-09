@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
 import { getHeliusRpcUrl } from '@/lib/helius-rpc-url'
+import { enrichWalletNftCollectionNames } from '@/lib/helius/enrich-wallet-nft-collection-names'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -11,7 +12,7 @@ interface HeliusAsset {
   id?: string
   /** When true, the mint was burned; DAS can still return the row until re-indexed. */
   burnt?: boolean
-  collection?: { address?: string; key?: string }
+  collection?: { address?: string; key?: string; name?: string }
   content?: {
     json_uri?: string
     metadata?: {
@@ -22,6 +23,14 @@ interface HeliusAsset {
     files?: Array<{ uri?: string; cdn_uri?: string }>
   }
   grouping?: Array<{ group_key?: string; group_value?: string }>
+}
+
+function extractCollectionNameFromDasAsset(item: HeliusAsset): string | null {
+  const topName = item.collection?.name
+  if (typeof topName === 'string' && topName.trim()) return topName.trim()
+  const metaName = item.content?.metadata?.collection?.name
+  if (typeof metaName === 'string' && metaName.trim()) return metaName.trim()
+  return null
 }
 
 function extractCollectionMintFromDasAsset(item: HeliusAsset): string | null {
@@ -216,10 +225,7 @@ export async function GET(request: NextRequest) {
         const symbol =
           typeof content?.metadata?.symbol === 'string' ? content.metadata.symbol.trim() || null : null
         const collectionMint = extractCollectionMintFromDasAsset(item)
-        const collectionName =
-          (typeof content?.metadata?.collection?.name === 'string' &&
-            content.metadata.collection.name.trim()) ||
-          null
+        const collectionName = extractCollectionNameFromDasAsset(item)
 
         return {
           mint,
@@ -240,6 +246,8 @@ export async function GET(request: NextRequest) {
       const rpcFallback = await getNftsViaRpcFallback(heliusRpcUrl, wallet)
       if (rpcFallback.length > 0) nfts = rpcFallback
     }
+
+    nfts = await enrichWalletNftCollectionNames(nfts)
 
     return NextResponse.json(nfts, {
       headers: {

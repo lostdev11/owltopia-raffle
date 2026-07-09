@@ -3,6 +3,7 @@ import {
   filterWalletNfts,
   groupWalletNftsByCollection,
   sortWalletNfts,
+  walletNftCollectionDisplayLabel,
   walletNftCollectionLabel,
   walletNftMintMatches,
 } from '../lib/raffles/wallet-nft-picker'
@@ -51,5 +52,12 @@ const sorted = sortWalletNfts(sample, 'collection')
 assert.equal(sorted[0].collectionName, 'Frogs')
 
 assert.equal(walletNftMintMatches('AbC', 'abc'), true)
+
+assert.equal(walletNftCollectionDisplayLabel(nft({ mint: 'x', collectionName: 'Owls' })), 'Owls')
+assert.equal(
+  walletNftCollectionDisplayLabel(nft({ mint: 'x', collectionMint: 'CollectionMintAddress1234567890' })),
+  'Coll…7890'
+)
+assert.equal(walletNftCollectionDisplayLabel(nft({ mint: 'x' })), 'No collection')
 
 console.log('wallet-nft-picker utils: ok')
