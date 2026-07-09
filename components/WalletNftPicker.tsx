@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { LayoutGrid, List, ChevronLeft, ChevronRight, Images } from 'lucide-react'
+import { LayoutGrid, List, ChevronLeft, ChevronRight, Image } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -427,7 +427,7 @@ export function WalletNftPicker({
           className="w-full min-h-[48px] touch-manipulation text-base"
           onClick={() => setBrowseOpen(true)}
         >
-          <Images className="h-5 w-5 mr-2 shrink-0" aria-hidden />
+          <Image className="h-5 w-5 mr-2 shrink-0" aria-hidden />
           Browse {nfts.length} NFT{nfts.length === 1 ? '' : 's'}
         </Button>
         <Dialog open={browseOpen} onOpenChange={setBrowseOpen}>
