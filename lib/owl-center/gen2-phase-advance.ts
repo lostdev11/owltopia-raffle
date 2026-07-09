@@ -207,8 +207,9 @@ export function gen2PublicWalletLimitRemaining(input: {
 
 /**
  * PUBLIC progress bar: cap is the full non-backstop pool (987). WL and PUBLIC share it — every WL
- * mint permanently consumes a spot, so remaining = cap − public_minted − wl_minted (unminted WL
- * leftover still counts toward "left" once WL closes because those spots roll into Public).
+ * mint permanently consumes a spot, so minted = public_minted + wl_minted and remaining =
+ * cap − minted (unminted WL leftover still counts toward "left" once WL closes because those
+ * spots roll into Public).
  */
 export function gen2PublicPhaseSupplyDisplay(input: {
   launch: Pick<
@@ -219,9 +220,10 @@ export function gen2PublicPhaseSupplyDisplay(input: {
   wlMinted: number
 }): { cap: number; minted: number; remaining: number } {
   const cap = gen2PhasePoolCap(input.launch, 'PUBLIC')
-  const minted = Math.max(0, input.publicMinted)
+  const publicMinted = Math.max(0, input.publicMinted)
   const wlMinted = Math.max(0, input.wlMinted)
-  const remaining = Math.max(0, cap - minted - wlMinted)
+  const minted = publicMinted + wlMinted
+  const remaining = Math.max(0, cap - minted)
   return { cap, minted, remaining }
 }
 
