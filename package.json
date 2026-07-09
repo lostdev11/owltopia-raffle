@@ -6,6 +6,7 @@
     "dev": "next dev --webpack",
     "dev:webpack": "next dev --webpack",
     "check:prize-escrow": "node scripts/check-prize-escrow-api.mjs",
+    "check:production-escrow-ops": "node scripts/check-production-escrow-ops.mjs",
     "check:funds-escrow": "node scripts/check-funds-escrow-api.mjs",
     "check:treasury-signing": "node --env-file=.env.local scripts/check-treasury-signing.mjs",
     "send:legacy-buyout-refund": "npx --yes tsx --env-file=.env.local scripts/send-legacy-buyout-refund.mjs",
