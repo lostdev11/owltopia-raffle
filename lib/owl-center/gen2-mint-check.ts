@@ -602,6 +602,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         wlMinted: wlMintedGlobal,
       })
       p.phase_supply = view.cap
+      p.phase_minted = view.minted
       p.phase_remaining = view.remaining
     }
     const startMs = p.phase_starts_at ? new Date(p.phase_starts_at).getTime() : null

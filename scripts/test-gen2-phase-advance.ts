@@ -181,6 +181,14 @@ check(
 
 console.log('PUBLIC supply display (shared pool progress bar):')
 check(
+  'minted counts WL + public mints from the shared 987 cap',
+  gen2PublicPhaseSupplyDisplay({
+    launch,
+    publicMinted: 525,
+    wlMinted: 177,
+  }).minted === 702
+)
+check(
   'remaining subtracts WL + public mints from 987 cap (WL still concurrent)',
   gen2PublicPhaseSupplyDisplay({
     launch,
