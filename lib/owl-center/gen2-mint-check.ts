@@ -601,9 +601,10 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
         publicMinted: p.phase_minted,
         wlMinted: wlMintedGlobal,
       })
+      // Cap only — keep phase_minted as public-only so the progress bar shows
+      // `public_minted / cap · (cap − public_minted) left`. Pool remaining (which also
+      // subtracts WL mints) stays in wallet max_mintable / admin phase_breakdown.
       p.phase_supply = view.cap
-      p.phase_minted = view.minted
-      p.phase_remaining = view.remaining
     }
     const startMs = p.phase_starts_at ? new Date(p.phase_starts_at).getTime() : null
     const windowMs = gen2PhaseWindowMs(p.phase)
