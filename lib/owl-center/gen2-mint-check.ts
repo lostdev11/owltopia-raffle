@@ -27,12 +27,14 @@ import { reconcileGen2WalletMints } from '@/lib/owl-center/reconcile-gen2-wallet
 import { isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
 import {
+  gen2EffectiveWlSupply,
   gen2PhaseWindowMs,
   gen2PublicMintPoolRemaining,
   gen2PublicPhaseSupplyDisplay,
   gen2PublicPoolCap,
   gen2PublicWalletLimitRemaining,
   isGen2WhitelistClosed,
+  maybeSyncGen2WlSupplyOnClose,
 } from '@/lib/owl-center/gen2-phase-advance'
 import {
   gen1AirdropMaxMintable,
@@ -197,6 +199,9 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
     sumOwlCenterPhaseMinted(launch.id, 'WHITELIST', network),
     sumOwlCenterPhaseMinted(launch.id, 'PUBLIC', network),
   ])
+  const wlSync = await maybeSyncGen2WlSupplyOnClose(launch, wlMintedGlobal)
+  if (wlSync.synced) launch.wl_supply = wlSync.wl_supply
+
   const phaseMintedGlobal: Record<OwlCenterPhase, number> = {
     AIRDROP: airdropMintedGlobal,
     PRESALE: presaleMintedGlobal,
@@ -231,7 +236,7 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
           : phase === 'PRESALE_OVERAGE'
             ? overageSupply
             : phase === 'WHITELIST'
-              ? launch.wl_supply
+              ? gen2EffectiveWlSupply(launch, wlMintedGlobal)
               : gen2PublicPoolCap(launch, wlMintedGlobal)
 
     const price_usdc =
@@ -486,7 +491,8 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       const availWl = wlCluster.connected_available
       const wlOnLinked =
         wlCluster.cluster_available > wlCluster.connected_available && wlCluster.connected_available === 0
-      const wlPoolRemaining = Math.max(0, launch.wl_supply - wlMintedGlobal)
+      const effectiveWlSupply = gen2EffectiveWlSupply(launch, wlMintedGlobal)
+      const wlPoolRemaining = Math.max(0, effectiveWlSupply - wlMintedGlobal)
       const supplyRemaining = Math.max(0, launch.total_supply - launch.minted_count)
       const max = whitelistMaxMintable({
         allocationRemaining: availWl,

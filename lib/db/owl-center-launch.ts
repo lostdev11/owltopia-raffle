@@ -245,6 +245,7 @@ export async function updateOwlCenterLaunchAdmin(
     launch_deadline_at: string | null
     phase_schedule: Record<string, string>
     generator_project_id: string | null
+    wl_supply: number
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()

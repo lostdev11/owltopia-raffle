@@ -3,7 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireGen2PresaleAdminSession } from '@/lib/gen2-presale/admin-auth'
 import { getOwlCenterLaunchBySlugAdmin, updateOwlCenterLaunchAdmin } from '@/lib/db/owl-center-launch'
 import { datetimeLocalToIso, parseActivePhases, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
+import { sumOwlCenterPhaseMinted } from '@/lib/owl-center/presale-mint-pool'
 import type { OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
+import { isDevnetMintEnabled } from '@/lib/solana/network'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
@@ -43,7 +45,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
+  const cur = await getOwlCenterLaunchBySlugAdmin('gen2')
+  if (!cur) {
+    return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
+  }
+
   const patch: Parameters<typeof updateOwlCenterLaunchAdmin>[1] = {}
+  let wl_reopen_warning: string | null = null
 
   if (typeof body.active_phase === 'string') {
     const p = body.active_phase.toUpperCase() as OwlCenterPhase
@@ -81,8 +89,7 @@ export async function POST(request: NextRequest) {
     if (!Number.isInteger(n) || n < 0) {
       return NextResponse.json({ error: 'Invalid minted_count' }, { status: 400 })
     }
-    const cur = await getOwlCenterLaunchBySlugAdmin('gen2')
-    if (cur && n > cur.total_supply) {
+    if (n > cur.total_supply) {
       return NextResponse.json({ error: 'minted_count cannot exceed total_supply' }, { status: 400 })
     }
     patch.minted_count = n
@@ -106,6 +113,19 @@ export async function POST(request: NextRequest) {
     patch.generator_project_id = body.generator_project_id.trim() || null
   }
 
+  if (patch.active_phases !== undefined) {
+    const hadWl = cur.active_phases?.includes('WHITELIST') ?? false
+    const hasWl = patch.active_phases.includes('WHITELIST')
+    const network = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
+    const wlMinted = await sumOwlCenterPhaseMinted(cur.id, 'WHITELIST', network)
+    if (hadWl && !hasWl) {
+      patch.wl_supply = Math.max(0, wlMinted)
+    } else if (!hadWl && hasWl) {
+      wl_reopen_warning =
+        `WHITELIST reopened with wl_supply=${cur.wl_supply}. Set wl_supply to ${wlMinted} plus any new WL spots for this round — leaving the old cap (${cur.wl_supply}) re-holds unminted WL spots that already rolled into PUBLIC.`
+    }
+  }
+
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'No valid fields' }, { status: 400 })
   }
@@ -115,5 +135,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Update failed' }, { status: 500 })
   }
 
-  return NextResponse.json({ ok: true, launch: updated })
+  return NextResponse.json({ ok: true, launch: updated, wl_reopen_warning })
 }

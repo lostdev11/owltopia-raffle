@@ -16,6 +16,7 @@ import {
   gen2PhasePoolCap,
   gen2PhaseWindowMs,
   gen2BackstopSupplyRemaining,
+  gen2EffectiveWlSupply,
   gen2PublicPhaseSupplyDisplay,
   gen2PublicPoolCap,
   gen2PublicWalletLimitRemaining,
@@ -181,6 +182,14 @@ check(
 )
 
 console.log('PUBLIC supply display (shared pool progress bar):')
+check(
+  'effective WL supply freezes at minted once WL is closed',
+  gen2EffectiveWlSupply({ ...launch, active_phase: 'PUBLIC', active_phases: [] }, 177) === 177
+)
+check(
+  'live WL supply still uses configured wl_supply while open',
+  gen2EffectiveWlSupply({ ...launch, active_phase: 'PUBLIC', active_phases: ['WHITELIST'] }, 177) === 800
+)
 check(
   'backstop remaining = unminted Gen1 + presale + overage',
   gen2BackstopSupplyRemaining({
