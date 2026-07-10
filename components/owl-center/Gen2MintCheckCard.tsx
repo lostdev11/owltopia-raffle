@@ -300,7 +300,7 @@ export function Gen2MintCheckCard({
                   <PhaseSupplyBar
                     minted={p.phase_minted}
                     total={p.phase_supply}
-                    remaining={p.phase_remaining}
+                    remaining={p.phase === 'PUBLIC' ? undefined : p.phase_remaining}
                   />
 
                   {/* Only show the WL countdown while WHITELIST is the primary gating phase. Once
