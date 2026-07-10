@@ -33,6 +33,17 @@ function MintCheckShell({
   return <CommandCard label="mint_allocation_checker.sys">{children}</CommandCard>
 }
 
+/** Unminted Gen1 + presale spots still reserved outside the WL/public shared pool. */
+function backstopSupplyRemaining(phases: Gen2MintCheckPhasePreview[]): number {
+  let remaining = 0
+  for (const phase of ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE'] as const) {
+    const row = phases.find((p) => p.phase === phase)
+    if (!row) continue
+    remaining += Math.max(0, row.phase_supply - row.phase_minted)
+  }
+  return remaining
+}
+
 function phaseActiveTag(p: Gen2MintCheckPhasePreview, presaleSoldOut: boolean): string | null {
   if (!p.is_active) return null
   return owlCenterActivePhaseTag(p.phase, { presaleSoldOut })
@@ -146,6 +157,7 @@ export function Gen2MintCheckCard({
   err,
   onRefresh,
   embedded = false,
+  collectionRemaining,
 }: {
   check: Gen2MintCheckResponse | null
   loading: boolean
@@ -153,6 +165,8 @@ export function Gen2MintCheckCard({
   onRefresh: () => void
   /** When true, render inline inside Supply & phases (no nested CommandCard). */
   embedded?: boolean
+  /** Total collection supply remaining (all phases) — reconciles with Overview. */
+  collectionRemaining?: number
 }) {
   const { publicKey, connected } = useWallet()
   const walletStr = publicKey?.toBase58() ?? null
@@ -163,6 +177,7 @@ export function Gen2MintCheckCard({
 
   const allPhases = check?.phases ?? []
   const allocatedPhases = allPhases.filter(phaseHasAllocation)
+  const backstopRemaining = backstopSupplyRemaining(allPhases)
   // Once connected, default to only the phases this wallet can mint in. Without a
   // connection (or with zero allocation) show everything so the section isn't empty.
   const showFiltered = connected && allocatedPhases.length > 0 && !showAll
@@ -294,14 +309,27 @@ export function Gen2MintCheckCard({
                     {formatPhasePriceSolOrFree(p.unit_lamports_estimate, {
                       paid: p.price_usdc != null && p.price_usdc > 0,
                     })}{' '}
-                    · cap {p.phase_supply}
+                    ·{' '}
+                    {p.phase === 'PUBLIC'
+                      ? `shared pool ${p.phase_supply} (WL + public · presale & Gen1 excluded)`
+                      : `cap ${p.phase_supply}`}
                   </p>
 
                   <PhaseSupplyBar
                     minted={p.phase_minted}
                     total={p.phase_supply}
-                    remaining={p.phase === 'PUBLIC' ? undefined : p.phase_remaining}
+                    remaining={p.phase_remaining}
                   />
+
+                  {p.phase === 'PUBLIC' && (backstopRemaining > 0 || collectionRemaining != null) ? (
+                    <p className="mt-1 text-[10px] leading-relaxed text-[#5C6773]">
+                      {backstopRemaining > 0
+                        ? `${backstopRemaining} presale & Gen1 spot${backstopRemaining === 1 ? '' : 's'} still reserved separately`
+                        : null}
+                      {backstopRemaining > 0 && collectionRemaining != null ? ' · ' : null}
+                      {collectionRemaining != null ? `${collectionRemaining} total collection remaining` : null}
+                    </p>
+                  ) : null}
 
                   {/* Only show the WL countdown while WHITELIST is the primary gating phase. Once
                       the primary phase is PUBLIC, the WL leftover has already rolled into public, so

@@ -114,6 +114,20 @@ export function gen2ReservedBackstopSupply(
   )
 }
 
+/** Unminted spots still reserved in the Gen1 + presale backstop pools (not part of the 987 WL/public pool). */
+export function gen2BackstopSupplyRemaining(input: {
+  launch: Pick<OwlCenterLaunchPublic, 'airdrop_supply' | 'presale_supply' | 'presale_overage_supply'>
+  airdropMinted: number
+  presaleMinted: number
+  overageMinted: number
+}): number {
+  return (
+    Math.max(0, input.launch.airdrop_supply - Math.max(0, input.airdropMinted)) +
+    Math.max(0, input.launch.presale_supply - Math.max(0, input.presaleMinted)) +
+    Math.max(0, (input.launch.presale_overage_supply ?? 0) - Math.max(0, input.overageMinted))
+  )
+}
+
 /** Supply pool cap for a phase (the number that, once minted, counts as "sold out"). */
 export function gen2PhasePoolCap(
   launch: Pick<
