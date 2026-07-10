@@ -15,6 +15,7 @@ import {
   gen2PhaseOpenFloorOffsetMs,
   gen2PhasePoolCap,
   gen2PhaseWindowMs,
+  gen2BackstopSupplyRemaining,
   gen2PublicPhaseSupplyDisplay,
   gen2PublicPoolCap,
   gen2PublicWalletLimitRemaining,
@@ -180,6 +181,30 @@ check(
 )
 
 console.log('PUBLIC supply display (shared pool progress bar):')
+check(
+  'backstop remaining = unminted Gen1 + presale + overage',
+  gen2BackstopSupplyRemaining({
+    launch,
+    airdropMinted: 298,
+    presaleMinted: 633,
+    overageMinted: 13,
+  }) === 69
+)
+check(
+  'pool remaining + backstop remaining = total collection remaining',
+  gen2PublicPhaseSupplyDisplay({
+    launch,
+    publicMinted: 534,
+    wlMinted: 177,
+  }).remaining +
+    gen2BackstopSupplyRemaining({
+      launch,
+      airdropMinted: 298,
+      presaleMinted: 633,
+      overageMinted: 13,
+    }) ===
+    345
+)
 check(
   'minted counts WL + public mints from the shared 987 cap',
   gen2PublicPhaseSupplyDisplay({

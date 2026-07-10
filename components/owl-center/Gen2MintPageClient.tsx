@@ -445,7 +445,11 @@ export function Gen2MintPageClient() {
 
           <StatPanel label="Minted" value={`${supply.minted} / ${supply.total}`} />
 
-          <StatPanel label="Remaining" value={supply.remaining} />
+          <StatPanel
+            label="Remaining"
+            value={supply.remaining}
+            hint="All phases incl. presale, Gen1 & public"
+          />
 
           <StatPanel
 
@@ -488,6 +492,7 @@ export function Gen2MintPageClient() {
             err={mintCheckErr}
             onRefresh={refreshMintCheck}
             embedded
+            collectionRemaining={supply.remaining}
           />
 
           <div id="mint" className="scroll-mt-28 md:scroll-mt-24">
