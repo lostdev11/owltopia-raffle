@@ -23,6 +23,7 @@ import {
 } from '@/lib/owl-center/mint-recovery-client'
 import { recordMintSessionConfirms, type MintConfirmBatchPayload } from '@/lib/owl-center/mint-session'
 import type { RecoveredCandyMachineMint } from '@/lib/solana/recover-candy-machine-mint'
+import { reasonLabel } from '@/lib/owl-center/mint-check-reason-label'
 import {
   createMintSessionDeadline,
   mintConfirmBackgroundBudgetMs,
@@ -86,6 +87,7 @@ function MintPanelShell({
 export function Gen2MintPanel({
   launch,
   remaining,
+  publicPoolRemaining,
   presaleSoldOut = false,
   mintControls,
   onRefresh,
@@ -94,6 +96,8 @@ export function Gen2MintPanel({
 }: {
   launch: OwlCenterLaunchPublic
   remaining: number
+  /** Spots left in the WL + public shared pool (987 cap). */
+  publicPoolRemaining?: number
   /** True when all presale purchase spots are claimed (distinct from Presale mint redemption phase). */
   presaleSoldOut?: boolean
   mintControls: OwlCenterMintControls
@@ -346,7 +350,23 @@ export function Gen2MintPanel({
 
   const trading = launch.active_phase === 'TRADING_ACTIVE'
   const soldOut = launch.active_phase === 'SOLD_OUT' || remaining <= 0
+  const publicPoolSoldOut =
+    launch.active_phase === 'PUBLIC' &&
+    publicPoolRemaining != null &&
+    publicPoolRemaining <= 0 &&
+    remaining > 0
   const mintClosed = trading || soldOut || mintControls.disabled
+  const mintButtonLabel = (() => {
+    if (isMintInProgress(step)) return stepLabel(step)
+    if (connected && eligLoading && !elig) return 'Checking eligibility…'
+    if (soldOut) return 'Sold out'
+    if (publicPoolSoldOut || elig?.reason === 'public_pool_exhausted') return 'Public sold out'
+    if (elig?.reason === 'sold_out') return 'Sold out'
+    if (elig?.reason === 'allocation_minted') return 'Allocation complete'
+    if (!connected) return 'Connect wallet to mint'
+    if (!elig?.is_eligible) return 'Not eligible'
+    return 'Mint now'
+  })()
 
   const runMint = async () => {
     setErr(null)
@@ -541,7 +561,10 @@ export function Gen2MintPanel({
     return (
       <MintPanelShell embedded={embedded} label="sold_out.sys">
         <p className="font-mono text-lg font-bold text-[#FF9C9C]">SOLD OUT</p>
-        <p className="mt-2 text-sm text-[#9BA8B4]">Primary mint supply exhausted. Awaiting or viewing trading activation.</p>
+        <p className="mt-2 text-sm text-[#9BA8B4]">
+          All {launch.total_supply.toLocaleString()} Gen2 spots have minted. Primary mint is closed — check secondary
+          markets below.
+        </p>
         <div className="mt-4">
           <TradingButtons magicEdenUrl={launch.magic_eden_url} tensorUrl={launch.tensor_url} />
         </div>
@@ -622,6 +645,15 @@ export function Gen2MintPanel({
           ) : mintControls.admin_paused ? (
             <p className="border border-[#FFD769]/40 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#FFD769]">
               Mint temporarily paused by Owl Center admin.
+            </p>
+          ) : null}
+
+          {publicPoolSoldOut ? (
+            <p className="border border-[#FF9C9C]/40 bg-[#FF9C9C]/10 px-3 py-2 text-sm text-[#FF9C9C]">
+              {reasonLabel('public_pool_exhausted')}
+              {remaining > 0
+                ? ` · ${remaining.toLocaleString()} spot${remaining === 1 ? '' : 's'} still reserved for presale & Gen1 backstop.`
+                : null}
             </p>
           ) : null}
 
@@ -773,11 +805,7 @@ export function Gen2MintPanel({
               }}
               className="flex-1 sm:flex-none"
             >
-              {isMintInProgress(step)
-                ? stepLabel(step)
-                : connected && eligLoading && !elig
-                  ? 'Checking eligibility…'
-                  : 'Mint now'}
+              {mintButtonLabel}
             </DeployButton>
           </div>
 
