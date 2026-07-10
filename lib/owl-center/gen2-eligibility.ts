@@ -11,7 +11,7 @@ import {
 import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { resolveGen1SnapshotForMint } from '@/lib/owl-center/gen2-mint-delegation'
 import { resolvePresaleBalanceForMint } from '@/lib/owl-center/gen2-presale-delegation'
-import { gen2PublicMintPoolRemaining, gen2PublicWalletLimitRemaining } from '@/lib/owl-center/gen2-phase-advance'
+import { gen2PublicMintPoolRemaining, gen2PublicWalletLimitRemaining, gen2EffectiveWlSupply } from '@/lib/owl-center/gen2-phase-advance'
 import {
   gen1AirdropMaxMintable,
   presaleOverageMaxMintable,
@@ -361,7 +361,8 @@ export async function buildGen2Eligibility(
     const used = row?.used_mints ?? 0
     const availWl = Math.max(0, allowed - used)
     const wlMintedGlobal = await sumOwlCenterPhaseMinted(launch.id, 'WHITELIST', network)
-    const wlPoolRemaining = Math.max(0, launch.wl_supply - wlMintedGlobal)
+    const effectiveWlSupply = gen2EffectiveWlSupply(launch, wlMintedGlobal)
+    const wlPoolRemaining = Math.max(0, effectiveWlSupply - wlMintedGlobal)
     const max = whitelistMaxMintable({
       allocationRemaining: availWl,
       wlPoolRemaining,

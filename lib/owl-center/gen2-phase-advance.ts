@@ -182,11 +182,23 @@ export function isGen2WhitelistClosed(launch: Gen2LaunchWhitelistGate): boolean 
  * {@link gen2PublicPoolCap}) instead of being stranded. AIRDROP/PRESALE leftover is intentionally
  * NOT rolled in — it stays reserved for the team's 7-day airdrop backstop.
  */
-export function gen2WlLeftoverForPublic(
-  launch: Pick<OwlCenterLaunchPublic, 'wl_supply'>,
+export function gen2EffectiveWlSupply(
+  launch: Pick<OwlCenterLaunchPublic, 'wl_supply'> & Gen2LaunchWhitelistGate,
   wlMintedGlobal: number
 ): number {
-  return Math.max(0, launch.wl_supply - Math.max(0, wlMintedGlobal))
+  const minted = Math.max(0, wlMintedGlobal)
+  // Once WL is closed its unminted cap rolls into PUBLIC — freeze the WL pool at what actually
+  // minted so reopening WL does not re-hold spots already released to the shared pool.
+  if (isGen2WhitelistClosed(launch)) return minted
+  return Math.max(minted, launch.wl_supply)
+}
+
+export function gen2WlLeftoverForPublic(
+  launch: Pick<OwlCenterLaunchPublic, 'wl_supply'> & Gen2LaunchWhitelistGate,
+  wlMintedGlobal: number
+): number {
+  const minted = Math.max(0, wlMintedGlobal)
+  return Math.max(0, gen2EffectiveWlSupply(launch, minted) - minted)
 }
 
 /**
@@ -229,16 +241,33 @@ export function gen2PublicPhaseSupplyDisplay(input: {
   launch: Pick<
     OwlCenterLaunchPublic,
     'airdrop_supply' | 'presale_supply' | 'presale_overage_supply' | 'wl_supply' | 'total_supply'
-  >
+  > &
+    Gen2LaunchWhitelistGate
   publicMinted: number
   wlMinted: number
 }): { cap: number; minted: number; remaining: number } {
-  const cap = gen2PhasePoolCap(input.launch, 'PUBLIC')
   const publicMinted = Math.max(0, input.publicMinted)
   const wlMinted = Math.max(0, input.wlMinted)
   const minted = publicMinted + wlMinted
+  const cap = Math.max(gen2PublicPoolCap(input.launch, wlMinted), minted)
   const remaining = Math.max(0, cap - minted)
   return { cap, minted, remaining }
+}
+
+/**
+ * When WHITELIST closes, sync `wl_supply` down to global WL mints so a later reopen does not
+ * re-hold hundreds of spots that already rolled into PUBLIC.
+ */
+export async function maybeSyncGen2WlSupplyOnClose(
+  launch: Pick<OwlCenterLaunchPublic, 'slug' | 'wl_supply'> & Gen2LaunchWhitelistGate,
+  wlMintedGlobal: number
+): Promise<{ synced: boolean; wl_supply: number }> {
+  const minted = Math.max(0, wlMintedGlobal)
+  if (launch.slug !== GEN2_SLUG || !isGen2WhitelistClosed(launch) || launch.wl_supply <= minted) {
+    return { synced: false, wl_supply: launch.wl_supply }
+  }
+  const updated = await updateOwlCenterLaunchAdmin(GEN2_SLUG, { wl_supply: minted })
+  return { synced: Boolean(updated), wl_supply: updated?.wl_supply ?? minted }
 }
 
 /**
@@ -397,7 +426,12 @@ export async function advanceGen2PhaseIfScheduled(nowMs: number = Date.now()): P
     })
   ) {
     const nextActivePhases = (launch.active_phases ?? []).filter((p) => p !== 'WHITELIST')
-    const updated = await updateOwlCenterLaunchAdmin(GEN2_SLUG, { active_phases: nextActivePhases })
+    const network = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
+    const wlMintedGlobal = await sumOwlCenterPhaseMinted(launch.id, 'WHITELIST', network)
+    const updated = await updateOwlCenterLaunchAdmin(GEN2_SLUG, {
+      active_phases: nextActivePhases,
+      wl_supply: Math.max(0, wlMintedGlobal),
+    })
     if (!updated) return { ok: false, error: 'update_failed' }
     await getSupabaseAdmin()
       .from('owl_center_activity_logs')
