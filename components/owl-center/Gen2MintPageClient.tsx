@@ -68,6 +68,8 @@ type Gen2StateApi = {
 
   supply: { total: number; minted: number; remaining: number; percent_minted: number }
 
+  phase_breakdown?: { phase: string; minted: number; cap: number; remaining: number }[]
+
   phases: { airdrop: number; presale: number; whitelist: number; public: number }
 
   prices_usdc: { presale: number | null; whitelist: number | null; public: number | null }
@@ -290,6 +292,8 @@ export function Gen2MintPageClient() {
   }
 
   const presaleSoldOut = state.presale_sold_out === true
+  const publicPoolRemaining =
+    state.phase_breakdown?.find((row) => row.phase === 'PUBLIC')?.remaining ?? supply.remaining
 
   const marketplace = state.marketplace ?? {
 
@@ -499,6 +503,7 @@ export function Gen2MintPageClient() {
             <Gen2MintPanel
               launch={launch}
               remaining={supply.remaining}
+              publicPoolRemaining={publicPoolRemaining}
               presaleSoldOut={presaleSoldOut}
               mintControls={mintControls}
               mintCheckPhases={mintCheck?.phases}
