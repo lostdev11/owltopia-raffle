@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { ArrowLeft, CheckCircle2, Copy, Loader2, Store } from 'lucide-react'
+import { PublicKey } from '@solana/web3.js'
 
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { WalletNftPicker } from '@/components/WalletNftPicker'
@@ -18,13 +19,16 @@ import type {
   ShopPriceCurrency,
 } from '@/lib/db/discord-marketplace-shop-items'
 import { slugifyShopItemSlug } from '@/lib/db/discord-marketplace-shop-items'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import {
   walletNftCollectionDisplayLabel,
   walletNftMintMatches,
 } from '@/lib/raffles/wallet-nft-picker'
+import { depositOwlToMarketplaceEscrowFromWallet } from '@/lib/solana/deposit-owl-to-marketplace-escrow'
+import { depositPrizeNftToEscrowFromWallet } from '@/lib/solana/deposit-prize-nft-to-escrow-wallet'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
+import { minimalWalletNftForEscrowTransfer } from '@/lib/solana/wallet-tokens'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
-import { PublicKey } from '@solana/web3.js'
 
 type DepositOption = {
   kind: ShopDepositKind
@@ -64,9 +68,10 @@ const DEPOSIT_OPTIONS: DepositOption[] = [
 
 export function AdminDiscordShopClient() {
   const { connection } = useConnection()
-  const { publicKey, connected } = useWallet()
-  const wallet = publicKey?.toBase58() ?? ''
-  const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
+  const { publicKey, connected, wallet } = useWallet()
+  const sendTransaction = useSendTransactionForWallet()
+  const walletAddr = publicKey?.toBase58() ?? ''
+  const cachedTrue = typeof window !== 'undefined' && walletAddr && getCachedAdmin(walletAddr) === true
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
   const [loading, setLoading] = useState(() => !cachedTrue)
 
@@ -321,6 +326,83 @@ export function AdminDiscordShopClient() {
     }
   }
 
+  const fundAndPublishItem = useCallback(
+    async (item: DiscordMarketplaceShopItem): Promise<{ ok: true } | { ok: false; error: string }> => {
+      if (!publicKey || !escrowWallet) {
+        return { ok: false, error: 'Connect wallet and ensure marketplace escrow is configured.' }
+      }
+      if (item.status !== 'pending_deposit') {
+        return { ok: true }
+      }
+
+      let depositTx: string | undefined
+
+      if (item.deposit_kind === 'owl_spl') {
+        setMsg(`Approve wallet: deposit ${item.units_per_sale} OWL to marketplace escrow…`)
+        const dep = await depositOwlToMarketplaceEscrowFromWallet({
+          connection,
+          publicKey,
+          sendTransaction,
+          escrowAddress: escrowWallet,
+          amountUi: item.units_per_sale,
+        })
+        if (!dep.ok) return dep
+        depositTx = dep.signature
+      } else if (item.deposit_kind === 'nft') {
+        const mint = item.asset_mint?.trim()
+        if (!mint) return { ok: false, error: 'Listing is missing NFT mint.' }
+        const nftForDeposit: WalletNft =
+          selectedShopNft && walletNftMintMatches(selectedShopNft.mint, mint)
+            ? selectedShopNft
+            : {
+                ...minimalWalletNftForEscrowTransfer(mint),
+                name: item.display_name,
+              }
+        setMsg('Approve wallet: transfer NFT to marketplace escrow…')
+        const dep = await depositPrizeNftToEscrowFromWallet({
+          connection,
+          publicKey,
+          sendTransaction,
+          walletAdapter: wallet?.adapter ?? null,
+          selectedNft: nftForDeposit,
+          prizeMintAddress: mint,
+          escrowAddress: escrowWallet,
+          logCtx: {
+            raffleId: item.id,
+            nftMint: mint,
+            transferAssetId: mint,
+            escrowAddress: escrowWallet,
+            fromWallet: publicKey.toBase58(),
+          },
+        })
+        if (!dep.ok) return { ok: false, error: dep.error }
+        depositTx = dep.signature
+      } else {
+        return { ok: false, error: 'This listing does not require a deposit.' }
+      }
+
+      setMsg('Confirming deposit on-chain…')
+      const res = await fetch(`/api/admin/discord-shop/items/${item.id}/verify-deposit`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deposit_tx: depositTx }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        return {
+          ok: false,
+          error:
+            typeof data.error === 'string'
+              ? `${data.error} Deposit tx: ${depositTx.slice(0, 12)}… — tap Deposit & publish after a few seconds if RPC lagged.`
+              : 'Verify failed after deposit',
+        }
+      }
+      return { ok: true }
+    },
+    [connection, escrowWallet, publicKey, selectedShopNft, sendTransaction, wallet?.adapter]
+  )
+
   const submit = async () => {
     setErr(null)
     setMsg(null)
@@ -330,7 +412,7 @@ export function AdminDiscordShopClient() {
       return
     }
     if (selectedDeposit.needsMint && !form.asset_mint.trim()) {
-      setErr('NFT mint address is required')
+      setErr('NFT mint address is required — load wallet NFTs and select one')
       return
     }
     const owlUnits = parseFloat(form.owl_units)
@@ -348,6 +430,13 @@ export function AdminDiscordShopClient() {
       setErr(
         `Wallet only has ${walletOwlUi.toLocaleString()} OWL. Lower the per-sale amount, or fund from treasury.`
       )
+      return
+    }
+    if (
+      (selectedDeposit.needsMint || (selectedDeposit.needsOwlUnits && !treasuryFunded)) &&
+      !escrowWallet
+    ) {
+      setErr('Marketplace escrow is not configured (DISCORD_MARKETPLACE_ESCROW_SECRET_KEY).')
       return
     }
 
@@ -374,15 +463,48 @@ export function AdminDiscordShopClient() {
         setErr(typeof data.error === 'string' ? data.error : 'Create failed')
         return
       }
-      setMsg(data.next_step ?? 'Listing created')
+
+      const item = data.item as DiscordMarketplaceShopItem | undefined
+      if (item?.status === 'pending_deposit') {
+        const funded = await fundAndPublishItem(item)
+        if (!funded.ok) {
+          setErr(funded.error)
+          setMsg('Listing saved as pending — fix the deposit, then tap Deposit & publish below.')
+          await load()
+          return
+        }
+        setMsg('Deposited to escrow and listing is live in Discord.')
+      } else {
+        setMsg(data.next_step ?? 'Listing created and live.')
+      }
+
       setForm((f) => ({ ...f, display_name: '', slug: '', asset_mint: '', description: '' }))
       setSelectedShopNft(null)
       setNftSearchQuery('')
       await load()
+      if (depositKind === 'owl_spl') void loadWalletOwl()
     } catch {
       setErr('Network error')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const depositAndPublish = async (item: DiscordMarketplaceShopItem) => {
+    setVerifyingId(item.id)
+    setErr(null)
+    setMsg(null)
+    try {
+      const funded = await fundAndPublishItem(item)
+      if (!funded.ok) {
+        setErr(funded.error)
+        return
+      }
+      setMsg('Deposited to escrow and listing is live in Discord.')
+      await load()
+      if (item.deposit_kind === 'owl_spl') void loadWalletOwl()
+    } finally {
+      setVerifyingId(null)
     }
   }
 
@@ -495,7 +617,10 @@ export function AdminDiscordShopClient() {
       <Card>
         <CardHeader>
           <CardTitle>Add shop item</CardTitle>
-          <CardDescription>Choose what you are listing, set the price, then deposit to escrow if needed.</CardDescription>
+          <CardDescription>
+            Create the listing, then your wallet will deposit OWL or the NFT into marketplace escrow and publish
+            automatically (same idea as raffle prize escrow).
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -736,7 +861,9 @@ export function AdminDiscordShopClient() {
 
           <Button type="button" disabled={submitting} onClick={() => void submit()}>
             {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Create listing
+            {selectedDeposit.needsMint || (selectedDeposit.needsOwlUnits && !treasuryFunded)
+              ? 'Create, deposit & publish'
+              : 'Create listing'}
           </Button>
 
           {msg ? (
@@ -772,18 +899,28 @@ export function AdminDiscordShopClient() {
                     {item.treasury_funded ? ' · treasury-funded' : ''}
                   </div>
                   {item.status === 'pending_deposit' ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="mt-2"
-                      disabled={verifyingId === item.id}
-                      onClick={() => void verifyDeposit(item.id)}
-                    >
-                      {verifyingId === item.id ? (
-                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                      ) : null}
-                      Verify deposit & publish
-                    </Button>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={verifyingId === item.id || !escrowWallet}
+                        onClick={() => void depositAndPublish(item)}
+                      >
+                        {verifyingId === item.id ? (
+                          <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                        ) : null}
+                        Deposit & publish
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={verifyingId === item.id}
+                        onClick={() => void verifyDeposit(item.id)}
+                      >
+                        Verify only
+                      </Button>
+                    </div>
                   ) : null}
                 </li>
               ))}

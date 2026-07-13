@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
       payment_wallet: getDiscordMarketplacePaymentWalletAddress(),
       next_step:
         item.status === 'pending_deposit'
-          ? 'Deposit the asset to escrow_wallet, then POST verify-deposit'
+          ? 'Approve the wallet deposit to escrow, then the listing will publish automatically'
           : 'Item is live — users can buy in Discord',
     })
   } catch (e) {
