@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot, ShieldAlert, Rocket, Trophy } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot, ShieldAlert, Rocket, Trophy, Store } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -3380,6 +3380,23 @@ export default function AdminDashboardPage() {
               </CardHeader>
             </Link>
           </Card>
+
+          {adminRole === 'full' && (
+            <Card className="hover:border-primary transition-colors cursor-pointer">
+              <Link href="/admin/discord-shop">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Store className="h-5 w-5" />
+                    Discord shop
+                  </CardTitle>
+                  <CardDescription>
+                    Manage /owltopia-shop listings — points items, OWL bundles, and NFTs. Deposit to marketplace escrow,
+                    verify, and announce new listings to your shop channel.
+                  </CardDescription>
+                </CardHeader>
+              </Link>
+            </Card>
+          )}
 
           <Card className="hover:border-primary transition-colors cursor-pointer">
             <Link href="/admin/gen2-presale">
