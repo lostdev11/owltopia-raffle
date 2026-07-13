@@ -18,20 +18,20 @@ const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
 
 export const metadata: Metadata = {
   title: `How It Works | ${PLATFORM_NAME}`,
-  description: 'How raffles work, how winners are chosen, and what Owl Vision trust scoring means for you.',
+  description: 'How raffles work: escrow, creator tickets, refunds, winner selection, and Owl Vision trust scoring.',
   alternates: { canonical: `${SITE_URL}/how-it-works` },
   openGraph: {
     type: 'website',
     url: `${SITE_URL}/how-it-works`,
     siteName: PLATFORM_NAME,
     title: `How It Works | ${PLATFORM_NAME}`,
-    description: 'How raffles work, how winners are chosen, and what Owl Vision trust scoring means for you.',
+    description: 'How raffles work: escrow, creator tickets, refunds, winner selection, and Owl Vision trust scoring.',
     images: [{ url: OG_IMAGE, ...DEFAULT_OG_IMAGE_DIMS, alt: OG_ALT, type: DEFAULT_OG_IMAGE_TYPE }],
   },
   twitter: {
     card: 'summary_large_image',
     title: `How It Works | ${PLATFORM_NAME}`,
-    description: 'How raffles work, how winners are chosen, and what Owl Vision trust scoring means for you.',
+    description: 'How raffles work: escrow, creator tickets, refunds, winner selection, and Owl Vision trust scoring.',
     images: [{ url: OG_IMAGE, alt: OG_ALT, ...DEFAULT_OG_IMAGE_DIMS }],
   },
 }
@@ -49,7 +49,7 @@ export default function HowItWorksPage() {
       <div className="prose prose-invert max-w-none">
         <h1 className="text-4xl font-bold mb-2">How It Works</h1>
         <p className="text-muted-foreground mb-8">
-          Raffles, winner selection, and the Owl Vision trust score — explained.
+          Raffles, escrow, refunds, winner selection, and the Owl Vision trust score — explained.
         </p>
 
         {/* How raffles work */}
@@ -70,16 +70,27 @@ export default function HowItWorksPage() {
               <Link href="/partner-program" className="text-green-500 hover:underline">
                 Partner Pro
               </Link>{' '}
-              communities may also list tickets in their own <strong>SPL token</strong> (only that partner&apos;s raffles; the mint is not a site-wide option for every creator). Ticket payments are real on-chain transfers. For most raffles today, proceeds go to a <strong>platform funds escrow</strong> wallet first; the app verifies each payment before your tickets count. Some older raffles may still pay a creator or recipient address directly — check the raffle page for the payment you are signing.
+              communities may also list tickets in their own <strong>SPL token</strong> (only that partner&apos;s raffles; the mint is not a site-wide option for every creator). Ticket payments are real on-chain transfers. For most raffles today, proceeds go to a <strong>platform funds escrow</strong> wallet first; the app verifies each payment before your tickets count. Some older raffles may still pay a creator or recipient address directly — check the raffle page for the payment you are signing. <strong>Raffle creators can buy tickets in their own raffles</strong>; those tickets count toward the draw like anyone else&apos;s.
             </li>
             <li>
               <strong>Entry is recorded</strong> — Your entry is stored with your wallet address and ticket count. Once your payment is verified on-chain, your entry counts toward the raffle.
             </li>
             <li>
-              <strong>NFT prizes (when applicable)</strong> — For NFT raffles, the prize is deposited to a <strong>prize escrow</strong> wallet before the draw can run. After someone wins, they <strong>claim</strong> the NFT from their dashboard when it is ready (on-chain claim).
+              <strong>Held in escrow for the duration</strong> — While a raffle is live, <strong>ticket sale funds</strong> sit in the platform funds escrow, and <strong>NFT prizes</strong> sit in the prize escrow wallet. Neither the creator nor buyers hold those assets until settlement, refund, or claim.
             </li>
             <li>
-              <strong>Raffle ends</strong> — When the end time is reached, the raffle stops accepting new entries. If a <strong>minimum ticket threshold</strong> is set and it is not met, the end date is usually <strong>extended once</strong> by the same length as the original raffle window (with a 7-day minimum if that length cannot be determined). If the minimum is still not met after that extension, ticket buyers on funds-escrow raffles can <strong>claim refunds</strong> from escrow, and escrowed NFT prizes are returned to the creator when possible.
+              <strong>NFT prizes (when applicable)</strong> — For NFT raffles, the prize is deposited to <strong>prize escrow</strong> before the draw can run. After someone wins, they <strong>claim</strong> the NFT from their{' '}
+              <Link href="/dashboard" className="text-green-500 hover:underline">
+                dashboard
+              </Link>{' '}
+              when it is ready (on-chain claim).
+            </li>
+            <li>
+              <strong>Raffle ends</strong> — When the end time is reached, the raffle stops accepting new entries. If a <strong>minimum ticket threshold</strong> is set and it is not met, the end date is usually <strong>extended once</strong> by the same length as the original raffle window (with a 7-day minimum if that length cannot be determined). If the minimum is still not met after that extension (or tickets otherwise do not sell through under the raffle rules), refunds are <strong>automatic from escrow</strong>: buyers claim ticket refunds and creators claim their escrowed NFT back from the{' '}
+              <Link href="/dashboard" className="text-green-500 hover:underline">
+                dashboard
+              </Link>
+              .
             </li>
             <li>
               <strong>Winner is selected</strong> — One winning <strong>wallet</strong> is chosen by <strong>weighted random selection</strong> in our backend: your chance is proportional to how many <strong>confirmed</strong> tickets that wallet holds (tickets from the same wallet are combined). The draw is not an on-chain randomness oracle; it is verifiable in the sense that only confirmed entries participate and the rules are applied consistently. Draws run when the raffle has ended, thresholds are satisfied, and (for NFT prizes) the prize is confirmed in escrow — often on a schedule (cron) or when an admin triggers processing.
@@ -91,6 +102,40 @@ export default function HowItWorksPage() {
           <p className="text-muted-foreground text-sm">
             Only <strong>confirmed</strong> entries (verified payments) are included in the draw. Pending or rejected entries do not count.
           </p>
+        </section>
+
+        {/* Common questions */}
+        <section className="mb-10">
+          <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
+            <Shield className="h-6 w-6 text-green-500" />
+            Common questions
+          </h2>
+          <ul className="list-none pl-0 space-y-4 mb-0">
+            <li>
+              <strong>What if all tickets are not sold?</strong>
+              <p className="text-sm text-muted-foreground mt-1 mb-0">
+                If a minimum threshold still is not met after the one-time extension, the raffle moves to a refundable state. Tickets buyers claim refunds from escrow in the dashboard; the creator claims the NFT (or other escrowed prize) back the same way.
+              </p>
+            </li>
+            <li>
+              <strong>Who holds the NFT during the raffle?</strong>
+              <p className="text-sm text-muted-foreground mt-1 mb-0">
+                The platform <strong>prize escrow</strong> wallet holds the NFT for the life of the raffle. Ticket payments for modern raffles are held in the separate <strong>funds escrow</strong> until refund or settlement.
+              </p>
+            </li>
+            <li>
+              <strong>How is the winner selected?</strong>
+              <p className="text-sm text-muted-foreground mt-1 mb-0">
+                Weighted random by confirmed ticket count per wallet (see step above). More confirmed tickets = higher chance; selection runs in our backend after the raffle is eligible to draw.
+              </p>
+            </li>
+            <li>
+              <strong>Can a creator buy tickets in their own raffle?</strong>
+              <p className="text-sm text-muted-foreground mt-1 mb-0">
+                Yes. Hosts may purchase tickets on raffles they create. Those tickets are normal confirmed entries and participate in the same weighted draw.
+              </p>
+            </li>
+          </ul>
         </section>
 
         {/* Bonus milestones (beta) */}
@@ -193,7 +238,7 @@ export default function HowItWorksPage() {
             Who Can Participate
           </h2>
           <p className="mb-4">
-            Anyone with a Solana wallet can buy tickets and create raffles. Creators can be holders or non-holders (fees differ as above). After a raffle ends, winner selection and deadline extensions are handled by automated jobs and/or admins according to the rules on this page. For full legal terms, see our <Link href="/terms" className="text-green-500 hover:underline">Terms of Service</Link>.
+            Anyone with a Solana wallet can buy tickets and create raffles — including buying tickets on a raffle you host. Creators can be holders or non-holders (fees differ as above). After a raffle ends, winner selection and deadline extensions are handled by automated jobs and/or admins according to the rules on this page. For full legal terms, see our <Link href="/terms" className="text-green-500 hover:underline">Terms of Service</Link>.
           </p>
         </section>
       </div>

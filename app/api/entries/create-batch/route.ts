@@ -21,7 +21,6 @@ import {
 } from '@/lib/entries/batch-invariants'
 import { CART_BATCH_MAX_RAFFLES_PER_TX } from '@/lib/cart/constants'
 import { raffleAcceptsSolAndBambooTickets } from '@/lib/raffles/dual-ticket-payment'
-import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
 
@@ -113,18 +112,6 @@ export async function POST(request: NextRequest) {
       if (!raffle) return NextResponse.json(ERROR_BODY, { status: 404 })
 
       if (!raffle.is_active) return NextResponse.json(ERROR_BODY, { status: 400 })
-
-      // Creators cannot buy tickets in their own raffle
-      const raffleCreatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
-      if (raffleCreatorWallet && walletsEqualSolana(raffleCreatorWallet, walletAddressStr)) {
-        return NextResponse.json(
-          {
-            success: false as const,
-            error: `You cannot buy tickets in your own raffle (${raffle.title}). Remove it from the cart to continue.`,
-          },
-          { status: 400 }
-        )
-      }
 
       if (raffleAcceptsSolAndBambooTickets(raffle)) {
         return NextResponse.json(
