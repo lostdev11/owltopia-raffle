@@ -236,7 +236,7 @@ export function DashboardOverviewSection({
               </p>
               <p className="text-xs text-muted-foreground leading-relaxed">{MILESTONE_BETA_NOTICE}</p>
               <Button asChild size="sm" className="min-h-[44px] w-full touch-manipulation sm:w-auto">
-                <Link href="/create">Add milestones to a raffle</Link>
+                <Link href="/admin/raffles/new?milestones=1">Add milestones to a raffle</Link>
               </Button>
             </div>
             <div className="rounded-lg border border-violet-500/20 bg-background/60 p-4 space-y-2">
