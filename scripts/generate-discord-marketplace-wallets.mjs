@@ -11,6 +11,7 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { spawnSync } from 'node:child_process'
 import { Keypair } from '@solana/web3.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -71,20 +72,12 @@ const payload = {
 mkdirSync(SECRETS_DIR, { recursive: true })
 writeFileSync(SECRETS_FILE, JSON.stringify(payload, null, 2) + '\n', { mode: 0o600 })
 
-const envBlock = `
-# Discord marketplace wallets (generated ${payload.generatedAt})
-# Escrow: NFT + OWL inventory. Payment: buyer SOL/OWL. Treasury: points-shop OWL delivery.
-DISCORD_MARKETPLACE_ESCROW_SECRET_KEY=${escrow.secretKeyJson}
-DISCORD_MARKETPLACE_ESCROW_WALLET=${escrow.publicKey}
-DISCORD_MARKETPLACE_PAYMENT_WALLET=${payment.publicKey}
-DISCORD_MARKETPLACE_OWL_TREASURY_SECRET_KEY=${owlTreasury.secretKeyJson}
-`.trimStart()
-
 if (writeEnv) {
-  const prefix = existsSync(ENV_LOCAL) ? '\n\n' : ''
-  writeFileSync(ENV_LOCAL, (existsSync(ENV_LOCAL) ? readFileSync(ENV_LOCAL, 'utf8') : '') + prefix + envBlock, {
-    mode: 0o600,
+  const merge = spawnSync(process.execPath, [join(__dirname, 'merge-discord-marketplace-env.mjs')], {
+    cwd: ROOT,
+    stdio: 'inherit',
   })
+  if (merge.status !== 0) process.exit(merge.status ?? 1)
 }
 
 console.log('Discord marketplace wallets generated.\n')
@@ -94,7 +87,7 @@ console.log('OWL treasury (points):  ', owlTreasury.publicKey)
 console.log('')
 console.log('Secrets saved to:', SECRETS_FILE)
 if (writeEnv) {
-  console.log('Env vars appended to:', ENV_LOCAL)
+  console.log('Env vars merged into:', ENV_LOCAL)
 } else {
   console.log('Re-run with --write-env to append vars to .env.local')
 }
