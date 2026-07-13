@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useWallet } from '@solana/wallet-adapter-react'
+import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { ArrowLeft, CheckCircle2, Copy, Loader2, Store } from 'lucide-react'
 
 import { WalletConnectButton } from '@/components/WalletConnectButton'
+import { WalletNftPicker } from '@/components/WalletNftPicker'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -16,6 +17,12 @@ import type {
   ShopDepositKind,
   ShopPriceCurrency,
 } from '@/lib/db/discord-marketplace-shop-items'
+import { slugifyShopItemSlug } from '@/lib/db/discord-marketplace-shop-items'
+import {
+  walletNftCollectionDisplayLabel,
+  walletNftMintMatches,
+} from '@/lib/raffles/wallet-nft-picker'
+import type { WalletNft } from '@/lib/solana/wallet-tokens'
 
 type DepositOption = {
   kind: ShopDepositKind
@@ -54,6 +61,7 @@ const DEPOSIT_OPTIONS: DepositOption[] = [
 ]
 
 export function AdminDiscordShopClient() {
+  const { connection } = useConnection()
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
@@ -70,6 +78,12 @@ export function AdminDiscordShopClient() {
   const [submitting, setSubmitting] = useState(false)
   const [verifyingId, setVerifyingId] = useState<string | null>(null)
 
+  const [walletNfts, setWalletNfts] = useState<WalletNft[] | null>(null)
+  const [loadingWalletNfts, setLoadingWalletNfts] = useState(false)
+  const [walletNftsError, setWalletNftsError] = useState<string | null>(null)
+  const [nftSearchQuery, setNftSearchQuery] = useState('')
+  const [selectedShopNft, setSelectedShopNft] = useState<WalletNft | null>(null)
+
   const [depositKind, setDepositKind] = useState<ShopDepositKind>('owl_spl')
   const [treasuryFunded, setTreasuryFunded] = useState(false)
   const [form, setForm] = useState({
@@ -83,6 +97,102 @@ export function AdminDiscordShopClient() {
   })
 
   const selectedDeposit = DEPOSIT_OPTIONS.find((d) => d.kind === depositKind) ?? DEPOSIT_OPTIONS[0]
+
+  useEffect(() => {
+    if (depositKind !== 'nft') {
+      setWalletNfts(null)
+      setWalletNftsError(null)
+      setNftSearchQuery('')
+      setSelectedShopNft(null)
+    }
+  }, [depositKind])
+
+  const handleShopNftSelect = useCallback((nft: WalletNft) => {
+    setSelectedShopNft(nft)
+    setForm((f) => {
+      const name = nft.name?.trim() || f.display_name
+      const slug = f.slug.trim() || (name ? slugifyShopItemSlug(name) : '')
+      return {
+        ...f,
+        asset_mint: nft.mint,
+        display_name: f.display_name.trim() ? f.display_name : name || f.display_name,
+        slug,
+      }
+    })
+  }, [])
+
+  const handleShopNftMintInputChange = useCallback(
+    (mint: string) => {
+      setForm((f) => ({ ...f, asset_mint: mint }))
+      const trimmed = mint.trim()
+      if (!trimmed) {
+        setSelectedShopNft(null)
+        return
+      }
+      const match = walletNfts?.find((nft) => walletNftMintMatches(nft.mint, trimmed))
+      if (match) {
+        setSelectedShopNft(match)
+        setForm((f) => ({
+          ...f,
+          asset_mint: match.mint,
+          display_name: f.display_name.trim() ? f.display_name : match.name?.trim() || f.display_name,
+          slug: f.slug.trim() || slugifyShopItemSlug(match.name ?? match.mint),
+        }))
+      } else {
+        setSelectedShopNft(null)
+      }
+    },
+    [walletNfts]
+  )
+
+  const loadWalletNfts = useCallback(async () => {
+    if (!publicKey) return
+    setLoadingWalletNfts(true)
+    setWalletNftsError(null)
+    const walletAddr = publicKey.toBase58()
+    try {
+      const [apiRes, escrowRes] = await Promise.all([
+        fetch(`/api/wallet/nfts?wallet=${encodeURIComponent(walletAddr)}`, { credentials: 'include' }),
+        fetch(`/api/wallet/escrowed-nft-mints?wallet=${encodeURIComponent(walletAddr)}`, {
+          credentials: 'include',
+        }),
+      ])
+      let nfts: WalletNft[] = []
+      if (apiRes.ok) {
+        const data = await apiRes.json()
+        nfts = Array.isArray(data) ? data : []
+      }
+      if (nfts.length === 0 || apiRes.status === 503) {
+        const { getWalletNfts } = await import('@/lib/solana/wallet-tokens')
+        try {
+          nfts = await getWalletNfts(connection, publicKey)
+        } catch (rpcErr) {
+          if (nfts.length === 0) throw rpcErr
+        }
+      }
+      if (escrowRes.ok) {
+        try {
+          const { mints: escrowedMints } = await escrowRes.json()
+          if (Array.isArray(escrowedMints) && escrowedMints.length > 0) {
+            const escrowedSet = new Set(escrowedMints.map((m: string) => m.toLowerCase()))
+            nfts = nfts.filter((n) => !escrowedSet.has(n.mint.toLowerCase()))
+          }
+        } catch {
+          // ignore
+        }
+      }
+      setWalletNfts(nfts)
+      setNftSearchQuery('')
+      setSelectedShopNft(null)
+      setForm((f) => ({ ...f, asset_mint: '' }))
+    } catch (e) {
+      console.error('loadWalletNfts:', e)
+      setWalletNftsError(e instanceof Error ? e.message : 'Failed to load wallet NFTs')
+      setWalletNfts(null)
+    } finally {
+      setLoadingWalletNfts(false)
+    }
+  }, [connection, publicKey])
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -181,6 +291,8 @@ export function AdminDiscordShopClient() {
       }
       setMsg(data.next_step ?? 'Listing created')
       setForm((f) => ({ ...f, display_name: '', slug: '', asset_mint: '', description: '' }))
+      setSelectedShopNft(null)
+      setNftSearchQuery('')
       await load()
     } catch {
       setErr('Network error')
@@ -358,15 +470,62 @@ export function AdminDiscordShopClient() {
           </div>
 
           {selectedDeposit.needsMint ? (
-            <div className="space-y-2">
-              <Label htmlFor="mint">NFT mint / asset address</Label>
-              <Input
-                id="mint"
-                value={form.asset_mint}
-                onChange={(e) => setForm((f) => ({ ...f, asset_mint: e.target.value }))}
-                placeholder="So111…"
-                className="font-mono text-xs"
-              />
+            <div className="space-y-3">
+              <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm">
+                <p className="font-medium text-amber-700 dark:text-amber-400">Pick an NFT from your wallet</p>
+                <p className="mt-0.5 text-muted-foreground">
+                  Same flow as creating an NFT raffle — load your wallet, browse or search, then deposit the selected
+                  NFT to marketplace escrow.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void loadWalletNfts()}
+                disabled={loadingWalletNfts || !publicKey}
+              >
+                {loadingWalletNfts ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Loading…
+                  </>
+                ) : (
+                  'Load NFTs from wallet'
+                )}
+              </Button>
+              {walletNftsError ? <p className="text-sm text-destructive">{walletNftsError}</p> : null}
+              {walletNfts && walletNfts.length === 0 && !loadingWalletNfts ? (
+                <p className="text-sm text-muted-foreground">
+                  No NFTs found in this wallet (excluding prize-escrow NFTs). You can paste a mint address below.
+                </p>
+              ) : null}
+              {walletNfts ? (
+                <WalletNftPicker
+                  nfts={walletNfts}
+                  selectedMint={selectedShopNft?.mint ?? (form.asset_mint.trim() || null)}
+                  onSelect={handleShopNftSelect}
+                  searchQuery={nftSearchQuery}
+                  onSearchQueryChange={setNftSearchQuery}
+                  showMintPaste
+                  mintInput={form.asset_mint}
+                  onMintInputChange={handleShopNftMintInputChange}
+                  searchInputId="shop-nft-search"
+                  mintInputId="shop-nft-mint"
+                />
+              ) : null}
+              {selectedShopNft || form.asset_mint.trim() ? (
+                <p className="text-sm text-muted-foreground">
+                  {selectedShopNft ? (
+                    <>
+                      Selected: <span className="text-foreground">{selectedShopNft.name ?? selectedShopNft.mint}</span>
+                      {' · '}
+                      {walletNftCollectionDisplayLabel(selectedShopNft)}
+                    </>
+                  ) : (
+                    <>Mint: {form.asset_mint.trim()}</>
+                  )}
+                </p>
+              ) : null}
             </div>
           ) : null}
 
