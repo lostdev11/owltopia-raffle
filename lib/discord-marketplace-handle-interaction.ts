@@ -111,7 +111,7 @@ function getSubcommandAndOptions(data: DiscordInteraction['data']): {
 
   const collect = (items: Array<{ name: string; type: number; value?: string | number }>) => {
     for (const o of items) {
-      if (o.type === 3 && typeof o.value === 'string') strOptions[o.name] = o.value
+      if ((o.type === 3 || o.type === 6) && typeof o.value === 'string') strOptions[o.name] = o.value
       if (o.type === 4 && typeof o.value === 'number') numOptions[o.name] = o.value
       if (o.type === 10 && typeof o.value === 'number') numOptions[o.name] = o.value
     }
@@ -187,6 +187,42 @@ function nftListingStatusEmoji(status: string): string {
     default:
       return '⚪'
   }
+}
+
+async function handleGrantMarketplacePoints(params: {
+  guildId: string
+  targetUserId: string
+  amount: number
+}): Promise<Record<string, unknown>> {
+  const targetUser = params.targetUserId.trim()
+  const amount = Math.trunc(params.amount)
+  if (!targetUser || !Number.isFinite(amount) || amount === 0) {
+    return ephemeral(
+      'Usage: `/owltopia-shop grant-points member:@user amount:<points>` — use a negative amount to deduct.'
+    )
+  }
+
+  const next = await grantMarketplacePoints({
+    discord_user_id: targetUser,
+    discord_guild_id: params.guildId,
+    delta: amount,
+  })
+  if (next == null) {
+    return ephemeral(
+      amount < 0
+        ? 'Could not deduct points (user may not have enough balance).'
+        : 'Could not update points.'
+    )
+  }
+
+  const deltaLabel =
+    amount > 0
+      ? `+${amount.toLocaleString()} points`
+      : `${amount.toLocaleString()} points`
+
+  return ephemeral(
+    `<@${targetUser}> now has **${next.toLocaleString()}** points (${deltaLabel}).`
+  )
 }
 
 export async function handleDiscordMarketplaceCommand(
@@ -303,6 +339,14 @@ export async function handleDiscordMarketplaceCommand(
   if (sub === 'balance') {
     const balance = await getMarketplacePointsBalance(discordUserId, guildId)
     return ephemeral(`Your balance: **${balance.toLocaleString()}** points`)
+  }
+
+  if (sub === 'grant-points') {
+    const access = await memberCanManageShop(interaction.member)
+    if (!access.ok) return ephemeral(access.message)
+    const targetUser = (strOptions.member ?? strOptions.user ?? '').trim()
+    const amount = numOptions.amount
+    return handleGrantMarketplacePoints({ guildId, targetUserId: targetUser, amount })
   }
 
   if (sub === 'wallet' || sub === 'connect-wallet') {
@@ -849,18 +893,9 @@ export async function handleDiscordMarketplaceCommand(
     }
 
     if (nestedSub === 'grant-points') {
-      const targetUser = (strOptions.user ?? '').trim()
+      const targetUser = (strOptions.member ?? strOptions.user ?? '').trim()
       const amount = numOptions.amount
-      if (!targetUser || !Number.isFinite(amount) || amount === 0) {
-        return ephemeral('Usage: `/owltopia-shop admin grant-points user:<discord_user_id> amount:…`')
-      }
-      const next = await grantMarketplacePoints({
-        discord_user_id: targetUser,
-        discord_guild_id: guildId,
-        delta: Math.trunc(amount),
-      })
-      if (next == null) return ephemeral('Could not update points.')
-      return ephemeral(`User \`${targetUser}\` now has **${next.toLocaleString()}** points.`)
+      return handleGrantMarketplacePoints({ guildId, targetUserId: targetUser, amount })
     }
 
     if (nestedSub === 'list-products') {
@@ -874,7 +909,7 @@ export async function handleDiscordMarketplaceCommand(
     }
 
     return ephemeral(
-      'Admin: `list-owl`, `add-product`, `list-nft`, `verify-nft-deposit`, `list-nfts`, `remove-nft`, `grant-points`, `list-products`'
+      'Admin: `grant-points`, `list-owl`, `add-product`, `list-nft`, `verify-nft-deposit`, `list-nfts`, `remove-nft`, `list-products`'
     )
   }
 

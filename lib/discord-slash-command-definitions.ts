@@ -154,6 +154,25 @@ export const OWLTOPIA_SHOP_SLASH_COMMAND = {
       type: 1,
     },
     {
+      name: 'grant-points',
+      description: 'Admin: add or remove shop points for a member',
+      type: 1,
+      options: [
+        {
+          name: 'member',
+          description: 'Discord member to credit or debit',
+          type: 6,
+          required: true,
+        },
+        {
+          name: 'amount',
+          description: 'Points to add (use a negative number to deduct)',
+          type: 4,
+          required: true,
+        },
+      ],
+    },
+    {
       name: 'admin',
       description: 'Manage shop products, NFT listings, and points (admin/founder)',
       type: 1,
@@ -232,7 +251,7 @@ export const OWLTOPIA_SHOP_SLASH_COMMAND = {
           description: 'Add or remove points for a Discord user',
           type: 1,
           options: [
-            { name: 'user', description: 'Discord user id (snowflake)', type: 3, required: true },
+            { name: 'member', description: 'Discord member to credit or debit', type: 6, required: true },
             { name: 'amount', description: 'Points to add (negative to deduct)', type: 4, required: true },
           ],
         },
