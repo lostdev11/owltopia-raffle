@@ -634,7 +634,9 @@ export function AdminDiscordShopClient() {
           <CardTitle>Marketplace wallets</CardTitle>
           <CardDescription>
             Inventory escrow (NFTs + OWL stock) is separate from raffle prize escrow. On-chain payments
-            go to the payment wallet.
+            go to the payment wallet. SOL/OWL checkouts also charge a ~$1 platform fee (SOL) to{' '}
+            <code className="text-xs">OWL_PLATFORM_FEE_TREASURY_WALLET</code>. New listings post a{' '}
+            <strong>Quick buy</strong> button when the bot can write to the shop channel.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">

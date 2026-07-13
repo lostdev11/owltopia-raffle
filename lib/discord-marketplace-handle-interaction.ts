@@ -1,5 +1,10 @@
 import { generateDiscordMarketplaceLinkState } from '@/lib/discord-marketplace-link-state'
-import { fulfillMarketplaceOwlDelivery } from '@/lib/solana/discord-marketplace-fulfill'
+import {
+  marketplaceBuyResultToInteractionResponse,
+  marketplaceBuyWithPoints,
+  marketplaceCreateOnchainQuote,
+  marketplaceQuickBuyFromCustomId,
+} from '@/lib/discord-marketplace-buy'
 import {
   fulfillMarketplaceNftToBuyer,
   getDiscordMarketplaceNftEscrowAddress,
@@ -10,32 +15,23 @@ import {
   verifyDiscordMarketplaceNftPayment,
 } from '@/lib/solana/verify-discord-marketplace-payment'
 import { getDiscordMarketplacePaymentWalletAddress } from '@/lib/solana/discord-marketplace-payment-wallet'
-import {
-  completeShopItemOnchainSale,
-  purchaseShopItemWithPoints,
-} from '@/lib/discord-marketplace-purchase-shop-item'
+import { completeShopItemOnchainSale } from '@/lib/discord-marketplace-purchase-shop-item'
 import { getShopItemBySlug, listShopItems } from '@/lib/db/discord-marketplace-shop-items'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { isAdmin } from '@/lib/db/admins'
 import {
-  createMarketplaceOrder,
   getMarketplacePointsBalance,
-  getMarketplaceProductBySlug,
   grantMarketplacePoints,
   listActiveMarketplaceProducts,
   listActiveOwlTokenProducts,
   listAllMarketplaceProducts,
   listRecentMarketplaceOrders,
-  markMarketplaceOrderFailed,
-  markMarketplaceOrderFulfilled,
-  refundMarketplaceOrder,
   slugifyMarketplaceProductSlug,
   upsertMarketplaceProduct,
 } from '@/lib/db/discord-marketplace'
 import {
   completeNftSale,
   createNftListing,
-  createNftPurchaseIntent,
   defaultNftListingSlugFromMint,
   findNftIntentByMemo,
   getNftListingBySlug,
@@ -415,112 +411,9 @@ export async function handleDiscordMarketplaceCommand(
     if (!slug) {
       return ephemeral('Usage: `/owltopia-shop buy product:<slug>` — run `/owltopia-shop browse` to see items.')
     }
-
-    const wallet = await getWalletAddressByDiscordUserId(discordUserId)
-    if (!wallet) {
-      const state = generateDiscordMarketplaceLinkState(discordUserId)
-      const url = `${getSiteBaseUrl()}/discord-shop/connect?state=${encodeURIComponent(state)}`
-      return ephemeral(
-        [
-          '**Connect your wallet first** so we can deliver your purchase automatically.',
-          '',
-          url,
-        ].join('\n')
-      )
-    }
-
-    const shopItem = await getShopItemBySlug(guildId, slug)
-    if (shopItem?.status === 'available' && shopItem.price_currency === 'POINTS') {
-      const purchase = await purchaseShopItemWithPoints({
-        item: shopItem,
-        discord_user_id: discordUserId,
-        discord_guild_id: guildId,
-        recipient_wallet: wallet,
-      })
-      if (!purchase.ok) return ephemeral(purchase.message)
-      const txLine = purchase.fulfillmentTx
-        ? `\n[View delivery](${gen2PresaleExplorerTxUrl(purchase.fulfillmentTx)})`
-        : ''
-      return embedResponse({
-        title: '🎉 Shop Purchase!',
-        description: [`**${shopItem.display_name}**`, '', purchase.message + txLine].join('\n'),
-        color: 0x2ecc71,
-      })
-    }
-
-    const product = await getMarketplaceProductBySlug(guildId, slug)
-    if (!product || !product.active) {
-      return ephemeral(`Product \`${slug}\` not found. Run \`/owltopia-shop browse\` for available items.`)
-    }
-
-    const balance = await getMarketplacePointsBalance(discordUserId, guildId)
-    if (balance < product.points_cost) {
-      return ephemeral(
-        `Not enough points. **${product.name}** costs **${product.points_cost.toLocaleString()}** — you have **${balance.toLocaleString()}**.`
-      )
-    }
-
-    const orderResult = await createMarketplaceOrder({
-      discord_user_id: discordUserId,
-      discord_guild_id: guildId,
-      product_id: product.id,
-      recipient_wallet: wallet,
-    })
-
-    if (!orderResult.ok) {
-      return ephemeral(orderResult.message)
-    }
-
-    if (product.owl_delivery_amount > 0) {
-      const delivery = await fulfillMarketplaceOwlDelivery({
-        recipientWallet: wallet,
-        owlAmountUi: product.owl_delivery_amount,
-      })
-
-      if (delivery.kind === 'sent') {
-        await markMarketplaceOrderFulfilled(orderResult.order_id, delivery.signature)
-        const shortWallet = `${wallet.slice(0, 4)}…${wallet.slice(-4)}`
-        return embedResponse({
-          title: '🎉 New Shop Purchase!',
-          description: [
-            `Congratulations! You acquired **${product.name}**.`,
-            '',
-            `**Cost:** ${orderResult.points_spent.toLocaleString()} points`,
-            `**Delivered:** ${product.owl_delivery_amount} OWL → \`${shortWallet}\``,
-            `[View transaction](${gen2PresaleExplorerTxUrl(delivery.signature)})`,
-          ].join('\n'),
-          color: 0x2ecc71,
-        })
-      }
-
-      if (delivery.kind === 'failed') {
-        await markMarketplaceOrderFailed(orderResult.order_id, delivery.error)
-        await refundMarketplaceOrder(orderResult.order_id)
-        return ephemeral(
-          `Purchase could not be delivered on-chain (${delivery.error}). Your points were refunded. Contact support if this persists.`
-        )
-      }
-
-      // zero_amount / skipped — points-only product with misconfigured owl amount 0 path shouldn't happen
-      await markMarketplaceOrderFulfilled(orderResult.order_id, 'no-on-chain-delivery')
-    } else {
-      await markMarketplaceOrderFulfilled(orderResult.order_id, 'points-only')
-    }
-
-    return embedResponse({
-      title: '🎉 New Shop Purchase!',
-      description: [
-        `Congratulations! You acquired **${product.name}**.`,
-        '',
-        `**Cost:** ${orderResult.points_spent.toLocaleString()} points`,
-        product.owl_delivery_amount > 0
-          ? ''
-          : '_This item does not include on-chain OWL delivery._',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-      color: 0x2ecc71,
-    })
+    return marketplaceBuyResultToInteractionResponse(
+      await marketplaceBuyWithPoints({ guildId, discordUserId, slug })
+    )
   }
 
   if (sub === 'buy-nft') {
@@ -528,85 +421,8 @@ export async function handleDiscordMarketplaceCommand(
     if (!listingSlug) {
       return ephemeral('Usage: `/owltopia-shop buy-nft listing:<slug>`')
     }
-
-    const wallet = await getWalletAddressByDiscordUserId(discordUserId)
-    if (!wallet) {
-      const state = generateDiscordMarketplaceLinkState(discordUserId)
-      const url = `${getSiteBaseUrl()}/discord-shop/connect?state=${encodeURIComponent(state)}`
-      return ephemeral(['**Connect your wallet first** to receive the NFT after payment.', '', url].join('\n'))
-    }
-
-    const shopItemOnchain = await getShopItemBySlug(guildId, listingSlug)
-    if (
-      shopItemOnchain?.status === 'available' &&
-      (shopItemOnchain.price_currency === 'SOL' || shopItemOnchain.price_currency === 'OWL')
-    ) {
-      const currency = shopItemOnchain.price_currency as NftListingCurrency
-      const intent = await createNftPurchaseIntent({
-        shop_item_id: shopItemOnchain.id,
-        discord_user_id: discordUserId,
-        buyer_wallet: wallet,
-        price_amount: shopItemOnchain.price_amount,
-        currency,
-      })
-      if (!intent) return ephemeral('Could not create payment session.')
-      const treasury = getDiscordMarketplacePaymentWalletAddress() ?? '(set DISCORD_MARKETPLACE_PAYMENT_WALLET)'
-      const payLine =
-        currency === 'SOL'
-          ? `Send **exactly ${shopItemOnchain.price_amount} SOL** to \`${treasury}\``
-          : `Send **exactly ${shopItemOnchain.price_amount} OWL** to \`${treasury}\``
-      return ephemeral(
-        [
-          `**Purchase — ${shopItemOnchain.display_name}**`,
-          '',
-          payLine,
-          `**Memo (exact):** \`${intent.memo}\``,
-          '',
-          'Include the memo in the **same transaction** as your payment.',
-          '',
-          `Quote expires: ${intent.expires_at}`,
-          '',
-          `Then run \`/owltopia-shop verify-nft signature:<your_tx_signature>\``,
-        ].join('\n')
-      )
-    }
-
-    const listing = await getNftListingBySlug(guildId, listingSlug)
-    if (!listing || listing.status !== 'available') {
-      return ephemeral(`Listing \`${listingSlug}\` not found or not available.`)
-    }
-
-    const intent = await createNftPurchaseIntent({
-      listing_id: listing.id,
-      discord_user_id: discordUserId,
-      buyer_wallet: wallet,
-      price_amount: listing.price_amount,
-      currency: listing.currency,
-    })
-    if (!intent) return ephemeral('Could not create payment session.')
-
-    const treasury = getDiscordMarketplacePaymentWalletAddress() ?? '(set DISCORD_MARKETPLACE_PAYMENT_WALLET)'
-    const label = listing.display_name ?? listing.nft_mint
-    const payLine =
-      listing.currency === 'SOL'
-        ? `Send **exactly ${listing.price_amount} SOL** to \`${treasury}\``
-        : `Send **exactly ${listing.price_amount} OWL** to \`${treasury}\``
-
-    return ephemeral(
-      [
-        `**NFT purchase — ${label}**`,
-        '',
-        payLine,
-        `**Memo (exact):** \`${intent.memo}\``,
-        '',
-        'Include the memo in the **same transaction** as your payment (Phantom: Advanced → Memo).',
-        '',
-        `Quote expires: ${intent.expires_at}`,
-        '',
-        `Then run \`/owltopia-shop verify-nft signature:<your_tx_signature>\``,
-        '',
-        `NFT will auto-transfer to \`${wallet.slice(0, 4)}…${wallet.slice(-4)}\` after verification.`,
-      ].join('\n')
+    return marketplaceBuyResultToInteractionResponse(
+      await marketplaceCreateOnchainQuote({ guildId, discordUserId, slug: listingSlug })
     )
   }
 
@@ -656,6 +472,7 @@ export async function handleDiscordMarketplaceCommand(
       expectedAmount: intent.price_amount,
       expectedMemo: intent.memo,
       payerWallet: wallet,
+      expectedPlatformFeeLamports: intent.platform_fee_lamports,
       parsedTransaction: tx,
     })
     if (!paymentCheck.ok) {
@@ -933,5 +750,29 @@ export async function handleDiscordMarketplaceCommand(
       '`/owltopia-shop balance` — your points',
       '`/owltopia-shop purchases` — order history',
     ].join('\n')
+  )
+}
+
+type DiscordMessageComponentInteraction = {
+  guild_id?: string
+  member?: { user?: { id: string } }
+  data?: { custom_id?: string; component_type?: number }
+}
+
+/** Quick buy / Connect wallet buttons on listing announcements. */
+export async function handleDiscordMarketplaceMessageComponent(
+  interaction: DiscordMessageComponentInteraction
+): Promise<Record<string, unknown>> {
+  const guildId = interaction.guild_id
+  if (!guildId) {
+    return ephemeral('Use Quick buy in a server channel.')
+  }
+  const discordUserId = interaction.member?.user?.id?.trim()
+  if (!discordUserId) {
+    return ephemeral('Could not read your Discord user id.')
+  }
+  const customId = interaction.data?.custom_id?.trim() ?? ''
+  return marketplaceBuyResultToInteractionResponse(
+    await marketplaceQuickBuyFromCustomId({ guildId, discordUserId, customId })
   )
 }

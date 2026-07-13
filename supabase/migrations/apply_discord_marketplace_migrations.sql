@@ -465,3 +465,9 @@ ALTER TABLE discord_marketplace_nft_purchase_intents
 
 ALTER TABLE discord_marketplace_nft_purchase_intents
   ALTER COLUMN listing_id DROP NOT NULL;
+
+ALTER TABLE discord_marketplace_nft_purchase_intents
+  ADD COLUMN IF NOT EXISTS platform_fee_lamports BIGINT NOT NULL DEFAULT 0;
+
+COMMENT ON COLUMN discord_marketplace_nft_purchase_intents.platform_fee_lamports IS
+  'Owltopia marketplace purchase fee in lamports (~$1 USD via Jupiter), paid to OWL_PLATFORM_FEE_TREASURY_WALLET in the same payment tx as the listing price.';

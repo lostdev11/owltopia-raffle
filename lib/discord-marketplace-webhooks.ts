@@ -1,26 +1,18 @@
 /**
- * Discord webhook when a marketplace listing goes live.
- * Set DISCORD_WEBHOOK_MARKETPLACE to an incoming webhook URL (#owltopia-shop channel).
- * Falls back to DISCORD_WEBHOOK_URL when unset.
+ * Discord webhook / bot announce when a marketplace listing goes live.
+ * Set DISCORD_WEBHOOK_MARKETPLACE (and optional DISCORD_MARKETPLACE_CHANNEL_ID for Quick buy buttons).
  */
 import type { DiscordMarketplaceProduct } from '@/lib/db/discord-marketplace'
 import type { DiscordMarketplaceNftListing } from '@/lib/db/discord-marketplace-nfts'
 import type { DiscordMarketplaceShopItem } from '@/lib/db/discord-marketplace-shop-items'
 import {
-  postDiscordIncomingWebhookEmbed,
-  type DiscordIncomingEmbed,
-} from '@/lib/discord-incoming-webhook'
+  marketplaceFeeFieldValue,
+  postMarketplaceListingAnnouncement,
+} from '@/lib/discord-marketplace-announce'
+import type { DiscordIncomingEmbed } from '@/lib/discord-incoming-webhook'
 import { resolveNftPrizeImageForDiscordEmbed } from '@/lib/discord-nft-embed-image'
 
 const EMBED_GOLD = 0xf39c12
-
-function marketplaceWebhookUrl(): string | undefined {
-  return (
-    process.env.DISCORD_WEBHOOK_MARKETPLACE?.trim() ||
-    process.env.DISCORD_WEBHOOK_URL?.trim() ||
-    undefined
-  )
-}
 
 function formatShopPrice(amount: number, currency: 'POINTS' | 'SOL' | 'OWL'): string {
   if (currency === 'POINTS') return `${Math.trunc(amount).toLocaleString()} points`
@@ -48,47 +40,51 @@ function shopItemBuyHint(item: DiscordMarketplaceShopItem): string {
   if (item.price_currency === 'POINTS') {
     return `/owltopia-shop buy product:${item.slug}`
   }
-  if (item.deposit_kind === 'nft') {
+  if (item.deposit_kind === 'nft' || item.price_currency === 'SOL' || item.price_currency === 'OWL') {
     return `/owltopia-shop buy-nft listing:${item.slug}`
   }
   return `/owltopia-shop browse`
 }
 
-async function postListingEmbed(embed: DiscordIncomingEmbed): Promise<void> {
-  const url = marketplaceWebhookUrl()
-  if (!url) return
-  try {
-    await postDiscordIncomingWebhookEmbed(url, embed, {
-      content: '🛒 **New marketplace listing**',
-    })
-  } catch (e) {
-    console.error('[discord-marketplace-webhook] post failed:', e)
-  }
+function withFeeField(
+  fields: NonNullable<DiscordIncomingEmbed['fields']>,
+  onchain: boolean
+): NonNullable<DiscordIncomingEmbed['fields']> {
+  if (!onchain) return fields
+  const fee = marketplaceFeeFieldValue()
+  if (!fee) return fields
+  return [...fields, { name: 'Platform fee', value: fee, inline: false }]
 }
 
 /** Fire-and-forget — listing save must not fail on Discord. */
 export function notifyMarketplaceShopItemLive(item: DiscordMarketplaceShopItem): void {
   if (item.status !== 'available') return
   void (async () => {
+    const onchain = item.price_currency === 'SOL' || item.price_currency === 'OWL'
     const embed: DiscordIncomingEmbed = {
       title: item.display_name,
       description: item.description?.trim() || 'Now available in the Owltopia shop.',
       color: EMBED_GOLD,
-      fields: [
-        { name: 'Price', value: formatShopPrice(item.price_amount, item.price_currency), inline: true },
-        { name: 'Type', value: shopItemTypeLabel(item), inline: true },
-        { name: 'Slug', value: `\`${item.slug}\``, inline: true },
-        {
-          name: 'How to buy',
-          value: `\`${shopItemBuyHint(item)}\``,
-          inline: false,
-        },
-        {
-          name: 'First step',
-          value: 'Link wallet once: `/owltopia-shop connect-wallet`',
-          inline: false,
-        },
-      ],
+      fields: withFeeField(
+        [
+          { name: 'Price', value: formatShopPrice(item.price_amount, item.price_currency), inline: true },
+          { name: 'Type', value: shopItemTypeLabel(item), inline: true },
+          { name: 'Slug', value: `\`${item.slug}\``, inline: true },
+          {
+            name: 'How to buy',
+            value: onchain
+              ? `Tap **Quick buy** or \`${shopItemBuyHint(item)}\``
+              : `Tap **Quick buy** (instant if you have points) or \`${shopItemBuyHint(item)}\``,
+            inline: false,
+          },
+          {
+            name: 'First step',
+            value: 'Link wallet once: `/owltopia-shop connect-wallet`',
+            inline: false,
+          },
+        ],
+        onchain
+      ),
       timestamp: new Date().toISOString(),
     }
 
@@ -97,7 +93,10 @@ export function notifyMarketplaceShopItemLive(item: DiscordMarketplaceShopItem):
       if (image) embed.thumbnail = { url: image }
     }
 
-    await postListingEmbed(embed)
+    await postMarketplaceListingAnnouncement({
+      embed,
+      quickBuy: { kind: 'item', slug: item.slug },
+    })
   })()
 }
 
@@ -121,7 +120,7 @@ export function notifyMarketplaceProductLive(product: DiscordMarketplaceProduct)
         { name: 'Slug', value: `\`${product.slug}\``, inline: true },
         {
           name: 'How to buy',
-          value: `\`/owltopia-shop buy product:${product.slug}\``,
+          value: `Tap **Quick buy** (needs linked wallet + points) or \`/owltopia-shop buy product:${product.slug}\``,
           inline: false,
         },
         {
@@ -133,7 +132,10 @@ export function notifyMarketplaceProductLive(product: DiscordMarketplaceProduct)
       timestamp: new Date().toISOString(),
     }
 
-    await postListingEmbed(embed)
+    await postMarketplaceListingAnnouncement({
+      embed,
+      quickBuy: { kind: 'prod', slug: product.slug },
+    })
   })()
 }
 
@@ -150,32 +152,38 @@ export function notifyMarketplaceNftListingLive(listing: DiscordMarketplaceNftLi
       title: label,
       description: 'NFT listing is live in the Owltopia shop.',
       color: EMBED_GOLD,
-      fields: [
-        { name: 'Price', value: price, inline: true },
-        { name: 'Type', value: 'NFT', inline: true },
-        { name: 'Listing', value: `\`${listing.listing_slug}\``, inline: true },
-        {
-          name: 'Mint',
-          value: `\`${listing.nft_mint}\``,
-          inline: false,
-        },
-        {
-          name: 'How to buy',
-          value: `\`/owltopia-shop buy-nft listing:${listing.listing_slug}\``,
-          inline: false,
-        },
-        {
-          name: 'First step',
-          value: 'Link wallet once: `/owltopia-shop connect-wallet`',
-          inline: false,
-        },
-      ],
+      fields: withFeeField(
+        [
+          { name: 'Price', value: price, inline: true },
+          { name: 'Type', value: 'NFT', inline: true },
+          { name: 'Listing', value: `\`${listing.listing_slug}\``, inline: true },
+          {
+            name: 'Mint',
+            value: `\`${listing.nft_mint}\``,
+            inline: false,
+          },
+          {
+            name: 'How to buy',
+            value: `Tap **Quick buy** or \`/owltopia-shop buy-nft listing:${listing.listing_slug}\``,
+            inline: false,
+          },
+          {
+            name: 'First step',
+            value: 'Link wallet once: `/owltopia-shop connect-wallet`',
+            inline: false,
+          },
+        ],
+        true
+      ),
       timestamp: new Date().toISOString(),
     }
 
     const image = await resolveNftPrizeImageForDiscordEmbed(listing.nft_mint, null)
     if (image) embed.thumbnail = { url: image }
 
-    await postListingEmbed(embed)
+    await postMarketplaceListingAnnouncement({
+      embed,
+      quickBuy: { kind: 'nft', slug: listing.listing_slug },
+    })
   })()
 }
