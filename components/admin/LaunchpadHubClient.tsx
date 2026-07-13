@@ -21,6 +21,7 @@ const QUICK_LINKS = [
   { href: '/admin/gen2-presale', label: 'Gen2 presale', hint: 'Credits, gifts, purchases' },
   { href: '/owl-center/generator', label: 'Generator', hint: 'Traits & Sugar export' },
   { href: '/owl-center/launch', label: 'Review queue', hint: 'Creator submissions' },
+  { href: '/admin/owl-center/partners', label: 'Partners', hint: 'Approve launchpad wallets' },
   { href: '/admin/owl-center/marketplaces', label: 'Marketplaces', hint: 'ME / Tensor readiness' },
 ] as const
 
