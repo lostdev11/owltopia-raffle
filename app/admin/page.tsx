@@ -330,6 +330,11 @@ export default function AdminDashboardPage() {
   )
   const [dailyRaidCopied, setDailyRaidCopied] = useState(false)
   const [pushingRaidPing, setPushingRaidPing] = useState(false)
+  const [registeringDiscordCommands, setRegisteringDiscordCommands] = useState(false)
+  const [discordCommandsMessage, setDiscordCommandsMessage] = useState<{
+    type: 'success' | 'error'
+    text: string
+  } | null>(null)
 
   const [devTasks, setDevTasks] = useState<DevTask[]>([])
   const [loadingDevTasks, setLoadingDevTasks] = useState(false)
@@ -942,6 +947,40 @@ export default function AdminDashboardPage() {
       window.setTimeout(() => setDailyRaidCopied(false), 1800)
     } catch {
       /* ignore */
+    }
+  }
+
+  const handleRegisterDiscordSlashCommands = async () => {
+    setRegisteringDiscordCommands(true)
+    setDiscordCommandsMessage(null)
+    try {
+      const res = await fetch('/api/admin/discord/register-commands', {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setDiscordCommandsMessage({
+          type: 'error',
+          text:
+            typeof data.error === 'string'
+              ? data.error
+              : typeof data.detail === 'string'
+                ? data.detail
+                : 'Could not register Discord slash commands',
+        })
+        return
+      }
+      const names = Array.isArray(data.command_names) ? (data.command_names as string[]).join(', ') : 'owltopia-shop'
+      const note = typeof data.note === 'string' ? ` ${data.note}` : ''
+      setDiscordCommandsMessage({
+        type: 'success',
+        text: `Registered (${names}).${note} Try /owltopia-shop in Discord.`,
+      })
+    } catch {
+      setDiscordCommandsMessage({ type: 'error', text: 'Network error registering Discord commands' })
+    } finally {
+      setRegisteringDiscordCommands(false)
     }
   }
 
@@ -3382,19 +3421,52 @@ export default function AdminDashboardPage() {
           </Card>
 
           {adminRole === 'full' && (
-            <Card className="hover:border-primary transition-colors cursor-pointer">
-              <Link href="/admin/discord-shop">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Store className="h-5 w-5" />
-                    Discord shop
-                  </CardTitle>
-                  <CardDescription>
-                    Manage /owltopia-shop listings — points items, OWL bundles, and NFTs. Deposit to marketplace escrow,
-                    verify, and announce new listings to your shop channel.
-                  </CardDescription>
-                </CardHeader>
-              </Link>
+            <Card className="hover:border-primary transition-colors">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Store className="h-5 w-5" />
+                  Discord shop
+                </CardTitle>
+                <CardDescription>
+                  Manage /owltopia-shop listings — points items, OWL bundles, and NFTs. Deposit to marketplace escrow,
+                  verify, and announce new listings to your shop channel. Re-register slash commands after each shop
+                  deploy so Discord shows the latest options.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild className="touch-manipulation min-h-[44px]">
+                    <Link href="/admin/discord-shop">Open Discord shop</Link>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="touch-manipulation min-h-[44px]"
+                    disabled={registeringDiscordCommands}
+                    onClick={() => void handleRegisterDiscordSlashCommands()}
+                  >
+                    {registeringDiscordCommands ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Registering…
+                      </>
+                    ) : (
+                      'Register Discord slash commands'
+                    )}
+                  </Button>
+                </div>
+                {discordCommandsMessage ? (
+                  <p
+                    className={
+                      discordCommandsMessage.type === 'success'
+                        ? 'text-sm text-emerald-600 dark:text-emerald-400'
+                        : 'text-sm text-destructive'
+                    }
+                  >
+                    {discordCommandsMessage.text}
+                  </p>
+                ) : null}
+              </CardContent>
             </Card>
           )}
 
