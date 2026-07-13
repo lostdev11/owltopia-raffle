@@ -21,6 +21,7 @@ import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { getPartnerProMonthlyQuoteUsdcForDiscordTenant } from '@/lib/db/partner-community-creators-admin'
 import { assertDiscordPartnerCommandAccess } from '@/lib/discord-partner-command-access'
+import { handleDiscordMarketplaceCommand } from '@/lib/discord-marketplace-handle-interaction'
 
 const MANAGE_WEBHOOKS_BIT = 1n << 29n
 
@@ -127,6 +128,9 @@ export async function handleDiscordApplicationCommand(
   }
 
   const root = interaction.data?.name
+  if (root === 'owltopia-shop') {
+    return handleDiscordMarketplaceCommand(interaction)
+  }
   if (root !== 'owltopia-partner') {
     return ephemeral('Unknown command.')
   }
