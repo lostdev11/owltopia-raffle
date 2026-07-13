@@ -23,6 +23,8 @@ import {
   walletNftMintMatches,
 } from '@/lib/raffles/wallet-nft-picker'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
+import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
+import { PublicKey } from '@solana/web3.js'
 
 type DepositOption = {
   kind: ShopDepositKind
@@ -84,6 +86,12 @@ export function AdminDiscordShopClient() {
   const [nftSearchQuery, setNftSearchQuery] = useState('')
   const [selectedShopNft, setSelectedShopNft] = useState<WalletNft | null>(null)
 
+  const [walletOwlUi, setWalletOwlUi] = useState<number | null>(null)
+  const [walletOwlMint, setWalletOwlMint] = useState<string | null>(null)
+  const [loadingWalletOwl, setLoadingWalletOwl] = useState(false)
+  const [walletOwlError, setWalletOwlError] = useState<string | null>(null)
+  const [walletOwlRecognized, setWalletOwlRecognized] = useState(false)
+
   const [depositKind, setDepositKind] = useState<ShopDepositKind>('owl_spl')
   const [treasuryFunded, setTreasuryFunded] = useState(false)
   const [form, setForm] = useState({
@@ -105,7 +113,72 @@ export function AdminDiscordShopClient() {
       setNftSearchQuery('')
       setSelectedShopNft(null)
     }
+    if (depositKind !== 'owl_spl') {
+      setWalletOwlUi(null)
+      setWalletOwlMint(null)
+      setWalletOwlError(null)
+      setWalletOwlRecognized(false)
+    }
   }, [depositKind])
+
+  const loadWalletOwl = useCallback(async () => {
+    if (!publicKey) return
+    setLoadingWalletOwl(true)
+    setWalletOwlError(null)
+    setWalletOwlRecognized(false)
+    try {
+      if (!isOwlEnabled()) {
+        setWalletOwlUi(null)
+        setWalletOwlMint(null)
+        setWalletOwlError('OWL mint is not configured (NEXT_PUBLIC_OWL_MINT_ADDRESS).')
+        return
+      }
+      const owl = getTokenInfo('OWL')
+      const mintStr = owl.mintAddress?.trim()
+      if (!mintStr) {
+        setWalletOwlError('OWL mint address missing.')
+        return
+      }
+      const mintPk = new PublicKey(mintStr)
+      const res = await connection.getParsedTokenAccountsByOwner(publicKey, { mint: mintPk }, 'confirmed')
+      let totalRaw = 0n
+      for (const { account } of res.value) {
+        const info = account.data?.parsed?.info as
+          | { tokenAmount?: { amount?: string } }
+          | undefined
+        const amtStr = info?.tokenAmount?.amount
+        if (typeof amtStr === 'string' && /^[0-9]+$/.test(amtStr)) {
+          totalRaw += BigInt(amtStr)
+        }
+      }
+      const ui = Number(totalRaw) / 10 ** owl.decimals
+      setWalletOwlUi(ui)
+      setWalletOwlMint(mintStr)
+      setWalletOwlRecognized(true)
+      if (ui > 0) {
+        setForm((f) => ({
+          ...f,
+          display_name: f.display_name.trim()
+            ? f.display_name
+            : `${ui % 1 === 0 ? ui.toLocaleString() : ui.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL`,
+          slug: f.slug.trim() || slugifyShopItemSlug(`owl-${Math.trunc(ui) || 'bundle'}`),
+        }))
+      }
+    } catch (e) {
+      console.error('loadWalletOwl:', e)
+      setWalletOwlError(e instanceof Error ? e.message : 'Failed to read OWL balance')
+      setWalletOwlUi(null)
+      setWalletOwlRecognized(false)
+    } finally {
+      setLoadingWalletOwl(false)
+    }
+  }, [connection, publicKey])
+
+  useEffect(() => {
+    if (depositKind === 'owl_spl' && connected && publicKey) {
+      void loadWalletOwl()
+    }
+  }, [depositKind, connected, publicKey, loadWalletOwl])
 
   const handleShopNftSelect = useCallback((nft: WalletNft) => {
     setSelectedShopNft(nft)
@@ -263,6 +336,18 @@ export function AdminDiscordShopClient() {
     const owlUnits = parseFloat(form.owl_units)
     if (selectedDeposit.needsOwlUnits && !treasuryFunded && (!Number.isFinite(owlUnits) || owlUnits <= 0)) {
       setErr('OWL amount per sale is required')
+      return
+    }
+    if (
+      selectedDeposit.needsOwlUnits &&
+      !treasuryFunded &&
+      walletOwlUi != null &&
+      Number.isFinite(owlUnits) &&
+      owlUnits > walletOwlUi
+    ) {
+      setErr(
+        `Wallet only has ${walletOwlUi.toLocaleString()} OWL. Lower the per-sale amount, or fund from treasury.`
+      )
       return
     }
 
@@ -529,6 +614,66 @@ export function AdminDiscordShopClient() {
             </div>
           ) : null}
 
+          {selectedDeposit.needsOwlUnits ? (
+            <div className="space-y-3 rounded-lg border border-border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">OWL in connected wallet</p>
+                  <p className="text-xs text-muted-foreground">
+                    Recognizes the configured OWL mint ({walletOwlMint ? `${walletOwlMint.slice(0, 4)}…${walletOwlMint.slice(-4)}` : '…'}).
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void loadWalletOwl()}
+                  disabled={loadingWalletOwl || !publicKey}
+                >
+                  {loadingWalletOwl ? (
+                    <>
+                      <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                      Checking…
+                    </>
+                  ) : (
+                    'Refresh OWL'
+                  )}
+                </Button>
+              </div>
+              {walletOwlError ? <p className="text-sm text-destructive">{walletOwlError}</p> : null}
+              {walletOwlRecognized && walletOwlUi != null ? (
+                <p className="text-sm">
+                  {walletOwlUi > 0 ? (
+                    <>
+                      Recognized <span className="font-semibold text-emerald-400">{walletOwlUi.toLocaleString()} OWL</span> in
+                      this wallet.
+                    </>
+                  ) : (
+                    <span className="text-amber-400">OWL mint recognized, but this wallet holds 0 OWL.</span>
+                  )}
+                </p>
+              ) : null}
+              {!treasuryFunded && walletOwlUi != null && walletOwlUi > 0 ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    setForm((f) => ({
+                      ...f,
+                      owl_units: String(walletOwlUi),
+                      display_name: f.display_name.trim()
+                        ? f.display_name
+                        : `${walletOwlUi % 1 === 0 ? walletOwlUi.toLocaleString() : walletOwlUi.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL`,
+                    }))
+                  }
+                >
+                  Use full wallet balance as units per sale
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+
           {selectedDeposit.needsOwlUnits && !treasuryFunded ? (
             <div className="space-y-2">
               <Label htmlFor="owl_units">OWL per sale (deposit this much to escrow)</Label>
@@ -540,6 +685,11 @@ export function AdminDiscordShopClient() {
                 value={form.owl_units}
                 onChange={(e) => setForm((f) => ({ ...f, owl_units: e.target.value }))}
               />
+              {walletOwlUi != null && Number(form.owl_units) > walletOwlUi ? (
+                <p className="text-xs text-amber-400">
+                  Amount exceeds wallet balance ({walletOwlUi.toLocaleString()} OWL).
+                </p>
+              ) : null}
             </div>
           ) : null}
 
