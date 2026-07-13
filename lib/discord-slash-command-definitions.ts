@@ -173,9 +173,10 @@ export const OWLTOPIA_SHOP_SLASH_COMMAND = {
       ],
     },
     {
+      // Must be SUB_COMMAND_GROUP (2). Discord rejects SUB_COMMAND nesting (type 1 → type 1).
       name: 'admin',
       description: 'Manage shop products, NFT listings, and points (admin/founder)',
-      type: 1,
+      type: 2,
       options: [
         {
           name: 'add-product',

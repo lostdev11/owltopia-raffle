@@ -328,13 +328,14 @@ export function AdminDiscordShopClient() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setErr(
-          typeof data.error === 'string'
-            ? data.error
-            : typeof data.detail === 'string'
-              ? data.detail
-              : 'Could not register Discord commands'
-        )
+        const errMsg = typeof data.error === 'string' ? data.error : 'Could not register Discord commands'
+        const detail =
+          typeof data.detail === 'string'
+            ? data.detail
+            : data.detail != null
+              ? JSON.stringify(data.detail).slice(0, 400)
+              : ''
+        setErr(detail ? `${errMsg}: ${detail}` : errMsg)
         return
       }
       const names = Array.isArray(data.command_names) ? data.command_names.join(', ') : 'owltopia-shop'

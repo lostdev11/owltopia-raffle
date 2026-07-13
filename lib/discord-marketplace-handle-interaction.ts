@@ -98,13 +98,9 @@ function getSubcommandAndOptions(data: DiscordInteraction['data']): {
   numOptions: Record<string, number>
 } {
   const opts = data?.options ?? []
-  const sub = opts.find((o) => o.type === 1)
-  if (!sub) return { sub: null, nestedSub: null, strOptions: {}, numOptions: {} }
-
-  const nested = (sub.options ?? []).find(
-    (o): o is { name: string; type: number; options?: Array<{ name: string; type: number; value?: string | number }> } =>
-      typeof o === 'object' && o != null && 'type' in o && (o as { type: number }).type === 1
-  )
+  // type 1 = SUB_COMMAND, type 2 = SUB_COMMAND_GROUP (e.g. /owltopia-shop admin …)
+  const top = opts.find((o) => o.type === 1 || o.type === 2)
+  if (!top) return { sub: null, nestedSub: null, strOptions: {}, numOptions: {} }
 
   const strOptions: Record<string, string> = {}
   const numOptions: Record<string, number> = {}
@@ -117,13 +113,22 @@ function getSubcommandAndOptions(data: DiscordInteraction['data']): {
     }
   }
 
-  if (nested) {
+  if (top.type === 2) {
+    const nested = (top.options ?? []).find(
+      (o): o is {
+        name: string
+        type: number
+        options?: Array<{ name: string; type: number; value?: string | number }>
+      } =>
+        typeof o === 'object' && o != null && 'type' in o && (o as { type: number }).type === 1
+    )
+    if (!nested) return { sub: top.name ?? null, nestedSub: null, strOptions: {}, numOptions: {} }
     collect((nested.options ?? []) as Array<{ name: string; type: number; value?: string | number }>)
-    return { sub: sub.name ?? null, nestedSub: nested.name ?? null, strOptions, numOptions }
+    return { sub: top.name ?? null, nestedSub: nested.name ?? null, strOptions, numOptions }
   }
 
-  collect((sub.options ?? []) as Array<{ name: string; type: number; value?: string | number }>)
-  return { sub: sub.name ?? null, nestedSub: null, strOptions, numOptions }
+  collect((top.options ?? []) as Array<{ name: string; type: number; value?: string | number }>)
+  return { sub: top.name ?? null, nestedSub: null, strOptions, numOptions }
 }
 
 function memberIsAdministrator(member: DiscordInteraction['member']): boolean {

@@ -960,14 +960,17 @@ export default function AdminDashboardPage() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
+        const errMsg =
+          typeof data.error === 'string' ? data.error : 'Could not register Discord slash commands'
+        const detail =
+          typeof data.detail === 'string'
+            ? data.detail
+            : data.detail != null
+              ? JSON.stringify(data.detail).slice(0, 400)
+              : ''
         setDiscordCommandsMessage({
           type: 'error',
-          text:
-            typeof data.error === 'string'
-              ? data.error
-              : typeof data.detail === 'string'
-                ? data.detail
-                : 'Could not register Discord slash commands',
+          text: detail ? `${errMsg}: ${detail}` : errMsg,
         })
         return
       }
