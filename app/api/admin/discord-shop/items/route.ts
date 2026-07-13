@@ -12,6 +12,7 @@ import {
 } from '@/lib/solana/discord-marketplace-escrow'
 import { getDiscordMarketplacePaymentWalletAddress } from '@/lib/solana/discord-marketplace-payment-wallet'
 import { safeErrorMessage } from '@/lib/safe-error'
+import { notifyMarketplaceShopItemLive } from '@/lib/discord-marketplace-webhooks'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -116,6 +117,10 @@ export async function POST(request: NextRequest) {
 
     if (!item) {
       return NextResponse.json({ error: 'Could not create shop item (duplicate slug?)' }, { status: 500 })
+    }
+
+    if (item.status === 'available') {
+      notifyMarketplaceShopItemLive(item)
     }
 
     return NextResponse.json({

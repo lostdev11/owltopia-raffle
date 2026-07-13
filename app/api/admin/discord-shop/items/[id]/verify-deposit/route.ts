@@ -6,6 +6,7 @@ import {
   verifyOwlDepositedInMarketplaceEscrow,
 } from '@/lib/solana/discord-marketplace-nft-escrow'
 import { safeErrorMessage } from '@/lib/safe-error'
+import { notifyMarketplaceShopItemLive } from '@/lib/discord-marketplace-webhooks'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -48,6 +49,9 @@ export async function POST(request: NextRequest, ctx: RouteCtx) {
     if (!ok) return NextResponse.json({ error: 'Could not update item' }, { status: 500 })
 
     const updated = await getShopItemById(id)
+    if (updated?.status === 'available') {
+      notifyMarketplaceShopItemLive(updated)
+    }
     return NextResponse.json({ ok: true, item: updated })
   } catch (e) {
     console.error('[admin/discord-shop/items/verify-deposit]', e)

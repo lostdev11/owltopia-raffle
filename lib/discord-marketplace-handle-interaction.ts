@@ -54,6 +54,10 @@ import {
 import { getWalletAddressByDiscordUserId } from '@/lib/db/wallet-profiles'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
 import { gen2PresaleExplorerTxUrl } from '@/lib/gen2-presale/explorer'
+import {
+  notifyMarketplaceNftListingLive,
+  notifyMarketplaceProductLive,
+} from '@/lib/discord-marketplace-webhooks'
 
 const ADMINISTRATOR_BIT = 0x8n
 
@@ -705,6 +709,8 @@ export async function handleDiscordMarketplaceCommand(
       })
       if (!product) return ephemeral('Could not save OWL listing (database error).')
 
+      notifyMarketplaceProductLive(product)
+
       return ephemeral(
         [
           `**OWL listing live:** **${product.owl_delivery_amount} OWL** for **${product.points_cost.toLocaleString()}** points`,
@@ -782,6 +788,9 @@ export async function handleDiscordMarketplaceCommand(
       const ok = await markNftListingAvailable(listing.id, depositSig)
       if (!ok) return ephemeral('Could not publish listing.')
 
+      const live = await getNftListingBySlug(guildId, listingSlug)
+      if (live) notifyMarketplaceNftListingLive(live)
+
       return ephemeral(
         `**${listing.display_name ?? listing.listing_slug}** is now **live** for **${formatNftPrice(listing.price_amount, listing.currency)}**.`
       )
@@ -831,6 +840,9 @@ export async function handleDiscordMarketplaceCommand(
         active: true,
       })
       if (!product) return ephemeral('Could not save product (database error).')
+
+      notifyMarketplaceProductLive(product)
+
       return ephemeral(
         `Saved **${product.name}** (\`${product.slug}\`) — ${product.points_cost.toLocaleString()} points, ${product.owl_delivery_amount} OWL auto-delivery.`
       )
