@@ -5,6 +5,7 @@ import {
   updateOwlCenterLaunchByIdAdmin,
 } from '@/lib/db/owl-center-launch'
 import type { OwlCenterAssetPackage, OwlCenterMarketplaceReadiness } from '@/lib/owl-center/asset-types'
+import { postLaunchApprovedDiscord } from '@/lib/owl-center/launch-approved-discord'
 import { getLaunchCandyMachineId, getLaunchCollectionMint, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
@@ -124,6 +125,8 @@ export async function promoteLaunchToLive(
   const patch = buildLaunchGoLivePatch(launch, marketplace)
   const updated = await updateOwlCenterLaunchByIdAdmin(launchId, patch)
   if (!updated) return { ok: false, reason: 'not_ready', blockers: ['Database update failed'] }
+
+  await postLaunchApprovedDiscord(updated)
 
   return { ok: true, launch: updated, auto: Boolean(options?.auto), already_live: false }
 }
