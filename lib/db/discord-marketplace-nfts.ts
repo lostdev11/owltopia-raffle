@@ -32,7 +32,8 @@ export type DiscordMarketplaceNftListing = {
 export type NftPurchaseIntent = {
   id: string
   reference_code: string
-  listing_id: string
+  listing_id: string | null
+  shop_item_id: string | null
   discord_user_id: string
   buyer_wallet: string
   price_amount: number
@@ -72,7 +73,8 @@ function mapIntent(row: Record<string, unknown>): NftPurchaseIntent {
   return {
     id: String(row.id),
     reference_code: String(row.reference_code),
-    listing_id: String(row.listing_id),
+    listing_id: row.listing_id != null ? String(row.listing_id) : null,
+    shop_item_id: row.shop_item_id != null ? String(row.shop_item_id) : null,
     discord_user_id: String(row.discord_user_id),
     buyer_wallet: String(row.buyer_wallet),
     price_amount: Number(row.price_amount),
@@ -250,7 +252,8 @@ function generateReferenceCode(): string {
 }
 
 export async function createNftPurchaseIntent(params: {
-  listing_id: string
+  listing_id?: string
+  shop_item_id?: string
   discord_user_id: string
   buyer_wallet: string
   price_amount: number
@@ -262,18 +265,22 @@ export async function createNftPurchaseIntent(params: {
   const ttl = params.ttlHours ?? 2
   const expires_at = new Date(Date.now() + ttl * 60 * 60 * 1000).toISOString()
 
-  await getSupabaseAdmin()
-    .from('discord_marketplace_nft_purchase_intents')
-    .update({ status: 'superseded' })
-    .eq('listing_id', params.listing_id.trim())
-    .eq('discord_user_id', params.discord_user_id.trim())
-    .eq('status', 'pending')
+  const listingFilter = params.listing_id?.trim()
+  if (listingFilter) {
+    await getSupabaseAdmin()
+      .from('discord_marketplace_nft_purchase_intents')
+      .update({ status: 'superseded' })
+      .eq('listing_id', listingFilter)
+      .eq('discord_user_id', params.discord_user_id.trim())
+      .eq('status', 'pending')
+  }
 
   const { data, error } = await getSupabaseAdmin()
     .from('discord_marketplace_nft_purchase_intents')
     .insert({
       reference_code,
-      listing_id: params.listing_id.trim(),
+      listing_id: params.listing_id?.trim() || null,
+      shop_item_id: params.shop_item_id?.trim() || null,
       discord_user_id: params.discord_user_id.trim(),
       buyer_wallet: params.buyer_wallet.trim(),
       price_amount: params.price_amount,

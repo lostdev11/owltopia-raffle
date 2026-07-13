@@ -9,7 +9,12 @@ import {
   extractOwlShopMemosFromParsedTx,
   verifyDiscordMarketplaceNftPayment,
 } from '@/lib/solana/verify-discord-marketplace-payment'
-import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
+import { getDiscordMarketplacePaymentWalletAddress } from '@/lib/solana/discord-marketplace-payment-wallet'
+import {
+  completeShopItemOnchainSale,
+  purchaseShopItemWithPoints,
+} from '@/lib/discord-marketplace-purchase-shop-item'
+import { getShopItemBySlug, listShopItems } from '@/lib/db/discord-marketplace-shop-items'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { isAdmin } from '@/lib/db/admins'
 import {
@@ -196,13 +201,14 @@ export async function handleDiscordMarketplaceCommand(
   const { sub, nestedSub, strOptions, numOptions } = getSubcommandAndOptions(interaction.data)
 
   if (sub === 'browse' || sub === 'shop') {
-    const [products, owlBundles, nfts] = await Promise.all([
+    const [products, owlBundles, nfts, shopItems] = await Promise.all([
       listActiveMarketplaceProducts(guildId),
       listActiveOwlTokenProducts(guildId),
       listAvailableNftListings(guildId),
+      listShopItems(guildId, { status: 'available' }),
     ])
     const genericProducts = products.filter((p) => p.product_kind !== 'owl_tokens')
-    if (genericProducts.length === 0 && owlBundles.length === 0 && nfts.length === 0) {
+    if (genericProducts.length === 0 && owlBundles.length === 0 && nfts.length === 0 && shopItems.length === 0) {
       return ephemeral(
         'No items in the shop yet. Admins can add products or listings via `/owltopia-shop admin`.'
       )
@@ -237,6 +243,18 @@ export async function handleDiscordMarketplaceCommand(
         )
       }
       lines.push('', 'Buy: `/owltopia-shop buy-nft listing:<slug>`')
+    }
+    if (shopItems.length > 0) {
+      if (genericProducts.length > 0 || owlBundles.length > 0 || nfts.length > 0) lines.push('')
+      lines.push('**Shop listings** (admin dashboard)')
+      for (const s of shopItems) {
+        const price =
+          s.price_currency === 'POINTS'
+            ? `${Math.trunc(s.price_amount).toLocaleString()} points`
+            : `${s.price_amount} ${s.price_currency}`
+        lines.push(`• **${s.display_name}** (\`${s.slug}\`) — ${price}`)
+      }
+      lines.push('', 'Points: `/owltopia-shop buy product:<slug>` · SOL/OWL: `/owltopia-shop buy-nft listing:<slug>`')
     }
     return ephemeral(lines.join('\n'))
   }
@@ -358,6 +376,25 @@ export async function handleDiscordMarketplaceCommand(
       )
     }
 
+    const shopItem = await getShopItemBySlug(guildId, slug)
+    if (shopItem?.status === 'available' && shopItem.price_currency === 'POINTS') {
+      const purchase = await purchaseShopItemWithPoints({
+        item: shopItem,
+        discord_user_id: discordUserId,
+        discord_guild_id: guildId,
+        recipient_wallet: wallet,
+      })
+      if (!purchase.ok) return ephemeral(purchase.message)
+      const txLine = purchase.fulfillmentTx
+        ? `\n[View delivery](${gen2PresaleExplorerTxUrl(purchase.fulfillmentTx)})`
+        : ''
+      return embedResponse({
+        title: '🎉 Shop Purchase!',
+        description: [`**${shopItem.display_name}**`, '', purchase.message + txLine].join('\n'),
+        color: 0x2ecc71,
+      })
+    }
+
     const product = await getMarketplaceProductBySlug(guildId, slug)
     if (!product || !product.active) {
       return ephemeral(`Product \`${slug}\` not found. Run \`/owltopia-shop browse\` for available items.`)
@@ -446,6 +483,41 @@ export async function handleDiscordMarketplaceCommand(
       return ephemeral(['**Connect your wallet first** to receive the NFT after payment.', '', url].join('\n'))
     }
 
+    const shopItemOnchain = await getShopItemBySlug(guildId, listingSlug)
+    if (
+      shopItemOnchain?.status === 'available' &&
+      (shopItemOnchain.price_currency === 'SOL' || shopItemOnchain.price_currency === 'OWL')
+    ) {
+      const currency = shopItemOnchain.price_currency as NftListingCurrency
+      const intent = await createNftPurchaseIntent({
+        shop_item_id: shopItemOnchain.id,
+        discord_user_id: discordUserId,
+        buyer_wallet: wallet,
+        price_amount: shopItemOnchain.price_amount,
+        currency,
+      })
+      if (!intent) return ephemeral('Could not create payment session.')
+      const treasury = getDiscordMarketplacePaymentWalletAddress() ?? '(set DISCORD_MARKETPLACE_PAYMENT_WALLET)'
+      const payLine =
+        currency === 'SOL'
+          ? `Send **exactly ${shopItemOnchain.price_amount} SOL** to \`${treasury}\``
+          : `Send **exactly ${shopItemOnchain.price_amount} OWL** to \`${treasury}\``
+      return ephemeral(
+        [
+          `**Purchase — ${shopItemOnchain.display_name}**`,
+          '',
+          payLine,
+          `**Memo (exact):** \`${intent.memo}\``,
+          '',
+          'Include the memo in the **same transaction** as your payment.',
+          '',
+          `Quote expires: ${intent.expires_at}`,
+          '',
+          `Then run \`/owltopia-shop verify-nft signature:<your_tx_signature>\``,
+        ].join('\n')
+      )
+    }
+
     const listing = await getNftListingBySlug(guildId, listingSlug)
     if (!listing || listing.status !== 'available') {
       return ephemeral(`Listing \`${listingSlug}\` not found or not available.`)
@@ -460,7 +532,7 @@ export async function handleDiscordMarketplaceCommand(
     })
     if (!intent) return ephemeral('Could not create payment session.')
 
-    const treasury = getRaffleTreasuryWalletAddress() ?? '(set RAFFLE_RECIPIENT_WALLET)'
+    const treasury = getDiscordMarketplacePaymentWalletAddress() ?? '(set DISCORD_MARKETPLACE_PAYMENT_WALLET)'
     const label = listing.display_name ?? listing.nft_mint
     const payLine =
       listing.currency === 'SOL'
@@ -525,14 +597,6 @@ export async function handleDiscordMarketplaceCommand(
       return ephemeral('Payment quote expired. Run `/owltopia-shop buy-nft` again.')
     }
 
-    const listingById = await getNftListingById(intent.listing_id)
-    if (!listingById || listingById.discord_guild_id !== guildId) {
-      return ephemeral('Listing not found for this server.')
-    }
-    if (listingById.status !== 'available') {
-      return ephemeral('This NFT was already sold.')
-    }
-
     const paymentCheck = await verifyDiscordMarketplaceNftPayment({
       signature: sig,
       currency: intent.currency,
@@ -545,6 +609,36 @@ export async function handleDiscordMarketplaceCommand(
       return ephemeral(paymentCheck.error)
     }
 
+    await markNftIntentConfirmed(intent.id, sig)
+
+    if (intent.shop_item_id) {
+      const delivery = await completeShopItemOnchainSale({
+        shop_item_id: intent.shop_item_id,
+        recipient_wallet: wallet,
+      })
+      if (!delivery.ok) {
+        return ephemeral(
+          `Payment verified but delivery failed (${delivery.error}). Contact support with \`${sig}\`.`
+        )
+      }
+      return embedResponse({
+        title: '🎉 Purchase complete!',
+        description: [
+          'Your item was delivered to your linked wallet.',
+          `[Payment](${gen2PresaleExplorerTxUrl(sig)}) · [Delivery](${gen2PresaleExplorerTxUrl(delivery.fulfillmentTx)})`,
+        ].join('\n'),
+        color: 0x2ecc71,
+      })
+    }
+
+    const listingById = intent.listing_id ? await getNftListingById(intent.listing_id) : null
+    if (!listingById || listingById.discord_guild_id !== guildId) {
+      return ephemeral('Listing not found for this server.')
+    }
+    if (listingById.status !== 'available') {
+      return ephemeral('This NFT was already sold.')
+    }
+
     const sale = await completeNftSale({
       listing_id: listingById.id,
       buyer_discord_user_id: discordUserId,
@@ -554,8 +648,6 @@ export async function handleDiscordMarketplaceCommand(
     if (!sale.ok) {
       return ephemeral(sale.message)
     }
-
-    await markNftIntentConfirmed(intent.id, sig)
 
     const delivery = await fulfillMarketplaceNftToBuyer({
       nftMint: sale.nft_mint,
@@ -642,7 +734,7 @@ export async function handleDiscordMarketplaceCommand(
 
       const escrow = getDiscordMarketplaceNftEscrowAddress()
       if (!escrow) {
-        return ephemeral('Marketplace escrow not configured (set PRIZE_ESCROW_SECRET_KEY on the server).')
+        return ephemeral('Marketplace escrow not configured (set DISCORD_MARKETPLACE_ESCROW_SECRET_KEY on the server).')
       }
 
       const listing = await createNftListing({

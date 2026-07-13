@@ -10,7 +10,7 @@ import {
   type PartiallyDecodedInstruction,
 } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
-import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
+import { getDiscordMarketplacePaymentWalletPubkey } from '@/lib/solana/discord-marketplace-payment-wallet'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 import type { NftListingCurrency } from '@/lib/db/discord-marketplace-nfts'
 
@@ -90,9 +90,9 @@ export async function verifyDiscordMarketplaceNftPayment(params: {
   const sig = params.signature.trim()
   if (!sig) return { ok: false, error: 'Missing signature' }
 
-  const treasuryWallet = getRaffleTreasuryWalletAddress()
-  if (!treasuryWallet) {
-    return { ok: false, error: 'Payment treasury not configured (RAFFLE_RECIPIENT_WALLET)' }
+  const treasury = getDiscordMarketplacePaymentWalletPubkey()
+  if (!treasury) {
+    return { ok: false, error: 'Marketplace payment wallet not configured (DISCORD_MARKETPLACE_PAYMENT_WALLET)' }
   }
 
   let payer: PublicKey
@@ -121,7 +121,7 @@ export async function verifyDiscordMarketplaceNftPayment(params: {
     }
   }
 
-  const treasuryB58 = treasuryWallet
+  const treasuryB58 = treasury.toBase58()
   const payerB58 = payer.toBase58()
   const tolerance = 1n
 
