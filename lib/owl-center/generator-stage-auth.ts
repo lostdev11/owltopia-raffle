@@ -2,11 +2,12 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 import { getSessionFromRequest } from '@/lib/auth-server'
-import { getOwlCenterAdminWallet } from '@/lib/owl-center/admin-access'
-import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import { getOwlCenterLaunchAccess } from '@/lib/owl-center/launch-access'
 
 export type GeneratorStageSession = {
   wallet: string
+  isAdmin: boolean
+  isPartner: boolean
 }
 
 export async function requireGeneratorStageSession(
@@ -17,15 +18,10 @@ export async function requireGeneratorStageSession(
     return NextResponse.json({ error: 'Sign in required' }, { status: 401 })
   }
 
-  const adminWallet = await getOwlCenterAdminWallet(request)
-  if (!adminWallet) {
-    return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
+  const access = await getOwlCenterLaunchAccess(request)
+  if (!access) {
+    return NextResponse.json({ error: 'Approved partner or admin access required' }, { status: 403 })
   }
 
-  const wallet = normalizeSolanaWalletAddress(session.wallet)
-  if (!wallet) {
-    return NextResponse.json({ error: 'Invalid session wallet' }, { status: 401 })
-  }
-
-  return { wallet }
+  return { wallet: access.wallet, isAdmin: access.isAdmin, isPartner: access.isPartner }
 }

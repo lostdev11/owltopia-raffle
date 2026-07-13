@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'node:crypto'
 
 import { getSessionFromRequest } from '@/lib/auth-server'
-import { getOwlCenterAdminWallet } from '@/lib/owl-center/admin-access'
+import { getOwlCenterLaunchAccess } from '@/lib/owl-center/launch-access'
+import { OWL_CENTER_MAX_LAUNCH_SUPPLY } from '@/lib/owl-center/launch-limits'
 import { attachGeneratorStagedJobToLaunch } from '@/lib/owl-center/attach-generator-staged-job'
 import { parseMintDetailsConfig } from '@/lib/owl-center/launch-mint-config'
 import { parseStandardFreezeConfig } from '@/lib/owl-center/freeze-config'
@@ -25,8 +26,10 @@ export async function POST(request: NextRequest) {
     return jsonError('Too many submissions — try later.', 429)
   }
 
-  const adminWallet = await getOwlCenterAdminWallet(request)
-  if (!adminWallet) return jsonError('Admin access required', 403)
+  const access = await getOwlCenterLaunchAccess(request)
+  if (!access) {
+    return jsonError('Sign in with an approved partner or admin wallet to submit a collection', 403)
+  }
 
   let body: Record<string, unknown>
   try {
@@ -40,8 +43,10 @@ export async function POST(request: NextRequest) {
   let creator = normalizeSolanaWalletAddress(
     typeof body.creator_wallet === 'string' ? body.creator_wallet : ''
   )
-  if (sessionWallet) {
-    const normalizedSession = normalizeSolanaWalletAddress(sessionWallet)
+  // Admins may submit on behalf of a partner (explicit creator wallet wins);
+  // partners always submit as themselves.
+  if (!access.isAdmin || !creator) {
+    const normalizedSession = normalizeSolanaWalletAddress(sessionWallet ?? '')
     if (normalizedSession) creator = normalizedSession
   }
   if (!creator) {
@@ -56,8 +61,11 @@ export async function POST(request: NextRequest) {
 
   if (!name || name.length > 120) return jsonError('Invalid collection name', 400)
   if (!symbol || symbol.length > 16) return jsonError('Invalid symbol', 400)
-  if (!Number.isInteger(supply) || supply < 1 || supply > 1_000_000) {
-    return jsonError('Invalid total supply', 400)
+  if (!Number.isInteger(supply) || supply < 1 || supply > OWL_CENTER_MAX_LAUNCH_SUPPLY) {
+    return jsonError(
+      `Total supply must be between 1 and ${OWL_CENTER_MAX_LAUNCH_SUPPLY.toLocaleString('en-US')}`,
+      400
+    )
   }
 
   const mintConfig = parseMintDetailsConfig({ ...body, total_supply: supply })
@@ -206,7 +214,9 @@ export async function POST(request: NextRequest) {
 
   await db.from('owl_center_activity_logs').insert({
     launch_id: launchId,
-    message: 'Launch submitted for review',
+    message: access.isPartner
+      ? `Launch submitted for review by partner ${creator.slice(0, 6)}…${creator.slice(-4)}`
+      : 'Launch submitted for review',
     event_type: 'submission',
   })
 

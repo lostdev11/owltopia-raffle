@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
-import { getOwlCenterAdminWallet } from '@/lib/owl-center/admin-access'
+import { getOwlCenterLaunchAccess } from '@/lib/owl-center/launch-access'
 import {
   DEV_TASK_SCREENSHOTS_BUCKET,
   isAllowedScreenshotFile,
@@ -23,8 +23,9 @@ function jsonError(message: string, status: number) {
  * Returns { url, path }.
  */
 export async function POST(request: NextRequest) {
-  const wallet = await getOwlCenterAdminWallet(request)
-  if (!wallet) return jsonError('Sign in required', 401)
+  const access = await getOwlCenterLaunchAccess(request)
+  if (!access) return jsonError('Sign in with an approved partner or admin wallet', 401)
+  const wallet = access.wallet
 
   const ip = getClientIp(request)
   if (!rateLimit(`owl-brand-image:${ip}`, 30, 3600_000).allowed) {
