@@ -541,7 +541,7 @@ export function CreatorAnalyticsSection({ feeBps = 600 }: { feeBps?: number }) {
         </CardHeader>
         <CardContent>
           <Button asChild className="min-h-[44px] touch-manipulation">
-            <Link href="/create">Create a raffle</Link>
+            <Link href="/admin/raffles/new">Create a raffle</Link>
           </Button>
         </CardContent>
       </Card>

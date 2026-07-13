@@ -254,9 +254,13 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   const [partnerDiscordLinked, setPartnerDiscordLinked] = useState(false)
   const [hideFromPublicBrowse, setHideFromPublicBrowse] = useState(false)
   const partnerCreateMode = searchParams.get('mode') === 'partner'
+  const milestonesCreateMode = searchParams.get('milestones') === '1'
   useEffect(() => {
     if (snsDomainHubFlow) setPrizeMode('nft')
   }, [snsDomainHubFlow])
+  useEffect(() => {
+    if (milestonesCreateMode) setMilestonesEnabled(true)
+  }, [milestonesCreateMode])
   const canUseBambooTicketCurrency =
     viewerIsAdmin === true ||
     (publicKey ? canWalletUseBambooTicketCurrency(publicKey.toBase58()) : false)
