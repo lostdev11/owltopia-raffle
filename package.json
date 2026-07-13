@@ -17,6 +17,7 @@
     "generate:council-owl-escrow-key": "node scripts/generate-council-owl-escrow-keypair.mjs",
     "generate:discord-marketplace-wallets": "node scripts/generate-discord-marketplace-wallets.mjs --write-env",
     "merge:discord-marketplace-env": "node scripts/merge-discord-marketplace-env.mjs",
+    "db:apply-discord-marketplace": "node scripts/apply-discord-marketplace-migrations.mjs",
     "mint:devnet-nft": "node scripts/mint-devnet-nft.mjs",
     "prepare:sugar-deploy": "node --env-file=.env.local scripts/prepare-sugar-deploy-from-launch.mjs",
     "sugar:deploy": "node --env-file=.env.local scripts/sugar-deploy-collection.mjs",
