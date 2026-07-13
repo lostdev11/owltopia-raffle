@@ -60,6 +60,7 @@ import {
   isDirectRaffleImageHost,
 } from '@/lib/raffle-display-image-url'
 import { useCart } from '@/components/cart/CartProvider'
+import { isRaffleCreatorWallet } from '@/lib/cart/validate-raffle-checkout'
 import { shareRaffleFromBrowser } from '@/lib/client/raffle-share'
 import { useImageAttemptTimeout } from '@/lib/use-image-attempt-timeout'
 import { fetchMintNftMetadata } from '@/lib/client/nft-metadata-client'
@@ -117,6 +118,8 @@ export function RaffleCard({
   const { connection } = useConnection()
   const { addItem: addCartItem } = useCart()
   const wallet = publicKey?.toBase58() ?? ''
+  /** Creators cannot buy tickets in their own raffle */
+  const viewerIsCreator = connected && isRaffleCreatorWallet(raffle, wallet)
   const [mounted, setMounted] = useState(false)
   const [now, setNow] = useState<Date | null>(null)
   const [isAdmin, setIsAdmin] = useState(() =>
@@ -443,6 +446,11 @@ export function RaffleCard({
   const handlePurchase = async () => {
     if (!connected || !publicKey) {
       setError('Please connect your wallet first')
+      return
+    }
+
+    if (viewerIsCreator) {
+      setError('You cannot buy tickets in your own raffle.')
       return
     }
 
@@ -1169,9 +1177,9 @@ export function RaffleCard({
                       className={`w-full touch-manipulation min-h-[44px] text-base sm:text-sm ${purchasesBlocked ? 'bg-muted text-muted-foreground cursor-not-allowed opacity-70' : ''}`}
                       size={displaySize === 'large' ? 'lg' : 'default'}
                       onClick={handleToggleQuickBuy}
-                      disabled={!isActive || isFuture || purchasesBlocked || (availableTickets !== null && availableTickets <= 0)}
+                      disabled={!isActive || isFuture || purchasesBlocked || viewerIsCreator || (availableTickets !== null && availableTickets <= 0)}
                     >
-                      {isFuture ? 'Starts Soon' : (isActive ? (purchasesBlocked ? 'Purchases Blocked' : availableTickets !== null && availableTickets <= 0 ? 'Sold Out' : 'Enter Raffle') : 'View Details')}
+                      {isFuture ? 'Starts Soon' : (isActive ? (purchasesBlocked ? 'Purchases Blocked' : viewerIsCreator ? 'Your Raffle' : availableTickets !== null && availableTickets <= 0 ? 'Sold Out' : 'Enter Raffle') : 'View Details')}
                     </Button>
                     <Button
                       type="button"

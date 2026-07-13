@@ -18,20 +18,20 @@ const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
 
 export const metadata: Metadata = {
   title: `How It Works | ${PLATFORM_NAME}`,
-  description: 'How raffles work: escrow, creator tickets, refunds, winner selection, and Owl Vision trust scoring.',
+  description: 'How raffles work: escrow, refunds, winner selection, and Owl Vision trust scoring.',
   alternates: { canonical: `${SITE_URL}/how-it-works` },
   openGraph: {
     type: 'website',
     url: `${SITE_URL}/how-it-works`,
     siteName: PLATFORM_NAME,
     title: `How It Works | ${PLATFORM_NAME}`,
-    description: 'How raffles work: escrow, creator tickets, refunds, winner selection, and Owl Vision trust scoring.',
+    description: 'How raffles work: escrow, refunds, winner selection, and Owl Vision trust scoring.',
     images: [{ url: OG_IMAGE, ...DEFAULT_OG_IMAGE_DIMS, alt: OG_ALT, type: DEFAULT_OG_IMAGE_TYPE }],
   },
   twitter: {
     card: 'summary_large_image',
     title: `How It Works | ${PLATFORM_NAME}`,
-    description: 'How raffles work: escrow, creator tickets, refunds, winner selection, and Owl Vision trust scoring.',
+    description: 'How raffles work: escrow, refunds, winner selection, and Owl Vision trust scoring.',
     images: [{ url: OG_IMAGE, alt: OG_ALT, ...DEFAULT_OG_IMAGE_DIMS }],
   },
 }
@@ -70,7 +70,7 @@ export default function HowItWorksPage() {
               <Link href="/partner-program" className="text-green-500 hover:underline">
                 Partner Pro
               </Link>{' '}
-              communities may also list tickets in their own <strong>SPL token</strong> (only that partner&apos;s raffles; the mint is not a site-wide option for every creator). Ticket payments are real on-chain transfers. For most raffles today, proceeds go to a <strong>platform funds escrow</strong> wallet first; the app verifies each payment before your tickets count. Some older raffles may still pay a creator or recipient address directly — check the raffle page for the payment you are signing. <strong>Raffle creators can buy tickets in their own raffles</strong>; those tickets count toward the draw like anyone else&apos;s.
+              communities may also list tickets in their own <strong>SPL token</strong> (only that partner&apos;s raffles; the mint is not a site-wide option for every creator). Ticket payments are real on-chain transfers. For most raffles today, proceeds go to a <strong>platform funds escrow</strong> wallet first; the app verifies each payment before your tickets count. Some older raffles may still pay a creator or recipient address directly — check the raffle page for the payment you are signing. <strong>Raffle creators cannot buy tickets in their own raffles</strong>.
             </li>
             <li>
               <strong>Entry is recorded</strong> — Your entry is stored with your wallet address and ticket count. Once your payment is verified on-chain, your entry counts toward the raffle.
@@ -132,7 +132,7 @@ export default function HowItWorksPage() {
             <li>
               <strong>Can a creator buy tickets in their own raffle?</strong>
               <p className="text-sm text-muted-foreground mt-1 mb-0">
-                Yes. Hosts may purchase tickets on raffles they create. Those tickets are normal confirmed entries and participate in the same weighted draw.
+                No. Hosts cannot purchase tickets on raffles they create. The buy flow is blocked in the app and on the server so creators cannot enter their own draws.
               </p>
             </li>
           </ul>
@@ -238,7 +238,7 @@ export default function HowItWorksPage() {
             Who Can Participate
           </h2>
           <p className="mb-4">
-            Anyone with a Solana wallet can buy tickets and create raffles — including buying tickets on a raffle you host. Creators can be holders or non-holders (fees differ as above). After a raffle ends, winner selection and deadline extensions are handled by automated jobs and/or admins according to the rules on this page. For full legal terms, see our <Link href="/terms" className="text-green-500 hover:underline">Terms of Service</Link>.
+            Anyone with a Solana wallet can buy tickets and create raffles. Creators can be holders or non-holders (fees differ as above), but they <strong>cannot buy tickets in their own raffles</strong>. After a raffle ends, winner selection and deadline extensions are handled by automated jobs and/or admins according to the rules on this page. For full legal terms, see our <Link href="/terms" className="text-green-500 hover:underline">Terms of Service</Link>.
           </p>
         </section>
       </div>

@@ -16,6 +16,7 @@ import { getPaymentSplit } from '@/lib/raffles/split-at-purchase'
 import { nftRaffleExemptFromEscrowRequirement } from '@/lib/raffles/visibility'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
+import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import { resolveReferralForPurchase } from '@/lib/db/referrals'
 import { REFERRAL_COOKIE_NAME } from '@/lib/referrals/constants'
 import {
@@ -105,6 +106,15 @@ export async function POST(request: NextRequest) {
 
     if (!raffle.is_active) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
+    }
+
+    // Creators cannot buy tickets in their own raffle (would skew odds + recycle their own funds)
+    const raffleCreatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
+    if (raffleCreatorWallet && walletsEqualSolana(raffleCreatorWallet, walletAddressStr)) {
+      return NextResponse.json(
+        { success: false as const, error: 'You cannot buy tickets in your own raffle.' },
+        { status: 400 }
+      )
     }
 
     // NFT raffles: block purchases until prize is verified in escrow (defense in depth)

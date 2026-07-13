@@ -39,7 +39,7 @@ import { isAdmin as isWalletRegisteredAdmin } from '@/lib/db/admins'
 
 export const dynamic = 'force-dynamic'
 
-/** Same filters as {@link processEndedRaffleByIdIfApplicable} — used so hosts see claim UI for raffles they created. */
+/** Same filters as {@link processEndedRaffleByIdIfApplicable} — used so hosts see claim UI without buying their own tickets. */
 function isEndedNoWinnerProcessCandidate(
   raffle:
     | {
