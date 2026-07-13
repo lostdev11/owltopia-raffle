@@ -114,7 +114,7 @@ export default function HowItWorksPage() {
             <li>
               <strong>What if all tickets are not sold?</strong>
               <p className="text-sm text-muted-foreground mt-1 mb-0">
-                If a minimum threshold still is not met after the one-time extension, the raffle moves to a refundable state. Tickets buyers claim refunds from escrow in the dashboard; the creator claims the NFT (or other escrowed prize) back the same way.
+                If a minimum threshold still is not met after the one-time extension, the raffle moves to a refundable state. Ticket buyers claim refunds from escrow in the dashboard; the creator claims the NFT (or other escrowed prize) back the same way.
               </p>
             </li>
             <li>
