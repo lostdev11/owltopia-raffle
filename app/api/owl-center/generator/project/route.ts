@@ -6,7 +6,7 @@ import {
   upsertGeneratorProjectForWallet,
 } from '@/lib/db/owl-center-generator-project'
 import { getSessionFromRequest } from '@/lib/auth-server'
-import { getOwlCenterAdminWallet } from '@/lib/owl-center/admin-access'
+import { getOwlCenterLaunchAccess } from '@/lib/owl-center/launch-access'
 import {
   MAX_GENERATOR_PROJECT_BYTES,
   projectJsonByteSize,
@@ -31,8 +31,8 @@ export async function GET(request: NextRequest) {
   const session = getSessionFromRequest(request)
   if (!session?.wallet) return jsonError('Sign in required', 401)
 
-  const adminWallet = await getOwlCenterAdminWallet(request)
-  if (!adminWallet) return jsonError('Admin access required', 403)
+  const access = await getOwlCenterLaunchAccess(request)
+  if (!access) return jsonError('Approved partner or admin access required', 403)
 
   const wallet = normalizeSolanaWalletAddress(session.wallet)
   if (!wallet) return jsonError('Invalid session wallet', 401)
@@ -58,8 +58,8 @@ export async function PUT(request: NextRequest) {
   const session = getSessionFromRequest(request)
   if (!session?.wallet) return jsonError('Sign in required', 401)
 
-  const adminWallet = await getOwlCenterAdminWallet(request)
-  if (!adminWallet) return jsonError('Admin access required', 403)
+  const access = await getOwlCenterLaunchAccess(request)
+  if (!access) return jsonError('Approved partner or admin access required', 403)
 
   const wallet = normalizeSolanaWalletAddress(session.wallet)
   if (!wallet) return jsonError('Invalid session wallet', 401)
@@ -94,8 +94,8 @@ export async function DELETE(request: NextRequest) {
   const session = getSessionFromRequest(request)
   if (!session?.wallet) return jsonError('Sign in required', 401)
 
-  const adminWallet = await getOwlCenterAdminWallet(request)
-  if (!adminWallet) return jsonError('Admin access required', 403)
+  const access = await getOwlCenterLaunchAccess(request)
+  if (!access) return jsonError('Approved partner or admin access required', 403)
 
   const wallet = normalizeSolanaWalletAddress(session.wallet)
   if (!wallet) return jsonError('Invalid session wallet', 401)

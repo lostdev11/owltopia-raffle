@@ -20,6 +20,7 @@ export default async function OwlCenterGeneratorPage({ searchParams }: PageProps
 
   return (
     <OwlCenterAdminGate
+      allowPartners={!gen2Mode}
       title={gen2Mode ? 'Gen2 Generator' : 'Owl Generator'}
       subtitle={gen2Mode ? 'Export and stage Gen2 assets in one flow.' : 'Trait layers, rules, and Sugar export.'}
     >

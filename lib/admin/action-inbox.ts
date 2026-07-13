@@ -20,6 +20,7 @@ export type AdminActionInboxItemType =
   | 'pending_entries'
   | 'prize_return_pending'
   | 'partner_application_new'
+  | 'launch_submission_pending'
   | 'open_dev_task'
 
 export interface AdminActionInboxItem {
@@ -191,6 +192,7 @@ export async function buildAdminActionInbox(now = new Date()): Promise<AdminActi
     devTasks,
     partnerApps,
     unrefundedRows,
+    pendingLaunchesRes,
   ] = await Promise.all([
     admin
       .from('raffles')
@@ -231,6 +233,12 @@ export async function buildAdminActionInbox(now = new Date()): Promise<AdminActi
     listDevTasks(),
     listPartnerProgramApplications(),
     listRaffleUnrefundedConfirmedEntryCounts(),
+    admin
+      .from('owl_center_launches')
+      .select('id, name, symbol, creator_wallet, total_supply, status, created_at, updated_at')
+      .eq('status', 'PENDING_REVIEW')
+      .neq('slug', 'gen2')
+      .order('created_at', { ascending: false }),
   ])
 
   for (const row of cancellationRes.data ?? []) {
@@ -413,6 +421,31 @@ export async function buildAdminActionInbox(now = new Date()): Promise<AdminActi
       detail: `${pendingEntryCount} pending entr${pendingEntryCount === 1 ? 'y has' : 'ies have'} a saved tx signature — try bulk re-verify`,
       href: '/admin#pending-entries-reverify',
       occurredAt: null,
+    })
+  }
+
+  for (const row of pendingLaunchesRes.data ?? []) {
+    const l = row as {
+      id: string
+      name: string | null
+      symbol: string | null
+      creator_wallet: string | null
+      total_supply: number | null
+      created_at: string | null
+      updated_at: string | null
+    }
+    if (!l.id) continue
+    const creator = (l.creator_wallet ?? '').trim()
+    const creatorShort = creator ? `${creator.slice(0, 6)}…${creator.slice(-4)}` : 'unknown wallet'
+    items.push({
+      id: `launch_submission:${l.id}`,
+      type: 'launch_submission_pending',
+      severity: 'warning',
+      fingerprint: `${l.updated_at ?? ''}`,
+      title: (l.name ?? 'Untitled collection').trim() || 'Untitled collection',
+      detail: `Launchpad submission awaiting review · ${l.total_supply ?? '—'} supply · creator ${creatorShort}`,
+      href: `/admin/owl-center/collections/${l.id}/assets`,
+      occurredAt: l.created_at,
     })
   }
 

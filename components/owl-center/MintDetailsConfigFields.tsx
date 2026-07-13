@@ -72,8 +72,8 @@ export function MintDetailsConfigFields({
         </label>
         <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
           {royaltiesLocked
-            ? 'Locked — set at Candy Machine deploy. Already-minted NFTs and remaining supply use this on-chain rate.'
-            : 'Choose before deploy (default 5%). Baked into the Candy Machine and every NFT minted from it. Cannot be changed after deploy.'}
+            ? 'Locked — this rate was set when the collection was deployed on-chain and applies to every NFT.'
+            : 'The percent of every secondary marketplace sale paid to your team (default 5%). Written on-chain at deploy — it cannot be changed afterwards.'}
         </p>
       </div>
 
@@ -138,7 +138,7 @@ export function MintDetailsConfigFields({
           </select>
         </label>
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-          Mint opens (kickoff)
+          Mint opens
           <input
             type="datetime-local"
             value={values.launch_date}
@@ -147,13 +147,16 @@ export function MintDetailsConfigFields({
           />
         </label>
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
-          Public phase starts (shown as mint opens if set)
+          Public phase starts
           <input
             type="datetime-local"
             value={values.public_start}
             onChange={(e) => set('public_start', e.target.value)}
             className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
+          <span className="font-mono text-[10px] normal-case tracking-normal text-[#5C6773]">
+            Only needed when presale or whitelist phases run first — leave empty to open straight into public mint.
+          </span>
         </label>
       </div>
 
@@ -243,7 +246,7 @@ export function MintDetailsConfigFields({
             />
           </label>
           <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-            WL price (USDC)
+            Whitelist price (USDC)
             <input
               type="number"
               step="any"

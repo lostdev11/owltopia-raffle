@@ -11,6 +11,7 @@ import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPan
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
 import { creatorMetadataRefreshApiPath } from '@/lib/owl-center/creator-api-paths'
+import { friendlyLaunchStatus } from '@/lib/owl-center/launch-status-display'
 import { isLaunchMarketplaceListingUnlocked } from '@/lib/owl-center/launch-marketplace-eligibility'
 import { useSiwsSession } from '@/hooks/use-siws-session'
 
@@ -35,6 +36,7 @@ export function CreatorLaunchesClient() {
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [isPartner, setIsPartner] = useState(false)
   const [launches, setLaunches] = useState<LaunchRow[]>([])
 
   const load = useCallback(async () => {
@@ -42,9 +44,15 @@ export function CreatorLaunchesClient() {
     setErr(null)
     try {
       const res = await fetch('/api/owl-center/my-launches', { credentials: 'include', cache: 'no-store' })
-      const j = (await res.json()) as { error?: string; launches?: LaunchRow[]; isAdmin?: boolean }
+      const j = (await res.json()) as {
+        error?: string
+        launches?: LaunchRow[]
+        isAdmin?: boolean
+        isPartner?: boolean
+      }
       if (!res.ok) throw new Error(j.error || 'load_failed')
       setIsAdmin(Boolean(j.isAdmin))
+      setIsPartner(Boolean(j.isPartner))
       setLaunches(j.launches ?? [])
     } catch (e) {
       setLaunches([])
@@ -96,25 +104,38 @@ export function CreatorLaunchesClient() {
                 No collections found for this wallet. If you submitted under a different address, sign in with that
                 wallet instead.
               </p>
-              <Link
-                href="/partner-program"
-                className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#1A222B] px-5 text-sm text-[#9BA8B4] hover:border-[#00FF9C]/35 hover:text-[#00FF9C]"
-              >
-                Apply to partner program
-              </Link>
+              {isPartner ? (
+                <Link
+                  href="/owl-center/launch"
+                  className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#00FF9C]/40 bg-[#00FF9C]/10 px-5 text-sm font-bold uppercase tracking-wide text-[#E8FDF4] hover:bg-[#00FF9C]/18"
+                >
+                  Submit your first collection
+                </Link>
+              ) : (
+                <Link
+                  href="/partner-program"
+                  className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#1A222B] px-5 text-sm text-[#9BA8B4] hover:border-[#00FF9C]/35 hover:text-[#00FF9C]"
+                >
+                  Apply to partner program
+                </Link>
+              )}
             </div>
           ) : null}
           {launches.map((l) => {
             const listingUnlocked = isLaunchMarketplaceListingUnlocked(l)
+            const friendly = friendlyLaunchStatus(l.status, l.active_phase)
             return (
-            <CommandCard key={l.id} label={`${l.status} · ${l.active_phase}`}>
+            <CommandCard key={l.id} label={isAdmin ? `${l.status} · ${l.active_phase}` : friendly.label}>
               <div className="flex flex-col gap-4">
                 <div>
                   <p className="font-display text-xl text-[#F4FBF8]">{l.name}</p>
                   <p className="mt-1 font-mono text-xs leading-relaxed text-[#5C6773]">
-                    {l.symbol ?? '—'} · {l.minted_count}/{l.total_supply} minted · {l.wallet_mint_limit}/wallet/phase ·
-                    slug {l.slug.slice(0, 12)}…
+                    {l.symbol ?? '—'} · {l.minted_count}/{l.total_supply} minted · {l.wallet_mint_limit}/wallet/phase
+                    {isAdmin ? <> · slug {l.slug.slice(0, 12)}…</> : null}
                   </p>
+                  {!isAdmin && friendly.hint ? (
+                    <p className="mt-2 text-xs leading-relaxed text-[#9BA8B4]">{friendly.hint}</p>
+                  ) : null}
                 </div>
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                   <Link

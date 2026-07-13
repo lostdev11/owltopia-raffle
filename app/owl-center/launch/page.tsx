@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 
 export default function OwlCenterLaunchSubmissionPage() {
   return (
-    <OwlCenterAdminGate title="Submit collection" subtitle="Launch review queue and asset checklist.">
+    <OwlCenterAdminGate allowPartners title="Submit collection" subtitle="Launch review queue and asset checklist.">
       <Suspense fallback={<div className="min-h-[40vh] bg-[#0F1419]" />}>
         <LaunchSubmissionWizard />
       </Suspense>
