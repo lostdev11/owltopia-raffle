@@ -84,6 +84,7 @@ export function AdminDiscordShopClient() {
   const [err, setErr] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [verifyingId, setVerifyingId] = useState<string | null>(null)
+  const [registeringCommands, setRegisteringCommands] = useState(false)
 
   const [walletNfts, setWalletNfts] = useState<WalletNft[] | null>(null)
   const [loadingWalletNfts, setLoadingWalletNfts] = useState(false)
@@ -315,6 +316,36 @@ export function AdminDiscordShopClient() {
   useEffect(() => {
     if (isAdmin) void load()
   }, [isAdmin, load])
+
+  const registerSlashCommands = async () => {
+    setRegisteringCommands(true)
+    setErr(null)
+    setMsg(null)
+    try {
+      const res = await fetch('/api/admin/discord/register-commands', {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setErr(
+          typeof data.error === 'string'
+            ? data.error
+            : typeof data.detail === 'string'
+              ? data.detail
+              : 'Could not register Discord commands'
+        )
+        return
+      }
+      const names = Array.isArray(data.command_names) ? data.command_names.join(', ') : 'owltopia-shop'
+      const note = typeof data.note === 'string' ? data.note : ''
+      setMsg(`Slash commands registered (${names}). ${note} Try typing /owltopia-shop in Discord.`)
+    } catch {
+      setErr('Network error registering Discord commands')
+    } finally {
+      setRegisteringCommands(false)
+    }
+  }
 
   const copy = async (text: string) => {
     try {
@@ -566,7 +597,7 @@ export function AdminDiscordShopClient() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/admin">
             <ArrowLeft className="mr-1 h-4 w-4" />
@@ -577,7 +608,25 @@ export function AdminDiscordShopClient() {
           <Store className="h-6 w-6" />
           Discord Shop
         </h1>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="ml-auto"
+          disabled={registeringCommands}
+          onClick={() => void registerSlashCommands()}
+        >
+          {registeringCommands ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+          Register Discord slash commands
+        </Button>
       </div>
+      {msg ? (
+        <p className="flex items-center gap-2 text-sm text-emerald-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          {msg}
+        </p>
+      ) : null}
+      {err ? <p className="text-sm text-red-400">{err}</p> : null}
 
       <Card>
         <CardHeader>
