@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { isOwlVisionAdmin } from '@/lib/admin/access'
 import { requireSession } from '@/lib/auth-server'
+import { isApprovedOwlCenterPartner } from '@/lib/db/owl-center-partners'
 import { listOwlCenterLaunchesAdmin, listOwlCenterLaunchesByCreatorWallet } from '@/lib/db/owl-center-launch'
 import { assessCreatorLaunchDeleteEligibility } from '@/lib/owl-center/creator-launch-delete'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
@@ -24,6 +25,7 @@ export async function GET(request: NextRequest) {
   }
 
   const isAdmin = await isOwlVisionAdmin(wallet)
+  const isPartner = isAdmin ? false : await isApprovedOwlCenterPartner(wallet)
   const rows = isAdmin
     ? (await listOwlCenterLaunchesAdmin()).filter((l) => l.slug !== 'gen2')
     : await listOwlCenterLaunchesByCreatorWallet(wallet)
@@ -32,6 +34,7 @@ export async function GET(request: NextRequest) {
     ok: true,
     wallet,
     isAdmin,
+    isPartner,
     launches: rows.map((l) => {
       const deleteEligibility = assessCreatorLaunchDeleteEligibility(l)
       return {
