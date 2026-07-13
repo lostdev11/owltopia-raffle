@@ -1,5 +1,7 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
+export type MarketplaceProductKind = 'generic' | 'owl_tokens'
+
 export type DiscordMarketplaceProduct = {
   id: string
   discord_guild_id: string
@@ -8,6 +10,7 @@ export type DiscordMarketplaceProduct = {
   description: string | null
   points_cost: number
   owl_delivery_amount: number
+  product_kind: MarketplaceProductKind
   active: boolean
   sort_order: number
   created_at: string
@@ -39,6 +42,8 @@ function mapProduct(row: Record<string, unknown>): DiscordMarketplaceProduct {
     description: row.description != null ? String(row.description) : null,
     points_cost: Number(row.points_cost),
     owl_delivery_amount: Number(row.owl_delivery_amount),
+    product_kind:
+      row.product_kind === 'owl_tokens' ? 'owl_tokens' : ('generic' as MarketplaceProductKind),
     active: Boolean(row.active),
     sort_order: Number(row.sort_order ?? 0),
     created_at: String(row.created_at),
@@ -87,6 +92,25 @@ export async function listActiveMarketplaceProducts(
 
   if (error) {
     console.error('listActiveMarketplaceProducts:', error.message)
+    return []
+  }
+  return (data ?? []).map((r) => mapProduct(r as Record<string, unknown>))
+}
+
+export async function listActiveOwlTokenProducts(
+  guildId: string
+): Promise<DiscordMarketplaceProduct[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('discord_marketplace_products')
+    .select('*')
+    .eq('discord_guild_id', guildId.trim())
+    .eq('active', true)
+    .eq('product_kind', 'owl_tokens')
+    .order('sort_order', { ascending: true })
+    .order('owl_delivery_amount', { ascending: true })
+
+  if (error) {
+    console.error('listActiveOwlTokenProducts:', error.message)
     return []
   }
   return (data ?? []).map((r) => mapProduct(r as Record<string, unknown>))
@@ -150,10 +174,14 @@ export async function upsertMarketplaceProduct(params: {
   description?: string | null
   points_cost: number
   owl_delivery_amount: number
+  product_kind?: MarketplaceProductKind
   active?: boolean
   sort_order?: number
 }): Promise<DiscordMarketplaceProduct | null> {
   const now = new Date().toISOString()
+  const kind =
+    params.product_kind ??
+    (params.owl_delivery_amount > 0 ? 'owl_tokens' : 'generic')
   const { data, error } = await getSupabaseAdmin()
     .from('discord_marketplace_products')
     .upsert(
@@ -164,6 +192,7 @@ export async function upsertMarketplaceProduct(params: {
         description: params.description?.trim() || null,
         points_cost: params.points_cost,
         owl_delivery_amount: params.owl_delivery_amount,
+        product_kind: kind,
         active: params.active ?? true,
         sort_order: params.sort_order ?? 0,
         updated_at: now,

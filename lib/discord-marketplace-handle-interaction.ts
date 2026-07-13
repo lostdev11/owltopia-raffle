@@ -18,6 +18,7 @@ import {
   getMarketplaceProductBySlug,
   grantMarketplacePoints,
   listActiveMarketplaceProducts,
+  listActiveOwlTokenProducts,
   listAllMarketplaceProducts,
   listRecentMarketplaceOrders,
   markMarketplaceOrderFailed,
@@ -195,37 +196,72 @@ export async function handleDiscordMarketplaceCommand(
   const { sub, nestedSub, strOptions, numOptions } = getSubcommandAndOptions(interaction.data)
 
   if (sub === 'browse' || sub === 'shop') {
-    const [products, nfts] = await Promise.all([
+    const [products, owlBundles, nfts] = await Promise.all([
       listActiveMarketplaceProducts(guildId),
+      listActiveOwlTokenProducts(guildId),
       listAvailableNftListings(guildId),
     ])
-    if (products.length === 0 && nfts.length === 0) {
+    const genericProducts = products.filter((p) => p.product_kind !== 'owl_tokens')
+    if (genericProducts.length === 0 && owlBundles.length === 0 && nfts.length === 0) {
       return ephemeral(
-        'No items in the shop yet. Admins can add products or NFT listings via `/owltopia-shop admin`.'
+        'No items in the shop yet. Admins can add products or listings via `/owltopia-shop admin`.'
       )
     }
     const lines: string[] = ['**Owltopia Shop**', '']
-    if (products.length > 0) {
-      lines.push('**Points items**')
-      for (const p of products) {
+    if (owlBundles.length > 0) {
+      lines.push('**OWL tokens** (pay with points → auto-delivered to wallet)')
+      for (const p of owlBundles) {
+        lines.push(
+          `• **${p.name}** (\`${p.slug}\`) — **${p.points_cost.toLocaleString()}** pts → **${p.owl_delivery_amount} OWL**`
+        )
+      }
+      lines.push('', 'Buy: `/owltopia-shop buy product:<slug>`')
+    }
+    if (genericProducts.length > 0) {
+      if (owlBundles.length > 0) lines.push('')
+      lines.push('**Other points items**')
+      for (const p of genericProducts) {
         const owl =
-          p.owl_delivery_amount > 0 ? ` → auto-delivers **${p.owl_delivery_amount} OWL**` : ''
+          p.owl_delivery_amount > 0 ? ` → **${p.owl_delivery_amount} OWL**` : ''
         lines.push(`• **${p.name}** (\`${p.slug}\`) — **${p.points_cost.toLocaleString()}** points${owl}`)
       }
-      lines.push('', 'Buy points items: `/owltopia-shop buy product:<slug>`')
+      lines.push('', 'Buy: `/owltopia-shop buy product:<slug>`')
     }
     if (nfts.length > 0) {
-      if (products.length > 0) lines.push('')
-      lines.push('**NFT listings**')
+      if (genericProducts.length > 0 || owlBundles.length > 0) lines.push('')
+      lines.push('**NFT listings** (pay SOL or OWL on-chain)')
       for (const n of nfts) {
         const label = n.display_name ?? n.nft_mint.slice(0, 8) + '…'
         lines.push(
           `• **${label}** (\`${n.listing_slug}\`) — **${formatNftPrice(n.price_amount, n.currency)}**`
         )
       }
-      lines.push('', 'Buy NFTs: `/owltopia-shop buy-nft listing:<slug>`')
+      lines.push('', 'Buy: `/owltopia-shop buy-nft listing:<slug>`')
     }
     return ephemeral(lines.join('\n'))
+  }
+
+  if (sub === 'browse-owl') {
+    const owlBundles = await listActiveOwlTokenProducts(guildId)
+    if (owlBundles.length === 0) {
+      return ephemeral(
+        'No OWL token bundles listed. Admins: `/owltopia-shop admin list-owl owl:<amount> points:<cost>`'
+      )
+    }
+    const lines = owlBundles.map(
+      (p) =>
+        `• **${p.name}** (\`${p.slug}\`) — **${p.points_cost.toLocaleString()}** points → **${p.owl_delivery_amount} OWL** auto-delivered`
+    )
+    return ephemeral(
+      [
+        '**OWL Token Shop** (pay with points)',
+        '',
+        ...lines,
+        '',
+        'Requires linked wallet: `/owltopia-shop connect-wallet`',
+        'Buy: `/owltopia-shop buy product:<slug>`',
+      ].join('\n')
+    )
   }
 
   if (sub === 'browse-nfts') {
@@ -554,6 +590,42 @@ export async function handleDiscordMarketplaceCommand(
     const access = await memberCanManageShop(interaction.member)
     if (!access.ok) return ephemeral(access.message)
 
+    if (nestedSub === 'list-owl') {
+      const owlAmount = numOptions.owl
+      const points = numOptions.points
+      if (!Number.isFinite(owlAmount) || owlAmount <= 0 || !Number.isFinite(points) || points <= 0) {
+        return ephemeral('Usage: `/owltopia-shop admin list-owl owl:<amount> points:<cost>`')
+      }
+      const defaultName = `${owlAmount} OWL`
+      const name = (strOptions.name ?? '').trim() || defaultName
+      const slug =
+        slugifyMarketplaceProductSlug(strOptions.slug ?? `owl-${owlAmount}`) ||
+        slugifyMarketplaceProductSlug(defaultName)
+
+      const product = await upsertMarketplaceProduct({
+        discord_guild_id: guildId,
+        slug,
+        name,
+        points_cost: Math.trunc(points),
+        owl_delivery_amount: owlAmount,
+        product_kind: 'owl_tokens',
+        active: true,
+      })
+      if (!product) return ephemeral('Could not save OWL listing (database error).')
+
+      return ephemeral(
+        [
+          `**OWL listing live:** **${product.owl_delivery_amount} OWL** for **${product.points_cost.toLocaleString()}** points`,
+          `Slug: \`${product.slug}\``,
+          '',
+          'Users buy with `/owltopia-shop buy product:' + product.slug + '` (linked wallet required).',
+          'OWL is sent automatically from the marketplace treasury on purchase.',
+          '',
+          '_Payment currency for OWL bundles is **points** today. SOL/OWL on-chain pricing can be added later if needed._',
+        ].join('\n')
+      )
+    }
+
     if (nestedSub === 'list-nft') {
       const mint = (strOptions.mint ?? '').trim()
       const price = numOptions.price
@@ -690,15 +762,15 @@ export async function handleDiscordMarketplaceCommand(
     if (nestedSub === 'list-products') {
       const products = await listAllMarketplaceProducts(guildId)
       if (products.length === 0) return ephemeral('No products configured.')
-      const lines = products.map(
-        (p) =>
-          `${p.active ? '🟢' : '🔴'} **${p.name}** (\`${p.slug}\`) — ${p.points_cost.toLocaleString()} pts, ${p.owl_delivery_amount} OWL`
-      )
+      const lines = products.map((p) => {
+        const kind = p.product_kind === 'owl_tokens' ? '🦉' : '📦'
+        return `${kind} ${p.active ? '🟢' : '🔴'} **${p.name}** (\`${p.slug}\`) — ${p.points_cost.toLocaleString()} pts${p.owl_delivery_amount > 0 ? `, ${p.owl_delivery_amount} OWL` : ''}`
+      })
       return ephemeral(['**All shop products**', '', ...lines].join('\n'))
     }
 
     return ephemeral(
-      'Admin: `add-product`, `list-nft`, `verify-nft-deposit`, `list-nfts`, `remove-nft`, `grant-points`, `list-products`'
+      'Admin: `list-owl`, `add-product`, `list-nft`, `verify-nft-deposit`, `list-nfts`, `remove-nft`, `grant-points`, `list-products`'
     )
   }
 
@@ -706,7 +778,8 @@ export async function handleDiscordMarketplaceCommand(
     [
       '**Owltopia Shop**',
       '',
-      '`/owltopia-shop browse` — points + NFT listings',
+      '`/owltopia-shop browse` — full shop',
+      '`/owltopia-shop browse-owl` — OWL bundles (points)',
       '`/owltopia-shop browse-nfts` — NFTs only',
       '`/owltopia-shop buy` — points purchase',
       '`/owltopia-shop buy-nft` — NFT payment quote (SOL/OWL)',

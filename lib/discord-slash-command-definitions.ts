@@ -85,18 +85,23 @@ export const OWLTOPIA_SHOP_SLASH_COMMAND = {
       type: 1,
     },
     {
+      name: 'browse-owl',
+      description: 'List OWL token bundles for sale (pay with points)',
+      type: 1,
+    },
+    {
       name: 'browse-nfts',
       description: 'List NFTs for sale (priced in SOL or OWL)',
       type: 1,
     },
     {
       name: 'buy',
-      description: 'Purchase a points shop item (requires linked wallet)',
+      description: 'Purchase a points shop item (OWL bundles, tickets, etc.)',
       type: 1,
       options: [
         {
           name: 'product',
-          description: 'Product slug from /owltopia-shop browse',
+          description: 'Product slug from browse or browse-owl',
           type: 3,
           required: true,
         },
@@ -163,6 +168,17 @@ export const OWLTOPIA_SHOP_SLASH_COMMAND = {
             { name: 'owl', description: 'OWL amount to auto-send on purchase', type: 10, required: false },
             { name: 'slug', description: 'URL slug (defaults from name)', type: 3, required: false },
             { name: 'description', description: 'Optional description', type: 3, required: false },
+          ],
+        },
+        {
+          name: 'list-owl',
+          description: 'List OWL tokens for sale (users pay with points, auto-delivered on buy)',
+          type: 1,
+          options: [
+            { name: 'owl', description: 'OWL amount delivered per purchase', type: 10, required: true },
+            { name: 'points', description: 'Points cost', type: 4, required: true },
+            { name: 'name', description: 'Display name (optional)', type: 3, required: false },
+            { name: 'slug', description: 'Listing slug (optional)', type: 3, required: false },
           ],
         },
         {
