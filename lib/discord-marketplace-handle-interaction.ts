@@ -1,5 +1,16 @@
 import { generateDiscordMarketplaceLinkState } from '@/lib/discord-marketplace-link-state'
 import { fulfillMarketplaceOwlDelivery } from '@/lib/solana/discord-marketplace-fulfill'
+import {
+  fulfillMarketplaceNftToBuyer,
+  getDiscordMarketplaceNftEscrowAddress,
+  verifyNftDepositedInMarketplaceEscrow,
+} from '@/lib/solana/discord-marketplace-nft-escrow'
+import {
+  extractOwlShopMemosFromParsedTx,
+  verifyDiscordMarketplaceNftPayment,
+} from '@/lib/solana/verify-discord-marketplace-payment'
+import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
+import { getSolanaConnection } from '@/lib/solana/connection'
 import { isAdmin } from '@/lib/db/admins'
 import {
   createMarketplaceOrder,
@@ -15,6 +26,25 @@ import {
   slugifyMarketplaceProductSlug,
   upsertMarketplaceProduct,
 } from '@/lib/db/discord-marketplace'
+import {
+  completeNftSale,
+  createNftListing,
+  createNftPurchaseIntent,
+  defaultNftListingSlugFromMint,
+  findNftIntentByMemo,
+  getNftListingBySlug,
+  getNftListingById,
+  isNftPaymentSignatureUsed,
+  listAllNftListings,
+  listAvailableNftListings,
+  markNftIntentConfirmed,
+  markNftListingAvailable,
+  markNftListingFulfillmentFailed,
+  markNftListingFulfilled,
+  removeNftListing,
+  slugifyNftListingSlug,
+  type NftListingCurrency,
+} from '@/lib/db/discord-marketplace-nfts'
 import { getWalletAddressByDiscordUserId } from '@/lib/db/wallet-profiles'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
 import { gen2PresaleExplorerTxUrl } from '@/lib/gen2-presale/explorer'
@@ -127,6 +157,28 @@ function orderStatusEmoji(status: string): string {
   }
 }
 
+function formatNftPrice(amount: number, currency: NftListingCurrency): string {
+  if (currency === 'SOL') return `${amount} SOL`
+  return `${amount} OWL`
+}
+
+function nftListingStatusEmoji(status: string): string {
+  switch (status) {
+    case 'available':
+      return '🟢'
+    case 'pending_deposit':
+      return '🟡'
+    case 'sold':
+      return '✅'
+    case 'fulfillment_failed':
+      return '🔴'
+    case 'removed':
+      return '🗑️'
+    default:
+      return '⚪'
+  }
+}
+
 export async function handleDiscordMarketplaceCommand(
   interaction: DiscordInteraction
 ): Promise<Record<string, unknown>> {
@@ -143,18 +195,51 @@ export async function handleDiscordMarketplaceCommand(
   const { sub, nestedSub, strOptions, numOptions } = getSubcommandAndOptions(interaction.data)
 
   if (sub === 'browse' || sub === 'shop') {
-    const products = await listActiveMarketplaceProducts(guildId)
-    if (products.length === 0) {
+    const [products, nfts] = await Promise.all([
+      listActiveMarketplaceProducts(guildId),
+      listAvailableNftListings(guildId),
+    ])
+    if (products.length === 0 && nfts.length === 0) {
       return ephemeral(
-        'No items in the shop yet. Admins can add products with `/owltopia-shop admin add-product`.'
+        'No items in the shop yet. Admins can add products or NFT listings via `/owltopia-shop admin`.'
       )
     }
-    const lines = products.map((p) => {
-      const owl =
-        p.owl_delivery_amount > 0 ? ` → auto-delivers **${p.owl_delivery_amount} OWL**` : ''
-      return `• **${p.name}** (\`${p.slug}\`) — **${p.points_cost.toLocaleString()}** points${owl}`
+    const lines: string[] = ['**Owltopia Shop**', '']
+    if (products.length > 0) {
+      lines.push('**Points items**')
+      for (const p of products) {
+        const owl =
+          p.owl_delivery_amount > 0 ? ` → auto-delivers **${p.owl_delivery_amount} OWL**` : ''
+        lines.push(`• **${p.name}** (\`${p.slug}\`) — **${p.points_cost.toLocaleString()}** points${owl}`)
+      }
+      lines.push('', 'Buy points items: `/owltopia-shop buy product:<slug>`')
+    }
+    if (nfts.length > 0) {
+      if (products.length > 0) lines.push('')
+      lines.push('**NFT listings**')
+      for (const n of nfts) {
+        const label = n.display_name ?? n.nft_mint.slice(0, 8) + '…'
+        lines.push(
+          `• **${label}** (\`${n.listing_slug}\`) — **${formatNftPrice(n.price_amount, n.currency)}**`
+        )
+      }
+      lines.push('', 'Buy NFTs: `/owltopia-shop buy-nft listing:<slug>`')
+    }
+    return ephemeral(lines.join('\n'))
+  }
+
+  if (sub === 'browse-nfts') {
+    const nfts = await listAvailableNftListings(guildId)
+    if (nfts.length === 0) {
+      return ephemeral('No NFTs listed for sale. Admins can list with `/owltopia-shop admin list-nft`.')
+    }
+    const lines = nfts.map((n) => {
+      const label = n.display_name ?? n.nft_mint.slice(0, 8) + '…'
+      return `• **${label}** (\`${n.listing_slug}\`) — **${formatNftPrice(n.price_amount, n.currency)}**`
     })
-    return ephemeral(['**Owltopia Shop**', '', ...lines, '', 'Buy with `/owltopia-shop buy product:<slug>`'].join('\n'))
+    return ephemeral(
+      ['**NFT Marketplace**', '', ...lines, '', 'Buy: `/owltopia-shop buy-nft listing:<slug>`'].join('\n')
+    )
   }
 
   if (sub === 'balance') {
@@ -312,9 +397,255 @@ export async function handleDiscordMarketplaceCommand(
     })
   }
 
+  if (sub === 'buy-nft') {
+    const listingSlug = (strOptions.listing ?? '').trim().toLowerCase()
+    if (!listingSlug) {
+      return ephemeral('Usage: `/owltopia-shop buy-nft listing:<slug>`')
+    }
+
+    const wallet = await getWalletAddressByDiscordUserId(discordUserId)
+    if (!wallet) {
+      const state = generateDiscordMarketplaceLinkState(discordUserId)
+      const url = `${getSiteBaseUrl()}/discord-shop/connect?state=${encodeURIComponent(state)}`
+      return ephemeral(['**Connect your wallet first** to receive the NFT after payment.', '', url].join('\n'))
+    }
+
+    const listing = await getNftListingBySlug(guildId, listingSlug)
+    if (!listing || listing.status !== 'available') {
+      return ephemeral(`Listing \`${listingSlug}\` not found or not available.`)
+    }
+
+    const intent = await createNftPurchaseIntent({
+      listing_id: listing.id,
+      discord_user_id: discordUserId,
+      buyer_wallet: wallet,
+      price_amount: listing.price_amount,
+      currency: listing.currency,
+    })
+    if (!intent) return ephemeral('Could not create payment session.')
+
+    const treasury = getRaffleTreasuryWalletAddress() ?? '(set RAFFLE_RECIPIENT_WALLET)'
+    const label = listing.display_name ?? listing.nft_mint
+    const payLine =
+      listing.currency === 'SOL'
+        ? `Send **exactly ${listing.price_amount} SOL** to \`${treasury}\``
+        : `Send **exactly ${listing.price_amount} OWL** to \`${treasury}\``
+
+    return ephemeral(
+      [
+        `**NFT purchase — ${label}**`,
+        '',
+        payLine,
+        `**Memo (exact):** \`${intent.memo}\``,
+        '',
+        'Include the memo in the **same transaction** as your payment (Phantom: Advanced → Memo).',
+        '',
+        `Quote expires: ${intent.expires_at}`,
+        '',
+        `Then run \`/owltopia-shop verify-nft signature:<your_tx_signature>\``,
+        '',
+        `NFT will auto-transfer to \`${wallet.slice(0, 4)}…${wallet.slice(-4)}\` after verification.`,
+      ].join('\n')
+    )
+  }
+
+  if (sub === 'verify-nft') {
+    const sig = (strOptions.signature ?? '').trim()
+    if (!sig) return ephemeral('Usage: `/owltopia-shop verify-nft signature:<tx>`')
+
+    const wallet = await getWalletAddressByDiscordUserId(discordUserId)
+    if (!wallet) {
+      return ephemeral('Link your wallet first with `/owltopia-shop connect-wallet`.')
+    }
+
+    if (await isNftPaymentSignatureUsed(sig)) {
+      return ephemeral('That transaction was already used for a purchase.')
+    }
+
+    const connection = getSolanaConnection()
+    const tx = await connection.getParsedTransaction(sig, {
+      maxSupportedTransactionVersion: 0,
+      commitment: 'confirmed',
+    })
+    if (!tx || tx.meta?.err) {
+      return ephemeral('Transaction not found or failed on-chain.')
+    }
+
+    const memos = extractOwlShopMemosFromParsedTx(tx)
+    let intent = null
+    for (const m of memos) {
+      const cand = await findNftIntentByMemo(m)
+      if (cand && cand.discord_user_id === discordUserId) {
+        intent = cand
+        break
+      }
+    }
+    if (!intent) {
+      return ephemeral(
+        'No matching pending NFT purchase. Run `/owltopia-shop buy-nft listing:<slug>` first and include memo `OWLSHOP:…` in your payment.'
+      )
+    }
+    if (new Date(intent.expires_at).getTime() <= Date.now()) {
+      return ephemeral('Payment quote expired. Run `/owltopia-shop buy-nft` again.')
+    }
+
+    const listingById = await getNftListingById(intent.listing_id)
+    if (!listingById || listingById.discord_guild_id !== guildId) {
+      return ephemeral('Listing not found for this server.')
+    }
+    if (listingById.status !== 'available') {
+      return ephemeral('This NFT was already sold.')
+    }
+
+    const paymentCheck = await verifyDiscordMarketplaceNftPayment({
+      signature: sig,
+      currency: intent.currency,
+      expectedAmount: intent.price_amount,
+      expectedMemo: intent.memo,
+      payerWallet: wallet,
+      parsedTransaction: tx,
+    })
+    if (!paymentCheck.ok) {
+      return ephemeral(paymentCheck.error)
+    }
+
+    const sale = await completeNftSale({
+      listing_id: listingById.id,
+      buyer_discord_user_id: discordUserId,
+      buyer_wallet: wallet,
+      payment_tx_signature: sig,
+    })
+    if (!sale.ok) {
+      return ephemeral(sale.message)
+    }
+
+    await markNftIntentConfirmed(intent.id, sig)
+
+    const delivery = await fulfillMarketplaceNftToBuyer({
+      nftMint: sale.nft_mint,
+      recipientWallet: wallet,
+    })
+
+    if (!delivery.ok) {
+      await markNftListingFulfillmentFailed(sale.listing_id, delivery.error)
+      return ephemeral(
+        `Payment verified but NFT transfer failed (${delivery.error}). Contact support with signature \`${sig}\` — payment is recorded.`
+      )
+    }
+
+    await markNftListingFulfilled(sale.listing_id, delivery.signature)
+    const label = sale.display_name ?? sale.nft_mint
+    const shortWallet = `${wallet.slice(0, 4)}…${wallet.slice(-4)}`
+
+    return embedResponse({
+      title: '🎉 NFT Purchased!',
+      description: [
+        `You acquired **${label}**.`,
+        '',
+        `**Paid:** ${formatNftPrice(sale.price_amount, sale.currency)}`,
+        `**Delivered to:** \`${shortWallet}\``,
+        `[Payment tx](${gen2PresaleExplorerTxUrl(sig)}) · [Delivery tx](${gen2PresaleExplorerTxUrl(delivery.signature)})`,
+      ].join('\n'),
+      color: 0x2ecc71,
+    })
+  }
+
   if (sub === 'admin') {
     const access = await memberCanManageShop(interaction.member)
     if (!access.ok) return ephemeral(access.message)
+
+    if (nestedSub === 'list-nft') {
+      const mint = (strOptions.mint ?? '').trim()
+      const price = numOptions.price
+      const currency = (strOptions.currency ?? '').trim().toUpperCase() as NftListingCurrency
+      const slug = slugifyNftListingSlug(strOptions.slug ?? strOptions.name ?? defaultNftListingSlugFromMint(mint))
+      const displayName = (strOptions.name ?? '').trim() || null
+
+      if (!mint || !Number.isFinite(price) || price <= 0) {
+        return ephemeral('Usage: `/owltopia-shop admin list-nft mint:… price:… currency:SOL|OWL`')
+      }
+      if (currency !== 'SOL' && currency !== 'OWL') {
+        return ephemeral('Currency must be **SOL** or **OWL**.')
+      }
+
+      const escrow = getDiscordMarketplaceNftEscrowAddress()
+      if (!escrow) {
+        return ephemeral('Marketplace escrow not configured (set PRIZE_ESCROW_SECRET_KEY on the server).')
+      }
+
+      const listing = await createNftListing({
+        discord_guild_id: guildId,
+        listing_slug: slug,
+        nft_mint: mint,
+        display_name: displayName,
+        price_amount: price,
+        currency,
+        listed_by_discord_user_id: discordUserId,
+      })
+      if (!listing) return ephemeral('Could not create listing (duplicate slug or database error).')
+
+      return ephemeral(
+        [
+          `**Listing created** (\`${listing.listing_slug}\`) — **${formatNftPrice(listing.price_amount, listing.currency)}**`,
+          '',
+          '**Step 1:** Transfer the NFT to marketplace escrow:',
+          `\`${escrow}\``,
+          '',
+          `**Step 2:** Run \`/owltopia-shop admin verify-nft-deposit listing:${listing.listing_slug}\``,
+          '',
+          `_Mint: \`${mint}\`_`,
+        ].join('\n')
+      )
+    }
+
+    if (nestedSub === 'verify-nft-deposit') {
+      const listingSlug = (strOptions.listing ?? '').trim().toLowerCase()
+      if (!listingSlug) {
+        return ephemeral('Usage: `/owltopia-shop admin verify-nft-deposit listing:<slug>`')
+      }
+      const listing = await getNftListingBySlug(guildId, listingSlug)
+      if (!listing) return ephemeral(`Listing \`${listingSlug}\` not found.`)
+      if (listing.status !== 'pending_deposit') {
+        return ephemeral(`Listing is \`${listing.status}\`, not pending deposit.`)
+      }
+
+      const depositCheck = await verifyNftDepositedInMarketplaceEscrow(listing.nft_mint)
+      if (!depositCheck.ok) {
+        return ephemeral(depositCheck.error ?? 'NFT not in escrow yet.')
+      }
+
+      const depositSig = (strOptions.signature ?? '').trim() || 'escrow-verified'
+      const ok = await markNftListingAvailable(listing.id, depositSig)
+      if (!ok) return ephemeral('Could not publish listing.')
+
+      return ephemeral(
+        `**${listing.display_name ?? listing.listing_slug}** is now **live** for **${formatNftPrice(listing.price_amount, listing.currency)}**.`
+      )
+    }
+
+    if (nestedSub === 'list-nfts') {
+      const listings = await listAllNftListings(guildId)
+      if (listings.length === 0) return ephemeral('No NFT listings.')
+      const lines = listings.map((n) => {
+        const label = n.display_name ?? n.nft_mint.slice(0, 8) + '…'
+        return `${nftListingStatusEmoji(n.status)} **${label}** (\`${n.listing_slug}\`) — ${formatNftPrice(n.price_amount, n.currency)} · ${n.status}`
+      })
+      return ephemeral(['**All NFT listings**', '', ...lines].join('\n'))
+    }
+
+    if (nestedSub === 'remove-nft') {
+      const listingSlug = (strOptions.listing ?? '').trim().toLowerCase()
+      if (!listingSlug) {
+        return ephemeral('Usage: `/owltopia-shop admin remove-nft listing:<slug>`')
+      }
+      const listing = await getNftListingBySlug(guildId, listingSlug)
+      if (!listing) return ephemeral('Listing not found.')
+      const ok = await removeNftListing(listing.id)
+      if (!ok) return ephemeral('Could not remove listing.')
+      return ephemeral(
+        `Removed listing \`${listingSlug}\`. Retrieve the NFT from escrow manually if it was deposited.`
+      )
+    }
 
     if (nestedSub === 'add-product') {
       const name = (strOptions.name ?? '').trim()
@@ -367,7 +698,7 @@ export async function handleDiscordMarketplaceCommand(
     }
 
     return ephemeral(
-      'Admin subcommands: `add-product`, `grant-points`, `list-products`'
+      'Admin: `add-product`, `list-nft`, `verify-nft-deposit`, `list-nfts`, `remove-nft`, `grant-points`, `list-products`'
     )
   }
 
@@ -375,8 +706,11 @@ export async function handleDiscordMarketplaceCommand(
     [
       '**Owltopia Shop**',
       '',
-      '`/owltopia-shop browse` — list items',
-      '`/owltopia-shop buy` — purchase (wallet required)',
+      '`/owltopia-shop browse` — points + NFT listings',
+      '`/owltopia-shop browse-nfts` — NFTs only',
+      '`/owltopia-shop buy` — points purchase',
+      '`/owltopia-shop buy-nft` — NFT payment quote (SOL/OWL)',
+      '`/owltopia-shop verify-nft` — confirm NFT payment + delivery',
       '`/owltopia-shop wallet` — check linked wallet',
       '`/owltopia-shop connect-wallet` — link Solana wallet',
       '`/owltopia-shop balance` — your points',

@@ -75,23 +75,54 @@ export const OWLTOPIA_PARTNER_SLASH_COMMAND = {
 
 export const OWLTOPIA_SHOP_SLASH_COMMAND = {
   name: 'owltopia-shop',
-  description: 'Owltopia points shop — browse, buy, and auto-deliver OWL to your linked wallet',
+  description: 'Owltopia shop — points, NFTs (SOL/OWL), wallet linking, auto-delivery',
   type: 1,
   dm_permission: false,
   options: [
     {
       name: 'browse',
-      description: 'List items available in this server shop',
+      description: 'List points items and NFT listings in this server shop',
+      type: 1,
+    },
+    {
+      name: 'browse-nfts',
+      description: 'List NFTs for sale (priced in SOL or OWL)',
       type: 1,
     },
     {
       name: 'buy',
-      description: 'Purchase an item (requires linked Solana wallet)',
+      description: 'Purchase a points shop item (requires linked wallet)',
       type: 1,
       options: [
         {
           name: 'product',
           description: 'Product slug from /owltopia-shop browse',
+          type: 3,
+          required: true,
+        },
+      ],
+    },
+    {
+      name: 'buy-nft',
+      description: 'Get payment instructions for an NFT listing (SOL or OWL)',
+      type: 1,
+      options: [
+        {
+          name: 'listing',
+          description: 'Listing slug from browse-nfts',
+          type: 3,
+          required: true,
+        },
+      ],
+    },
+    {
+      name: 'verify-nft',
+      description: 'Verify SOL/OWL payment and receive your NFT automatically',
+      type: 1,
+      options: [
+        {
+          name: 'signature',
+          description: 'Solana transaction signature (base58)',
           type: 3,
           required: true,
         },
@@ -119,12 +150,12 @@ export const OWLTOPIA_SHOP_SLASH_COMMAND = {
     },
     {
       name: 'admin',
-      description: 'Manage shop products and grant points (admin/founder)',
+      description: 'Manage shop products, NFT listings, and points (admin/founder)',
       type: 1,
       options: [
         {
           name: 'add-product',
-          description: 'Add or update a shop product',
+          description: 'Add or update a points shop product',
           type: 1,
           options: [
             { name: 'name', description: 'Display name', type: 3, required: true },
@@ -133,6 +164,52 @@ export const OWLTOPIA_SHOP_SLASH_COMMAND = {
             { name: 'slug', description: 'URL slug (defaults from name)', type: 3, required: false },
             { name: 'description', description: 'Optional description', type: 3, required: false },
           ],
+        },
+        {
+          name: 'list-nft',
+          description: 'List an NFT for sale in SOL or OWL (deposit to escrow after)',
+          type: 1,
+          options: [
+            { name: 'mint', description: 'NFT mint / asset address', type: 3, required: true },
+            { name: 'price', description: 'Price in SOL or OWL', type: 10, required: true },
+            {
+              name: 'currency',
+              description: 'Payment currency',
+              type: 3,
+              required: true,
+              choices: [
+                { name: 'SOL', value: 'SOL' },
+                { name: 'OWL', value: 'OWL' },
+              ],
+            },
+            { name: 'name', description: 'Display name (optional)', type: 3, required: false },
+            { name: 'slug', description: 'Listing slug (optional)', type: 3, required: false },
+          ],
+        },
+        {
+          name: 'verify-nft-deposit',
+          description: 'Confirm NFT arrived in escrow and publish listing',
+          type: 1,
+          options: [
+            { name: 'listing', description: 'Listing slug', type: 3, required: true },
+            {
+              name: 'signature',
+              description: 'Deposit transaction signature (optional if already in escrow)',
+              type: 3,
+              required: false,
+            },
+          ],
+        },
+        {
+          name: 'list-nfts',
+          description: 'List all NFT marketplace listings',
+          type: 1,
+        },
+        {
+          name: 'remove-nft',
+          description: 'Remove a listing (does not return NFT on-chain)',
+          type: 1,
+          options: [{ name: 'listing', description: 'Listing slug', type: 3, required: true }],
         },
         {
           name: 'grant-points',
@@ -145,7 +222,7 @@ export const OWLTOPIA_SHOP_SLASH_COMMAND = {
         },
         {
           name: 'list-products',
-          description: 'List all products including inactive',
+          description: 'List all points products including inactive',
           type: 1,
         },
       ],
