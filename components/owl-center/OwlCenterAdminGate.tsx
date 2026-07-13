@@ -13,10 +13,13 @@ type OwlCenterAdminGateProps = {
   children: ReactNode
   title: string
   subtitle?: string
+  /** Also let approved launchpad partners through (launch wizard, generator). */
+  allowPartners?: boolean
 }
 
-export function OwlCenterAdminGate({ children, title, subtitle }: OwlCenterAdminGateProps) {
-  const { adminLoading, isOwlCenterAdmin, showAdminFeatures, setViewMode } = useOwlCenterView()
+export function OwlCenterAdminGate({ children, title, subtitle, allowPartners = false }: OwlCenterAdminGateProps) {
+  const { adminLoading, isOwlCenterAdmin, isLaunchpadPartner, showAdminFeatures, setViewMode } =
+    useOwlCenterView()
 
   if (adminLoading) {
     return (
@@ -26,18 +29,39 @@ export function OwlCenterAdminGate({ children, title, subtitle }: OwlCenterAdmin
     )
   }
 
+  // Approved partners skip the admin view-mode machinery entirely.
+  if (allowPartners && !isOwlCenterAdmin && isLaunchpadPartner) {
+    return <>{children}</>
+  }
+
   if (!isOwlCenterAdmin) {
     return (
       <OwlCenterShell eyebrow="OWL_CENTER" title={title} subtitle="This area is not available yet.">
         <p className="max-w-lg text-sm text-[#9BA8B4]">
-          Launchpad tools are for Owl Vision admins only. Gen2 mint and presale stay on the holder console.
+          {allowPartners
+            ? 'Launchpad tools are for approved partners and Owl Vision admins. Want to launch a collection with us? Apply to the partner program and we will set up your wallet.'
+            : 'Launchpad tools are for Owl Vision admins only. Gen2 mint and presale stay on the holder console.'}
         </p>
-        <Link
-          href={OWL_CENTER_HOLDER_HOME}
-          className="mt-6 inline-flex min-h-[44px] touch-manipulation items-center border border-[#00FF9C]/35 bg-[#00FF9C]/10 px-5 text-sm font-bold uppercase tracking-wide text-[#E8FDF4] hover:bg-[#00FF9C]/16"
-        >
-          Go to Gen2 mint
-        </Link>
+        <div className="mt-6 flex flex-wrap gap-3">
+          {allowPartners ? (
+            <Link
+              href="/partner-program"
+              className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#00FF9C]/35 bg-[#00FF9C]/10 px-5 text-sm font-bold uppercase tracking-wide text-[#E8FDF4] hover:bg-[#00FF9C]/16"
+            >
+              Apply to partner program
+            </Link>
+          ) : null}
+          <Link
+            href={OWL_CENTER_HOLDER_HOME}
+            className={`inline-flex min-h-[44px] touch-manipulation items-center px-5 text-sm font-bold uppercase tracking-wide ${
+              allowPartners
+                ? 'border border-[#1A222B] text-[#9BA8B4] hover:border-[#00FF9C]/35 hover:text-[#00FF9C]'
+                : 'border border-[#00FF9C]/35 bg-[#00FF9C]/10 text-[#E8FDF4] hover:bg-[#00FF9C]/16'
+            }`}
+          >
+            Go to Gen2 mint
+          </Link>
+        </div>
       </OwlCenterShell>
     )
   }

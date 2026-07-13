@@ -10,8 +10,8 @@ import { cn } from '@/lib/utils'
 
 export function OwlCenterNav() {
   const pathname = usePathname() ?? ''
-  const { showAdminFeatures, isOwlCenterAdmin, adminLoading } = useOwlCenterView()
-  const items = owlCenterNavItemsForView(showAdminFeatures)
+  const { showLaunchTools, isOwlCenterAdmin, isLaunchpadPartner, adminLoading } = useOwlCenterView()
+  const items = owlCenterNavItemsForView(showLaunchTools)
 
   return (
     <div className="sticky top-0 z-40 border-b border-[#1A222B] bg-[#0F1419]/95 backdrop-blur-md supports-[backdrop-filter]:bg-[#0F1419]/88">
@@ -24,7 +24,7 @@ export function OwlCenterNav() {
             {items.map((item) => {
               const active = isOwlCenterNavActive(pathname, item)
               const Icon = item.icon
-              const disabled = item.adminOnly && (adminLoading || !isOwlCenterAdmin)
+              const disabled = item.adminOnly && (adminLoading || (!isOwlCenterAdmin && !isLaunchpadPartner))
 
               if (disabled) {
                 return (

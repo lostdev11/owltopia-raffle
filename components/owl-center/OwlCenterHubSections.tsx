@@ -6,13 +6,13 @@ import { useOwlCenterView } from '@/components/owl-center/OwlCenterViewProvider'
 import { owlCenterNavItemsForView } from '@/lib/owl-center/nav'
 
 export function OwlCenterHubQuickLinks() {
-  const { showAdminFeatures, isOwlCenterAdmin, adminLoading } = useOwlCenterView()
-  const items = owlCenterNavItemsForView(showAdminFeatures).filter((item) => item.href !== '/owl-center')
+  const { showLaunchTools, isOwlCenterAdmin, isLaunchpadPartner, adminLoading } = useOwlCenterView()
+  const items = owlCenterNavItemsForView(showLaunchTools).filter((item) => item.href !== '/owl-center')
 
   return (
     <>
       <p className="mt-3 max-w-2xl text-sm text-[#5C6773]">
-        {showAdminFeatures
+        {showLaunchTools
           ? 'Jump between live drops, Gen2 mint, generator, and partner mints. Phantom / Solflare on mobile.'
           : 'Browse live drops and mint partner collections. Connect Phantom or Solflare on mobile.'}
       </p>
@@ -20,7 +20,7 @@ export function OwlCenterHubQuickLinks() {
         {items.map((item) => {
           const Icon = item.icon
           const primary = item.href.includes('collection/gen2')
-          const disabled = item.adminOnly && (adminLoading || !isOwlCenterAdmin)
+          const disabled = item.adminOnly && (adminLoading || (!isOwlCenterAdmin && !isLaunchpadPartner))
 
           if (disabled) {
             return (
@@ -63,9 +63,9 @@ export function OwlCenterHubQuickLinks() {
 }
 
 export function OwlCenterSubmitHint() {
-  const { showAdminFeatures } = useOwlCenterView()
+  const { showLaunchTools } = useOwlCenterView()
 
-  if (!showAdminFeatures) {
+  if (!showLaunchTools) {
     return (
       <p className="mt-4 font-mono text-sm text-[#5C6773]">
         Partner collections will appear here when announced.
