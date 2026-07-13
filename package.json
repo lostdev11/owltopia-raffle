@@ -15,6 +15,7 @@
     "generate:nesting-reward-treasury-key": "node scripts/generate-nesting-reward-treasury-keypair.mjs",
     "generate:funds-escrow-key": "node scripts/generate-funds-escrow-keypair.mjs",
     "generate:council-owl-escrow-key": "node scripts/generate-council-owl-escrow-keypair.mjs",
+    "generate:discord-marketplace-wallets": "node scripts/generate-discord-marketplace-wallets.mjs --write-env",
     "mint:devnet-nft": "node scripts/mint-devnet-nft.mjs",
     "prepare:sugar-deploy": "node --env-file=.env.local scripts/prepare-sugar-deploy-from-launch.mjs",
     "sugar:deploy": "node --env-file=.env.local scripts/sugar-deploy-collection.mjs",
