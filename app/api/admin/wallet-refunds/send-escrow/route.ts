@@ -7,6 +7,10 @@ import { getEntryById, acquireEntryRefundLock, clearEntryRefundLock, markEntryRe
 import { getRaffleById } from '@/lib/db/raffles'
 import { getBuyoutOfferById, finalizeBuyoutRefund, getRefundEligibleOffer } from '@/lib/db/buyout-offers'
 import { refundEntryFromFundsEscrow, refundBuyoutOfferFromFundsEscrow } from '@/lib/raffles/funds-escrow'
+import {
+  entryHasOnChainRefundAmount,
+  noPaymentRefundSignature,
+} from '@/lib/raffles/entry-refund-amount'
 import { raffleAllowsAdminFundsEscrowRefund } from '@/lib/raffles/ticket-escrow-policy'
 import { resolveBuyoutDepositSource } from '@/lib/buyout/deposit-source'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
@@ -88,6 +92,13 @@ export async function POST(request: NextRequest) {
       }
 
       try {
+        if (!entryHasOnChainRefundAmount(entry)) {
+          const signature = noPaymentRefundSignature(entry.id)
+          await markEntryRefunded(entry.id, signature)
+          results.push({ id: entryId, kind: 'ticket', ok: true, transactionSignature: signature })
+          continue
+        }
+
         const result = await refundEntryFromFundsEscrow(raffle, entry)
         if (!result.ok) {
           await clearEntryRefundLock(entry.id)

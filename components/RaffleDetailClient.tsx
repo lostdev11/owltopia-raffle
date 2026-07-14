@@ -45,6 +45,10 @@ import {
   ticketUnitPriceForCurrency,
 } from '@/lib/raffles/dual-ticket-payment'
 import {
+  formatRefundClaimAmount,
+  formatRefundClaimButtonLabel,
+} from '@/lib/raffles/entry-refund-amount'
+import {
   getRaffleProfitInfo,
   normalizeRaffleTicketCurrency,
   revenueFlexPromoChipUppercase,
@@ -1337,7 +1341,7 @@ export function RaffleDetailClient({
       entryId: string
     ): Promise<
       | { ok: false }
-      | { ok: true; tx: string | null; alreadyRefunded?: boolean }
+      | { ok: true; tx: string | null; alreadyRefunded?: boolean; noPayment?: boolean }
     > => {
       if (!connected || !publicKey) {
         setClaimRefundError('Please connect your wallet first.')
@@ -1421,6 +1425,7 @@ export function RaffleDetailClient({
         ok: true as const,
         tx: extractTransactionSignature(json),
         alreadyRefunded: (json as { alreadyRefunded?: boolean }).alreadyRefunded === true,
+        noPayment: (json as { noPayment?: boolean }).noPayment === true,
       }
     },
     [connected, publicKey, signMessage]
@@ -1448,14 +1453,20 @@ export function RaffleDetailClient({
           const entry = buyerRefundableEntries.find((e) => e.id === entryId)
           const amountLabel =
             entry != null
-              ? `${Number(entry.amount_paid).toFixed(entry.currency === 'USDC' ? 2 : 4)} ${entry.currency}`
+              ? formatRefundClaimAmount(entry.amount_paid, entry.currency)
               : 'Your ticket payment'
           presentActionClaimSuccess({
-            tx: result.tx,
-            heading: result.alreadyRefunded ? 'Refund already sent' : 'Refund claimed!',
+            tx: result.noPayment ? null : result.tx,
+            heading: result.alreadyRefunded
+              ? 'Refund already sent'
+              : result.noPayment
+                ? 'Free ticket closed'
+                : 'Refund claimed!',
             message: result.alreadyRefunded
               ? `${amountLabel} was already returned to your wallet.`
-              : `${amountLabel} was sent back to your wallet.`,
+              : result.noPayment
+                ? 'This was a free referral ticket — nothing was paid on-chain, so there is nothing to return.'
+                : `${amountLabel} was sent back to your wallet.`,
           })
           router.refresh()
         }
@@ -4261,9 +4272,6 @@ export function RaffleDetailClient({
                     )}
                     <ul className="space-y-2">
                       {buyerRefundableEntries.map((entry) => {
-                        const cur = String(entry.currency ?? raffle.currency ?? 'SOL').toUpperCase()
-                        const decimals = cur === 'USDC' ? 2 : 4
-                        const amt = Number(entry.amount_paid).toFixed(decimals)
                         return (
                           <li
                             key={entry.id}
@@ -4286,7 +4294,7 @@ export function RaffleDetailClient({
                                   Refunding…
                                 </>
                               ) : (
-                                `Claim ${amt} ${cur}`
+                                formatRefundClaimButtonLabel(entry, raffle.currency)
                               )}
                             </Button>
                           </li>

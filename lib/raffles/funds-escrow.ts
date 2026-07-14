@@ -257,7 +257,11 @@ export async function refundEntryFromFundsEscrow(
     return { ok: false, error: 'Invalid entry amount.' }
   }
 
-  const currency = (entry.currency || raffle.currency || 'SOL').toUpperCase() as 'SOL' | 'USDC' | 'OWL'
+  const currency = (entry.currency || raffle.currency || 'SOL').toUpperCase() as
+    | 'SOL'
+    | 'USDC'
+    | 'OWL'
+    | 'BAMBOO'
   const connection = getSolanaConnection()
   const escrowPubkey = kp.publicKey
   const buyerPk = new PublicKey(entry.wallet_address.trim())

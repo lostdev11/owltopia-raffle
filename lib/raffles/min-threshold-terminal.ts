@@ -26,6 +26,13 @@ export async function finalizeMinThresholdTerminalFailure(raffleId: string): Pro
   await updateRaffle(raffleId, { status: 'failed_refund_available', is_active: false })
 
   try {
+    const { markZeroPaymentEntriesRefundedForRaffle } = await import('@/lib/db/entries')
+    await markZeroPaymentEntriesRefundedForRaffle(raffleId)
+  } catch (e) {
+    console.error('[finalizeMinThresholdTerminalFailure] zero-payment refund close:', e)
+  }
+
+  try {
     const { voidMilestonesOnFailedRaffle } = await import('@/lib/raffles/milestones/settlement')
     await voidMilestonesOnFailedRaffle(raffleId)
   } catch (e) {

@@ -32,6 +32,7 @@ import {
 import { processEndedRaffleByIdIfApplicable } from '@/lib/draw-ended-raffles'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
+import { entryHasOnChainRefundAmount } from '@/lib/raffles/entry-refund-amount'
 import { listOfferRefundCandidatesByWallet } from '@/lib/db/raffle-offers'
 import { listMilestoneBonusWinsForWallet } from '@/lib/db/raffle-milestones'
 import { getDiscordPartnerTenantIdForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
@@ -113,6 +114,41 @@ export async function GET(request: NextRequest) {
 
     let entriesWithRaffles = await getEntriesByWallet(wallet)
     let rafflesForResponse = await getRafflesByCreator(wallet)
+
+    // Heal stuck complimentary / zero-paid rows so dashboards do not show "Claim 0.0000 SOL".
+    {
+      const zeroPaymentRaffleIds = new Set<string>()
+      for (const row of entriesWithRaffles) {
+        const r = row.raffle
+        if (!r?.id) continue
+        const st = String(r.status ?? '').toLowerCase()
+        if (
+          st !== 'failed_refund_available' &&
+          st !== 'pending_min_not_met' &&
+          st !== 'cancelled'
+        ) {
+          continue
+        }
+        if (row.entry.status !== 'confirmed' || row.entry.refunded_at) continue
+        if (!raffleUsesFundsEscrow(r)) continue
+        if (entryHasOnChainRefundAmount(row.entry)) continue
+        zeroPaymentRaffleIds.add(r.id)
+      }
+      if (zeroPaymentRaffleIds.size > 0) {
+        try {
+          const { markZeroPaymentEntriesRefundedForRaffle } = await import('@/lib/db/entries')
+          for (const raffleId of zeroPaymentRaffleIds) {
+            await markZeroPaymentEntriesRefundedForRaffle(raffleId)
+          }
+          entriesWithRaffles = await getEntriesByWallet(wallet)
+        } catch (e) {
+          console.warn(
+            '[me/dashboard] zero-payment refund heal:',
+            e instanceof Error ? e.message : e
+          )
+        }
+      }
+    }
 
     const endedNoWinnerCandidateIds = new Set<string>()
     for (const row of entriesWithRaffles) {

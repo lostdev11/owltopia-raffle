@@ -6,6 +6,10 @@ import { withRetry } from '@/lib/db-retry'
 import { RAFFLE_CURRENCIES } from '@/lib/tokens'
 import { PENDING_PAYMENT_GRACE_MS } from '@/lib/entries/pending-payment-grace'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
+import {
+  entryHasOnChainRefundAmount,
+  noPaymentRefundSignature,
+} from '@/lib/raffles/entry-refund-amount'
 
 /** Thrown when the DB rejects a duplicate transaction_signature (unique index). */
 export class TransactionSignatureAlreadyUsedError extends Error {
@@ -1047,6 +1051,45 @@ export async function markEntryRefunded(entryId: string, transactionSignature: s
     console.error('markEntryRefunded error:', error)
     throw new Error(`Failed to mark entry refunded: ${error.message}`)
   }
+}
+
+/**
+ * Close confirmed, unrefunded rows with no on-chain payment (complimentary / amount_paid 0)
+ * so they do not appear as "Claim 0.0000 SOL" in buyer refund UIs.
+ */
+export async function markZeroPaymentEntriesRefundedForRaffle(raffleId: string): Promise<number> {
+  const rid = typeof raffleId === 'string' ? raffleId.trim() : ''
+  if (!rid) return 0
+
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
+    .from('entries')
+    .select('id, amount_paid, referral_complimentary')
+    .eq('raffle_id', rid)
+    .eq('status', 'confirmed')
+    .is('refunded_at', null)
+
+  if (error) {
+    console.error('markZeroPaymentEntriesRefundedForRaffle select:', error)
+    return 0
+  }
+
+  let closed = 0
+  for (const row of data ?? []) {
+    const entry = row as {
+      id: string
+      amount_paid?: number | string | null
+      referral_complimentary?: boolean | null
+    }
+    if (entryHasOnChainRefundAmount(entry)) continue
+    try {
+      await markEntryRefunded(entry.id, noPaymentRefundSignature(entry.id))
+      closed += 1
+    } catch (e) {
+      console.error('markZeroPaymentEntriesRefundedForRaffle mark:', e)
+    }
+  }
+  return closed
 }
 
 /**

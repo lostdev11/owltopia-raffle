@@ -11,6 +11,10 @@ import { safeErrorMessage } from '@/lib/safe-error'
 import { claimRefundEntryBody, parseOr400 } from '@/lib/validations'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { refundEntryFromFundsEscrow } from '@/lib/raffles/funds-escrow'
+import {
+  entryHasOnChainRefundAmount,
+  noPaymentRefundSignature,
+} from '@/lib/raffles/entry-refund-amount'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
@@ -91,6 +95,17 @@ export async function POST(request: NextRequest) {
     }
 
     try {
+      // Referral complimentary / zero-paid rows have nothing to return on-chain.
+      if (!entryHasOnChainRefundAmount(entry)) {
+        const signature = noPaymentRefundSignature(entry.id)
+        await markEntryRefunded(entry.id, signature)
+        return NextResponse.json({
+          success: true,
+          transactionSignature: signature,
+          noPayment: true,
+        })
+      }
+
       const result = await refundEntryFromFundsEscrow(raffle, entry)
       if (!result.ok || !result.signature) {
         await clearEntryRefundLock(entry.id)
