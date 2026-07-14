@@ -1341,7 +1341,7 @@ export function RaffleDetailClient({
       entryId: string
     ): Promise<
       | { ok: false }
-      | { ok: true; tx: string | null; alreadyRefunded?: boolean }
+      | { ok: true; tx: string | null; alreadyRefunded?: boolean; noPayment?: boolean }
     > => {
       if (!connected || !publicKey) {
         setClaimRefundError('Please connect your wallet first.')
