@@ -56,7 +56,11 @@ async function transcodeToSatoriPngBase64(buf: ArrayBuffer): Promise<string | nu
   }
 }
 
-/** When gateways omit Content-Type or send application/octet-stream (common on IPFS). */
+/**
+ * Prefer magic bytes over Content-Type / file extension.
+ * Owltopia carousel assets are WebP bytes served as `image/png` (`.png` name) — trusting
+ * the header alone skipped the WebP→PNG transcode and left Share Mint OG art empty.
+ */
 function sniffImageMimeFromBuffer(buf: ArrayBuffer): string | null {
   const u8 = new Uint8Array(buf)
   if (u8.length < 12) return null
@@ -74,6 +78,11 @@ function sniffImageMimeFromBuffer(buf: ArrayBuffer): string | null {
     u8[11] === 0x50
   ) {
     return 'image/webp'
+  }
+  // ISO BMFF: ....ftypavif / ....ftypavis / ....ftypheic
+  if (u8[4] === 0x66 && u8[5] === 0x74 && u8[6] === 0x79 && u8[7] === 0x70 && u8.length >= 12) {
+    const brand = String.fromCharCode(u8[8], u8[9], u8[10], u8[11]).toLowerCase()
+    if (brand === 'avif' || brand === 'avis' || brand === 'mif1') return 'image/avif'
   }
   return null
 }
@@ -110,12 +119,13 @@ export async function fetchImageDataUrlForOg(
     const buf = await res.arrayBuffer()
     if (buf.byteLength < 24 || buf.byteLength > maxBytes) return null
 
-    let mime = (res.headers.get('content-type')?.split(';')[0].trim() ?? '').toLowerCase()
+    const headerMime = (res.headers.get('content-type')?.split(';')[0].trim() ?? '').toLowerCase()
+    const sniffed = sniffImageMimeFromBuffer(buf)
+    // Magic bytes win — Content-Type lies for .png-named WebP carousel assets and some IPFS gateways.
+    const mime = sniffed || headerMime
     if (!mime || mime === 'application/octet-stream' || !mime.startsWith('image/')) {
-      const sniffed = sniffImageMimeFromBuffer(buf)
-      if (sniffed) mime = sniffed
+      return null
     }
-    if (!mime.startsWith('image/')) return null
     if (isSvg(mime, s)) return null
 
     // Satori only embeds PNG/JPEG/GIF, and large art makes the inlined base64 slow/unstable. So
