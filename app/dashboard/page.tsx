@@ -39,6 +39,10 @@ import { getCancellationFeeSol } from '@/lib/config/raffles'
 import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
 import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
+import {
+  formatRefundClaimAmount,
+  formatRefundClaimButtonLabel,
+} from '@/lib/raffles/entry-refund-amount'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import {
@@ -172,6 +176,7 @@ type EntryWithRaffle = {
     refunded_at?: string | null
     referrer_wallet?: string | null
     referral_code_used?: string | null
+    referral_complimentary?: boolean | null
   }
   raffle: {
     id: string
@@ -1183,20 +1188,27 @@ export default function DashboardPage() {
           return
         }
         const alreadyRefunded = (json as { alreadyRefunded?: boolean }).alreadyRefunded === true
+        const noPayment = (json as { noPayment?: boolean }).noPayment === true
         const amount = row ? Number(row.entry.amount_paid) : null
         const currency = row?.entry.currency
         const amountLabel =
           amount != null && currency
-            ? `${amount.toFixed(currency === 'USDC' ? 2 : 4)} ${currency}`
+            ? formatRefundClaimAmount(amount, currency)
             : 'Your ticket payment'
         presentClaimSuccess({
-          tx: extractTransactionSignature(json),
+          tx: noPayment ? null : extractTransactionSignature(json),
           title: row?.raffle.title ?? 'Ticket refund',
           slug: row?.raffle.slug ?? 'dashboard',
-          heading: alreadyRefunded ? 'Refund already sent' : 'Refund claimed!',
+          heading: alreadyRefunded
+            ? 'Refund already sent'
+            : noPayment
+              ? 'Free ticket closed'
+              : 'Refund claimed!',
           message: alreadyRefunded
             ? `${amountLabel} was already returned to your wallet.`
-            : `${amountLabel} was sent back to your wallet.`,
+            : noPayment
+              ? 'This was a free referral ticket — nothing was paid on-chain, so there is nothing to return.'
+              : `${amountLabel} was sent back to your wallet.`,
         })
         await loadDashboard({ silent: true })
       } finally {
@@ -2307,7 +2319,7 @@ export default function DashboardPage() {
                             Refunding…
                           </>
                         ) : (
-                          `Claim ${Number(entry.amount_paid).toFixed(entry.currency === 'USDC' ? 2 : 4)} ${entry.currency}`
+                          formatRefundClaimButtonLabel(entry)
                         )}
                       </Button>
                     </li>
@@ -3188,7 +3200,7 @@ export default function DashboardPage() {
                                           Refunding…
                                         </>
                                       ) : (
-                                        `Claim ${Number(entry.amount_paid).toFixed(entry.currency === 'USDC' ? 2 : 4)} ${entry.currency}`
+                                        formatRefundClaimButtonLabel(entry)
                                       )}
                                     </Button>
                                   </li>

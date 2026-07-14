@@ -72,6 +72,13 @@ export async function POST(
       is_active: false,
     })
 
+    try {
+      const { markZeroPaymentEntriesRefundedForRaffle } = await import('@/lib/db/entries')
+      await markZeroPaymentEntriesRefundedForRaffle(id)
+    } catch (e) {
+      console.error('[accept-cancellation] zero-payment refund close:', e)
+    }
+
     /** NFT or partner SPL prize in escrow — return to creator automatically (same as return-prize-to-creator). */
     let prizeReturnAttempted = false
     let prizeReturnOk: boolean | undefined

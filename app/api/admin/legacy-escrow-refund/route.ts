@@ -11,6 +11,10 @@ import { safeErrorMessage } from '@/lib/safe-error'
 import { adminLegacyEscrowRefundBody, parseOr400 } from '@/lib/validations'
 import { refundEntryFromFundsEscrow } from '@/lib/raffles/funds-escrow'
 import {
+  entryHasOnChainRefundAmount,
+  noPaymentRefundSignature,
+} from '@/lib/raffles/entry-refund-amount'
+import {
   raffleAllowsAdminFundsEscrowRefund,
   raffleUsesFundsEscrow,
 } from '@/lib/raffles/ticket-escrow-policy'
@@ -109,6 +113,13 @@ export async function POST(request: NextRequest) {
       }
 
       try {
+        if (!entryHasOnChainRefundAmount(entry)) {
+          const signature = noPaymentRefundSignature(entry.id)
+          await markEntryRefunded(entry.id, signature)
+          results.push({ entryId, ok: true, transactionSignature: signature })
+          continue
+        }
+
         const result = await refundEntryFromFundsEscrow(raffle, entry)
         if (!result.ok) {
           await clearEntryRefundLock(entry.id)
