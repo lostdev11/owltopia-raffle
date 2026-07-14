@@ -2,7 +2,7 @@ import { ImageResponse } from 'next/og'
 import { PLATFORM_NAME, getSiteBaseUrl } from '@/lib/site-config'
 import { owltopiaLinkPreviewOg, OWLTOPIA_OG_SIZE } from '@/lib/og/owltopia-link-preview'
 import { getOwltopiaOgResponseOptions } from '@/lib/og/og-image-fonts'
-import { fetchImageDataUrlForOg } from '@/lib/og/fetch-image-data-url-for-og'
+import { loadLocalOgBrandArtDataUrl } from '@/lib/og/load-local-public-image-for-og'
 
 export const runtime = 'nodejs'
 export const revalidate = 600
@@ -19,12 +19,11 @@ function hostLabel(site: string): string {
 }
 
 export default async function Image() {
-  const site = getSiteBaseUrl().replace(/\/$/, '')
   const ogOpts = await getOwltopiaOgResponseOptions()
-  const artUrl = `${site}/images/gen2-carousel/nest-punk-owl.png`
+  // True PNG from public/og-assets — carousel /images/*.png are WebP bytes that Satori can't embed.
   let imageUrl: string | null = null
   try {
-    imageUrl = await fetchImageDataUrlForOg(artUrl)
+    imageUrl = await loadLocalOgBrandArtDataUrl('nest-punk-owl')
   } catch {
     imageUrl = null
   }
