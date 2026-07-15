@@ -1,7 +1,13 @@
 # Phantom Wallet Domain Review Guide
 
 ## Issue
-Phantom wallet on Android is showing a "This dApp could be malicious" security warning when users try to connect to **owltopia.xyz**.
+Phantom wallet is showing a "This dApp could be malicious" security warning — most visibly in the **raffle purchase flow**, because that is the first place the site asks the wallet to sign/send an outgoing transfer, which is when Phantom's transaction scanner (Blowfish) runs hardest.
+
+## ⚠️ Register the exact origin users connect from: `www.owltopia.xyz`
+
+Production is served from **`www.owltopia.xyz`** (the apex `owltopia.xyz` returns a 307 redirect to `www`). Wallet dApp verification is **host-specific**: if Phantom/Blowfish verified the apex `owltopia.xyz` but users actually load and connect from `www.owltopia.xyz`, the connecting origin does **not** match the verified domain, so the dApp is still treated as unverified and the warning persists.
+
+**Register and verify `www.owltopia.xyz`** (the real connect origin) in every step below. Register the apex `owltopia.xyz` too for completeness, but `www` is the one that must match. Keep this aligned with `NEXT_PUBLIC_SITE_URL` and the wallet `appIdentity.uri` (both should resolve to the same canonical host).
 
 ## Solution Steps
 
