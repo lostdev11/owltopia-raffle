@@ -13,9 +13,58 @@ const RATE_WINDOW_MS = 60_000
 const UPSTREAM_TIMEOUT_MS = 25_000
 
 /**
+ * Methods used by Owl Center / Gen2 browser mint and purchase flows
+ * (Umi + web3.js Connection over the same-origin proxy).
+ */
+const ALLOWED_RPC_METHODS = new Set([
+  'getAccountInfo',
+  'getMultipleAccounts',
+  'getBalance',
+  'getLatestBlockhash',
+  'getBlockHeight',
+  'getBlockTime',
+  'getEpochInfo',
+  'getFeeForMessage',
+  'getMinimumBalanceForRentExemption',
+  'getRecentPrioritizationFees',
+  'getSignatureStatuses',
+  'getSignatureStatus',
+  'getSignaturesForAddress',
+  'getSlot',
+  'getTransaction',
+  'getTransactionCount',
+  'getVersion',
+  'getHealth',
+  'isBlockhashValid',
+  'sendTransaction',
+  'simulateTransaction',
+  'getAddressLookupTable',
+  'getTokenAccountBalance',
+  'getTokenAccountsByOwner',
+])
+
+function extractRpcMethods(body: unknown): string[] | null {
+  if (Array.isArray(body)) {
+    const methods: string[] = []
+    for (const item of body) {
+      if (!item || typeof item !== 'object' || typeof (item as { method?: unknown }).method !== 'string') {
+        return null
+      }
+      methods.push((item as { method: string }).method)
+    }
+    return methods
+  }
+  if (body && typeof body === 'object' && typeof (body as { method?: unknown }).method === 'string') {
+    return [(body as { method: string }).method]
+  }
+  return null
+}
+
+/**
  * Same-origin Solana JSON-RPC proxy for Owl Center mints.
  * Mobile wallets often time out on direct calls to third-party RPC hosts; routing through
  * the app uses the server `SOLANA_RPC_URL` (Helius) on a stable connection.
+ * Only mint/purchase-related methods are forwarded.
  */
 export async function POST(request: NextRequest) {
   const ip = getClientIp(request)
@@ -45,6 +94,26 @@ export async function POST(request: NextRequest) {
       { jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null },
       { status: 400 }
     )
+  }
+
+  const methods = extractRpcMethods(body)
+  if (!methods || methods.length === 0) {
+    return NextResponse.json(
+      { jsonrpc: '2.0', error: { code: -32600, message: 'Invalid Request' }, id: null },
+      { status: 400 }
+    )
+  }
+  for (const method of methods) {
+    if (!ALLOWED_RPC_METHODS.has(method)) {
+      return NextResponse.json(
+        {
+          jsonrpc: '2.0',
+          error: { code: -32601, message: `Method not allowed: ${method}` },
+          id: Array.isArray(body) ? null : ((body as { id?: unknown })?.id ?? null),
+        },
+        { status: 400 }
+      )
+    }
   }
 
   const controller = new AbortController()
