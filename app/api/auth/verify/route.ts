@@ -57,17 +57,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!(await consumeNonceOnce(nonce, walletStr))) {
-      return NextResponse.json(
-        { error: 'Invalid or expired nonce' },
-        { status: 400 }
-      )
-    }
-
     const result = verifySignIn(walletStr, messageStr, sigStr)
     if (!result.valid) {
       return NextResponse.json(
         { error: result.error || 'Invalid signature' },
+        { status: 400 }
+      )
+    }
+
+    // Consume after signature check so a bad signature does not burn the nonce.
+    if (!(await consumeNonceOnce(nonce, walletStr))) {
+      return NextResponse.json(
+        { error: 'Invalid or expired nonce' },
         { status: 400 }
       )
     }
