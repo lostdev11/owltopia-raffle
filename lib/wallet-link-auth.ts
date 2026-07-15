@@ -74,7 +74,7 @@ function linkSiteHost(): string {
   try {
     return new URL(getSiteBaseUrl()).host
   } catch {
-    return 'owltopia.xyz'
+    return 'www.owltopia.xyz'
   }
 }
 
