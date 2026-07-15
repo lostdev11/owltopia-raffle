@@ -60,9 +60,10 @@ export function computeOwlCenterPurchaseLamports(
 
 export async function getOwlCenterPresaleServerConfig(
   tenant: OwlCenterPresaleTenantAdmin,
-  solUsdPrice?: number
+  _solUsdPrice?: number
 ): Promise<OwlCenterPresaleCampaignConfig> {
-  const solUsd = solUsdPrice != null && solUsdPrice > 0 ? solUsdPrice : await resolveGen2SolUsdPrice()
+  // Always use live server oracle — never a client-supplied SOL/USD for amount checks.
+  const solUsd = await resolveGen2SolUsdPrice()
   return tenantToCampaignConfig(tenant, solUsd)
 }
 

@@ -29,6 +29,7 @@
     "lint:fix": "eslint . --fix",
     "normalize:nft-economics": "node --env-file=.env.local scripts/normalize-nft-raffle-economics.mjs",
     "check:nft-economics": "node --env-file=.env.local scripts/check-nft-economics-compliance.mjs",
+    "test:presale-amount-validation": "npx --yes tsx scripts/test-presale-amount-validation.ts",
     "test:batch-cart-invariants": "npx --yes tsx scripts/test-batch-cart-invariants.ts",
     "test:pending-verification-store": "npx --yes tsx scripts/test-pending-verification-store.ts",
     "test:cart-checkout-restore": "npx --yes tsx scripts/test-cart-checkout-restore.ts",

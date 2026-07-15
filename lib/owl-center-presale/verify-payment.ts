@@ -43,6 +43,15 @@ function sumTreasuryTransferFromBuyer(
   return total
 }
 
+/** Exported for confirm drift checks against the live oracle expected lamports. */
+export function sumOwlCenterTreasuryTransferFromBuyer(
+  parsed: ParsedTransactionWithMeta,
+  buyerNorm: string,
+  treasuryNorm: string
+): bigint {
+  return sumTreasuryTransferFromBuyer(parsed, buyerNorm, treasuryNorm)
+}
+
 export function verifyOwlCenterTreasuryPayment(params: {
   parsed: ParsedTransactionWithMeta
   buyerWallet: string

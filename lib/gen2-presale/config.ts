@@ -37,7 +37,11 @@ function parsePercent(raw: string | undefined, fallback: number): number {
 }
 
 export type Gen2PresaleServerConfigOptions = {
-  /** Use the SOL/USD rate from create-transaction so confirm matches on-chain amounts after refreshes. */
+  /**
+   * @deprecated Ignored for amount checks. Confirm always uses the live server oracle;
+   * chain-aligned verification absorbs normal create→confirm SOL/USD drift.
+   * Client-supplied rates must never set expected lamports.
+   */
   solUsdPrice?: number
 }
 
@@ -85,15 +89,13 @@ function parseGen2PresaleEnvBase(): Omit<Gen2PresaleEnvConfig, 'solUsdPrice'> {
 }
 
 /**
- * Server presale config. SOL/USD from Jupiter (cached) unless overridden (e.g. confirm passes rate from create).
+ * Server presale config. SOL/USD always from the live server oracle (never a client-supplied rate).
  */
 export async function getGen2PresaleServerConfig(
-  options?: Gen2PresaleServerConfigOptions
+  _options?: Gen2PresaleServerConfigOptions
 ): Promise<Gen2PresaleEnvConfig> {
   const base = parseGen2PresaleEnvBase()
-  const override = options?.solUsdPrice
-  const solUsdPrice =
-    override != null && Number.isFinite(override) && override > 0 ? override : await resolveGen2SolUsdPrice()
+  const solUsdPrice = await resolveGen2SolUsdPrice()
   return { ...base, solUsdPrice }
 }
 
