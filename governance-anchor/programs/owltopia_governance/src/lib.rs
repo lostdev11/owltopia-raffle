@@ -11,7 +11,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 
-declare_id!("FwEAjseYTP6vTp9g6SpBTgySWzm4yxCtBc3Ti7Rvcfyz");
+declare_id!("CJD7H2URWfCqUBqntRgaEe6yzB2f1MmHofoXDi7BuYQR");
 
 /// 48 hours in seconds (minimum voting period).
 pub const MIN_VOTING_SECS: i64 = 48 * 3600;
