@@ -27,12 +27,8 @@ type NoncePayload = { w: string; exp: number; r: string; v: 1 }
 /**
  * Stateless nonce (serverless-safe).
  *
- * We used to store nonces in-memory, which breaks on serverless because the nonce
- * can be generated on one instance and verified on another (leading to "Invalid nonce").
- *
- * This nonce is self-verifying (HMAC-signed) and includes wallet + expiry.
- * It is not strictly one-time-use (replay is possible within TTL), but that is acceptable
- * for SIWS because the user still must produce a valid wallet signature for the message.
+ * Self-verifying (HMAC-signed) with wallet + expiry. Single-use is enforced by
+ * {@link consumeNonceOnce} recording the payload random id in Supabase.
  */
 export function generateNonce(wallet: string, expiresAtMs: number): string {
   const secret = getSecret()
@@ -47,28 +43,69 @@ export function generateNonce(wallet: string, expiresAtMs: number): string {
   return `${payloadB64}.${sig}`
 }
 
-export function consumeNonce(nonce: string, wallet: string): boolean {
+/** Validate HMAC + wallet + expiry; returns payload when valid. */
+export function parseValidatedNonce(
+  nonce: string,
+  wallet: string
+): NoncePayload | null {
   const [payloadB64, sigB64] = (nonce || '').split('.')
-  if (!payloadB64 || !sigB64) return false
+  if (!payloadB64 || !sigB64) return null
   try {
     const secret = getSecret()
     const expected = createHmac('sha256', secret).update(payloadB64).digest()
     const got = Buffer.from(sigB64, 'base64url')
-    if (expected.length !== got.length || !timingSafeEqual(expected, got)) return false
+    if (expected.length !== got.length || !timingSafeEqual(expected, got)) return null
 
     const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as Partial<NoncePayload>
-    if (payload.v !== 1) return false
-    if (typeof payload.w !== 'string' || typeof payload.exp !== 'number') return false
-    if (payload.w.trim() !== wallet.trim()) return false
-    if (payload.exp < Date.now()) return false
+    if (payload.v !== 1) return null
+    if (typeof payload.w !== 'string' || typeof payload.exp !== 'number' || typeof payload.r !== 'string') {
+      return null
+    }
+    if (!payload.r.trim()) return null
+    if (payload.w.trim() !== wallet.trim()) return null
+    if (payload.exp < Date.now()) return null
 
     // Safety: don't accept extremely long-lived nonces even if signed
-    if (payload.exp > Date.now() + NONCE_TTL_MS + 30_000) return false
+    if (payload.exp > Date.now() + NONCE_TTL_MS + 30_000) return null
 
-    return true
+    return { w: payload.w, exp: payload.exp, r: payload.r, v: 1 }
   } catch {
+    return null
+  }
+}
+
+/** HMAC + wallet + expiry check (does not mark single-use). Prefer {@link consumeNonceOnce}. */
+export function consumeNonce(nonce: string, wallet: string): boolean {
+  return parseValidatedNonce(nonce, wallet) != null
+}
+
+/**
+ * Validate nonce then consume it once (Supabase insert on nonce random id).
+ * Returns false if invalid, expired, or already consumed.
+ */
+export async function consumeNonceOnce(nonce: string, wallet: string): Promise<boolean> {
+  const payload = parseValidatedNonce(nonce, wallet)
+  if (!payload) return false
+
+  const { getSupabaseAdmin } = await import('@/lib/supabase-admin')
+  const db = getSupabaseAdmin()
+
+  // Opportunistic TTL cleanup (best-effort; ignore failures)
+  void db.from('siws_consumed_nonces').delete().lt('expires_at', new Date().toISOString())
+
+  const { error } = await db.from('siws_consumed_nonces').insert({
+    nonce_id: payload.r,
+    wallet: wallet.trim(),
+    expires_at: new Date(payload.exp).toISOString(),
+  })
+
+  if (error) {
+    // Unique violation — already consumed
+    if (error.code === '23505') return false
+    console.error('[auth] consumeNonceOnce:', error.message)
     return false
   }
+  return true
 }
 
 function signInSiteHost(): string {
@@ -110,6 +147,22 @@ export function buildSignInMessage(wallet: string, nonce: string, expiresAt: Dat
     `Nonce: ${nonce}`,
     `Valid until: ${formatSignInExpiry(expiresAt)}`,
   ].join('\n')
+}
+
+/**
+ * Require the signed message to match the exact SIWS text we issue for this wallet + nonce
+ * (host, wallet line, Valid until from the nonce expiry). Rejects shape/host/wallet mismatches.
+ */
+export function messageMatchesIssuedSignIn(wallet: string, message: string, nonce: string): boolean {
+  const payload = parseValidatedNonce(nonce, wallet)
+  if (!payload) return false
+  const expected = buildSignInMessage(wallet, nonce, new Date(payload.exp))
+  if (message.length !== expected.length) return false
+  try {
+    return timingSafeEqual(Buffer.from(message, 'utf8'), Buffer.from(expected, 'utf8'))
+  } catch {
+    return false
+  }
 }
 
 /**
