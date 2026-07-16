@@ -87,6 +87,91 @@ function treasuryWalletFromEnv(): string | null {
   return w || null
 }
 
+/** Buffer for the network fee when checking the escrow's SOL balance. */
+const SOL_FEE_BUFFER_LAMPORTS = 15_000
+
+function formatRawTokenAmount(raw: bigint, decimals: number): string {
+  return (Number(raw) / Math.pow(10, decimals)).toString()
+}
+
+function logFundsEscrowFailure(context: string, details: Record<string, unknown>, error?: unknown): void {
+  if (error !== undefined) {
+    console.error(`[funds-escrow] ${context}`, details, error)
+  } else {
+    console.error(`[funds-escrow] ${context}`, details)
+  }
+}
+
+/**
+ * Preflight: escrow token account must hold at least `requiredRaw`. Returns a friendly
+ * error message when short; null when it holds enough or when the balance could not be
+ * read (an RPC failure never blocks the payout — send/simulation still catches a real
+ * shortfall).
+ */
+async function findEscrowTokenShortfall(params: {
+  context: string
+  currency: string
+  decimals: number
+  mint: PublicKey
+  programId: typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID
+  escrowPubkey: PublicKey
+  fromAta: PublicKey
+  requiredRaw: bigint
+}): Promise<string | null> {
+  const { context, currency, decimals, mint, programId, escrowPubkey, fromAta, requiredRaw } = params
+  let balanceRaw: bigint
+  try {
+    const acct = await getAccount(getSolanaReadConnection(), fromAta, 'confirmed', programId)
+    balanceRaw = acct.amount
+  } catch {
+    return null
+  }
+  if (balanceRaw >= requiredRaw) return null
+  logFundsEscrowFailure(`${context}: escrow ${currency} balance is short`, {
+    escrow: escrowPubkey.toBase58(),
+    tokenAccount: fromAta.toBase58(),
+    mint: mint.toBase58(),
+    decimals,
+    requiredRaw: requiredRaw.toString(),
+    balanceRaw: balanceRaw.toString(),
+  })
+  return (
+    `Funds escrow is short of ${currency} for this payout: it needs ` +
+    `${formatRawTokenAmount(requiredRaw, decimals)} ${currency} but holds ` +
+    `${formatRawTokenAmount(balanceRaw, decimals)}. Please contact support to top up the escrow, then try again.`
+  )
+}
+
+/**
+ * Preflight: escrow wallet must hold the SOL being paid out plus a small fee buffer.
+ * Same best-effort contract as {@link findEscrowTokenShortfall}.
+ */
+async function findEscrowSolShortfall(params: {
+  context: string
+  escrowPubkey: PublicKey
+  requiredLamports: number
+}): Promise<string | null> {
+  const { context, escrowPubkey, requiredLamports } = params
+  let balance: number
+  try {
+    balance = await getSolanaReadConnection().getBalance(escrowPubkey, 'confirmed')
+  } catch {
+    return null
+  }
+  const needed = requiredLamports + SOL_FEE_BUFFER_LAMPORTS
+  if (balance >= needed) return null
+  logFundsEscrowFailure(`${context}: escrow SOL balance is short`, {
+    escrow: escrowPubkey.toBase58(),
+    requiredLamports: needed,
+    balanceLamports: balance,
+  })
+  return (
+    `Funds escrow is short of SOL for this payout: it needs about ` +
+    `${(needed / LAMPORTS_PER_SOL).toFixed(5)} SOL (incl. network fee) but holds ` +
+    `${(balance / LAMPORTS_PER_SOL).toFixed(5)}. Please contact support to top up the escrow, then try again.`
+  )
+}
+
 export type FundsEscrowPayoutResult =
   | { ok: true; signature: string }
   | { ok: false; error: string }
@@ -132,6 +217,13 @@ export async function payoutCreatorAndPlatformFromFundsEscrow(raffle: Raffle): P
       if (creatorLamports <= 0 && feeLamports <= 0) {
         return { ok: false, error: 'Nothing to pay out.' }
       }
+
+      const solShortfall = await findEscrowSolShortfall({
+        context: 'claim-proceeds',
+        escrowPubkey,
+        requiredLamports: creatorLamports + feeLamports,
+      })
+      if (solShortfall) return { ok: false, error: solShortfall }
 
       const tx = new Transaction()
       if (creatorLamports > 0) {
@@ -189,6 +281,18 @@ export async function payoutCreatorAndPlatformFromFundsEscrow(raffle: Raffle): P
       ASSOCIATED_TOKEN_PROGRAM_ID
     )
 
+    const tokenShortfall = await findEscrowTokenShortfall({
+      context: 'claim-proceeds',
+      currency,
+      decimals,
+      mint,
+      programId,
+      escrowPubkey,
+      fromAta,
+      requiredRaw: creatorRaw + feeRaw,
+    })
+    if (tokenShortfall) return { ok: false, error: tokenShortfall }
+
     const tx = new Transaction()
 
     const addTokenPayout = async (toOwner: PublicKey, amount: bigint) => {
@@ -235,6 +339,11 @@ export async function payoutCreatorAndPlatformFromFundsEscrow(raffle: Raffle): P
     })
     return { ok: true, signature: sig }
   } catch (e) {
+    logFundsEscrowFailure(
+      'claim-proceeds payout failed',
+      { escrow: escrowPubkey.toBase58(), currency, creatorPayout, platformFee },
+      e
+    )
     const msg = e instanceof Error ? e.message : String(e)
     return { ok: false, error: msg }
   }
@@ -270,6 +379,14 @@ export async function refundEntryFromFundsEscrow(
     if (currency === 'SOL') {
       const lamports = Math.round(amount * LAMPORTS_PER_SOL)
       if (lamports <= 0) return { ok: false, error: 'Nothing to refund.' }
+
+      const solShortfall = await findEscrowSolShortfall({
+        context: 'entry-refund',
+        escrowPubkey,
+        requiredLamports: lamports,
+      })
+      if (solShortfall) return { ok: false, error: solShortfall }
+
       const tx = new Transaction().add(
         SystemProgram.transfer({
           fromPubkey: escrowPubkey,
@@ -317,6 +434,18 @@ export async function refundEntryFromFundsEscrow(
       ASSOCIATED_TOKEN_PROGRAM_ID
     )
 
+    const tokenShortfall = await findEscrowTokenShortfall({
+      context: 'entry-refund',
+      currency,
+      decimals,
+      mint,
+      programId,
+      escrowPubkey,
+      fromAta,
+      requiredRaw: raw,
+    })
+    if (tokenShortfall) return { ok: false, error: tokenShortfall }
+
     const tx = new Transaction()
     try {
       await getAccount(readConn, toAta, 'confirmed', programId)
@@ -342,6 +471,11 @@ export async function refundEntryFromFundsEscrow(
     })
     return { ok: true, signature: sig }
   } catch (e) {
+    logFundsEscrowFailure(
+      'entry-refund payout failed',
+      { escrow: escrowPubkey.toBase58(), currency, amount },
+      e
+    )
     const msg = e instanceof Error ? e.message : String(e)
     return { ok: false, error: msg }
   }
@@ -371,6 +505,14 @@ export async function payoutCryptoFromFundsEscrow(params: {
     if (params.currency === 'SOL') {
       const lamports = Math.round(amount * LAMPORTS_PER_SOL)
       if (lamports <= 0) return { ok: false, error: 'Nothing to pay.' }
+
+      const solShortfall = await findEscrowSolShortfall({
+        context: 'crypto-payout',
+        escrowPubkey,
+        requiredLamports: lamports,
+      })
+      if (solShortfall) return { ok: false, error: solShortfall }
+
       const tx = new Transaction().add(
         SystemProgram.transfer({
           fromPubkey: escrowPubkey,
@@ -415,6 +557,18 @@ export async function payoutCryptoFromFundsEscrow(params: {
       ASSOCIATED_TOKEN_PROGRAM_ID
     )
 
+    const tokenShortfall = await findEscrowTokenShortfall({
+      context: 'crypto-payout',
+      currency: 'USDC',
+      decimals,
+      mint,
+      programId,
+      escrowPubkey,
+      fromAta,
+      requiredRaw: raw,
+    })
+    if (tokenShortfall) return { ok: false, error: tokenShortfall }
+
     const tx = new Transaction()
     try {
       await getAccount(readConn, toAta, 'confirmed', programId)
@@ -438,6 +592,11 @@ export async function payoutCryptoFromFundsEscrow(params: {
     })
     return { ok: true, signature: sig }
   } catch (e) {
+    logFundsEscrowFailure(
+      'crypto-payout failed',
+      { escrow: escrowPubkey.toBase58(), currency: params.currency, amount },
+      e
+    )
     const msg = e instanceof Error ? e.message : String(e)
     return { ok: false, error: msg }
   }
@@ -495,6 +654,13 @@ export async function payoutBuyoutAcceptanceFromFundsEscrow(params: {
       const feeLamports = Math.round(treasuryFee * LAMPORTS_PER_SOL)
       if (winnerLamports <= 0) return { ok: false, error: 'Invalid SOL payout amount.' }
 
+      const solShortfall = await findEscrowSolShortfall({
+        context: 'buyout-payout',
+        escrowPubkey,
+        requiredLamports: winnerLamports + Math.max(feeLamports, 0),
+      })
+      if (solShortfall) return { ok: false, error: solShortfall }
+
       const tx = new Transaction().add(
         SystemProgram.transfer({
           fromPubkey: escrowPubkey,
@@ -543,6 +709,19 @@ export async function payoutBuyoutAcceptanceFromFundsEscrow(params: {
         programId,
         ASSOCIATED_TOKEN_PROGRAM_ID,
       )
+
+      const tokenShortfall = await findEscrowTokenShortfall({
+        context: 'buyout-payout',
+        currency: 'USDC',
+        decimals,
+        mint,
+        programId,
+        escrowPubkey,
+        fromAta,
+        requiredRaw: winnerRaw + (feeRaw > 0n ? feeRaw : 0n),
+      })
+      if (tokenShortfall) return { ok: false, error: tokenShortfall }
+
       const tx = new Transaction()
 
       const addTokenPayout = async (toOwner: PublicKey, amount: bigint) => {
@@ -583,6 +762,11 @@ export async function payoutBuyoutAcceptanceFromFundsEscrow(params: {
 
     return { ok: false, error: 'Unsupported offer currency.' }
   } catch (e) {
+    logFundsEscrowFailure(
+      'buyout-payout failed',
+      { escrow: escrowPubkey.toBase58(), currency: params.currency, winnerNet, treasuryFee },
+      e
+    )
     const msg = e instanceof Error ? e.message : String(e)
     return { ok: false, error: msg }
   }
@@ -613,6 +797,14 @@ export async function refundOfferBidFromFundsEscrow(
     if (currency === 'SOL') {
       const lamports = Math.round(amount * LAMPORTS_PER_SOL)
       if (lamports <= 0) return { ok: false, error: 'Nothing to refund.' }
+
+      const solShortfall = await findEscrowSolShortfall({
+        context: 'offer-refund',
+        escrowPubkey,
+        requiredLamports: lamports,
+      })
+      if (solShortfall) return { ok: false, error: solShortfall }
+
       const tx = new Transaction().add(
         SystemProgram.transfer({
           fromPubkey: escrowPubkey,
@@ -660,6 +852,18 @@ export async function refundOfferBidFromFundsEscrow(
       ASSOCIATED_TOKEN_PROGRAM_ID
     )
 
+    const tokenShortfall = await findEscrowTokenShortfall({
+      context: 'offer-refund',
+      currency,
+      decimals,
+      mint,
+      programId,
+      escrowPubkey,
+      fromAta,
+      requiredRaw: raw,
+    })
+    if (tokenShortfall) return { ok: false, error: tokenShortfall }
+
     const tx = new Transaction()
     try {
       await getAccount(readConn, toAta, 'confirmed', programId)
@@ -685,6 +889,11 @@ export async function refundOfferBidFromFundsEscrow(
     })
     return { ok: true, signature: sig }
   } catch (e) {
+    logFundsEscrowFailure(
+      'offer-refund failed',
+      { escrow: escrowPubkey.toBase58(), currency, amount },
+      e
+    )
     const msg = e instanceof Error ? e.message : String(e)
     return { ok: false, error: msg }
   }
