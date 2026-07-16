@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic'
 
 const VALID_TIERS = new Set(['$0_partner', 'partner_pro', 'white_label'])
 
+function isValidHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const ip = getClientIp(request)
@@ -23,6 +31,7 @@ export async function POST(request: NextRequest) {
     const wallet_address = normalizeSolanaWalletAddress(wallet_address_raw)
     const interested_tier = typeof body.interested_tier === 'string' ? body.interested_tier.trim() : ''
     const details = typeof body.details === 'string' ? body.details.trim() : ''
+    const logo_url = typeof body.logo_url === 'string' ? body.logo_url.trim() : ''
 
     if (!project_name || project_name.length > 120) {
       return NextResponse.json({ error: 'Project name is required (max 120 chars).' }, { status: 400 })
@@ -39,6 +48,9 @@ export async function POST(request: NextRequest) {
     if (details.length > 2000) {
       return NextResponse.json({ error: 'Details are too long (max 2000 chars).' }, { status: 400 })
     }
+    if (logo_url && (logo_url.length > 500 || !isValidHttpsUrl(logo_url))) {
+      return NextResponse.json({ error: 'Logo must be an HTTPS image URL (max 500 chars).' }, { status: 400 })
+    }
 
     const row = await insertPartnerProgramApplication({
       project_name,
@@ -47,6 +59,7 @@ export async function POST(request: NextRequest) {
       wallet_address,
       interested_tier,
       details: details || null,
+      logo_url: logo_url || null,
     })
     return NextResponse.json({ ok: true, id: row.id })
   } catch (error) {

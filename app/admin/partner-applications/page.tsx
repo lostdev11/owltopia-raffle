@@ -20,6 +20,7 @@ type PartnerApplication = {
   wallet_address: string
   interested_tier: string
   details: string | null
+  logo_url: string | null
   status: ApplicationStatus | string
   created_at: string
 }
@@ -173,7 +174,21 @@ export default function AdminPartnerApplicationsPage() {
                   <p className="text-sm text-muted-foreground">
                     #{row.id} · {new Date(row.created_at).toLocaleString()} · status: {row.status}
                   </p>
-                  <p className="text-base font-medium">{row.project_name}</p>
+                  <div className="flex items-center gap-3">
+                    {row.logo_url ? (
+                      <a
+                        href={row.logo_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border/70 bg-muted"
+                        title="Open submitted logo"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={row.logo_url} alt={`${row.project_name} logo`} className="h-full w-full object-contain" />
+                      </a>
+                    ) : null}
+                    <p className="text-base font-medium">{row.project_name}</p>
+                  </div>
                   <p className="text-sm text-muted-foreground">
                     Contact: {row.contact_name || '—'} ({row.contact_handle})
                   </p>

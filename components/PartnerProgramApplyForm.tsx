@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import Link from 'next/link'
-import { Loader2 } from 'lucide-react'
+import { ImagePlus, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -37,7 +37,32 @@ export function PartnerProgramApplyForm() {
     wallet_address: '',
     interested_tier: '$0_partner',
     details: '',
+    logo_url: '',
   })
+  const logoInputRef = useRef<HTMLInputElement>(null)
+  const [logoUploading, setLogoUploading] = useState(false)
+  const [logoError, setLogoError] = useState<string | null>(null)
+
+  const uploadLogo = async (file: File) => {
+    setLogoUploading(true)
+    setLogoError(null)
+    try {
+      const data = new FormData()
+      data.append('image', file)
+      const res = await fetch('/api/partner-program/logo', { method: 'POST', body: data })
+      const json = (await res.json().catch(() => ({}))) as { url?: string; error?: string }
+      if (!res.ok || !json.url) {
+        setLogoError(typeof json.error === 'string' ? json.error : 'Could not upload logo.')
+        return
+      }
+      setForm((s) => ({ ...s, logo_url: json.url as string }))
+    } catch {
+      setLogoError('Could not upload logo.')
+    } finally {
+      setLogoUploading(false)
+      if (logoInputRef.current) logoInputRef.current.value = ''
+    }
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -63,6 +88,7 @@ export function PartnerProgramApplyForm() {
         wallet_address: '',
         interested_tier: '$0_partner',
         details: '',
+        logo_url: '',
       })
     } catch {
       setError('Could not submit application.')
@@ -150,6 +176,63 @@ export function PartnerProgramApplyForm() {
           ) : null}
         </div>
         <div className="space-y-1.5 sm:col-span-2">
+          <Label htmlFor="partner-logo">Community logo (optional)</Label>
+          <div className="flex items-start gap-3">
+            {form.logo_url ? (
+              <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border/70 bg-muted">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={form.logo_url} alt="Community logo preview" className="h-full w-full object-contain" />
+              </div>
+            ) : (
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-dashed border-border/70 bg-muted/50 text-muted-foreground">
+                <ImagePlus className="h-5 w-5" aria-hidden />
+              </div>
+            )}
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="inline-flex min-h-[44px] cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-md border border-input bg-background px-4 text-sm font-medium hover:bg-accent has-[:disabled]:pointer-events-none has-[:disabled]:opacity-50">
+                  <input
+                    ref={logoInputRef}
+                    id="partner-logo"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif,image/avif,image/heic"
+                    className="sr-only"
+                    disabled={logoUploading}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      if (f) void uploadLogo(f)
+                    }}
+                  />
+                  {logoUploading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                      Uploading…
+                    </>
+                  ) : (
+                    <>
+                      <ImagePlus className="h-4 w-4" aria-hidden />
+                      Upload logo
+                    </>
+                  )}
+                </label>
+                {form.logo_url ? (
+                  <button
+                    type="button"
+                    className="min-h-[44px] touch-manipulation px-2 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setForm((s) => ({ ...s, logo_url: '' }))}
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Square PNG/JPG/WebP up to 5MB. If approved, this is the logo we feature in the Partner Spotlight.
+              </p>
+              {logoError ? <p className="text-xs text-destructive">{logoError}</p> : null}
+            </div>
+          </div>
+        </div>
+        <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor="partner-details">Notes (optional)</Label>
           <textarea
             id="partner-details"
@@ -163,7 +246,11 @@ export function PartnerProgramApplyForm() {
       </div>
       {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
       {ok ? <p className="mt-3 text-sm text-green-400">Application received. We will follow up in Discord.</p> : null}
-      <Button type="submit" disabled={loading} className="mt-4 min-h-[44px] w-full touch-manipulation sm:w-auto">
+      <Button
+        type="submit"
+        disabled={loading || logoUploading}
+        className="mt-4 min-h-[44px] w-full touch-manipulation sm:w-auto"
+      >
         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit partner application'}
       </Button>
     </form>
