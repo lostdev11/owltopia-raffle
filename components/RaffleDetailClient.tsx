@@ -128,6 +128,7 @@ import {
   isMplCoreNoApprovalsError,
   mplCoreNoApprovalsEscrowMessage,
 } from '@/lib/solana/mpl-core-transfer-errors'
+import { formatPhantomBlockedEscrowMessage } from '@/lib/solana/phantom-safe-umi-send'
 import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
@@ -496,10 +497,10 @@ export function RaffleDetailClient({
   const isFuture = startTimeMs > nowMs
   const isActive = startTimeMs <= nowMs && endTimeMs > nowMs && raffle.is_active
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
-  // Pending escrow deposit should be based on escrow verification state, not solely on `raffle.status`,
-  // since status can drift (e.g. restore/maintenance) while `is_active` remains false.
+  // Pending escrow: draft + inactive until prize, milestones, and moderation fee are all done.
+  // Do not require !prize_deposited_at — otherwise post-prize / pre-milestone drafts show as Ended.
   const isPendingDraft =
-    !raffle.prize_deposited_at &&
+    raffle.status === 'draft' &&
     !raffle.is_active &&
     ((raffle.prize_type === 'nft' && !!(raffle.nft_mint_address && raffle.nft_mint_address.trim())) ||
       isPartnerSplPrizeRaffle(raffle))
@@ -531,7 +532,9 @@ export function RaffleDetailClient({
           ? `Ended ${formatDistance(new Date(raffle.end_time), serverTime, { addSuffix: true })}`
           : `Ends in ${formatDistance(new Date(raffle.end_time), serverTime)}`)
       : isPendingDraft
-        ? 'Pending escrow deposit'
+        ? raffle.prize_deposited_at
+          ? 'Pending bonus / listing deposits'
+          : 'Pending escrow deposit'
       : `Ended ${formatDateTimeLocal(raffle.end_time)}`
 
   const handleMobileLinkTouchStart = (e: React.TouchEvent<HTMLAnchorElement>) => {
@@ -1827,6 +1830,7 @@ export function RaffleDetailClient({
           wallet: walletAdapter,
           assetId: transferAssetId,
           escrowAddress,
+          sendTransaction,
         })
         await afterWalletSignature(sig, 'mpl_core')
         return
@@ -1846,6 +1850,7 @@ export function RaffleDetailClient({
           wallet: walletAdapter,
           assetId: transferAssetId,
           escrowAddress,
+          sendTransaction,
         })
         await afterWalletSignature(sig, 'compressed')
         return
@@ -1875,6 +1880,7 @@ export function RaffleDetailClient({
               wallet: walletAdapter,
               assetId: transferAssetId,
               escrowAddress,
+              sendTransaction,
             })
             await afterWalletSignature(sig, 'fallback_compressed')
             return
@@ -1894,6 +1900,7 @@ export function RaffleDetailClient({
               wallet: walletAdapter,
               assetId: transferAssetId,
               escrowAddress,
+              sendTransaction,
             })
             await afterWalletSignature(sig, 'fallback_mpl_core')
             return
@@ -1956,6 +1963,7 @@ export function RaffleDetailClient({
             wallet: walletAdapter,
             mintAddress: raffle.nft_mint_address as string,
             escrowAddress,
+            sendTransaction,
           })
           await afterWalletSignature(sig, 'token_metadata')
           return
@@ -2018,7 +2026,7 @@ export function RaffleDetailClient({
           )
           setShowManualEscrowFallback(false)
         } else {
-          setDepositEscrowError(baseMessage)
+          setDepositEscrowError(formatPhantomBlockedEscrowMessage(baseMessage) ?? baseMessage)
           setShowManualEscrowFallback(true)
         }
       }

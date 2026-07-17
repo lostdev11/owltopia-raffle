@@ -325,7 +325,6 @@ export function RaffleCard({
     : refNow !== null && endTime > refNow && raffle.is_active && !(refNow !== null && startTime > refNow)
   const isPendingDraft =
     raffle.status === 'draft' &&
-    !raffle.prize_deposited_at &&
     !raffle.is_active &&
     ((raffle.prize_type === 'nft' && !!(raffle.nft_mint_address && raffle.nft_mint_address.trim())) ||
       isPartnerSplPrizeRaffle(raffle))

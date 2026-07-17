@@ -3,6 +3,8 @@
  * does not strand users after a successful on-chain transfer.
  */
 
+import { umiSignatureToBase58 } from '@/lib/solana/umi-signature'
+
 /** Strip whitespace; extract base58 sig from Solscan/explorer URLs; trim query strings. */
 export function normalizeDepositTxSignatureInput(raw: string | null | undefined): string {
   const s = (raw ?? '').trim()
@@ -25,6 +27,12 @@ export function normalizeDepositTxSignatureInput(raw: string | null | undefined)
   const noQuery = (s.split('?')[0] ?? '').trim()
   const stripped = noQuery.replace(/^[`"'“”]+|[`"'“”]+$/g, '').trim()
   if (/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(stripped)) return stripped
+
+  // UMI bug: String(Uint8Array) → "42,191,137,…" — recover base58 when possible.
+  if (/^\d+(,\d+)+$/.test(stripped)) {
+    const recovered = umiSignatureToBase58(stripped)
+    if (/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(recovered)) return recovered
+  }
 
   for (const part of stripped.split(/\s+/)) {
     const p = part.replace(/^[`'"]|[`'"]$/g, '').split('?')[0]?.trim() ?? ''

@@ -22,6 +22,7 @@ import {
   isMplCoreNoApprovalsError,
   mplCoreNoApprovalsEscrowMessage,
 } from '@/lib/solana/mpl-core-transfer-errors'
+import { formatPhantomBlockedEscrowMessage } from '@/lib/solana/phantom-safe-umi-send'
 import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
@@ -1103,10 +1104,31 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             let bundledSolWithNft = 0
 
             const nftMilestoneSol = milestoneDepositTotalForPrizeCurrency(createdMilestones, 'SOL')
+            const fundsEscrowForNftBundle =
+              nftMilestoneSol > 0 ? await fetchFundsEscrowAddress() : null
+            const solMilestoneLamports =
+              fundsEscrowForNftBundle && nftMilestoneSol > 0
+                ? Math.round(nftMilestoneSol * 1e9)
+                : undefined
+            const umiSolBundleArgs =
+              solMilestoneLamports && fundsEscrowForNftBundle
+                ? {
+                    solMilestoneLamports,
+                    fundsEscrowAddress: fundsEscrowForNftBundle,
+                    sendTransaction,
+                  }
+                : { sendTransaction }
+            const markBundledSolIfConfigured = () => {
+              if (solMilestoneLamports && fundsEscrowForNftBundle) {
+                bundledSolWithNft = nftMilestoneSol
+              }
+            }
             const nftWalletHint =
-              nftMilestoneSol > 0
+              nftMilestoneSol > 0 && fundsEscrowForNftBundle
                 ? `approve sending the prize NFT and ${nftMilestoneSol} SOL bonus to escrow in one transaction.`
-                : 'approve the transaction to send the prize NFT to escrow.'
+                : nftMilestoneSol > 0
+                  ? 'approve sending the prize NFT to escrow (bonus SOL deposits in a follow-up step).'
+                  : 'approve the transaction to send the prize NFT to escrow.'
 
             setEscrowProgress((p) => ({
               ...p,
@@ -1119,19 +1141,25 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
               if (walletAdapter && tokenProgram.equals(TOKEN_PROGRAM_ID)) {
                 try {
-                  logEscrowDepositPath(depositLogCtx, 'token_metadata')
+                  logEscrowDepositPath(depositLogCtx, 'token_metadata', {
+                    bundledSolMilestone:
+                      solMilestoneLamports && fundsEscrowForNftBundle ? nftMilestoneSol : undefined,
+                  })
                   depositSig = await transferTokenMetadataNftToEscrow({
                     connection,
                     wallet: walletAdapter,
                     mintAddress: raffle.nft_mint_address,
                     escrowAddress,
+                    ...umiSolBundleArgs,
                   })
+                  markBundledSolIfConfigured()
                   logEscrowDepositSigned(depositLogCtx, 'token_metadata', depositSig)
                 } catch (tmErr) {
                   logEscrowDepositAbort(depositLogCtx, 'token_metadata_failed_trying_spl', {
                     detail: tmErr instanceof Error ? tmErr.message : String(tmErr),
                   })
                   depositSig = null
+                  bundledSolWithNft = 0
                 }
               }
               if (!depositSig) {
@@ -1192,32 +1220,50 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 logEscrowDepositSigned(depositLogCtx, 'spl_transfer', depositSig)
               }
             } else if (walletAdapter) {
+              if (!connected) {
+                logEscrowDepositAbort(depositLogCtx, 'not_connected_for_core_compressed')
+                alert(
+                  'Connect your wallet to deposit this NFT. Phantom users need an active connection so Blowfish can validate the transfer.'
+                )
+                router.push(`/raffles/${raffle.slug}?deposit=1`)
+                return
+              }
               try {
                 logEscrowDepositPath(depositLogCtx, 'fallback_compressed', {
                   note: 'No SPL holder resolved; trying compressed',
+                  bundledSolMilestone:
+                    solMilestoneLamports && fundsEscrowForNftBundle ? nftMilestoneSol : undefined,
                 })
                 depositSig = await transferCompressedNftToEscrow({
                   connection,
                   wallet: walletAdapter,
                   assetId: prizeNft.mint,
                   escrowAddress,
+                  ...umiSolBundleArgs,
                 })
+                markBundledSolIfConfigured()
                 logEscrowDepositSigned(depositLogCtx, 'fallback_compressed', depositSig)
               } catch (cErr) {
                 logEscrowDepositAbort(depositLogCtx, 'fallback_compressed_failed', {
                   detail: cErr instanceof Error ? cErr.message : String(cErr),
                 })
                 depositSig = null
+                bundledSolWithNft = 0
               }
               if (!depositSig) {
                 try {
-                  logEscrowDepositPath(depositLogCtx, 'fallback_mpl_core')
+                  logEscrowDepositPath(depositLogCtx, 'fallback_mpl_core', {
+                    bundledSolMilestone:
+                      solMilestoneLamports && fundsEscrowForNftBundle ? nftMilestoneSol : undefined,
+                  })
                   depositSig = await transferMplCoreToEscrow({
                     connection,
                     wallet: walletAdapter,
                     assetId: prizeNft.mint,
                     escrowAddress,
+                    ...umiSolBundleArgs,
                   })
+                  markBundledSolIfConfigured()
                   logEscrowDepositSigned(depositLogCtx, 'fallback_mpl_core', depositSig)
                 } catch (coreErr) {
                   const coreMsg = coreErr instanceof Error ? coreErr.message : String(coreErr)
@@ -1226,6 +1272,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     detail: coreMsg,
                   })
                   depositSig = null
+                  bundledSolWithNft = 0
                 }
               }
               if (!depositSig) {
@@ -1426,8 +1473,11 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               transferErr
             )
             console.error('NFT transfer to escrow failed:', transferErr)
+            const transferMsg =
+              transferErr instanceof Error ? transferErr.message : 'Transfer to escrow failed.'
             alert(
-              transferErr instanceof Error ? transferErr.message : 'Transfer to escrow failed. You can complete it on the raffle page.'
+              formatPhantomBlockedEscrowMessage(transferMsg) ??
+                `${transferMsg} You can complete it on the raffle page.`
             )
             router.push(`/raffles/${raffle.slug}?deposit=1`)
           }

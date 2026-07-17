@@ -37,6 +37,7 @@ import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
 import { getAssetWithProof, mplBubblegum } from '@metaplex-foundation/mpl-bubblegum'
 import { buildBubblegumLeafTransferBuilder } from '@/lib/solana/bubblegum-leaf-transfer'
 import { trySendSplNftViaTokenMetadataFromEscrow } from '@/lib/solana/token-metadata-prize-payout'
+import { umiSignatureToBase58 } from '@/lib/solana/umi-signature'
 import { fetchAsset, fetchAssetV1, transferV1 } from '@metaplex-foundation/mpl-core'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -649,7 +650,7 @@ export async function payoutMplCoreFromEscrowToRecipient(
     } as any)
      
     const result: any = await builder.sendAndConfirm(umi as any)
-    const sig = String(result.signature ?? result)
+    const sig = umiSignatureToBase58(result)
     return { ok: true, signature: sig }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -706,7 +707,7 @@ export async function payoutCompressedFromEscrowToRecipient(
     )
      
     const result: any = await builder.sendAndConfirm(umi)
-    const sig = String(result.signature ?? result)
+    const sig = umiSignatureToBase58(result)
     return { ok: true, signature: sig }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -1463,7 +1464,7 @@ async function transferMplCorePrizeToCreatorFromEscrow(
     } as any)
      
     const result: any = await builder.sendAndConfirm(umi as any)
-    const sig = String(result.signature ?? result)
+    const sig = umiSignatureToBase58(result)
     await persistPrizeReturnToCreator(raffleId, reason, sig)
     return { ok: true, signature: sig }
   } catch (err) {
@@ -1520,7 +1521,7 @@ async function transferCompressedPrizeToCreatorFromEscrow(
     )
      
     const result: any = await builder.sendAndConfirm(umi)
-    const sig = String(result.signature ?? result)
+    const sig = umiSignatureToBase58(result)
     await persistPrizeReturnToCreator(raffleId, reason, sig)
     return { ok: true, signature: sig }
   } catch (err) {

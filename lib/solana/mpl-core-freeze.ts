@@ -24,6 +24,7 @@ import {
   readMplCoreFreezeDelegate,
 } from '@/lib/solana/mpl-core-nest-lock'
 import { isMplCoreNoApprovalsError } from '@/lib/solana/mpl-core-transfer-errors'
+import { assertPhantomUsesWalletSignAndSend } from '@/lib/solana/phantom-safe-umi-send'
 import { resolveMetaplexClientRpcUrl } from '@/lib/solana-rpc-url'
 import {
   sendUmiBuilderViaWalletSignAndSend,
@@ -107,6 +108,11 @@ async function sendNestLockBuilder(params: {
   wallet: any
   sendTransaction?: WalletSendTransactionFn
 }): Promise<string> {
+  assertPhantomUsesWalletSignAndSend({
+    wallet: params.wallet,
+    sendTransaction: params.sendTransaction,
+    action: 'nest lock',
+  })
   if (params.sendTransaction) {
     return sendUmiBuilderViaWalletSignAndSend({
       umi: params.umi,
