@@ -4,18 +4,27 @@ import type { Connection, TransactionSignature } from '@solana/web3.js'
 import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js'
 import bs58 from 'bs58'
 
+type PhantomSendOptions = {
+  skipPreflight?: boolean
+  preflightCommitment?: 'processed' | 'confirmed' | 'finalized'
+  maxRetries?: number
+  minContextSlot?: number
+}
+
 type PhantomSolanaLike = {
   isPhantom?: boolean
   publicKey?: PublicKey | { toBase58(): string } | null
   signAndSendTransaction?: (
     transaction: Transaction | VersionedTransaction,
-    options?: {
-      skipPreflight?: boolean
-      preflightCommitment?: 'processed' | 'confirmed' | 'finalized'
-      maxRetries?: number
-      minContextSlot?: number
-    }
+    options?: PhantomSendOptions
   ) => Promise<{ signature: TransactionSignature | Uint8Array }>
+  signAndSendAllTransactions?: (
+    transactions: (Transaction | VersionedTransaction)[],
+    options?: PhantomSendOptions
+  ) => Promise<{
+    signatures: Array<TransactionSignature | Uint8Array>
+    publicKey?: PublicKey | { toBase58(): string }
+  }>
 }
 
 function toBase58(pk: PublicKey | { toBase58(): string }): string {
@@ -131,4 +140,96 @@ export async function sendTransactionPreferPhantomSignAndSend(
     }
   }
   return fallbackSendTransaction(transaction, connection, options)
+}
+
+export type SendAllTransactionsPreferPhantomParams = {
+  transactions: Array<Transaction | VersionedTransaction>
+  connection: Connection
+  options?: SendTransactionOptions
+  adapter: WalletAdapter
+  publicKey: PublicKey | null
+  /** Per-tx fallback when Phantom signAndSendAll is unavailable. */
+  fallbackSendTransaction: (
+    transaction: Transaction | VersionedTransaction,
+    connection: Connection,
+    options?: SendTransactionOptions
+  ) => Promise<TransactionSignature>
+}
+
+/**
+ * Prefer Phantom `signAndSendAllTransactions` (Blowfish Lighthouse path) for a batch.
+ * Falls back to sequential `sendTransactionPreferPhantomSignAndSend` when unavailable.
+ */
+export async function sendAllTransactionsPreferPhantomSignAndSend(
+  params: SendAllTransactionsPreferPhantomParams
+): Promise<TransactionSignature[]> {
+  const { transactions, connection, options, adapter, publicKey, fallbackSendTransaction } = params
+  if (transactions.length === 0) return []
+
+  const signers = options?.signers
+  if (
+    publicKey &&
+    adapterIsPhantom(adapter) &&
+    (!signers || signers.length === 0)
+  ) {
+    const provider = getPhantomInjectedProviderForPublicKey(publicKey)
+    if (provider?.signAndSendAllTransactions) {
+      try {
+        const prepared: Array<Transaction | VersionedTransaction> = []
+        for (const transaction of transactions) {
+          if (!isVersionedTransaction(transaction)) {
+            prepared.push(
+              await prepareLegacyTransactionLikeAdapter(
+                transaction,
+                connection,
+                publicKey,
+                options
+              )
+            )
+          } else {
+            prepared.push(transaction)
+          }
+        }
+        const preflight = options?.preflightCommitment as
+          | 'processed'
+          | 'confirmed'
+          | 'finalized'
+          | undefined
+        const { signatures } = await provider.signAndSendAllTransactions(prepared, {
+          skipPreflight: options?.skipPreflight,
+          preflightCommitment: preflight,
+          maxRetries: options?.maxRetries,
+          minContextSlot: options?.minContextSlot,
+        })
+        return signatures.map(normalizeSignature)
+      } catch (err) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(
+            '[sendAllTransactionsPreferPhantomSignAndSend] Phantom signAndSendAll failed; using per-tx send.',
+            err
+          )
+        }
+      }
+    }
+  }
+
+  const out: TransactionSignature[] = []
+  for (const transaction of transactions) {
+    out.push(
+      await sendTransactionPreferPhantomSignAndSend({
+        transaction,
+        connection,
+        options,
+        adapter,
+        publicKey,
+        fallbackSendTransaction,
+      })
+    )
+  }
+  return out
+}
+
+/** True when the connected adapter is Phantom (name check). */
+export function walletAdapterIsPhantom(adapter: WalletAdapter | null | undefined): boolean {
+  return Boolean(adapter && adapterIsPhantom(adapter))
 }

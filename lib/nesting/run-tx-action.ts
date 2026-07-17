@@ -13,6 +13,11 @@ export type RunNestingTxActionParams<T> = {
   signStep?: () => Promise<void>
   /** Skip the brief preparing step (e.g. OWL claim POST has no local prep). */
   skipPreparing?: boolean
+  /**
+   * NFT nest open manages preparing / wallet / sync phases inside `execute`.
+   * Avoids the shell flashing `submitting` over those steps.
+   */
+  phasesOwnedByExecute?: boolean
   /** When aborted, phases return to `idle` without flashing `failed`. */
   signal?: AbortSignal
 }
@@ -42,9 +47,21 @@ if (typeof queueMicrotask === 'function') {
  * Rethrows `execute` errors; caller sets user-facing `actionError`. Always returns phase to `idle` on end.
  */
 export async function runNestingTxAction<T>(params: RunNestingTxActionParams<T>): Promise<T> {
-  const { onPhase, execute, afterSuccess, signStep, skipPreparing, signal } = params
+  const { onPhase, execute, afterSuccess, signStep, skipPreparing, phasesOwnedByExecute, signal } =
+    params
   try {
     throwIfNestingAborted(signal)
+    if (phasesOwnedByExecute) {
+      const result = await execute()
+      throwIfNestingAborted(signal)
+      onPhase('syncing')
+      if (afterSuccess) {
+        await afterSuccess()
+      }
+      throwIfNestingAborted(signal)
+      onPhase('idle')
+      return result
+    }
     if (!skipPreparing) {
       onPhase('preparing')
       await microDelay()
