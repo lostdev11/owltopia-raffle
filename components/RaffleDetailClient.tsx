@@ -17,6 +17,7 @@ import { RaffleReferralShareCard } from '@/components/referrals/RaffleReferralSh
 import { FreeEntryUnlockedDialog } from '@/components/referrals/FreeEntryUnlockedDialog'
 import type { RaffleReferralPromoterRow } from '@/lib/referrals/types'
 import { CreatorModerationBuyerWarning } from '@/components/CreatorModerationBuyerWarning'
+import { CreatorEditRaffleDescription } from '@/components/CreatorEditRaffleDescription'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
 import { ParticipantsModal } from '@/components/ParticipantsModal'
 import { RaffleBuyoutPanel } from '@/components/RaffleBuyoutPanel'
@@ -315,6 +316,9 @@ export function RaffleDetailClient({
   const [cartAddedHint, setCartAddedHint] = useState(false)
   const [requestCancelLoading, setRequestCancelLoading] = useState(false)
   const [requestCancelDialogOpen, setRequestCancelDialogOpen] = useState(false)
+  const [creatorDescription, setCreatorDescription] = useState<string | null>(
+    raffle.description ?? null
+  )
   const [claimFailedPrizeReturnLoading, setClaimFailedPrizeReturnLoading] = useState(false)
   const [actionClaimSuccess, setActionClaimSuccess] = useState<{
     tx: string
@@ -639,6 +643,10 @@ export function RaffleDetailClient({
     setBrowseListedOnFeed(raffle.list_on_platform !== false)
     setBrowseListError(null)
   }, [raffle.id, raffle.list_on_platform])
+
+  useEffect(() => {
+    setCreatorDescription(raffle.description ?? null)
+  }, [raffle.id, raffle.description])
 
   const persistBrowseListSetting = useCallback(
     async (next: boolean) => {
@@ -3648,8 +3656,21 @@ export function RaffleDetailClient({
               <div className="flex-1 min-w-0">
                 <CardTitle className={classes.title}>{raffle.title}</CardTitle>
                 <CardDescription className={`${classes.description} break-words`}>
-                  <RaffleDescriptionText raffle={raffle} />
+                  <RaffleDescriptionText
+                    raffle={{
+                      ...raffle,
+                      description: creatorDescription,
+                    }}
+                  />
                 </CardDescription>
+                {isCreator || isCreatorViewer || adminCapable ? (
+                  <CreatorEditRaffleDescription
+                    raffleId={raffle.id}
+                    description={creatorDescription}
+                    allowLinks={adminCapable}
+                    onSaved={setCreatorDescription}
+                  />
+                ) : null}
                 {raffle.creator_restricted_listing && (
                   <div className="mt-3">
                     <CreatorModerationBuyerWarning raffle={raffle} variant="banner" />
