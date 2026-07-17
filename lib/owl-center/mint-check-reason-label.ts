@@ -1,6 +1,6 @@
 const REASON_LABELS: Record<string, string> = {
   wallet_required: 'Enter or connect a wallet to check',
-  not_gen1_holder: 'No Owltopia Gen1 NFT detected on this wallet (check collection + Helius)',
+  not_gen1_holder: 'Wallet not on the Gen1 airdrop snapshot (post-snapshot purchases do not qualify)',
   gen1_on_linked_wallet: 'Gen1 NFT is on a linked wallet — connect the wallet that holds your Gen1 to mint',
   gen1_collection_not_configured: 'Server missing OWLTOPIA_COLLECTION_ADDRESS — contact support',
   gen1_pool_exhausted: '343 GEN1 mint cap reached globally',

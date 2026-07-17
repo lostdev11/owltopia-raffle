@@ -185,7 +185,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Total per-wallet entitlement for this group (independent of confirm bookkeeping):
-  //  - AIRDROP: Gen1 NFTs held; counter id 1 counts gen1-group mints.
+  //  - AIRDROP: frozen Gen1 snapshot count only (not live holdings); counter id 1.
   //  - PRESALE/PRESALE_OVERAGE: purchased + gifted; counter id 4 counts all pre-group mints.
   const entitlement =
     phase === 'AIRDROP'

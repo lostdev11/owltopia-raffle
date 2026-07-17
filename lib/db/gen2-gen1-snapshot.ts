@@ -80,11 +80,11 @@ export async function replaceGen1Snapshot(
 
 /**
  * Frozen Gen1 NFT count for a single wallet from the snapshot allowlist — the exact
- * per-wallet allocation the on-chain `gen1` candy guard enforces (merkle root + proof).
+ * per-wallet AIRDROP allocation (also enforced on-chain via merkle root + proof).
  * Returns 0 when the wallet is not snapshotted or the table is missing (migration 142).
  *
- * Used as a floor for the live DAS holder scan so a flaky / rate-limited Helius response
- * can't under-report a holder's count and wrongly block their remaining AIRDROP claims.
+ * This is the sole entitlement source for Gen1 free mints: live DAS holdings must never
+ * raise allocation above this count (post-snapshot purchases do not qualify).
  */
 export async function getGen1SnapshotCount(wallet: string): Promise<number> {
   const normalized = normalizeSolanaWalletAddress(wallet)

@@ -686,8 +686,9 @@ export function Gen2MintPanel({
           {elig?.active_phase === 'AIRDROP' && elig?.gen1_snapshot?.is_holder ? (
             <p className="text-sm text-[#9BA8B4]">
               GEN1 phase: mint up to{' '}
-              <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> — one free Gen2 per Gen1 NFT you hold (
-              {elig.gen1_snapshot.gen1_nft_count} detected). Approve once in your wallet to mint your selected quantity.
+              <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> — one free Gen2 per Gen1 in the
+              airdrop snapshot ({elig.gen1_snapshot.gen1_nft_count} reserved). Approve once in your wallet to mint your
+              selected quantity.
             </p>
           ) : null}
 
@@ -715,8 +716,8 @@ export function Gen2MintPanel({
 
           {elig?.active_phase === 'AIRDROP' && elig && !elig.is_eligible && elig.reason === 'not_gen1_holder' ? (
             <p className="text-sm text-[#FF9C9C]">
-              No Owltopia Gen1 NFT detected on this connected wallet. Use the same wallet that holds your Gen1 on mainnet,
-              then refresh eligibility.
+              This wallet is not on the Gen1 airdrop snapshot. Gen1s bought after the snapshot do not unlock free Gen2
+              mints — connect a snapshotted wallet, then refresh eligibility.
             </p>
           ) : null}
 
