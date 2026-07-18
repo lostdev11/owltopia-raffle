@@ -125,7 +125,11 @@ import {
   NESTING_NFT_STAKE_MAX_PER_RUN,
 } from '@/lib/solana/mpl-core-freeze'
 import { isNestingStakeFlowError, NestingStakeFlowError } from '@/lib/nesting/errors'
-import { formatNestingWalletError, isNestingBatchSizeError } from '@/lib/nesting/wallet-error'
+import {
+  formatNestingWalletError,
+  isNestingBatchSizeError,
+  isNestingWalletUserRejection,
+} from '@/lib/nesting/wallet-error'
 import {
   fetchNestingJson,
   formatNestingApiFetchError,
@@ -191,6 +195,7 @@ export function DashboardNestingClient() {
     hint?: string
     title?: string
     placement: 'modal'
+    tone?: 'success' | 'error'
   } | null>(null)
   const [claimLedgerNotice, setClaimLedgerNotice] = useState<string | null>(null)
   const [claimLedgerHealBusy, setClaimLedgerHealBusy] = useState(false)
@@ -1606,6 +1611,26 @@ export function DashboardNestingClient() {
     stakeTxAbortRef.current?.abort()
   }, [])
 
+  /**
+   * Nest open finished without success: keep the inline error for reference AND pop
+   * the same result box holders get on success, so the outcome is never missed.
+   */
+  const reportNestOpenFailure = useCallback((error: unknown, message: string) => {
+    setActionError(message)
+    const cancelledInWallet = isNestingWalletUserRejection(error)
+    setSuccessNotice({
+      placement: 'modal',
+      tone: 'error',
+      title: cancelledInWallet ? 'Nesting cancelled' : 'Nesting did not finish',
+      message: cancelledInWallet
+        ? 'You closed or declined the wallet approval, so nothing was locked or charged.'
+        : message,
+      hint: cancelledInWallet
+        ? 'Your NFT is untouched in your wallet. Tap Confirm nest whenever you are ready to try again.'
+        : 'Your NFT stays safe in your wallet. If it shows Opening… after a refresh, tap Finish opening nest and we resume where you left off.',
+    })
+  }, [])
+
   const handleStake = async (opts?: { assetIdsOverride?: string[] }) => {
     if (!publicKey) return
     if (isNestingTxPhaseInFlight(stakeTxPhase)) return
@@ -1752,6 +1777,48 @@ export function DashboardNestingClient() {
             needsServerFreeze: boolean
           }
 
+          const isNestFreezeConfirmedRow = (row: StakingPositionRow | undefined): boolean =>
+            Boolean(
+              row &&
+                (row.status === 'active' ||
+                  (row.external_reference ?? '').startsWith('nft_freeze_confirmed:'))
+            )
+
+          /**
+           * Read the server's view of one position. With `heal`, the server also
+           * promotes pending nests whose wallet lock is already on-chain — the same
+           * work behind the manual "Finish opening nest" tap, run automatically.
+           */
+          const checkNestFreezeConfirmedOnServer = async (
+            positionId: string,
+            opts?: { heal?: boolean }
+          ): Promise<boolean> => {
+            throwIfNestingAborted(signal)
+            try {
+              const res = await fetch(
+                nestingClientApiUrl(
+                  opts?.heal ? '/api/me/staking/positions' : '/api/me/staking/positions?heal=0'
+                ),
+                {
+                  credentials: 'include',
+                  cache: 'no-store',
+                  headers: { 'X-Connected-Wallet': publicKey.toBase58() },
+                  signal,
+                }
+              )
+              if (!res.ok) return false
+              const json = (await res.json().catch(() => ({}))) as {
+                positions?: StakingPositionRow[]
+              }
+              const rows = Array.isArray(json.positions) ? json.positions : []
+              return isNestFreezeConfirmedRow(rows.find((p) => p.id === positionId))
+            } catch (e) {
+              if (e instanceof DOMException && e.name === 'AbortError') throw e
+              if (e instanceof Error && e.name === 'AbortError') throw e
+              return false
+            }
+          }
+
           const confirmNftNestFreezeForPrep = async (
             prep: PreparedNftNest,
             freezeSignature?: string | null,
@@ -1761,12 +1828,29 @@ export function DashboardNestingClient() {
             setStakeTxPhase('syncing')
             setNftStakeBatchHint('Confirming your nest on Owltopia — almost done…')
 
-            const delaysMs = [0, 700, 1400, 2500]
+            // The wallet approval is done at this point; what remains is server-side
+            // (RPC/DAS indexes catching up + the DB confirm). Keep retrying inside
+            // "Confirming on Owltopia" long enough that holders never need the manual
+            // "Finish opening nest" tap for a lock that already succeeded on-chain.
+            // First attempt is immediate (in-sync RPC confirms instantly); gaps are
+            // capped at 6s so success is detected quickly once the chain catches up.
+            const delaysMs = [0, 700, 1400, 2200, 3000, 4000, 5000, 6000, 6000, 6000, 6000, 6000]
             let lastError: unknown = null
             for (let attempt = 0; attempt < delaysMs.length; attempt++) {
               const wait = delaysMs[attempt]!
               if (wait > 0) {
                 await new Promise<void>((resolve) => setTimeout(resolve, wait))
+              }
+              throwIfNestingAborted(signal)
+              if (attempt === 4) {
+                setNftStakeBatchHint(
+                  'Still confirming on Owltopia — your wallet lock is approved, no more wallet actions needed. Hang tight…'
+                )
+              }
+              // An earlier confirm may have landed server-side even if its response was
+              // lost (mobile network blips) — cheap DB read before retrying the confirm.
+              if (attempt > 0 && (await checkNestFreezeConfirmedOnServer(prep.positionId))) {
+                return
               }
               throwIfNestingAborted(signal)
               try {
@@ -1786,13 +1870,24 @@ export function DashboardNestingClient() {
                   }),
                   signal,
                 })
-                const freezeJson = (await freezeRes.json().catch(() => ({}))) as { error?: string }
+                const freezeJson = (await freezeRes.json().catch(() => ({}))) as {
+                  error?: string
+                  code?: string
+                }
                 if (freezeRes.ok) return
                 lastError = new NestingStakeFlowError(
                   typeof freezeJson.error === 'string'
                     ? freezeJson.error
                     : 'Could not confirm NFT freeze'
                 )
+                // Retrying cannot fix these — surface immediately instead of stalling.
+                if (
+                  freezeRes.status === 401 ||
+                  freezeRes.status === 404 ||
+                  freezeJson.code === 'nest_relock_required'
+                ) {
+                  break
+                }
               } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') throw e
                 if (e instanceof Error && e.name === 'AbortError') throw e
@@ -1800,8 +1895,13 @@ export function DashboardNestingClient() {
               }
             }
 
-            // Wallet may have locked the NFT already; heal can promote pending → active.
-            await loadPositions({ heal: true, silent: true })
+            // Last resort inside "Confirming on Owltopia": ask the server to heal
+            // (promote pending → active when the wallet lock is on-chain). Success here
+            // completes the nest without the user ever seeing "Finish opening nest".
+            if (await checkNestFreezeConfirmedOnServer(prep.positionId, { heal: true })) {
+              return
+            }
+            await loadPositions({ heal: false, silent: true })
             throw (
               lastError ??
               new NestingStakeFlowError(
@@ -1920,7 +2020,7 @@ export function DashboardNestingClient() {
                   prepared.length > 0
                     ? `Prepared ${prepared.length} of ${totalNests} before stopping — `
                     : ''
-                setActionError(`${prefix}${detail}`)
+                reportNestOpenFailure(e, `${prefix}${detail}`)
                 void loadPositions({ heal: true, silent: true })
                 throw new Error('stake')
               }
@@ -2067,12 +2167,13 @@ export function DashboardNestingClient() {
         return
       }
       if (isNestingStakeFlowError(e)) {
-        setActionError(e.userMessage)
+        reportNestOpenFailure(e, e.userMessage)
         void refreshNestingUiAfterChange()
         return
       }
       if (e instanceof Error && e.message === 'stake') return
-      setActionError(
+      reportNestOpenFailure(
+        e,
         formatNestingWalletError(e, wallet?.adapter?.name, nftAssetLabels.singular) ||
           formatNestingApiFetchError(e, 'generic')
       )
@@ -3874,6 +3975,7 @@ export function DashboardNestingClient() {
         title={successNotice?.title}
         message={successNotice?.message ?? ''}
         hint={successNotice?.hint}
+        tone={successNotice?.tone ?? 'success'}
       />
     </main>
   )
