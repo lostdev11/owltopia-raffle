@@ -1832,7 +1832,9 @@ export function DashboardNestingClient() {
             // (RPC/DAS indexes catching up + the DB confirm). Keep retrying inside
             // "Confirming on Owltopia" long enough that holders never need the manual
             // "Finish opening nest" tap for a lock that already succeeded on-chain.
-            const delaysMs = [0, 700, 1400, 2500, 4000, 6000, 8000, 10_000, 12_000, 15_000]
+            // First attempt is immediate (in-sync RPC confirms instantly); gaps are
+            // capped at 6s so success is detected quickly once the chain catches up.
+            const delaysMs = [0, 700, 1400, 2200, 3000, 4000, 5000, 6000, 6000, 6000, 6000, 6000]
             let lastError: unknown = null
             for (let attempt = 0; attempt < delaysMs.length; attempt++) {
               const wait = delaysMs[attempt]!
