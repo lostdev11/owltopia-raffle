@@ -125,7 +125,11 @@ import {
   NESTING_NFT_STAKE_MAX_PER_RUN,
 } from '@/lib/solana/mpl-core-freeze'
 import { isNestingStakeFlowError, NestingStakeFlowError } from '@/lib/nesting/errors'
-import { formatNestingWalletError, isNestingBatchSizeError } from '@/lib/nesting/wallet-error'
+import {
+  formatNestingWalletError,
+  isNestingBatchSizeError,
+  isNestingWalletUserRejection,
+} from '@/lib/nesting/wallet-error'
 import {
   fetchNestingJson,
   formatNestingApiFetchError,
@@ -191,6 +195,7 @@ export function DashboardNestingClient() {
     hint?: string
     title?: string
     placement: 'modal'
+    tone?: 'success' | 'error'
   } | null>(null)
   const [claimLedgerNotice, setClaimLedgerNotice] = useState<string | null>(null)
   const [claimLedgerHealBusy, setClaimLedgerHealBusy] = useState(false)
@@ -1606,6 +1611,26 @@ export function DashboardNestingClient() {
     stakeTxAbortRef.current?.abort()
   }, [])
 
+  /**
+   * Nest open finished without success: keep the inline error for reference AND pop
+   * the same result box holders get on success, so the outcome is never missed.
+   */
+  const reportNestOpenFailure = useCallback((error: unknown, message: string) => {
+    setActionError(message)
+    const cancelledInWallet = isNestingWalletUserRejection(error)
+    setSuccessNotice({
+      placement: 'modal',
+      tone: 'error',
+      title: cancelledInWallet ? 'Nesting cancelled' : 'Nesting did not finish',
+      message: cancelledInWallet
+        ? 'You closed or declined the wallet approval, so nothing was locked or charged.'
+        : message,
+      hint: cancelledInWallet
+        ? 'Your NFT is untouched in your wallet. Tap Confirm nest whenever you are ready to try again.'
+        : 'Your NFT stays safe in your wallet. If it shows Opening… after a refresh, tap Finish opening nest and we resume where you left off.',
+    })
+  }, [])
+
   const handleStake = async (opts?: { assetIdsOverride?: string[] }) => {
     if (!publicKey) return
     if (isNestingTxPhaseInFlight(stakeTxPhase)) return
@@ -1993,7 +2018,7 @@ export function DashboardNestingClient() {
                   prepared.length > 0
                     ? `Prepared ${prepared.length} of ${totalNests} before stopping — `
                     : ''
-                setActionError(`${prefix}${detail}`)
+                reportNestOpenFailure(e, `${prefix}${detail}`)
                 void loadPositions({ heal: true, silent: true })
                 throw new Error('stake')
               }
@@ -2140,12 +2165,13 @@ export function DashboardNestingClient() {
         return
       }
       if (isNestingStakeFlowError(e)) {
-        setActionError(e.userMessage)
+        reportNestOpenFailure(e, e.userMessage)
         void refreshNestingUiAfterChange()
         return
       }
       if (e instanceof Error && e.message === 'stake') return
-      setActionError(
+      reportNestOpenFailure(
+        e,
         formatNestingWalletError(e, wallet?.adapter?.name, nftAssetLabels.singular) ||
           formatNestingApiFetchError(e, 'generic')
       )
@@ -3947,6 +3973,7 @@ export function DashboardNestingClient() {
         title={successNotice?.title}
         message={successNotice?.message ?? ''}
         hint={successNotice?.hint}
+        tone={successNotice?.tone ?? 'success'}
       />
     </main>
   )
