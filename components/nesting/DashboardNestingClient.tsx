@@ -1785,14 +1785,13 @@ export function DashboardNestingClient() {
             )
 
           /**
-           * Read the server's view of one position. With `heal`, the server also
-           * promotes pending nests whose wallet lock is already on-chain — the same
+           * Read the server's view of this wallet's positions. With `heal`, the server
+           * also promotes pending nests whose wallet lock is already on-chain — the same
            * work behind the manual "Finish opening nest" tap, run automatically.
            */
-          const checkNestFreezeConfirmedOnServer = async (
-            positionId: string,
-            opts?: { heal?: boolean }
-          ): Promise<boolean> => {
+          const fetchServerNestPositions = async (opts?: {
+            heal?: boolean
+          }): Promise<StakingPositionRow[] | null> => {
             throwIfNestingAborted(signal)
             try {
               const res = await fetch(
@@ -1806,17 +1805,36 @@ export function DashboardNestingClient() {
                   signal,
                 }
               )
-              if (!res.ok) return false
+              if (!res.ok) return null
               const json = (await res.json().catch(() => ({}))) as {
                 positions?: StakingPositionRow[]
               }
-              const rows = Array.isArray(json.positions) ? json.positions : []
-              return isNestFreezeConfirmedRow(rows.find((p) => p.id === positionId))
+              return Array.isArray(json.positions) ? json.positions : null
             } catch (e) {
               if (e instanceof DOMException && e.name === 'AbortError') throw e
               if (e instanceof Error && e.name === 'AbortError') throw e
-              return false
+              return null
             }
+          }
+
+          const checkNestFreezeConfirmedOnServer = async (
+            positionId: string,
+            opts?: { heal?: boolean }
+          ): Promise<boolean> => {
+            const rows = await fetchServerNestPositions(opts)
+            return isNestFreezeConfirmedRow(rows?.find((p) => p.id === positionId))
+          }
+
+          /** True when this mint already has a confirmed nest on the selected perch. */
+          const checkMintNestConfirmedOnServer = async (
+            mint: string,
+            opts?: { heal?: boolean }
+          ): Promise<boolean> => {
+            const rows = await fetchServerNestPositions(opts)
+            const trimmed = mint.trim()
+            return isNestFreezeConfirmedRow(
+              rows?.find((p) => p.pool_id === pool_id && p.asset_identifier?.trim() === trimmed)
+            )
           }
 
           const confirmNftNestFreezeForPrep = async (
@@ -1880,11 +1898,18 @@ export function DashboardNestingClient() {
                     ? freezeJson.error
                     : 'Could not confirm NFT freeze'
                 )
+                // `nest_relock_required` right after the wallet-lock step usually means the
+                // server RPC has not seen our transaction yet — keep retrying (the heal
+                // fallback settles it). Without a wallet step this run it is genuine
+                // (a new approval is required) — fail fast so the holder is not stalled.
+                const staleRelockRead =
+                  freezeJson.code === 'nest_relock_required' &&
+                  (prep.needsWalletFreeze || Boolean(freezeSignature?.trim()))
                 // Retrying cannot fix these — surface immediately instead of stalling.
                 if (
                   freezeRes.status === 401 ||
                   freezeRes.status === 404 ||
-                  freezeJson.code === 'nest_relock_required'
+                  (freezeJson.code === 'nest_relock_required' && !staleRelockRead)
                 ) {
                   break
                 }
@@ -1994,6 +2019,7 @@ export function DashboardNestingClient() {
           const runNftBatchStake = async (assetIds: string[]) => {
             const totalNests = assetIds.length
             const prepared: PreparedNftNest[] = []
+            let alreadyConfirmedCount = 0
 
             setStakeTxPhase('preparing')
             setNftStakeBatchHint(
@@ -2013,6 +2039,17 @@ export function DashboardNestingClient() {
               } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') throw e
                 if (e instanceof Error && e.name === 'AbortError') throw e
+                // "Already in an open staking position" on a resume usually means the
+                // earlier lock finally confirmed (heal promoted it). Verify server-side
+                // and count it as nested instead of surfacing a false error.
+                if (
+                  isNestingStakeFlowError(e) &&
+                  /already in an open (staking position|nest)/i.test(e.userMessage) &&
+                  (await checkMintNestConfirmedOnServer(assetId, { heal: true }))
+                ) {
+                  alreadyConfirmedCount += 1
+                  continue
+                }
                 const detail = isNestingStakeFlowError(e)
                   ? e.userMessage
                   : formatNestingWalletError(e, wallet?.adapter?.name, nftAssetLabels.singular)
@@ -2028,7 +2065,8 @@ export function DashboardNestingClient() {
 
             const freezePreps = prepared.filter((p) => p.needsWalletFreeze)
             const serverFreezePreps = prepared.filter((p) => p.needsServerFreeze)
-            let completed = prepared.length - freezePreps.length - serverFreezePreps.length
+            let completed =
+              alreadyConfirmedCount + prepared.length - freezePreps.length - serverFreezePreps.length
 
             if (serverFreezePreps.length > 0) {
               setStakeTxPhase('syncing')
