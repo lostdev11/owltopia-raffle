@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Check, Copy, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
@@ -40,6 +40,12 @@ function nestStatusPhrase(
     default:
       return status
   }
+}
+
+function truncatePositionId(id: string): string {
+  const trimmed = id.trim()
+  if (trimmed.length <= 14) return trimmed
+  return `${trimmed.slice(0, 8)}…${trimmed.slice(-4)}`
 }
 
 export type PositionNestRowProps = {
@@ -93,10 +99,21 @@ export function PositionNestRow({
   const claimBlocked = claimsPaused ?? nestingPaused
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [dasNftName, setDasNftName] = useState<string | null>(null)
+  const [positionIdCopied, setPositionIdCopied] = useState(false)
 
   useEffect(() => {
     setDasNftName(null)
+    setPositionIdCopied(false)
   }, [position.id, position.asset_identifier])
+
+  const copyPositionId = useCallback(() => {
+    const id = position.id.trim()
+    if (!id || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return
+    void navigator.clipboard.writeText(id).then(() => {
+      setPositionIdCopied(true)
+      window.setTimeout(() => setPositionIdCopied(false), 2000)
+    })
+  }, [position.id])
 
   useEffect(() => {
     if (position.status === 'unstaked') return
@@ -259,6 +276,32 @@ export function PositionNestRow({
             ) : (
               <LockTimer unlockAtIso={position.unlock_at} />
             )}
+          </dd>
+        </div>
+        <div className="col-span-2">
+          <dt className="text-muted-foreground mb-1">Position ID</dt>
+          <dd className="flex items-stretch gap-2">
+            <span
+              className="flex min-h-[44px] min-w-0 flex-1 items-center font-mono text-[11px] text-muted-foreground sm:text-xs"
+              title={position.id}
+            >
+              <span className="truncate">{truncatePositionId(position.id)}</span>
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="min-h-[44px] shrink-0 touch-manipulation gap-1.5 px-3"
+              onClick={copyPositionId}
+              aria-label={positionIdCopied ? 'Position ID copied' : 'Copy position ID'}
+            >
+              {positionIdCopied ? (
+                <Check className="h-3.5 w-3.5" aria-hidden />
+              ) : (
+                <Copy className="h-3.5 w-3.5" aria-hidden />
+              )}
+              {positionIdCopied ? 'Copied' : 'Copy'}
+            </Button>
           </dd>
         </div>
       </dl>
