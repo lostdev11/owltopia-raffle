@@ -9,7 +9,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { NestingHero } from '@/components/nesting/NestingHero'
 import { NestingGlobalOwlNestProgress } from '@/components/nesting/NestingGlobalOwlNestProgress'
+import { NestingGlobalGenOwlNestProgress } from '@/components/nesting/NestingGlobalGenOwlNestProgress'
 import type { OwlNest365PublicStats } from '@/lib/nesting/owl-nest-365-stats'
+import type { GenOwlNestPublicStats } from '@/lib/nesting/gen-owl-nest-stats'
+import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
 import { StakingPoolCard } from '@/components/nesting/StakingPoolCard'
 import { ConsolidatedGenOwlStakingCard } from '@/components/nesting/ConsolidatedGenOwlStakingCard'
 import { buildNestingPerchDisplayList } from '@/lib/nesting/gen-owl-staking-groups'
@@ -33,6 +36,7 @@ function defaultDashboardNestingHref(pools: StakingPoolRow[]): string {
 type Props = {
   initialPools: StakingPoolRow[]
   initialOwlNest365Stats?: OwlNest365PublicStats | null
+  initialGenOwlNestStats?: Partial<Record<GenOwlStakingGroupKey, GenOwlNestPublicStats>>
   /** Server: global pause (deployment env and/or admin “pause holder actions” in Owl Nesting admin). */
   nestingDisabled?: boolean
   nestingPausedByDeployEnv?: boolean
@@ -44,6 +48,7 @@ type Props = {
 export function NestingLandingClient({
   initialPools,
   initialOwlNest365Stats = null,
+  initialGenOwlNestStats = {},
   nestingDisabled = false,
   nestingPausedByDeployEnv = false,
   nestingPausedByAdmin = false,
@@ -62,6 +67,13 @@ export function NestingLandingClient({
     () => buildNestingPerchDisplayList(filterPoolsForPublicNestingCatalog(initialPools)),
     [initialPools]
   )
+  const visibleGenGroups = useMemo(() => {
+    const keys: GenOwlStakingGroupKey[] = []
+    for (const item of displayPerches) {
+      if (item.kind === 'gen_owl_group') keys.push(item.groupKey)
+    }
+    return keys
+  }, [displayPerches])
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -189,7 +201,16 @@ export function NestingLandingClient({
       ) : null}
       <NestingHero />
 
-      <NestingGlobalOwlNestProgress initialStats={initialOwlNest365Stats} />
+      <div className="space-y-4">
+        <NestingGlobalOwlNestProgress initialStats={initialOwlNest365Stats} />
+        {visibleGenGroups.map((groupKey) => (
+          <NestingGlobalGenOwlNestProgress
+            key={groupKey}
+            groupKey={groupKey}
+            initialStats={initialGenOwlNestStats[groupKey] ?? null}
+          />
+        ))}
+      </div>
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[

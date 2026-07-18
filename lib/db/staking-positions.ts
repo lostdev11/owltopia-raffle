@@ -50,6 +50,26 @@ export async function countOpenStakingPositionsForPool(poolId: string): Promise<
   return count ?? 0
 }
 
+/** Active + pending nests across multiple pools (e.g. Gen 1 90d+180d). Server-only aggregate. */
+export async function countOpenStakingPositionsForPools(poolIds: string[]): Promise<number> {
+  const ids = [...new Set(poolIds.map((id) => id.trim()).filter(Boolean))]
+  if (ids.length === 0) return 0
+  if (ids.length === 1) return countOpenStakingPositionsForPool(ids[0]!)
+
+  const db = getSupabaseAdmin()
+  const { count, error } = await db
+    .from('staking_positions')
+    .select('id', { count: 'exact', head: true })
+    .in('pool_id', ids)
+    .in('status', ['active', 'pending'])
+
+  if (error) {
+    console.error('[staking-positions] countOpenForPools:', error.message)
+    return 0
+  }
+  return count ?? 0
+}
+
 export async function listStakingPositionsByWallet(wallet: string): Promise<StakingPositionRow[]> {
   const db = getSupabaseAdmin()
   const { data, error } = await db
