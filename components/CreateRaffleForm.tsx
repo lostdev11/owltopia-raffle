@@ -93,6 +93,7 @@ import {
 import { buildMilestoneBonusRulesCopy, MILESTONE_BETA_NOTICE } from '@/lib/raffles/milestones/copy'
 import { MILESTONE_MAX_PER_RAFFLE, MILESTONE_MAX_PRIZE_SOL, milestoneMaxPrizeUsdc } from '@/lib/raffles/milestones/constants'
 import type { Raffle, RaffleMilestone, RaffleMilestoneWinnerMode, RaffleMilestoneTriggerType } from '@/lib/types'
+import { fetchWalletNftsWithRetry } from '@/lib/solana/fetch-wallet-nfts-api'
 import {
   fetchFundsEscrowAddress,
   milestoneDepositTotalForPrizeCurrency,
@@ -234,6 +235,13 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   }, [selectedNft, nftMintInput, walletNfts])
   const [loadingWalletAssets, setLoadingWalletAssets] = useState(false)
   const [walletAssetsError, setWalletAssetsError] = useState<string | null>(null)
+  const connectedWalletAddr = publicKey?.toBase58() ?? null
+  useEffect(() => {
+    // Wallet switched (or disconnected): the previous wallet's inventory must not stay selectable.
+    setWalletNfts(null)
+    setSelectedNft(null)
+    setWalletAssetsError(null)
+  }, [connectedWalletAddr])
   /** Inline message for POST /api/raffles failures — avoids a blocking alert that can feel like a brief “flash” on mobile. */
   const [submissionError, setSubmissionError] = useState<string | null>(null)
   const [floorPrice, setFloorPrice] = useState('')
@@ -584,17 +592,13 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     const walletAddr = publicKey.toBase58()
     try {
       // Prefer API first: faster (batch from Helius) and returns more NFTs (paginated).
-      const [apiRes, escrowRes] = await Promise.all([
-        fetch(`/api/wallet/nfts?wallet=${encodeURIComponent(walletAddr)}`, { credentials: 'include' }),
+      const [apiResult, escrowRes] = await Promise.all([
+        fetchWalletNftsWithRetry(walletAddr),
         fetch(`/api/wallet/escrowed-nft-mints?wallet=${encodeURIComponent(walletAddr)}`, { credentials: 'include' }),
       ])
-      let nfts: WalletNft[] = []
-      if (apiRes.ok) {
-        const data = await apiRes.json()
-        nfts = Array.isArray(data) ? data : []
-      }
+      let nfts: WalletNft[] = apiResult.nfts
       // Fallback to client RPC when API is unavailable (e.g. no HELIUS_API_KEY) or fails
-      if (nfts.length === 0 || apiRes.status === 503) {
+      if (nfts.length === 0 || apiResult.res?.status === 503) {
         const { getWalletNfts } = await import('@/lib/solana/wallet-tokens')
         try {
           nfts = await getWalletNfts(connection, publicKey)
