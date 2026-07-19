@@ -943,7 +943,7 @@ export function AdminNestingClient() {
       <section className="space-y-4">
         <SectionHeader
           title="Public staking page"
-          description="Turn on the /nesting landing page when you are ready for all visitors. The site header shows Nesting for everyone while this is on. To pause actual nesting (claims, new nests, leaving), use Live nesting actions below or NESTING_DISABLED in deployment env."
+          description="Turn on the /nesting landing page when you are ready for all visitors. The site header always shows a Nesting link; while this is off, non-admins who tap it land on their dashboard nest instead of the public page. To pause actual nesting (claims, new nests, leaving), use Live nesting actions below or NESTING_DISABLED in deployment env."
         />
         <Card className="rounded-xl border-green-500/20">
           <CardHeader>

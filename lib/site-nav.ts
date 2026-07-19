@@ -128,13 +128,18 @@ export const OWLS_NAV_GROUP: SiteNavGroup = {
       description: 'Buy presale spots before mint',
       icon: Sparkles,
     },
-    {
-      href: '/nesting',
-      label: 'Nesting',
-      description: 'Stake owls and NFTs to earn OWL',
-      icon: Bird,
-    },
   ],
+}
+
+/**
+ * Top-level header link so holders don't have to hunt through the Owls dropdown.
+ * (Was previously the third item inside OWLS_NAV_GROUP.)
+ */
+export const NESTING_NAV_ITEM: SiteNavItem = {
+  href: '/nesting',
+  label: 'Nesting',
+  description: 'Stake owls and NFTs to earn OWL',
+  icon: Bird,
 }
 
 export const DASHBOARD_NAV_ITEM: SiteNavItem = {

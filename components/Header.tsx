@@ -23,6 +23,7 @@ import {
   COMMUNITY_NAV_GROUP,
   CREATE_RAFFLE_NAV_ITEM,
   DASHBOARD_NAV_ITEM,
+  NESTING_NAV_ITEM,
   OWLS_NAV_GROUP,
   filterAdminNavItems,
   type SiteNavGroup,
@@ -126,6 +127,12 @@ export function Header() {
     pathname === CREATE_RAFFLE_NAV_ITEM.href || pathname.startsWith(`${CREATE_RAFFLE_NAV_ITEM.href}/`)
   const CreateRaffleIcon = CREATE_RAFFLE_NAV_ITEM.icon
 
+  const nestingActive =
+    pathname === NESTING_NAV_ITEM.href ||
+    pathname.startsWith(`${NESTING_NAV_ITEM.href}/`) ||
+    pathname.startsWith('/dashboard/nesting')
+  const NestingIcon = NESTING_NAV_ITEM.icon
+
   return (
     <header className="w-full bg-black border-b border-green-500/20 text-white">
       <div className="container mx-auto px-3 sm:px-4 py-3 sm:py-4 header-safe-area-inner">
@@ -142,6 +149,16 @@ export function Header() {
               <HeaderRafflesMenuDesktop buttonClassName={desktopNavButtonClass} />
               <HeaderNavGroupMenuDesktop group={COMMUNITY_NAV_GROUP} buttonClassName={desktopNavButtonClass} />
               <HeaderNavGroupMenuDesktop group={OWLS_NAV_GROUP} buttonClassName={desktopNavButtonClass} />
+              <Link href={NESTING_NAV_ITEM.href}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(desktopNavButtonClass, nestingActive && 'bg-white/10 text-white')}
+                >
+                  <NestingIcon className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4 text-violet-400/90" />
+                  <span className="hidden sm:inline">{NESTING_NAV_ITEM.label}</span>
+                </Button>
+              </Link>
               {connected && (
                 <Link href={DASHBOARD_NAV_ITEM.href}>
                   <Button
@@ -198,6 +215,26 @@ export function Header() {
             <DialogTitle className="text-left text-base">Menu</DialogTitle>
           </DialogHeader>
           <nav className="flex flex-col p-2 pb-6 max-h-[min(85vh,32rem)] overflow-y-auto overscroll-contain">
+            <div className="mb-2 border-b border-green-500/20 pb-2">
+              <Link
+                href={NESTING_NAV_ITEM.href}
+                onClick={() => setMobileMenuOpen(false)}
+                className={cn(
+                  'flex gap-3 px-4 py-3 rounded-lg min-h-[48px] touch-manipulation hover:bg-white/10 active:bg-white/15',
+                  nestingActive && 'bg-white/10'
+                )}
+              >
+                <NestingIcon className="h-5 w-5 shrink-0 text-violet-400/90" aria-hidden />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">{NESTING_NAV_ITEM.label}</span>
+                  {NESTING_NAV_ITEM.description ? (
+                    <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">
+                      {NESTING_NAV_ITEM.description}
+                    </span>
+                  ) : null}
+                </span>
+              </Link>
+            </div>
             <HeaderRafflesMenuMobile onNavigate={() => setMobileMenuOpen(false)} />
             {mobileNavGroups.map((group, index) => (
               <HeaderNavGroupMenuMobile
