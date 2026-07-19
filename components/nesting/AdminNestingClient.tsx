@@ -20,6 +20,7 @@ import type {
 import { getCachedAdmin, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import { StakingPoolCard } from '@/components/nesting/StakingPoolCard'
+import { AdminGenOwlNestRosterSection } from '@/components/nesting/AdminGenOwlNestRosterSection'
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { PoolOnChainSettingsForm } from '@/components/nesting/PoolOnChainSettingsForm'
 import { NESTING_RECONCILE_MAX_BATCH } from '@/lib/nesting/rpc-policy'
@@ -1347,6 +1348,8 @@ export function AdminNestingClient() {
           </CardContent>
         </Card>
       </section>
+
+      <AdminGenOwlNestRosterSection />
 
       <section className="space-y-4">
         <SectionHeader
