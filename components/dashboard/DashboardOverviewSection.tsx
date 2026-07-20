@@ -105,6 +105,36 @@ function QuickNavCard({
   )
 }
 
+function QuickNavLinkCard({
+  title,
+  description,
+  href,
+  icon,
+}: {
+  title: string
+  description: string
+  href: string
+  icon: React.ReactNode
+}) {
+  return (
+    <Link
+      href={href}
+      className="flex min-h-[44px] w-full flex-col gap-2 rounded-xl border border-violet-500/30 bg-violet-500/[0.06] p-4 text-left shadow-sm touch-manipulation transition-colors hover:bg-violet-500/10"
+    >
+      <span className="flex items-center justify-between gap-2">
+        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/15 text-violet-400">
+          {icon}
+        </span>
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+      </span>
+      <span className="flex items-center gap-2">
+        <span className="text-sm font-semibold text-foreground">{title}</span>
+      </span>
+      <span className="text-xs text-muted-foreground leading-relaxed">{description}</span>
+    </Link>
+  )
+}
+
 export function DashboardOverviewSection({
   engagement,
   feeTier,
@@ -194,7 +224,13 @@ export function DashboardOverviewSection({
         />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <QuickNavLinkCard
+          title="Nesting"
+          description="Stake your owls for 90 or 180 days and earn OWL — open or check your nests."
+          href="/dashboard/nesting"
+          icon={<Bird className="h-4 w-4" aria-hidden />}
+        />
         <QuickNavCard
           title="Hosting"
           description="Claim creator proceeds, track live escrow, and manage your raffles."
