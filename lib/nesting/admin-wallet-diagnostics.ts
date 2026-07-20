@@ -1,28 +1,34 @@
-import { getStakingPoolBySlug } from '@/lib/db/staking-pools'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import {
-  getActivePositionByAssetIdentifier,
   listStakingPositionsByWallet,
   type StakingPositionRow,
 } from '@/lib/db/staking-positions'
-import { fetchWalletNftsInCollectionDas } from '@/lib/helius/fetch-wallet-nfts-in-collection'
+import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
 import { clearOrphanedActiveNftNestsForWallet } from '@/lib/nesting/clear-orphaned-active-nests'
 import { clearOrphanedPendingNftNestsForWallet } from '@/lib/nesting/clear-orphaned-pending-nests'
 import { clearCrossWalletStaleNestsForWallet } from '@/lib/nesting/clear-cross-wallet-stale-nests'
-import {
-  readOwlClaimNftNestLockEligibility,
-} from '@/lib/nesting/nft-freeze'
 import { positionRequiresOnChainNftFreezeLock } from '@/lib/nesting/nft-nest-onchain-lock'
-import { resolveWalletOwlNestCollectionCandidates } from '@/lib/nesting/owl-nest-collection'
+import { readNestLockEligibilityForPool } from '@/lib/nesting/nft-lock-service'
 import { isPendingNftNestBeforeFreezeConfirmed } from '@/lib/nesting/position-lifecycle'
-import { NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS, NESTING_DIAGNOSTIC_MAX_WALLET_MINT_CROSS_CHECKS } from '@/lib/nesting/rpc-policy'
+import {
+  NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS,
+  NESTING_DIAGNOSTIC_MAX_WALLET_MINT_CROSS_CHECKS,
+} from '@/lib/nesting/rpc-policy'
+import {
+  listSupportNestMintAddressesInWallet,
+  loadSupportNestPools,
+  supportNestFamilyForPoolSlug,
+  supportNestFamilyLabel,
+  type SupportNestFamilyKey,
+} from '@/lib/nesting/support-nest-pools'
+import { OWL_NEST_365_SLUG } from '@/lib/nesting/owl-nest-365-stats'
 
 const LOCK_SAMPLE_MAX = 8
 const LOCK_RPC_CONCURRENCY = 4
 
 export type DiagnoseNestingWalletOptions = {
-  /** Cap per-active-nest MPL Core lock reads (default NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS). */
+  /** Cap per-active-nest MPL Core / SPL lock reads (default NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS). */
   maxActiveLockChecks?: number
   /** Skip redundant lock_samples RPC block (support playbook). */
   skipLockSamples?: boolean
@@ -68,11 +74,23 @@ export type NestingWalletIssue = {
   suggested_action: string
 }
 
+export type NestingWalletFamilyStats = {
+  family: SupportNestFamilyKey
+  label: string
+  wallet_mint_count: number
+  active: number
+  pending: number
+}
+
 export type NestingWalletDiagnostics = {
   wallet: string
   helius_configured: boolean
+  /** @deprecated Prefer pool_slugs — kept for older admin UI. Primary coin perch when present. */
   pool_slug: string
+  /** All NFT nest perches scanned (coins + Gen 1 + Gen 2). */
+  pool_slugs: string[]
   wallet_nest_mint_count: number
+  nest_families: NestingWalletFamilyStats[]
   positions_under_wallet: {
     active: number
     pending: number
@@ -107,15 +125,83 @@ async function listCrossWalletOpenRows(holderWallet: string, mints: string[]) {
   return data ?? []
 }
 
+async function listOpenRowsForMints(mints: string[]) {
+  if (mints.length === 0) return []
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('staking_positions')
+    .select('id, wallet_address, asset_identifier, status, pool_id')
+    .in('asset_identifier', mints)
+    .in('status', ['active', 'pending'])
+
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
+function emptyFamilyStats(
+  mintCounts: Record<SupportNestFamilyKey, number>
+): NestingWalletFamilyStats[] {
+  const keys: SupportNestFamilyKey[] = ['owl-nest-coins', 'gen1-owl', 'gen2-owl']
+  return keys.map((family) => ({
+    family,
+    label: supportNestFamilyLabel(family),
+    wallet_mint_count: mintCounts[family] ?? 0,
+    active: 0,
+    pending: 0,
+  }))
+}
+
+function buildFamilyStats(
+  positions: StakingPositionRow[],
+  poolById: Map<string, StakingPoolRow>,
+  mintCounts: Record<SupportNestFamilyKey, number>
+): NestingWalletFamilyStats[] {
+  const stats = new Map<SupportNestFamilyKey, NestingWalletFamilyStats>()
+  for (const row of emptyFamilyStats(mintCounts)) {
+    stats.set(row.family, row)
+  }
+
+  for (const position of positions) {
+    if (position.status !== 'active' && position.status !== 'pending') continue
+    const pool = poolById.get(position.pool_id)
+    const family = supportNestFamilyForPoolSlug(pool?.slug)
+    if (!family) continue
+    const row = stats.get(family)!
+    if (position.status === 'active') row.active += 1
+    else row.pending += 1
+  }
+
+  return [...stats.values()]
+}
+
 export async function diagnoseNestingWallet(
   wallet: string,
   options: DiagnoseNestingWalletOptions = {}
 ): Promise<NestingWalletDiagnostics> {
   const holder = wallet.trim()
-  const pool = await getStakingPoolBySlug('owl-nest-365')
   const issues: NestingWalletIssue[] = []
+  const pools = await loadSupportNestPools()
+  const poolById = new Map(pools.map((p) => [p.id, p]))
+  const poolSlugs = pools.map((p) => p.slug)
 
   const positions = await listStakingPositionsByWallet(holder)
+  // Also resolve pools for positions that may sit on a perch not in the support slug list
+  // (legacy / partner) so lock checks still use the correct pool row.
+  const missingPoolIds = [
+    ...new Set(
+      positions
+        .map((p) => p.pool_id)
+        .filter((id) => id && !poolById.has(id))
+    ),
+  ]
+  if (missingPoolIds.length > 0) {
+    const db = getSupabaseAdmin()
+    const { data } = await db.from('staking_pools').select('*').in('id', missingPoolIds)
+    for (const row of (data ?? []) as StakingPoolRow[]) {
+      poolById.set(row.id, row)
+    }
+  }
+
   const byStatus = { active: 0, pending: 0, unstaked: 0, ghost_active: 0 }
   let ghostActive = 0
   for (const p of positions) {
@@ -134,25 +220,33 @@ export async function diagnoseNestingWallet(
       kind: 'ghost_active_nest',
       severity: 'medium',
       message: `${ghostActive} active nest row(s) have no mint in the ledger — they are skipped for Claim all until cleared.`,
-      suggested_action: 'Admin: Clear ghost actives only (one click). Does not close real nests or remove claimable OWL.',
+      suggested_action:
+        'Admin: Clear ghost actives only (one click). Does not close real nests or remove claimable OWL.',
     })
   }
 
   const heliusRpcUrl = getHeliusMainnetRpcUrl()
   let walletMints: string[] = []
+  let mintCountsByFamily: Record<SupportNestFamilyKey, number> = {
+    'owl-nest-coins': 0,
+    'gen1-owl': 0,
+    'gen2-owl': 0,
+  }
 
-  if (!pool || pool.asset_type !== 'nft') {
+  if (pools.length === 0) {
     issues.push({
       kind: 'orphaned_active',
       severity: 'high',
-      message: 'Owl Nest 365 pool not found or not configured as NFT perch.',
-      suggested_action: 'Check staking_pools in Supabase.',
+      message: 'No support nest pools found (owl-nest-365 / gen1-owl-* / gen2-owl-*).',
+      suggested_action: 'Check staking_pools in Supabase and Gen 1 / Gen 2 migrations.',
     })
     return {
       wallet: holder,
       helius_configured: Boolean(heliusRpcUrl),
-      pool_slug: 'owl-nest-365',
+      pool_slug: OWL_NEST_365_SLUG,
+      pool_slugs: [],
       wallet_nest_mint_count: 0,
+      nest_families: emptyFamilyStats(mintCountsByFamily),
       positions_under_wallet: byStatus,
       issues,
       cross_wallet_rows: [],
@@ -164,21 +258,17 @@ export async function diagnoseNestingWallet(
     issues.push({
       kind: 'orphaned_active',
       severity: 'medium',
-      message: 'HELIUS_API_KEY missing — cannot compare wallet NFTs to cross-wallet ledger rows.',
+      message:
+        'HELIUS_API_KEY missing — cannot compare wallet NFTs (coins / Gen 1 / Gen 2) to cross-wallet ledger rows.',
       suggested_action: 'Set Helius env or query Supabase manually by asset_identifier.',
     })
   } else {
-    const candidates = resolveWalletOwlNestCollectionCandidates(pool)
-    const itemsByMint = new Map<string, true>()
-    for (const candidate of candidates) {
-      const batch = await fetchWalletNftsInCollectionDas(heliusRpcUrl, holder, candidate)
-      for (const item of batch) {
-        const id = item.id?.trim()
-        if (id && item.burnt !== true) itemsByMint.set(id, true)
-      }
-    }
-    walletMints = [...itemsByMint.keys()]
+    const scanned = await listSupportNestMintAddressesInWallet(holder)
+    walletMints = scanned.mints
+    mintCountsByFamily = scanned.mint_counts_by_family
   }
+
+  const nest_families = buildFamilyStats(positions, poolById, mintCountsByFamily)
 
   const crossRows = await listCrossWalletOpenRows(holder, walletMints)
   for (const row of crossRows) {
@@ -199,10 +289,13 @@ export async function diagnoseNestingWallet(
     if (position.status === 'pending' && isPendingNftNestBeforeFreezeConfirmed(position)) {
       const ref = (position.external_reference ?? '').trim()
       if (ref === 'awaiting_nft_freeze' && position.asset_identifier?.trim()) {
+        const pool = poolById.get(position.pool_id)
+        const family = supportNestFamilyForPoolSlug(pool?.slug)
+        const label = family ? supportNestFamilyLabel(family) : 'NFT'
         issues.push({
           kind: 'orphaned_pending',
           severity: 'medium',
-          message: `Pending nest never finished wallet freeze (${position.asset_identifier.slice(0, 8)}…).`,
+          message: `Pending ${label} nest never finished wallet freeze (${position.asset_identifier.slice(0, 8)}…).`,
           asset_identifier: position.asset_identifier,
           position_id: position.id,
           suggested_action: 'Heal: clear orphaned pending.',
@@ -218,9 +311,10 @@ export async function diagnoseNestingWallet(
       NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS
     )
   )
-  const activeLockPositions = positions.filter(
-    (p) => p.status === 'active' && positionRequiresOnChainNftFreezeLock(p, pool)
-  )
+  const activeLockPositions = positions.filter((p) => {
+    const pool = poolById.get(p.pool_id)
+    return pool != null && positionRequiresOnChainNftFreezeLock(p, pool)
+  })
   const positionsForLockRpc = activeLockPositions.slice(0, lockCheckCap)
   const lockChecksSkipped = Math.max(0, activeLockPositions.length - positionsForLockRpc.length)
 
@@ -239,21 +333,26 @@ export async function diagnoseNestingWallet(
     LOCK_RPC_CONCURRENCY,
     async (position) => {
       const assetId = position.asset_identifier!.trim()
-      const lockState = await readOwlClaimNftNestLockEligibility({
+      const pool = poolById.get(position.pool_id)!
+      const lockState = await readNestLockEligibilityForPool({
+        pool,
         assetId,
         ownerWallet: holder,
         collectionMint: pool.collection_key,
       })
-      return { position, assetId, lockState }
+      return { position, assetId, pool, lockState }
     }
   )
 
-  for (const { position, assetId, lockState } of lockResults) {
+  for (const { position, assetId, pool, lockState } of lockResults) {
+    const family = supportNestFamilyForPoolSlug(pool.slug)
+    const assetLabel = family ? supportNestFamilyLabel(family).replace(/s$/, '') : 'NFT'
+
     if (lockState?.ownerThawedEligible === true) {
       issues.push({
         kind: 'owner_thawed_active',
         severity: 'low',
-        message: `Active nest with Owner-thawed coin (${assetId.slice(0, 8)}…) — claims may work; re-stake needs leave nest or ledger clear.`,
+        message: `Active nest with Owner-thawed ${assetLabel} (${assetId.slice(0, 8)}…) — claims may work; re-stake needs leave nest or ledger clear.`,
         asset_identifier: assetId,
         position_id: position.id,
         suggested_action: 'User can claim OWL, or heal active orphan if they need to re-open nest.',
@@ -274,7 +373,7 @@ export async function diagnoseNestingWallet(
         message: `Nest OK on-chain (${assetId.slice(0, 8)}…).`,
         asset_identifier: assetId,
         position_id: position.id,
-        suggested_action: 'No ledger fix needed for this coin.',
+        suggested_action: 'No ledger fix needed for this NFT.',
       })
     }
   }
@@ -291,35 +390,39 @@ export async function diagnoseNestingWallet(
     issues.push({
       kind: 'ledger_active_onchain_locked',
       severity: 'low',
-      message: `Cross-wallet mint scan sampled ${mintsForCrossCheck.length} of ${walletMints.length} Owl Nest coin(s) in wallet.`,
+      message: `Cross-wallet mint scan sampled ${mintsForCrossCheck.length} of ${walletMints.length} nest NFT(s) in wallet (coins + Gen 1 + Gen 2).`,
       suggested_action: 'Cross-wallet rows from Supabase are still listed when found.',
     })
   }
 
-  for (const mint of mintsForCrossCheck) {
-    const open = await getActivePositionByAssetIdentifier(pool.id, mint)
-    if (
-      open &&
-      open.wallet_address.trim() !== holder &&
-      !crossRows.some((r) => String(r.id) === open.id)
-    ) {
-      issues.push({
-        kind: 'cross_wallet_blocker',
-        severity: 'high',
-        message: `Mint ${mint.slice(0, 8)}… blocked by open row on ${open.wallet_address.slice(0, 8)}….`,
-        asset_identifier: mint,
-        position_id: open.id,
-        other_wallet: open.wallet_address,
-        suggested_action: 'Heal: clear cross_wallet.',
-      })
-    }
+  const openByMint = await listOpenRowsForMints(mintsForCrossCheck)
+  for (const open of openByMint) {
+    const mint = String(open.asset_identifier ?? '').trim()
+    const prior = String(open.wallet_address ?? '').trim()
+    if (!mint || prior === holder) continue
+    if (crossRows.some((r) => String(r.id) === String(open.id))) continue
+    issues.push({
+      kind: 'cross_wallet_blocker',
+      severity: 'high',
+      message: `Mint ${mint.slice(0, 8)}… blocked by open row on ${prior.slice(0, 8)}….`,
+      asset_identifier: mint,
+      position_id: String(open.id),
+      other_wallet: prior,
+      suggested_action: 'Heal: clear cross_wallet.',
+    })
   }
 
   const lock_samples: NestingWalletDiagnostics['lock_samples'] = []
   if (!options.skipLockSamples) {
-    const sampleMints = walletMints.slice(0, LOCK_SAMPLE_MAX)
-    for (const assetId of sampleMints) {
-      const lockState = await readOwlClaimNftNestLockEligibility({
+    const samplePositions = positions
+      .filter((p) => p.status === 'active' && p.asset_identifier?.trim())
+      .slice(0, LOCK_SAMPLE_MAX)
+    for (const position of samplePositions) {
+      const assetId = position.asset_identifier!.trim()
+      const pool = poolById.get(position.pool_id)
+      if (!pool) continue
+      const lockState = await readNestLockEligibilityForPool({
+        pool,
         assetId,
         ownerWallet: holder,
         collectionMint: pool.collection_key,
@@ -335,8 +438,10 @@ export async function diagnoseNestingWallet(
   return {
     wallet: holder,
     helius_configured: Boolean(heliusRpcUrl),
-    pool_slug: pool.slug,
+    pool_slug: poolSlugs.includes(OWL_NEST_365_SLUG) ? OWL_NEST_365_SLUG : poolSlugs[0] ?? OWL_NEST_365_SLUG,
+    pool_slugs: poolSlugs,
     wallet_nest_mint_count: walletMints.length,
+    nest_families,
     positions_under_wallet: byStatus,
     issues,
     cross_wallet_rows: crossRows.map((r) => ({

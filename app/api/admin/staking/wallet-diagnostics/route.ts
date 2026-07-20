@@ -8,7 +8,7 @@ export const maxDuration = 60
 
 /**
  * GET /api/admin/staking/wallet-diagnostics?wallet=<address>
- * Support audit: ledger vs on-chain vs cross-wallet blockers for Owl Nest 365.
+ * Support audit: ledger vs on-chain vs cross-wallet blockers for Owltopia coins, Gen 1, and Gen 2 nests.
  */
 export async function GET(request: NextRequest) {
   const session = await requireFullAdminSession(request)

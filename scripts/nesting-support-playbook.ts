@@ -1,5 +1,6 @@
 /**
  * Support: combined playbook (audit + diagnostics + do-not-harm guards).
+ * Covers Owltopia coins, Gen 1 owls, and Gen 2 owls.
  * Usage: npx --yes tsx scripts/nesting-support-playbook.ts <wallet>
  */
 import { loadEnvConfig } from '@next/env'

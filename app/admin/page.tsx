@@ -3609,8 +3609,8 @@ export default function AdminDashboardPage() {
                       Owl Nesting
                     </CardTitle>
                     <CardDescription>
-                      Create and activate staking pools (perches), toggle the public /nesting landing page, and configure
-                      on-chain metadata including the council governance OWL pool.
+                      Nest perches (coins, Gen 1, Gen 2), public landing toggle, rev-share roster, and support playbook
+                      for holder wallet diagnostics / heal.
                     </CardDescription>
                   </CardHeader>
                 </Link>

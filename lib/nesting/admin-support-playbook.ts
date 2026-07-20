@@ -171,7 +171,37 @@ export function buildAdminSupportPlaybook(params: {
       severity: 'caution',
       code: 'cross_wallet',
       title: `${crossWalletCount} cross-wallet blocker(s)`,
-      detail: 'NFTs are in this wallet but open nest rows exist on another address. Full heal clears those stale rows.',
+      detail:
+        'NFTs (Owltopia coins, Gen 1 owls, and/or Gen 2 owls) are in this wallet but open nest rows exist on another address. Full heal clears those stale rows.',
+    })
+  }
+
+  const families = diag.nest_families ?? []
+  const familySummary = families
+    .filter((f) => f.active > 0 || f.pending > 0 || f.wallet_mint_count > 0)
+    .map(
+      (f) =>
+        `${f.label}: ${f.active} active / ${f.pending} pending / ${f.wallet_mint_count} in wallet`
+    )
+    .join('; ')
+
+  if (familySummary) {
+    warnings.push({
+      severity: 'info',
+      code: 'nest_families_scanned',
+      title: 'Nest families scanned',
+      detail: `${familySummary}. Covers owl-nest-365 + Gen 1 (90d/180d) + Gen 2 (90d/180d).`,
+    })
+  }
+
+  const genActive =
+    (families.find((f) => f.family === 'gen1-owl')?.active ?? 0) +
+    (families.find((f) => f.family === 'gen2-owl')?.active ?? 0)
+  if (genActive > 0) {
+    recommendations.push({
+      action: 'Gen 1 / Gen 2: confirm perch + rev share',
+      detail:
+        'Daily OWL claims use Claim all / per-nest claim. Month-end SOL/USDC rev share is separate (Gen Owl rev share panel). Do not use OWL catch-up for rev-share payouts.',
     })
   }
 
@@ -188,14 +218,16 @@ export function buildAdminSupportPlaybook(params: {
       severity: 'info',
       code: 'no_db_rows',
       title: 'No nests under this wallet in DB',
-      detail: 'User may be on a new wallet after transfer, or never completed nest open. Run diagnostics then heal if cross-wallet rows appear.',
+      detail:
+        'User may be on a new wallet after transfer, or never completed nest open (coin / Gen 1 / Gen 2). Run diagnostics then heal if cross-wallet rows appear.',
     })
   }
 
   if (warnings.length === 0 && !significantUnpaid && !(audit?.risk_flags.length)) {
     recommendations.push({
       action: 'No high-risk pattern',
-      detail: 'If the user still has issues, get the exact error text and one NFT mint address.',
+      detail:
+        'If the user still has issues, get the exact error text, which perch (coins / Gen 1 / Gen 2), and one NFT mint address.',
     })
   }
 

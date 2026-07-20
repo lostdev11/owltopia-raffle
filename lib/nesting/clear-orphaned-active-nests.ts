@@ -5,9 +5,9 @@ import {
   type StakingPositionRow,
 } from '@/lib/db/staking-positions'
 import {
-  isWalletNftFrozenForNestingDelegate,
-  readOwlClaimNftNestLockEligibility,
-} from '@/lib/nesting/nft-freeze'
+  isWalletNftFrozenForPool,
+  readNestLockEligibilityForPool,
+} from '@/lib/nesting/nft-lock-service'
 import { positionRequiresOnChainNftFreezeLock } from '@/lib/nesting/nft-nest-onchain-lock'
 import { sortStakingPositionsOldestFirst } from '@/lib/nesting/position-lifecycle'
 
@@ -21,6 +21,7 @@ export type ClearOrphanedActiveNestResult = {
 /**
  * Closes active NFT nest rows that have no on-chain lock (DB thinks nested, wallet does not).
  * Does not thaw NFTs — only fixes the app ledger so the holder can open a fresh nest.
+ * Pool-aware: MPL Core (coins / Gen 1) and SPL token freeze (Gen 2).
  */
 export async function clearOrphanedActiveNftNestsForWallet(
   wallet: string
@@ -54,7 +55,8 @@ async function tryClearOrphanedActiveNest(
 
   const assetId = position.asset_identifier!.trim()
 
-  const frozen = await isWalletNftFrozenForNestingDelegate({
+  const frozen = await isWalletNftFrozenForPool({
+    pool,
     assetId,
     collectionMint: pool.collection_key,
     ownerWallet: position.wallet_address,
@@ -63,7 +65,8 @@ async function tryClearOrphanedActiveNest(
     return { ...base, reason: 'still_frozen_on_chain' }
   }
 
-  const lockState = await readOwlClaimNftNestLockEligibility({
+  const lockState = await readNestLockEligibilityForPool({
+    pool,
     assetId,
     ownerWallet: position.wallet_address,
     collectionMint: pool.collection_key,

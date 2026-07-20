@@ -8,7 +8,8 @@ export const maxDuration = 120
 
 /**
  * GET /api/admin/staking/support-playbook?wallet=<address>
- * Combined claim-ledger audit + nest diagnostics with do-not-harm guards for catch-up vs wallet heal.
+ * Combined claim-ledger audit + nest diagnostics (Owltopia coins + Gen 1 + Gen 2)
+ * with do-not-harm guards for catch-up vs wallet heal.
  */
 export async function GET(request: NextRequest) {
   const session = await requireFullAdminSession(request)
