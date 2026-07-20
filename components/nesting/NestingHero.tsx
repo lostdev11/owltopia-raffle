@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { nestingMutedActionButtonClass } from '@/lib/nesting/ui-classes'
+import { nestingClaimReadyButtonClass } from '@/lib/nesting/ui-classes'
 import { cn } from '@/lib/utils'
 
 export function NestingHero() {
@@ -23,11 +23,29 @@ export function NestingHero() {
           just prove it is still you.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
-          <Button asChild variant="outline" size="lg" className={cn(nestingMutedActionButtonClass, 'text-base')}>
+          <Button
+            asChild
+            variant="default"
+            size="lg"
+            className={cn(
+              nestingClaimReadyButtonClass,
+              'min-h-[48px] touch-manipulation text-base font-semibold'
+            )}
+          >
             <Link href="#perches">See perches</Link>
           </Button>
-          <Button asChild variant="outline" size="lg" className={cn(nestingMutedActionButtonClass, 'text-base')}>
-            <Link href="/nesting#perches">My nest</Link>
+          <Button
+            asChild
+            variant="outline"
+            size="lg"
+            className={cn(
+              'min-h-[48px] touch-manipulation text-base font-semibold',
+              'border-theme-prime/55 bg-theme-prime/10 text-theme-prime',
+              'hover:bg-theme-prime/20 hover:text-theme-prime hover:border-theme-prime/70',
+              'shadow-[0_0_18px_rgba(0,255,136,0.12)]'
+            )}
+          >
+            <Link href="/dashboard/nesting">My nest</Link>
           </Button>
         </div>
       </div>
