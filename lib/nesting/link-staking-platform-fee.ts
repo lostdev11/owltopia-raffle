@@ -84,13 +84,14 @@ export async function validateStakingPlatformFeeLinked(
       throw new StakingUserError('That platform fee transaction was used for a different nest action.', 400)
     }
 
+    // Idempotent: retries after a successful link (lost response, mobile blip, "Finish opening")
+    // must not fail with "already recorded" — that traps nests after the fee is paid.
     const linked = new Set(existing.position_ids)
-    for (const id of positionIds) {
-      if (linked.has(id)) {
-        throw new StakingUserError('Platform fee was already recorded for this nest.', 400)
-      }
+    const toLink = positionIds.filter((id) => !linked.has(id))
+    if (toLink.length === 0) {
+      return
     }
-    if (linked.size + positionIds.length > existing.units) {
+    if (linked.size + toLink.length > existing.units) {
       throw new StakingUserError(
         `This fee payment covers ${existing.units} nest(s) and ${linked.size} are already linked. Send a new fee transaction.`,
         400

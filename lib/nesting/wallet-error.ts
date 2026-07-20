@@ -111,5 +111,22 @@ export function formatNestingWalletError(
     return `Your wallet rejected the nest lock transaction during simulation.${backpackHint}`
   }
 
+  // Ledger-via-Phantom/Solflare often never surfaces complex MPL Core nest locks on-device.
+  if (
+    hay.includes('ledger') ||
+    hay.includes('blind signing') ||
+    hay.includes('blind-signing') ||
+    hay.includes('device timeout') ||
+    hay.includes('u2f') ||
+    hay.includes('hid') ||
+    hay.includes('transport')
+  ) {
+    return (
+      `Nest lock did not reach your hardware wallet for approval. ` +
+      `Ledger through Phantom/Solflare often cannot sign Metaplex nest transactions even with blind signing on. ` +
+      `Nest one ${asset} at a time, keep the Ledger Solana app open (and Ledger Live closed), or nest from a hot wallet if needed.`
+    )
+  }
+
   return msg || 'Nest transaction failed'
 }

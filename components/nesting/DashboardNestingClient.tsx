@@ -1961,11 +1961,19 @@ export function DashboardNestingClient() {
                   code?: string
                 }
                 if (freezeRes.ok) return
-                lastError = new NestingStakeFlowError(
+                const freezeErrMsg =
                   typeof freezeJson.error === 'string'
                     ? freezeJson.error
                     : 'Could not confirm NFT freeze'
-                )
+                lastError = new NestingStakeFlowError(freezeErrMsg)
+                // Fee already linked (or race after a lost success response): treat as
+                // progress and heal/confirm instead of surfacing a dead-end modal.
+                if (/platform fee was already recorded/i.test(freezeErrMsg)) {
+                  if (await checkNestFreezeConfirmedOnServer(prep.positionId, { heal: true })) {
+                    return
+                  }
+                  continue
+                }
                 // `nest_relock_required` right after the wallet-lock step usually means the
                 // server RPC has not seen our transaction yet — keep retrying (the heal
                 // fallback settles it). Without a wallet step this run it is genuine
@@ -2190,10 +2198,12 @@ export function DashboardNestingClient() {
                 )
               } else if (platformFeeActive && chunkFeeLabel) {
                 setNftStakeBatchHint(
-                  `Approve once in your wallet — nest lock and ${chunkFeeLabel} are in the same signature…`
+                  `Approve once in your wallet — nest lock and ${chunkFeeLabel} are in the same signature. On Ledger, keep the Solana app open and Ledger Live closed…`
                 )
               } else {
-                setNftStakeBatchHint('Approve once in your wallet to lock your nest…')
+                setNftStakeBatchHint(
+                  'Approve once in your wallet to lock your nest. On Ledger, keep the Solana app open and Ledger Live closed…'
+                )
               }
 
               const platformFee = chunkNestPlatformFee(chunkPreps.length)

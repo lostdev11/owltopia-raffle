@@ -221,6 +221,19 @@ export function buildAdminSupportPlaybook(params: {
       detail:
         'User may be on a new wallet after transfer, or never completed nest open (coin / Gen 1 / Gen 2). Run diagnostics then heal if cross-wallet rows appear.',
     })
+    recommendations.push({
+      action: 'Ask: Ledger via Phantom/Solflare?',
+      detail:
+        'If connect works but nest signing never appears on the device, the nest lock is a complex Metaplex Core versioned tx that Ledger often never prompts for (even with blind signing). Hot wallets usually work. Workaround: nest one NFT from a hot wallet, or keep Ledger Solana app open and Ledger Live closed and retry a single NFT.',
+    })
+  }
+
+  if (orphanedPendingCount > 0) {
+    recommendations.push({
+      action: 'User: Finish opening / refresh with heal',
+      detail:
+        `${orphanedPendingCount} pending nest(s). If they already paid the platform fee and see "Platform fee was already recorded", refresh nesting (heal) or tap Finish opening — do not ask them to pay again. Admin heal-wallet also promotes when the on-chain freeze is present.`,
+    })
   }
 
   if (warnings.length === 0 && !significantUnpaid && !(audit?.risk_flags.length)) {
