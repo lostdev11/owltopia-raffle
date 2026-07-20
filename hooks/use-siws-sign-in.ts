@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { useRouter } from 'next/navigation'
+import { performSiwsSignIn } from '@/lib/client/siws-sign-in'
 
 /**
  * Sign-In with Solana (nonce → signMessage → /api/auth/verify) + router.refresh().
@@ -10,7 +11,7 @@ import { useRouter } from 'next/navigation'
  */
 export function useSiwsSignIn() {
   const router = useRouter()
-  const { publicKey, signMessage } = useWallet()
+  const { publicKey, signMessage, wallet } = useWallet()
   const [signingIn, setSigningIn] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -22,53 +23,11 @@ export function useSiwsSignIn() {
     setError(null)
     setSigningIn(true)
     try {
-      const walletAddr = publicKey.toBase58()
-      const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(walletAddr)}`, {
-        credentials: 'include',
+      await performSiwsSignIn({
+        wallet: publicKey.toBase58(),
+        signMessage,
+        walletName: wallet?.adapter?.name,
       })
-      if (!nonceRes.ok) {
-        const data = await nonceRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Failed to get sign-in nonce')
-      }
-      const { message } = (await nonceRes.json()) as { message: string }
-      const messageBytes = new TextEncoder().encode(message)
-
-      const SIGN_TIMEOUT_MS = 120_000
-      const signature = await Promise.race([
-        signMessage(messageBytes),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(
-                  'Timed out waiting for a wallet signature. Open Phantom (or your wallet), approve the Sign Message request, or disconnect and reconnect if nothing appears.'
-                )
-              ),
-            SIGN_TIMEOUT_MS
-          )
-        ),
-      ])
-      const signatureBase64 =
-        typeof signature === 'string'
-          ? btoa(signature)
-          : btoa(String.fromCharCode(...new Uint8Array(signature)))
-
-      const verifyRes = await fetch('/api/auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          wallet: walletAddr,
-          message,
-          signature: signatureBase64,
-        }),
-      })
-
-      if (!verifyRes.ok) {
-        const data = await verifyRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Sign-in verification failed')
-      }
-
       await opts?.onSuccess?.()
       router.refresh()
       return true
@@ -78,7 +37,7 @@ export function useSiwsSignIn() {
     } finally {
       setSigningIn(false)
     }
-  }, [publicKey, signMessage, router])
+  }, [publicKey, signMessage, wallet?.adapter?.name, router])
 
   return { signIn, signingIn, error }
 }

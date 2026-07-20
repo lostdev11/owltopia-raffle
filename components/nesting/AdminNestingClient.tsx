@@ -56,12 +56,12 @@ const emptyForm = () => ({
 })
 
 export function AdminNestingClient() {
-  const { publicKey, connected, signMessage } = useWallet()
+  const { publicKey, connected, signMessage, wallet } = useWallet()
   const visibilityTick = useVisibilityTick()
-  const wallet = publicKey?.toBase58() ?? ''
+  const walletAddr = publicKey?.toBase58() ?? ''
 
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
-    typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
+    typeof window !== 'undefined' && walletAddr ? getCachedAdmin(walletAddr) : null
   )
   const [loadingAdmin, setLoadingAdmin] = useState(true)
   const [sessionReady, setSessionReady] = useState<boolean | null>(null)
@@ -361,34 +361,12 @@ export function AdminNestingClient() {
     setSignInError(null)
     setSigningIn(true)
     try {
-      const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(publicKey.toBase58())}`, {
-        credentials: 'include',
+      const { performSiwsSignIn } = await import('@/lib/client/siws-sign-in')
+      await performSiwsSignIn({
+        wallet: publicKey.toBase58(),
+        signMessage,
+        walletName: wallet?.adapter?.name,
       })
-      if (!nonceRes.ok) {
-        const data = await nonceRes.json().catch(() => ({}))
-        throw new Error(data?.error || 'Failed to get nonce')
-      }
-      const { message } = await nonceRes.json()
-      const messageBytes = new TextEncoder().encode(message)
-      const signature = await signMessage(messageBytes)
-      const signatureBase64 =
-        typeof signature === 'string'
-          ? btoa(signature)
-          : btoa(String.fromCharCode(...new Uint8Array(signature)))
-      const verifyRes = await fetch('/api/auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          wallet: publicKey.toBase58(),
-          message,
-          signature: signatureBase64,
-        }),
-      })
-      if (!verifyRes.ok) {
-        const data = await verifyRes.json().catch(() => ({}))
-        throw new Error(data?.error || 'Verification failed')
-      }
       setSessionReady(true)
       await fetchPools()
     } catch (e) {
@@ -396,7 +374,7 @@ export function AdminNestingClient() {
     } finally {
       setSigningIn(false)
     }
-  }, [publicKey, signMessage, fetchPools])
+  }, [publicKey, signMessage, wallet?.adapter?.name, fetchPools])
 
   const createQuickPool = async () => {
     const name = quickName.trim()

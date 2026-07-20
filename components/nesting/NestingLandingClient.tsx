@@ -326,7 +326,11 @@ export function NestingLandingClient({
             },
             {
               q: 'Why do you ask me to sign a message on the dashboard?',
-              a: 'So we never mix up nests between wallets—it is just a quick hey-it-is-you check, same vibe as signing in elsewhere in Owltopia.',
+              a: 'So we never mix up nests between wallets—it is just a quick hey-it-is-you check, same vibe as signing in elsewhere in Owltopia. Ledger users: unlock, open the Solana app, enable Blind signing, then approve the short Sign Message prompt (USB on desktop is usually smoother than Bluetooth).',
+            },
+            {
+              q: 'I use Ledger and the sign prompt never shows up',
+              a: 'Close Ledger Live, keep the Solana app open, turn Blind signing on in that app settings, and reconnect Bluetooth or plug in USB. If Phantom/Solflare still never asks the device, open Owltopia inside the wallet browser or sign in once from a hot wallet, then switch back for nesting.',
             },
           ].map(({ q, a }) => (
             <div key={q} className="px-4 py-4 sm:px-5">

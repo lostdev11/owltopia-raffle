@@ -119,12 +119,14 @@ export function formatNestingWalletError(
     hay.includes('device timeout') ||
     hay.includes('u2f') ||
     hay.includes('hid') ||
-    hay.includes('transport')
+    hay.includes('bluetooth') ||
+    hay.includes('transport') ||
+    hay.includes('unexpected error')
   ) {
     return (
       `Nest lock did not reach your hardware wallet for approval. ` +
-      `Ledger through Phantom/Solflare often cannot sign Metaplex nest transactions even with blind signing on. ` +
-      `Nest one ${asset} at a time, keep the Ledger Solana app open (and Ledger Live closed), or nest from a hot wallet if needed.`
+      `Unlock Ledger, open the Solana app (close Ledger Live), enable Blind signing, and nest one ${asset} at a time. ` +
+      `USB/WebHID on desktop is more reliable than Bluetooth. If the device never prompts, nest from a hot wallet.`
     )
   }
 
