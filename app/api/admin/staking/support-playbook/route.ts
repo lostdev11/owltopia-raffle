@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import { loadAdminSupportPlaybook } from '@/lib/nesting/admin-support-playbook'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -12,7 +12,7 @@ export const maxDuration = 120
  * with do-not-harm guards for catch-up vs wallet heal.
  */
 export async function GET(request: NextRequest) {
-  const session = await requireFullAdminSession(request)
+  const session = await requireAdminSession(request)
   if (session instanceof NextResponse) return session
 
   try {

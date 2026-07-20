@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRaffleById } from '@/lib/db/raffles'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { isRaffleLiveForManualDiscordShare } from '@/lib/raffles/discord-live-share'
 import { pushAdminRaffleXShareToDiscord } from '@/lib/discord-raffle-webhooks'
@@ -19,7 +19,7 @@ const RAFFLE_DEDUPE_MS = 2 * 60 * 60 * 1000 // 2h — same raffle not mirrored t
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireFullAdminSession(request)
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const ip = getClientIp(request)

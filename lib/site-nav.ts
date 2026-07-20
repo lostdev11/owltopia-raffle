@@ -187,6 +187,12 @@ export function isPathInNavGroup(pathname: string, group: SiteNavGroup): boolean
 }
 
 /** Admin menu items are admin-only. Create Raffle is no longer here (see CREATE_RAFFLE_NAV_ITEM). */
-export function filterAdminNavItems(options: { showOwlVision: boolean }): SiteNavItem[] {
-  return options.showOwlVision ? [...ADMIN_NAV_GROUP.items] : []
+export function filterAdminNavItems(options: {
+  showOwlVision: boolean
+  adminRole?: 'full' | 'mod' | null
+}): SiteNavItem[] {
+  if (!options.showOwlVision) return []
+  return options.adminRole === 'mod'
+    ? [ADMIN_NAV_GROUP.items[0]]
+    : [...ADMIN_NAV_GROUP.items]
 }

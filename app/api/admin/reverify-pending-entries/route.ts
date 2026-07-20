@@ -8,7 +8,7 @@ import {
 } from '@/lib/db/entries'
 import { getRaffleById } from '@/lib/db/raffles'
 import { verifyTransaction } from '@/lib/verify-transaction'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -24,7 +24,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireFullAdminSession(request)
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const body = await request.json().catch(() => ({}))

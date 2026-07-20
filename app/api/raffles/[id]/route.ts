@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { updateRaffle, getRaffleById, getEntriesByRaffleId, deleteRaffle } from '@/lib/db/raffles'
 import type { Raffle } from '@/lib/types'
 import { requireAdminSession, requireFullAdminSession } from '@/lib/auth-server'
+import { getAdminRole } from '@/lib/db/admins'
+import { isFullAdminRole } from '@/lib/admin/roles'
 import { safeErrorMessage } from '@/lib/safe-error'
 import {
   checkEscrowHoldsNft,
@@ -60,7 +62,8 @@ export async function PATCH(
   context: { params: Promise<Record<string, string | string[] | undefined>> }
 ) {
   try {
-    const session = await requireFullAdminSession(request)
+    // Mods may patch listing visibility / artwork only; all other patches need full admin.
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const body = await request.json()
@@ -165,6 +168,14 @@ export async function PATCH(
         return NextResponse.json({ error: 'Failed to update raffle' }, { status: 500 })
       }
       return NextResponse.json(raffle)
+    }
+
+    const role = await getAdminRole(session.wallet)
+    if (!isFullAdminRole(role)) {
+      return NextResponse.json(
+        { error: 'Forbidden — this raffle change requires a full admin' },
+        { status: 403 }
+      )
     }
 
     /**
@@ -996,7 +1007,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid raffle id' }, { status: 400 })
     }
 
-    const session = await requireAdminSession(request)
+    const session = await requireFullAdminSession(request)
     if (session instanceof NextResponse) return session
 
     let deleteReasonParsed: string | undefined

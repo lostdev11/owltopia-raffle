@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRaffles } from '@/lib/db/raffles'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { selectRafflesForDailyRaid } from '@/lib/raffles/daily-raid-batch'
 import { pushDailyRaidBundleToDiscord } from '@/lib/discord-raffle-webhooks'
@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireFullAdminSession(request)
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const ip = getClientIp(request)
