@@ -12,10 +12,11 @@ import {
 } from '@/lib/nesting/security-notice-content'
 import { verifyNestingSecurityAckClient } from '@/lib/nesting/verify-security-ack-client'
 import { signMessageSignatureToBase64 } from '@/lib/solana/sign-message-signature'
+import { formatSignMessageError } from '@/lib/solana/sign-message-error'
 import { normalizeSolanaWalletAddress, walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
 export function useNestingSecurityAck(publicKey: PublicKey | null) {
-  const { signMessage } = useWallet()
+  const { signMessage, wallet } = useWallet()
   const [acknowledged, setAcknowledged] = useState(false)
   const [signing, setSigning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -86,7 +87,25 @@ export function useNestingSecurityAck(publicKey: PublicKey | null) {
       }
 
       const messageBytes = new TextEncoder().encode(challenge.message)
-      const signature = await signMessage(messageBytes)
+      let signature: Uint8Array
+      try {
+        signature = await Promise.race([
+          signMessage(messageBytes),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    'Timed out waiting for a safeguards signature. Approve Sign Message on your Ledger if prompted, or reconnect Bluetooth/USB and try again.'
+                  )
+                ),
+              180_000
+            )
+          ),
+        ])
+      } catch (e) {
+        throw new Error(formatSignMessageError(e, { walletName: wallet?.adapter?.name, context: 'safeguards' }))
+      }
 
       const localVerify = verifyNestingSecurityAckClient(publicKey, challenge.message, signature)
       if (!localVerify.valid) {
@@ -114,7 +133,7 @@ export function useNestingSecurityAck(publicKey: PublicKey | null) {
     } finally {
       setSigning(false)
     }
-  }, [publicKey, signMessage, persistAck])
+  }, [publicKey, signMessage, wallet?.adapter?.name, persistAck])
 
   return {
     acknowledged,

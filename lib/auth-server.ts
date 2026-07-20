@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { PublicKey } from '@solana/web3.js'
 import nacl from 'tweetnacl'
 import { isAdmin } from '@/lib/db/admins'
@@ -14,6 +14,10 @@ export const SESSION_COOKIE_NAME = 'owl_session'
 const NONCE_TTL_MS = 5 * 60 * 1000 // 5 min
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000 // 24 h
 
+/** Compact binary nonce (Ledger-friendly message size). */
+const NONCE_V2 = 2
+const NONCE_V2_BYTES = 25 // version(1) + exp(8) + random(16)
+
 function getSecret(): string {
   const secret = process.env.SESSION_SECRET || process.env.AUTH_SECRET
   if (!secret || secret.length < 16) {
@@ -22,25 +26,74 @@ function getSecret(): string {
   return secret
 }
 
-type NoncePayload = { w: string; exp: number; r: string; v: 1 }
+type NoncePayload = { w: string; exp: number; r: string; v: 1 | 2 }
 
 /**
  * Stateless nonce (serverless-safe).
  *
- * Self-verifying (HMAC-signed) with wallet + expiry. Single-use is enforced by
- * {@link consumeNonceOnce} recording the payload random id in Supabase.
+ * v2 is a compact binary token (wallet bound via HMAC) so SIWS messages stay short
+ * enough for Ledger clear / blind signing through Phantom and Solflare.
+ * Single-use is enforced by {@link consumeNonceOnce} recording the random id in Supabase.
  */
 export function generateNonce(wallet: string, expiresAtMs: number): string {
   const secret = getSecret()
-  const payload: NoncePayload = {
-    w: wallet,
-    exp: expiresAtMs,
-    r: `${Date.now()}:${Math.random()}`,
-    v: 1,
-  }
-  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
-  const sig = createHmac('sha256', secret).update(payloadB64).digest('base64url')
+  const buf = Buffer.alloc(NONCE_V2_BYTES)
+  buf.writeUInt8(NONCE_V2, 0)
+  buf.writeBigUInt64BE(BigInt(expiresAtMs), 1)
+  randomBytes(16).copy(buf, 9)
+  const payloadB64 = buf.toString('base64url')
+  const sig = createHmac('sha256', secret)
+    .update(`${wallet.trim()}|${payloadB64}`)
+    .digest('base64url')
   return `${payloadB64}.${sig}`
+}
+
+function parseV2NoncePayload(payloadB64: string, wallet: string): NoncePayload | null {
+  const buf = Buffer.from(payloadB64, 'base64url')
+  if (buf.length !== NONCE_V2_BYTES || buf.readUInt8(0) !== NONCE_V2) return null
+  const exp = Number(buf.readBigUInt64BE(1))
+  const r = buf.subarray(9, 25).toString('base64url')
+  if (!Number.isFinite(exp) || !r) return null
+  if (exp < Date.now()) return null
+  if (exp > Date.now() + NONCE_TTL_MS + 30_000) return null
+  return { w: wallet.trim(), exp, r, v: 2 }
+}
+
+function parseV1NoncePayload(payloadB64: string, wallet: string): NoncePayload | null {
+  const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as Partial<{
+    w: string
+    exp: number
+    r: string
+    v: number
+  }>
+  if (payload.v !== 1) return null
+  if (typeof payload.w !== 'string' || typeof payload.exp !== 'number' || typeof payload.r !== 'string') {
+    return null
+  }
+  if (!payload.r.trim()) return null
+  if (payload.w.trim() !== wallet.trim()) return null
+  if (payload.exp < Date.now()) return null
+  if (payload.exp > Date.now() + NONCE_TTL_MS + 30_000) return null
+  return { w: payload.w, exp: payload.exp, r: payload.r, v: 1 }
+}
+
+/** Detect nonce wire format without validating HMAC (for message-shape selection). */
+export function peekSignInNonceVersion(nonce: string): 1 | 2 | null {
+  const [payloadB64] = (nonce || '').split('.')
+  if (!payloadB64) return null
+  try {
+    const buf = Buffer.from(payloadB64, 'base64url')
+    if (buf.length === NONCE_V2_BYTES && buf.readUInt8(0) === NONCE_V2) return 2
+  } catch {
+    /* fall through */
+  }
+  try {
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as { v?: number }
+    if (payload.v === 1) return 1
+  } catch {
+    /* ignore */
+  }
+  return null
 }
 
 /** Validate HMAC + wallet + expiry; returns payload when valid. */
@@ -52,23 +105,22 @@ export function parseValidatedNonce(
   if (!payloadB64 || !sigB64) return null
   try {
     const secret = getSecret()
-    const expected = createHmac('sha256', secret).update(payloadB64).digest()
     const got = Buffer.from(sigB64, 'base64url')
-    if (expected.length !== got.length || !timingSafeEqual(expected, got)) return null
+    const version = peekSignInNonceVersion(nonce)
 
-    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as Partial<NoncePayload>
-    if (payload.v !== 1) return null
-    if (typeof payload.w !== 'string' || typeof payload.exp !== 'number' || typeof payload.r !== 'string') {
-      return null
+    if (version === 2) {
+      const expected = createHmac('sha256', secret).update(`${wallet.trim()}|${payloadB64}`).digest()
+      if (expected.length !== got.length || !timingSafeEqual(expected, got)) return null
+      return parseV2NoncePayload(payloadB64, wallet)
     }
-    if (!payload.r.trim()) return null
-    if (payload.w.trim() !== wallet.trim()) return null
-    if (payload.exp < Date.now()) return null
 
-    // Safety: don't accept extremely long-lived nonces even if signed
-    if (payload.exp > Date.now() + NONCE_TTL_MS + 30_000) return null
+    if (version === 1) {
+      const expected = createHmac('sha256', secret).update(payloadB64).digest()
+      if (expected.length !== got.length || !timingSafeEqual(expected, got)) return null
+      return parseV1NoncePayload(payloadB64, wallet)
+    }
 
-    return { w: payload.w, exp: payload.exp, r: payload.r, v: 1 }
+    return null
   } catch {
     return null
   }
@@ -136,7 +188,22 @@ export function parseNonceFromSignInMessage(message: string): string | null {
   return match?.[1]?.trim() ?? null
 }
 
-export function buildSignInMessage(wallet: string, nonce: string, expiresAt: Date): string {
+/**
+ * Compact printable-ASCII SIWS message for Ledger / hardware wallets.
+ * Keeps payload well under Solana off-chain HW limits (~1212 bytes).
+ */
+export function buildCompactSignInMessage(wallet: string, nonce: string, expiresAt: Date): string {
+  const host = signInSiteHost()
+  return [
+    `${host} wallet verify`,
+    `Wallet: ${wallet}`,
+    `Nonce: ${nonce}`,
+    `Exp: ${expiresAt.getTime()}`,
+  ].join('\n')
+}
+
+/** Legacy verbose SIWS message (v1 nonces still in flight during deploy). */
+export function buildLegacySignInMessage(wallet: string, nonce: string, expiresAt: Date): string {
   const host = signInSiteHost()
   return [
     `Verify wallet for ${host}`,
@@ -149,9 +216,15 @@ export function buildSignInMessage(wallet: string, nonce: string, expiresAt: Dat
   ].join('\n')
 }
 
+export function buildSignInMessage(wallet: string, nonce: string, expiresAt: Date): string {
+  const version = peekSignInNonceVersion(nonce)
+  if (version === 1) return buildLegacySignInMessage(wallet, nonce, expiresAt)
+  return buildCompactSignInMessage(wallet, nonce, expiresAt)
+}
+
 /**
  * Require the signed message to match the exact SIWS text we issue for this wallet + nonce
- * (host, wallet line, Valid until from the nonce expiry). Rejects shape/host/wallet mismatches.
+ * (host, wallet line, expiry from the nonce). Rejects shape/host/wallet mismatches.
  */
 export function messageMatchesIssuedSignIn(wallet: string, message: string, nonce: string): boolean {
   const payload = parseValidatedNonce(nonce, wallet)
@@ -163,6 +236,12 @@ export function messageMatchesIssuedSignIn(wallet: string, message: string, nonc
   } catch {
     return false
   }
+}
+
+/** Approximate UTF-8 byte length of a freshly issued SIWS message (for Ledger diagnostics). */
+export function measureSignInMessageBytes(wallet: string, expiresAtMs = Date.now() + NONCE_TTL_MS): number {
+  const nonce = generateNonce(wallet, expiresAtMs)
+  return Buffer.byteLength(buildSignInMessage(wallet, nonce, new Date(expiresAtMs)), 'utf8')
 }
 
 /**

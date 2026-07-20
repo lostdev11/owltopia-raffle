@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     }
 
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
-    const nonce = generateNestingSecurityAckNonce(wallet)
+    const nonce = generateNestingSecurityAckNonce(wallet, expiresAt.getTime())
     const message = buildNestingSecurityAckMessage(wallet, nonce, expiresAt)
 
     return NextResponse.json({

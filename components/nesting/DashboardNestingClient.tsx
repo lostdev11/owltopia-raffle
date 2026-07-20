@@ -1499,45 +1499,20 @@ export function DashboardNestingClient() {
     setSignInError(null)
     setSigningIn(true)
     try {
-      const addr = publicKey.toBase58()
-      const nonceRes = await fetch(nestingClientApiUrl(`/api/auth/nonce?wallet=${encodeURIComponent(addr)}`), {
-        credentials: 'include',
+      const { performSiwsSignIn } = await import('@/lib/client/siws-sign-in')
+      await performSiwsSignIn({
+        wallet: publicKey.toBase58(),
+        signMessage,
+        apiUrl: nestingClientApiUrl,
+        walletName: wallet?.adapter?.name,
       })
-      if (!nonceRes.ok) {
-        const data = await nonceRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Failed to get sign-in nonce')
-      }
-      const { message } = (await nonceRes.json()) as { message: string }
-      const messageBytes = new TextEncoder().encode(message)
-      const signature = await signMessage(messageBytes)
-      const signatureBase64 =
-        typeof signature === 'string'
-          ? btoa(signature)
-          : btoa(String.fromCharCode(...new Uint8Array(signature)))
-
-      const verifyRes = await fetch(nestingClientApiUrl('/api/auth/verify'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          wallet: addr,
-          message,
-          signature: signatureBase64,
-        }),
-      })
-
-      if (!verifyRes.ok) {
-        const data = await verifyRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Sign-in verification failed')
-      }
-
       await refreshAll()
     } catch (e) {
       setSignInError(formatNestingApiFetchError(e, 'generic'))
     } finally {
       setSigningIn(false)
     }
-  }, [publicKey, signMessage, refreshAll])
+  }, [publicKey, signMessage, wallet?.adapter?.name, refreshAll])
 
   const sendOnChainTokenStakeTransfer = useCallback(
     async (pool: StakingPoolRow, amountUi: string): Promise<string> => {
@@ -2847,16 +2822,21 @@ export function DashboardNestingClient() {
         </Button>
         <h1 className="text-2xl font-bold">Almost there</h1>
         <p className="text-muted-foreground">
-          Say hi with one wallet message so we can pull up your nests and show{' '}
+          Say hi with one short wallet message so we can pull up your nests and show{' '}
           <span className="font-medium text-foreground">Claim all</span> when OWL is ready—no gas fees, just a
           signature.
         </p>
-        {signInError && <p className="text-destructive text-sm">{signInError}</p>}
+        <p className="text-sm text-muted-foreground rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+          Using Ledger? Unlock it, open the Solana app (close Ledger Live), turn on Blind signing in the Solana app
+          settings, then approve the Sign Message prompt. On mobile, reconnect Bluetooth or open this page inside
+          Phantom/Solflare. On desktop, USB/WebHID is more reliable than Bluetooth.
+        </p>
+        {signInError && <p className="text-destructive text-sm whitespace-pre-wrap">{signInError}</p>}
         <Button onClick={() => void handleSignIn()} disabled={signingIn || !signMessage}>
           {signingIn ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              Signing in…
+              Waiting for wallet / Ledger…
             </>
           ) : (
             'Say hi with wallet'
