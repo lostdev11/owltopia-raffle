@@ -346,11 +346,13 @@ export function DashboardNestingClient() {
   }, [connected, publicKey])
 
   const applyPositionsPayload = useCallback(
-    (json: Record<string, unknown>) => {
+    (json: Record<string, unknown>, opts?: { showHealSuccess?: boolean }) => {
       setPositions(Array.isArray(json.positions) ? (json.positions as StakingPositionRow[]) : [])
       const healedCount =
         typeof json.healed_count === 'number' && json.healed_count > 0 ? json.healed_count : 0
-      if (healedCount > 0) {
+      // Silent refreshes (e.g. after a failed Confirm) must not overwrite an error modal
+      // with a delayed "Nest opened successfully" once background heal catches up.
+      if (healedCount > 0 && opts?.showHealSuccess !== false) {
         setSuccessNotice({
           placement: 'modal',
           title: healedCount === 1 ? 'Nest opened successfully' : 'Nests opened successfully',
@@ -407,7 +409,7 @@ export function DashboardNestingClient() {
       }
 
       setNeedsSignIn(false)
-      applyPositionsPayload(json)
+      applyPositionsPayload(json, { showHealSuccess: !opts?.silent })
       void loadClaimLedger()
       return true
     },

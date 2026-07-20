@@ -1,6 +1,7 @@
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import { StakingUserError } from '@/lib/nesting/errors'
+import { nestingNftAssetLabels } from '@/lib/nesting/gen1-staking-pools'
 import {
   assertWalletNftFrozenForNesting,
   readOwlClaimNftNestLockEligibilityWithRetry,
@@ -34,7 +35,7 @@ export async function assertNftNestOnChainLockHeld(params: {
   ownerWallet: string
   assetId: string
   collectionMint?: string | null
-  pool?: Pick<StakingPoolRow, 'nft_lock_standard' | 'asset_type' | 'collection_key'> | null
+  pool?: Pick<StakingPoolRow, 'nft_lock_standard' | 'asset_type' | 'collection_key' | 'slug'> | null
   repairMissingFreeze?: boolean
   /** Pay OWL rewards without forcing a wallet re-lock when the coin uses Owner freeze (thawed). */
   allowOwnerThawedForClaim?: boolean
@@ -46,6 +47,7 @@ export async function assertNftNestOnChainLockHeld(params: {
   }
 
   const pool = params.pool ?? null
+  const assetSingular = nestingNftAssetLabels(pool).singular
 
   if (params.repairMissingFreeze) {
     if (pool) {
@@ -60,6 +62,7 @@ export async function assertNftNestOnChainLockHeld(params: {
         ownerWallet,
         assetId,
         collectionMint: params.collectionMint,
+        assetSingular,
       })
     }
     return
@@ -89,7 +92,7 @@ export async function assertNftNestOnChainLockHeld(params: {
   }
 
   throw new StakingUserError(
-    'This Owl Nest coin is not locked on-chain, so it cannot earn or claim until the nest lock is restored. Finish opening the nest in your wallet, or contact support.',
+    `This ${assetSingular} is not locked on-chain, so it cannot earn or claim until the nest lock is restored. Finish opening the nest in your wallet, or contact support.`,
     400
   )
 }
@@ -118,7 +121,7 @@ export function assertPoolConfiguredForOnChainNftFreeze(pool: StakingPoolRow): v
     !poolUsesOnChainNftFreezeLock(pool)
   ) {
     throw new StakingUserError(
-      'This Owl Nest perch must use on-chain NFT locks before new nests can open. Contact support.',
+      'This nest perch must use on-chain NFT locks before new nests can open. Contact support.',
       503
     )
   }
