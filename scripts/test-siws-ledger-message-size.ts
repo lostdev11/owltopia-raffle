@@ -80,6 +80,16 @@ function main() {
   const rejectErr = formatSignMessageError(new Error('User rejected the request'), { context: 'sign-in' })
   assert.equal(rejectErr, 'Sign-in cancelled in wallet.')
 
+  const phantomCancel = formatSignMessageError(new Error('Transaction cancelled'), {
+    walletName: 'Phantom',
+    context: 'sign-in',
+  })
+  assert.ok(
+    phantomCancel.toLowerCase().includes('ledger') || phantomCancel.toLowerCase().includes('sign with ledger'),
+    phantomCancel
+  )
+  assert.ok(!phantomCancel.toLowerCase().startsWith('transaction cancelled'), phantomCancel)
+
   // Memo-tx fallback (Ledger path): sign a memo transaction, do not broadcast.
   const fakeBlockhash = Keypair.generate().publicKey.toBase58()
   const tx = buildSignInMemoTransaction({ wallet: kp.publicKey, message, blockhash: fakeBlockhash })

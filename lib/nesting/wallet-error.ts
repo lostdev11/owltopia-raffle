@@ -67,6 +67,18 @@ export function formatNestingWalletError(
   const asset = assetSingular.trim() || 'NFT'
 
   if (isNestingWalletUserRejection(err)) {
+    // Phantom/Solflare + Ledger often emits "Transaction cancelled" even after the user OK'd the device.
+    if (
+      (hay.includes('transaction cancelled') || hay.includes('transaction canceled')) &&
+      !hay.includes('user rejected') &&
+      !hay.includes('user declined') &&
+      !hay.includes('rejected the request')
+    ) {
+      return (
+        `Wallet reported the nest lock as cancelled after Ledger approval — common with Ledger via Phantom/Solflare on Metaplex nest locks. ` +
+        `Nest one ${asset} at a time over USB, keep the Solana app open (Ledger Live closed), or nest from a hot wallet.`
+      )
+    }
     return 'Transaction cancelled in wallet.'
   }
 

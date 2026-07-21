@@ -2836,11 +2836,10 @@ export function DashboardNestingClient() {
           signature.
         </p>
         <p className="text-sm text-muted-foreground rounded-md border border-border/60 bg-muted/30 px-3 py-2">
-          Using Ledger? Phantom/Solflare often never show Sign Message on the device (even with Blind signing on).
-          Unlock Ledger, open the Solana app, close Ledger Live, then tap{' '}
-          <span className="font-medium text-foreground">Sign with Ledger transaction</span> below — approve the memo
-          on the device. It is not broadcast, so Owltopia does not charge a fee. USB on desktop is more reliable than
-          Bluetooth.
+          Using Ledger? If “Say hi” shows Transaction cancelled right after you OK the device, that is a Phantom/Solflare Sign Message bug — tap{' '}
+          <span className="font-medium text-foreground">Sign with Ledger transaction</span> instead. Unlock Ledger, open
+          the Solana app, close Ledger Live. Approve the memo on the device (not broadcast; no Owltopia fee). USB on
+          desktop beats Bluetooth.
         </p>
         {signInError && <p className="text-destructive text-sm whitespace-pre-wrap">{signInError}</p>}
         <div className="flex flex-col sm:flex-row gap-2">
