@@ -689,14 +689,15 @@ export function WalletConnectButton() {
     sessionStorage.removeItem('mobile_wallet_redirect_url')
   }, [disconnect, clearWalletSelectionStorage])
 
-  // Ensure button is properly initialized and clickable when not connected
+  // Ensure desktop WalletMultiButton stays clickable when not connected.
+  // On mobile we render a dedicated button (see below) so this only applies to desktop.
   useEffect(() => {
     if (!mounted || !buttonRef.current || connected) {
       return
     }
+    if (isMobileDevice()) return
 
     const timeoutId = setTimeout(() => {
-      // Ensure the button is fully rendered and interactive
       const button = buttonRef.current?.querySelector('button')
       if (!button) {
         if (process.env.NODE_ENV === 'development') {
@@ -705,109 +706,76 @@ export function WalletConnectButton() {
         return
       }
 
-      // Ensure the button can receive clicks/touches
       button.style.pointerEvents = 'auto'
       button.style.cursor = 'pointer'
       button.style.touchAction = 'manipulation'
       button.style.position = 'relative'
       button.style.zIndex = '10'
-      
-      // Remove any disabled state
+
       if (button.hasAttribute('disabled')) {
         button.removeAttribute('disabled')
       }
-      
-      // Ensure the wrapper allows pointer events
+
       if (buttonRef.current) {
         buttonRef.current.style.pointerEvents = 'auto'
         buttonRef.current.style.zIndex = '10'
       }
-
-      // Ensure the button opens the modal on first click for both mobile and desktop
-      // Let WalletMultiButton handle the click naturally - it will open modal when not connected
-      // No need to intercept - WalletMultiButton already handles this correctly
     }, 200)
-    
+
     return () => {
       clearTimeout(timeoutId)
     }
-  }, [mounted, connected, setVisible])
+  }, [mounted, connected])
 
-  // When not connected, any click on the wrapper opens the modal (or on mobile, offers in-app first)
-  // On mobile: offer "Open in Solflare/Phantom" so the whole flow stays in-app; else store redirect URL and open modal
-  const handleWrapperClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (!mounted || connected || connecting) return
-      if (!isMobileDevice()) return
-      if (isMobileDevice()) {
-        const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
-        if (currentUrl) {
-          const keys = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
-          keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
-          sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
-        }
-        // Seeker / Solana Mobile Web Shell: use built-in MWA wallet — skip Phantom/Solflare redirect.
-        if (isSolanaMobileEnvironment()) {
-          setVisible(true)
-          return
-        }
-        if (isMobileWebBrowser()) {
-          setShowMobileInAppDialog(true)
-          return
-        }
-      }
-      setVisible(true)
-    },
-    [mounted, connected, connecting, setVisible]
-  )
+  // Debounce so touchend + pointerup + click (and SolflareTouchFix synthetic click) only run once.
+  const mobileConnectGestureAtRef = useRef(0)
 
-  // Solflare in-app browser (mobile) often doesn't fire click from touch; pointerup fires reliably
-  const handleWrapperPointerUp = useCallback(
-    (e: React.PointerEvent) => {
-      if (!isMobileDevice()) return
-      if (e.button !== 0 && e.button !== undefined) return
-      if (!mounted || connected || connecting) return
-      const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
-      if (currentUrl) {
-        const keys = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
-        keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
-        sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
-      }
-      if (isSolanaMobileEnvironment()) {
-        setVisible(true)
-        return
-      }
-      if (isMobileWebBrowser()) {
-        setShowMobileInAppDialog(true)
-        return
-      }
-      setVisible(true)
-    },
-    [mounted, connected, connecting, setVisible]
-  )
+  /**
+   * Mobile Safari/Chrome: WalletMultiButton opens the adapter modal on its own click, while our
+   * wrapper also opens the in-app browser dialog — both appear and fight. Own the gesture on mobile
+   * with a plain button so only one UI shows: in-app redirect dialog, or adapter modal.
+   */
+  const openMobileConnectFlow = useCallback(() => {
+    if (!mounted || connected || connecting) return
+    if (!isMobileDevice()) return
 
-  // Backup for mobile WebViews (e.g. Solflare) where click/pointerUp sometimes don't fire; touchEnd opens modal
-  const handleWrapperTouchEnd = useCallback(
-    (e: React.TouchEvent) => {
-      if (!isMobileDevice()) return
-      if (!mounted || connected || connecting) return
-      const currentUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
-      if (currentUrl) {
-        const keys = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile'].map((n) => `${n}_redirect_url`)
-        keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
-        sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
-      }
-      if (isSolanaMobileEnvironment()) {
-        setVisible(true)
-        return
-      }
-      if (isMobileWebBrowser()) {
-        setShowMobileInAppDialog(true)
-        return
-      }
+    const now = Date.now()
+    if (now - mobileConnectGestureAtRef.current < 500) return
+    mobileConnectGestureAtRef.current = now
+
+    const currentUrl =
+      typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : ''
+    if (currentUrl) {
+      const keys = ['solflare', 'phantom', 'backpack', 'coinbase', 'trust', 'solana_mobile'].map(
+        (n) => `${n}_redirect_url`
+      )
+      keys.forEach((key) => sessionStorage.setItem(key, currentUrl))
+      sessionStorage.setItem('mobile_wallet_redirect_url', currentUrl)
+    }
+
+    // Seeker / Solana Mobile Web Shell: use built-in MWA wallet — skip Phantom/Solflare redirect.
+    if (isSolanaMobileEnvironment()) {
+      setShowMobileInAppDialog(false)
       setVisible(true)
+      return
+    }
+    if (isMobileWebBrowser()) {
+      // Keep adapter modal closed while the in-app chooser is open (Safari dual-modal bug).
+      setVisible(false)
+      setShowMobileInAppDialog(true)
+      return
+    }
+    setShowMobileInAppDialog(false)
+    setVisible(true)
+  }, [mounted, connected, connecting, setVisible])
+
+  const handleMobileConnectClick = useCallback(
+    (e: React.MouseEvent | React.PointerEvent | React.TouchEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      openMobileConnectFlow()
     },
-    [mounted, connected, connecting, setVisible]
+    [openMobileConnectFlow]
   )
 
   return (
@@ -822,14 +790,14 @@ export function WalletConnectButton() {
           position: 'relative',
           zIndex: 10,
         }}
-        onClick={handleWrapperClick}
-        onPointerUp={handleWrapperPointerUp}
-        onTouchEnd={handleWrapperTouchEnd}
-        tabIndex={connected ? -1 : 0}
+        tabIndex={connected || !mounted ? -1 : isMobileDevice() ? -1 : 0}
         onKeyDown={(e) => {
           if (connected) return
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
+          if (e.key !== 'Enter' && e.key !== ' ') return
+          e.preventDefault()
+          if (isMobileDevice()) {
+            openMobileConnectFlow()
+          } else {
             setVisible(true)
           }
         }}
@@ -859,6 +827,40 @@ export function WalletConnectButton() {
             publicKey={publicKey}
             onDisconnect={handleDisconnect}
           />
+        ) : isMobileDevice() ? (
+          <>
+            {/* Plain button — do not mount WalletMultiButton on mobile or both modals open. */}
+            <button
+              type="button"
+              className="wallet-adapter-button"
+              onClick={handleMobileConnectClick}
+              onPointerUp={(e) => {
+                // Solflare / some WebViews: click is unreliable; pointerup is.
+                if (e.button !== 0 && e.button !== undefined) return
+                handleMobileConnectClick(e)
+              }}
+              onTouchEnd={handleMobileConnectClick}
+              disabled={connecting}
+              aria-label="Connect wallet"
+            >
+              {connecting ? 'Connecting...' : 'Select Wallet'}
+            </button>
+            {showCancelButton && connecting && !connected && (
+              <Button
+                onClick={handleCancelConnection}
+                variant="outline"
+                size="sm"
+                className="ml-2"
+                style={{
+                  fontSize: '12px',
+                  padding: '6px 12px',
+                  height: 'auto',
+                }}
+              >
+                Cancel
+              </Button>
+            )}
+          </>
         ) : (
           <>
             <WalletMultiButton key={remountKey} />
@@ -882,7 +884,14 @@ export function WalletConnectButton() {
       </div>
       
       {/* Mobile: offer in-app first so connection stays entirely in-app (no redirect out and back) */}
-      <Dialog open={showMobileInAppDialog} onOpenChange={setShowMobileInAppDialog}>
+      <Dialog
+        open={showMobileInAppDialog}
+        onOpenChange={(open) => {
+          setShowMobileInAppDialog(open)
+          // Never let the adapter modal sit underneath this dialog.
+          if (open) setVisible(false)
+        }}
+      >
         <DialogContent className="sm:max-w-[500px]" style={{ zIndex: 10000 }}>
           <DialogHeader>
             <DialogTitle>Connect wallet</DialogTitle>
