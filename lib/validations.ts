@@ -133,6 +133,13 @@ export const authVerifyBody = z.object({
   signature: z.string().min(1),
 })
 
+/** Ledger fallback: signed memo transaction (not broadcast) proving SIWS message. */
+export const authVerifyTxBody = z.object({
+  wallet: solanaAddress,
+  message: z.string().min(1).max(2000),
+  signedTransaction: z.string().min(64).max(3000),
+})
+
 export const owlCenterSubmitBody = z.object({
   collection_name: z.string().trim().min(1).max(120),
   symbol: z.string().trim().min(1).max(16),

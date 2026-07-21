@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useWallet } from '@solana/wallet-adapter-react'
+import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { ArrowLeft, ChevronDown, Globe, Loader2, PauseCircle, Plus, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -56,7 +56,8 @@ const emptyForm = () => ({
 })
 
 export function AdminNestingClient() {
-  const { publicKey, connected, signMessage, wallet } = useWallet()
+  const { publicKey, connected, signMessage, signTransaction, wallet } = useWallet()
+  const { connection } = useConnection()
   const visibilityTick = useVisibilityTick()
   const walletAddr = publicKey?.toBase58() ?? ''
 
@@ -353,28 +354,37 @@ export function AdminNestingClient() {
     }
   }, [])
 
-  const handleSignIn = useCallback(async () => {
-    if (!publicKey || !signMessage) {
-      setSignInError('Your wallet does not support message signing.')
-      return
-    }
-    setSignInError(null)
-    setSigningIn(true)
-    try {
-      const { performSiwsSignIn } = await import('@/lib/client/siws-sign-in')
-      await performSiwsSignIn({
-        wallet: publicKey.toBase58(),
-        signMessage,
-        walletName: wallet?.adapter?.name,
-      })
-      setSessionReady(true)
-      await fetchPools()
-    } catch (e) {
-      setSignInError(e instanceof Error ? e.message : 'Sign-in failed')
-    } finally {
-      setSigningIn(false)
-    }
-  }, [publicKey, signMessage, wallet?.adapter?.name, fetchPools])
+  const handleSignIn = useCallback(
+    async (opts?: { preferTx?: boolean }) => {
+      if (!publicKey || (!signMessage && !signTransaction)) {
+        setSignInError('Your wallet does not support signing.')
+        return
+      }
+      setSignInError(null)
+      setSigningIn(true)
+      try {
+        const { performSiwsSignIn } = await import('@/lib/client/siws-sign-in')
+        await performSiwsSignIn({
+          wallet: publicKey.toBase58(),
+          signMessage,
+          signTransaction,
+          preferTx: opts?.preferTx,
+          walletName: wallet?.adapter?.name,
+          getBlockhash: async () => {
+            const latest = await connection.getLatestBlockhash('confirmed')
+            return latest.blockhash
+          },
+        })
+        setSessionReady(true)
+        await fetchPools()
+      } catch (e) {
+        setSignInError(e instanceof Error ? e.message : 'Sign-in failed')
+      } finally {
+        setSigningIn(false)
+      }
+    },
+    [publicKey, signMessage, signTransaction, wallet?.adapter?.name, connection, fetchPools]
+  )
 
   const createQuickPool = async () => {
     const name = quickName.trim()
@@ -898,11 +908,26 @@ export function AdminNestingClient() {
         </Button>
         <h1 className="text-2xl font-semibold">Owl Nesting admin</h1>
         <p className="text-muted-foreground text-sm">Sign in to create and edit staking pools.</p>
-        {signInError && <p className="text-destructive text-sm">{signInError}</p>}
-        <Button onClick={() => void handleSignIn()} disabled={signingIn || !signMessage}>
-          {signingIn ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-          Sign in with wallet
-        </Button>
+        {signInError && <p className="text-destructive text-sm whitespace-pre-wrap">{signInError}</p>}
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button
+            onClick={() => void handleSignIn()}
+            disabled={signingIn || (!signMessage && !signTransaction)}
+          >
+            {signingIn ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            Sign in with wallet
+          </Button>
+          {signTransaction ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleSignIn({ preferTx: true })}
+              disabled={signingIn}
+            >
+              Sign with Ledger transaction
+            </Button>
+          ) : null}
+        </div>
       </div>
     )
   }
