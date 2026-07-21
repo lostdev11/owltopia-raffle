@@ -355,7 +355,7 @@ export function AdminNestingClient() {
   }, [])
 
   const handleSignIn = useCallback(
-    async (opts?: { preferTx?: boolean }) => {
+    async (opts?: { preferTx?: boolean; preferMessage?: boolean }) => {
       if (!publicKey || (!signMessage && !signTransaction)) {
         setSignInError('Your wallet does not support signing.')
         return
@@ -364,11 +364,14 @@ export function AdminNestingClient() {
       setSigningIn(true)
       try {
         const { performSiwsSignIn } = await import('@/lib/client/siws-sign-in')
+        const useTx =
+          opts?.preferTx === true ||
+          (opts?.preferMessage !== true && Boolean(signTransaction))
         await performSiwsSignIn({
           wallet: publicKey.toBase58(),
           signMessage,
           signTransaction,
-          preferTx: opts?.preferTx,
+          preferTx: useTx,
           walletName: wallet?.adapter?.name,
           getBlockhash: async () => {
             const latest = await connection.getLatestBlockhash('confirmed')
@@ -911,20 +914,20 @@ export function AdminNestingClient() {
         {signInError && <p className="text-destructive text-sm whitespace-pre-wrap">{signInError}</p>}
         <div className="flex flex-col sm:flex-row gap-2">
           <Button
-            onClick={() => void handleSignIn()}
+            onClick={() => void handleSignIn(signTransaction ? { preferTx: true } : undefined)}
             disabled={signingIn || (!signMessage && !signTransaction)}
           >
             {signingIn ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Sign in with wallet
+            {signTransaction ? 'Sign with Ledger / wallet' : 'Sign in with wallet'}
           </Button>
-          {signTransaction ? (
+          {signTransaction && signMessage ? (
             <Button
               type="button"
               variant="outline"
-              onClick={() => void handleSignIn({ preferTx: true })}
+              onClick={() => void handleSignIn({ preferMessage: true })}
               disabled={signingIn}
             >
-              Sign with Ledger transaction
+              Try message sign-in instead
             </Button>
           ) : null}
         </div>

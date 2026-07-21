@@ -99,6 +99,15 @@ function main() {
   )
   assert.ok(!phantomCancel.toLowerCase().startsWith('transaction cancelled'), phantomCancel)
 
+  const apduErr = formatSignMessageError(
+    new Error(
+      '[ledgerUnknownSignError] [Ledger Sign Error]: Ledger device: UNKNOWN_ERROR (0x6a81)'
+    ),
+    { walletName: 'Phantom', context: 'sign-in' }
+  )
+  assert.ok(apduErr.includes('0x6a81'), apduErr)
+  assert.ok(apduErr.toLowerCase().includes('ledger'), apduErr)
+
   // Memo-tx fallback (Ledger path): legacy signed memo, do not broadcast.
   const fakeBlockhash = Keypair.generate().publicKey.toBase58()
   const tx = buildSignInMemoTransaction({ wallet: kp.publicKey, message, blockhash: fakeBlockhash })

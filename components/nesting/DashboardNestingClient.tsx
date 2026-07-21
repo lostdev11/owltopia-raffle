@@ -1492,7 +1492,7 @@ export function DashboardNestingClient() {
   const nestsPendingOnly = pendingOpenCount > 0 && totals.activeCount === 0
 
   const handleSignIn = useCallback(
-    async (opts?: { preferTx?: boolean }) => {
+    async (opts?: { preferTx?: boolean; preferMessage?: boolean }) => {
       if (!publicKey || (!signMessage && !signTransaction)) {
         setSignInError('Your wallet does not support signing.')
         return
@@ -1501,11 +1501,15 @@ export function DashboardNestingClient() {
       setSigningIn(true)
       try {
         const { performSiwsSignIn } = await import('@/lib/client/siws-sign-in')
+        // Nesting default: memo-tx first when available — Ledger Sign Message hits 0x6a81 via Phantom/Solflare.
+        const useTx =
+          opts?.preferTx === true ||
+          (opts?.preferMessage !== true && Boolean(signTransaction))
         await performSiwsSignIn({
           wallet: publicKey.toBase58(),
           signMessage,
           signTransaction,
-          preferTx: opts?.preferTx,
+          preferTx: useTx,
           apiUrl: nestingClientApiUrl,
           walletName: wallet?.adapter?.name,
           getBlockhash: async () => {
@@ -2831,20 +2835,20 @@ export function DashboardNestingClient() {
         </Button>
         <h1 className="text-2xl font-bold">Almost there</h1>
         <p className="text-muted-foreground">
-          Say hi with one short wallet message so we can pull up your nests and show{' '}
-          <span className="font-medium text-foreground">Claim all</span> when OWL is ready—no gas fees, just a
-          signature.
+          Confirm this wallet so we can pull up your nests and show{' '}
+          <span className="font-medium text-foreground">Claim all</span> when OWL is ready. Ledger users: we use a
+          short memo transaction (not broadcast — no Owltopia fee).
         </p>
         <p className="text-sm text-muted-foreground rounded-md border border-border/60 bg-muted/30 px-3 py-2">
-          Using Ledger? If “Say hi” shows Transaction cancelled right after you OK the device, that is a Phantom/Solflare Sign Message bug — tap{' '}
-          <span className="font-medium text-foreground">Sign with Ledger transaction</span> instead. Unlock Ledger, open
-          the Solana app, close Ledger Live. Approve the memo on the device (not broadcast; no Owltopia fee). USB on
-          desktop beats Bluetooth.
+          Using Ledger? Phantom/Solflare Sign Message fails with{' '}
+          <span className="font-medium text-foreground">0x6a81</span> on many devices. Tap the green button below —
+          unlock Ledger, open the Solana app, close Ledger Live, prefer USB on desktop, then approve the memo on the
+          device.
         </p>
         {signInError && <p className="text-destructive text-sm whitespace-pre-wrap">{signInError}</p>}
         <div className="flex flex-col sm:flex-row gap-2">
           <Button
-            onClick={() => void handleSignIn()}
+            onClick={() => void handleSignIn(signTransaction ? { preferTx: true } : undefined)}
             disabled={signingIn || (!signMessage && !signTransaction)}
           >
             {signingIn ? (
@@ -2852,19 +2856,21 @@ export function DashboardNestingClient() {
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 Waiting for wallet / Ledger…
               </>
+            ) : signTransaction ? (
+              'Sign with Ledger / wallet'
             ) : (
               'Say hi with wallet'
             )}
           </Button>
-          {signTransaction ? (
+          {signTransaction && signMessage ? (
             <Button
               type="button"
               variant="outline"
-              onClick={() => void handleSignIn({ preferTx: true })}
+              onClick={() => void handleSignIn({ preferMessage: true })}
               disabled={signingIn}
               className="min-h-[44px]"
             >
-              Sign with Ledger transaction
+              Try message sign-in instead
             </Button>
           ) : null}
         </div>
