@@ -63,8 +63,13 @@ export async function POST(request: NextRequest) {
       signedTransactionBase64: signedTransaction,
     })
     if (!result.valid) {
+      console.warn('[auth/verify-tx] reject:', result.error, {
+        walletPrefix: walletStr.slice(0, 4),
+        txBytes: Buffer.from(signedTransaction, 'base64').length,
+        messageBytes: Buffer.byteLength(messageStr, 'utf8'),
+      })
       return NextResponse.json(
-        { error: result.error || 'Invalid signed transaction' },
+        { error: result.error || 'Invalid signed transaction', code: 'verify_tx_failed' },
         { status: 400 }
       )
     }

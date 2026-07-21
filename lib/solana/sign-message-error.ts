@@ -69,6 +69,7 @@ export function isLikelyHardwareWalletSignMessageFailure(err: unknown): boolean 
   const hay = errorHaystack(err)
   return (
     isAmbiguousLedgerSignCancel(err) ||
+    isLedgerOffchainSignApduError(err) ||
     hay.includes('ledger') ||
     hay.includes('blind signing') ||
     hay.includes('blind-signing') ||
@@ -90,10 +91,25 @@ export function isLikelyHardwareWalletSignMessageFailure(err: unknown): boolean 
   )
 }
 
+/**
+ * Ledger APDU 0x6a81 / ledgerUnknownSignError — device rejected off-chain signMessage
+ * (Phantom/Solflare formatting or unsupported path). Memo-tx sign-in is the workaround.
+ */
+export function isLedgerOffchainSignApduError(err: unknown): boolean {
+  const hay = errorHaystack(err)
+  return (
+    hay.includes('0x6a81') ||
+    hay.includes('ledgerunknownsignerror') ||
+    hay.includes('ledger sign error') ||
+    (hay.includes('unknown_error') && hay.includes('ledger')) ||
+    (hay.includes('unknown error') && hay.includes('ledger'))
+  )
+}
+
 const LEDGER_SIGN_MESSAGE_HINT =
-  'Ledger tip: unlock the device, open the Solana app (close Ledger Live), then tap “Sign with Ledger transaction” on My nest (memo is not broadcast). ' +
-  'On phone, reconnect Bluetooth or open this site inside Phantom/Solflare. On desktop, prefer USB/WebHID. ' +
-  'If the device still never prompts, sign in from a hot wallet, then switch back for nesting.'
+  'Ledger cannot complete Phantom/Solflare Sign Message (error 0x6a81 is common). ' +
+  'Tap “Sign with Ledger transaction” on My nest — approve the memo on the device (not broadcast, no Owltopia fee). ' +
+  'Unlock Ledger, open the Solana app, close Ledger Live; prefer USB on desktop.'
 
 /**
  * Format a `signMessage` failure for SIWS / nesting “say hi” / safeguards.
@@ -122,14 +138,16 @@ export function formatSignMessageError(
     return `${walletLabel} does not support message signing. Try Phantom or Solflare, or a different account.`
   }
 
-  if (isLikelyHardwareWalletSignMessageFailure(err)) {
+  if (isLedgerOffchainSignApduError(err) || isLikelyHardwareWalletSignMessageFailure(err)) {
     const lead =
       context === 'safeguards'
         ? 'Hardware wallet did not complete the safeguards signature.'
         : context === 'sign-in'
-          ? isAmbiguousLedgerSignCancel(err)
-            ? 'Ledger approved something, but Phantom/Solflare cancelled the Sign Message step (common with hardware wallets).'
-            : 'Hardware wallet did not complete the nest sign-in message.'
+          ? isLedgerOffchainSignApduError(err)
+            ? 'Ledger rejected Sign Message (0x6a81) — Phantom/Solflare cannot finish off-chain signing on this device.'
+            : isAmbiguousLedgerSignCancel(err)
+              ? 'Ledger approved something, but Phantom/Solflare cancelled the Sign Message step (common with hardware wallets).'
+              : 'Hardware wallet did not complete the nest sign-in message.'
           : 'Hardware wallet did not complete the message signature.'
     return `${lead} ${LEDGER_SIGN_MESSAGE_HINT}`
   }
