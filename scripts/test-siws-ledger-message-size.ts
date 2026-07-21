@@ -6,7 +6,13 @@
  */
 import assert from 'node:assert/strict'
 import nacl from 'tweetnacl'
-import { Keypair } from '@solana/web3.js'
+import {
+  Keypair,
+  PublicKey,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from '@solana/web3.js'
 import {
   buildSignInMessage,
   consumeNonce,
@@ -19,7 +25,8 @@ import {
 } from '../lib/auth-server'
 import {
   buildSignInMemoTransaction,
-  serializeUnsignedSignInMemoTransaction,
+  serializeSignedSignInTransaction,
+  SIGN_IN_MEMO_PROGRAM_ID,
   verifySignInMemoTransaction,
 } from '../lib/auth-tx-sign-in'
 import { formatSignMessageError } from '../lib/solana/sign-message-error'
@@ -27,6 +34,8 @@ import { signMessageSignatureToBase64 } from '../lib/solana/sign-message-signatu
 
 /** Solana off-chain format 0/1 hardware limit (preamble + body). Stay comfortably under. */
 const LEDGER_SAFE_MESSAGE_BYTES = 900
+
+const COMPUTE_BUDGET_PROGRAM_ID = new PublicKey('ComputeBudget111111111111111111111111111111')
 
 function main() {
   if (!process.env.SESSION_SECRET && !process.env.AUTH_SECRET) {
@@ -90,11 +99,11 @@ function main() {
   )
   assert.ok(!phantomCancel.toLowerCase().startsWith('transaction cancelled'), phantomCancel)
 
-  // Memo-tx fallback (Ledger path): sign a memo transaction, do not broadcast.
+  // Memo-tx fallback (Ledger path): legacy signed memo, do not broadcast.
   const fakeBlockhash = Keypair.generate().publicKey.toBase58()
   const tx = buildSignInMemoTransaction({ wallet: kp.publicKey, message, blockhash: fakeBlockhash })
   tx.partialSign(kp)
-  const signedB64 = serializeUnsignedSignInMemoTransaction(tx)
+  const signedB64 = serializeSignedSignInTransaction(tx)
   const txOk = verifySignInMemoTransaction({
     wallet,
     message,
@@ -109,6 +118,32 @@ function main() {
   })
   assert.equal(txBad.valid, false)
 
+  // Solflare/Phantom often return VersionedTransaction + ComputeBudget — must still verify.
+  const setCuLimit = new TransactionInstruction({
+    programId: COMPUTE_BUDGET_PROGRAM_ID,
+    keys: [],
+    data: Buffer.from([2, 0x40, 0x0d, 0x03, 0x00]), // SetComputeUnitLimit-ish bytes (shape only)
+  })
+  const memoIx = new TransactionInstruction({
+    keys: [],
+    programId: SIGN_IN_MEMO_PROGRAM_ID,
+    data: Buffer.from(message, 'utf8'),
+  })
+  const msg = new TransactionMessage({
+    payerKey: kp.publicKey,
+    recentBlockhash: fakeBlockhash,
+    instructions: [setCuLimit, memoIx],
+  }).compileToV0Message()
+  const vtx = new VersionedTransaction(msg)
+  vtx.sign([kp])
+  const vtxB64 = serializeSignedSignInTransaction(vtx)
+  const vtxOk = verifySignInMemoTransaction({
+    wallet,
+    message,
+    signedTransactionBase64: vtxB64,
+  })
+  assert.equal(vtxOk.valid, true, vtxOk.error)
+
   console.log(
     JSON.stringify(
       {
@@ -117,6 +152,7 @@ function main() {
         messageBytes: bytes,
         messagePreview: message.split('\n')[0],
         memoTxFallback: true,
+        versionedWithComputeBudget: true,
       },
       null,
       2

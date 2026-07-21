@@ -1,10 +1,10 @@
 'use client'
 
-import type { Transaction } from '@solana/web3.js'
+import type { Transaction, VersionedTransaction } from '@solana/web3.js'
 import { nestingClientApiUrl } from '@/lib/nesting/fetch-json'
 import {
   buildSignInMemoTransaction,
-  serializeUnsignedSignInMemoTransaction,
+  serializeSignedSignInTransaction,
 } from '@/lib/auth-tx-sign-in'
 import {
   formatSignMessageError,
@@ -17,7 +17,9 @@ import { signMessageSignatureToBase64 } from '@/lib/solana/sign-message-signatur
 export const SIWS_SIGN_TIMEOUT_MS = 180_000
 
 export type SiwsSignMessageFn = (message: Uint8Array) => Promise<Uint8Array>
-export type SiwsSignTransactionFn = (transaction: Transaction) => Promise<Transaction>
+export type SiwsSignTransactionFn = (
+  transaction: Transaction
+) => Promise<Transaction | VersionedTransaction>
 
 export type PerformSiwsSignInParams = {
   wallet: string
@@ -166,7 +168,7 @@ async function signInViaMemoTransaction(params: {
     blockhash,
   })
 
-  let signed: Transaction
+  let signed: Transaction | VersionedTransaction
   try {
     signed = await withTimeout(
       params.signTransaction(tx),
@@ -183,7 +185,14 @@ async function signInViaMemoTransaction(params: {
     )
   }
 
-  const signedTransactionBase64 = serializeUnsignedSignInMemoTransaction(signed)
+  let signedTransactionBase64: string
+  try {
+    signedTransactionBase64 = serializeSignedSignInTransaction(signed)
+  } catch (e) {
+    throw new Error(
+      `Could not read the signed Ledger transaction (${e instanceof Error ? e.message : 'serialize failed'}). Try Phantom or Solflare on desktop USB, then tap Sign with Ledger transaction again.`
+    )
+  }
   await verifyWithSignedMemoTx({
     walletAddr: params.walletAddr,
     message: params.message,

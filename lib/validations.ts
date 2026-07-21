@@ -137,7 +137,8 @@ export const authVerifyBody = z.object({
 export const authVerifyTxBody = z.object({
   wallet: solanaAddress,
   message: z.string().min(1).max(2000),
-  signedTransaction: z.string().min(64).max(3000),
+  /** Base64 wire bytes — versioned + compute-budget txs need headroom over legacy size. */
+  signedTransaction: z.string().min(64).max(8000),
 })
 
 export const owlCenterSubmitBody = z.object({
