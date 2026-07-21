@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { PublicKey, Transaction } from '@solana/web3.js'
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -89,7 +90,8 @@ function parseVoteLockBreakdown(raw: unknown): VoteLockBreakdownRow[] {
  */
 export function CouncilOwlEscrowPanel({ sessionWallet }: CouncilOwlEscrowPanelProps) {
   const { connection } = useConnection()
-  const { publicKey, connected, sendTransaction, signMessage } = useWallet()
+  const { publicKey, connected, signMessage } = useWallet()
+  const sendTransaction = useSendTransactionForWallet()
   const { signIn: siwsSignIn, signingIn: siwsSigningIn, error: siwsError } = useSiwsSignIn()
   const wallet = publicKey?.toBase58() ?? ''
 

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { Loader2 } from 'lucide-react'
 
 import { DeployButton } from '@/components/owl-center/DeployButton'
@@ -29,7 +30,8 @@ function statusBadge(m: ManageGen2Milestone): { label: string; cls: string } {
 
 export function AdminGen2MintMilestones() {
   const { connection } = useConnection()
-  const { publicKey, sendTransaction } = useWallet()
+  const { publicKey } = useWallet()
+  const sendTransaction = useSendTransactionForWallet()
 
   const [payload, setPayload] = useState<ManagePayload | null>(null)
   const [loading, setLoading] = useState(false)

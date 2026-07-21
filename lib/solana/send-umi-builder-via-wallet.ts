@@ -3,8 +3,8 @@
 import type { TransactionBuilder, Umi } from '@metaplex-foundation/umi'
 import { toWeb3JsTransaction } from '@metaplex-foundation/umi-web3js-adapters'
 import type { Connection, SendOptions, TransactionSignature } from '@solana/web3.js'
-import { VersionedTransaction } from '@solana/web3.js'
-import type { Transaction } from '@solana/web3.js'
+import type { Transaction, VersionedTransaction } from '@solana/web3.js'
+import { assertTransactionSimulatesClean } from '@/lib/solana/phantom-presimulate'
 
 export type WalletSendTransactionFn = (
   transaction: Transaction | VersionedTransaction,
@@ -35,7 +35,9 @@ export async function sendUmiBuilderViaWalletSignAndSend(params: {
 
   // Phantom guidance: simulate with sigVerify:false before the wallet prompt so failed txs
   // do not surface as "dApp could be malicious" simulation warnings.
-  await assertTransactionSimulatesClean(params.connection, web3Tx)
+  await assertTransactionSimulatesClean(params.connection, web3Tx, {
+    failMessagePrefix: 'Escrow deposit would fail on-chain before wallet approval.',
+  })
 
   const signature = await params.sendTransaction(web3Tx, params.connection, {
     skipPreflight: false,
@@ -54,30 +56,4 @@ export async function sendUmiBuilderViaWalletSignAndSend(params: {
   )
 
   return signature
-}
-
-async function assertTransactionSimulatesClean(
-  connection: Connection,
-  tx: Transaction | VersionedTransaction
-): Promise<void> {
-  try {
-    // web3.js SimulateTransactionConfig (sigVerify: false) is reliably typed for VersionedTransaction.
-    // UMI → web3 adapter usually returns v0 txs; skip pre-sim for rare legacy txs rather than wrong overload.
-    if (!(tx instanceof VersionedTransaction)) return
-
-    const sim = await connection.simulateTransaction(tx, {
-      sigVerify: false,
-      commitment: 'confirmed',
-      replaceRecentBlockhash: true,
-    })
-    if (sim.value.err) {
-      const logs = (sim.value.logs ?? []).slice(-10).join('\n')
-      throw new Error(
-        `Escrow deposit would fail on-chain before wallet approval.${logs ? `\n${logs}` : ''}`
-      )
-    }
-  } catch (e) {
-    if (e instanceof Error && e.message.startsWith('Escrow deposit would fail')) throw e
-    // RPC / simulate flakiness must not block a valid Phantom signAndSend prompt.
-  }
 }

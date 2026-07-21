@@ -10,7 +10,7 @@ import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-
  *   Lighthouse guards — do not sign-then-sendRaw or UMI `sendAndConfirm` on Phantom.
  * - Keep txs unsigned until the wallet sends them (noop UMI identity when building).
  * - One fee-payer signer only (no partial site signers on the same prompt).
- * - Pre-simulate with `sigVerify: false` when possible (see sendUmiBuilderViaWalletSignAndSend).
+ * - Pre-simulate with `sigVerify: false` (see `phantom-presimulate.ts` + signAndSend helpers).
  *
  * @see https://docs.phantom.com/developer-powertools/domain-and-transaction-warnings
  * @see https://docs.phantom.com/developer-powertools/lighthouse
@@ -63,7 +63,7 @@ export function formatPhantomBlockedEscrowMessage(raw?: string): string | null {
   }
   return (
     'Your wallet blocked this escrow deposit for security. ' +
-    'Owltopia uses Phantom’s signAndSend path so Blowfish can add Lighthouse checks — ' +
-    'if this keeps happening, ask Phantom to review owltopia.xyz (review@phantom.com) or try Solflare / another network (Wi‑Fi vs mobile data).'
+      'Owltopia uses Phantom’s signAndSend path with a pre-simulation check so Blowfish can validate the transfer. ' +
+      'If this keeps happening after a successful sim, ask Phantom to review owltopia.xyz (see PHANTOM_DOMAIN_REVIEW.md) or try Solflare / another network (Wi‑Fi vs mobile data).'
   )
 }

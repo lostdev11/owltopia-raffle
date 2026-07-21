@@ -3,6 +3,10 @@ import { isVersionedTransaction } from '@solana/wallet-adapter-base'
 import type { Connection, TransactionSignature } from '@solana/web3.js'
 import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js'
 import bs58 from 'bs58'
+import {
+  assertTransactionSimulatesClean,
+  isPhantomPresimulateError,
+} from '@/lib/solana/phantom-presimulate'
 
 type PhantomSendOptions = {
   skipPreflight?: boolean
@@ -117,6 +121,8 @@ export async function sendTransactionPreferPhantomSignAndSend(
             options
           )
         }
+        // Phantom docs: pre-sim with sigVerify:false so doomed txs do not look "malicious".
+        await assertTransactionSimulatesClean(connection, tx)
         const preflight = options?.preflightCommitment as
           | 'processed'
           | 'confirmed'
@@ -130,6 +136,8 @@ export async function sendTransactionPreferPhantomSignAndSend(
         })
         return normalizeSignature(signature)
       } catch (err) {
+        // Doomed txs must not fall through to another wallet prompt (still looks "malicious").
+        if (isPhantomPresimulateError(err)) throw err
         if (process.env.NODE_ENV === 'development') {
           console.warn(
             '[sendTransactionPreferPhantomSignAndSend] Phantom signAndSendTransaction failed; using adapter.',
@@ -190,6 +198,9 @@ export async function sendAllTransactionsPreferPhantomSignAndSend(
             prepared.push(transaction)
           }
         }
+        for (const tx of prepared) {
+          await assertTransactionSimulatesClean(connection, tx)
+        }
         const preflight = options?.preflightCommitment as
           | 'processed'
           | 'confirmed'
@@ -203,6 +214,7 @@ export async function sendAllTransactionsPreferPhantomSignAndSend(
         })
         return signatures.map(normalizeSignature)
       } catch (err) {
+        if (isPhantomPresimulateError(err)) throw err
         if (process.env.NODE_ENV === 'development') {
           console.warn(
             '[sendAllTransactionsPreferPhantomSignAndSend] Phantom signAndSendAll failed; using per-tx send.',
