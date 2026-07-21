@@ -157,7 +157,7 @@ function rpcEndpointLooksDevnet(endpoint: string | undefined): boolean {
 }
 
 export function DashboardNestingClient() {
-  const { publicKey, connected, signMessage, wallet } = useWallet()
+  const { publicKey, connected, signMessage, signTransaction, wallet } = useWallet()
   const {
     acknowledged: securityAck,
     signing: securityAckSigning,
@@ -1491,28 +1491,37 @@ export function DashboardNestingClient() {
   )
   const nestsPendingOnly = pendingOpenCount > 0 && totals.activeCount === 0
 
-  const handleSignIn = useCallback(async () => {
-    if (!publicKey || !signMessage) {
-      setSignInError('Your wallet does not support message signing.')
-      return
-    }
-    setSignInError(null)
-    setSigningIn(true)
-    try {
-      const { performSiwsSignIn } = await import('@/lib/client/siws-sign-in')
-      await performSiwsSignIn({
-        wallet: publicKey.toBase58(),
-        signMessage,
-        apiUrl: nestingClientApiUrl,
-        walletName: wallet?.adapter?.name,
-      })
-      await refreshAll()
-    } catch (e) {
-      setSignInError(formatNestingApiFetchError(e, 'generic'))
-    } finally {
-      setSigningIn(false)
-    }
-  }, [publicKey, signMessage, wallet?.adapter?.name, refreshAll])
+  const handleSignIn = useCallback(
+    async (opts?: { preferTx?: boolean }) => {
+      if (!publicKey || (!signMessage && !signTransaction)) {
+        setSignInError('Your wallet does not support signing.')
+        return
+      }
+      setSignInError(null)
+      setSigningIn(true)
+      try {
+        const { performSiwsSignIn } = await import('@/lib/client/siws-sign-in')
+        await performSiwsSignIn({
+          wallet: publicKey.toBase58(),
+          signMessage,
+          signTransaction,
+          preferTx: opts?.preferTx,
+          apiUrl: nestingClientApiUrl,
+          walletName: wallet?.adapter?.name,
+          getBlockhash: async () => {
+            const latest = await connection.getLatestBlockhash('confirmed')
+            return latest.blockhash
+          },
+        })
+        await refreshAll()
+      } catch (e) {
+        setSignInError(formatNestingApiFetchError(e, 'generic'))
+      } finally {
+        setSigningIn(false)
+      }
+    },
+    [publicKey, signMessage, signTransaction, wallet?.adapter?.name, connection, refreshAll]
+  )
 
   const sendOnChainTokenStakeTransfer = useCallback(
     async (pool: StakingPoolRow, amountUi: string): Promise<string> => {
@@ -2827,21 +2836,39 @@ export function DashboardNestingClient() {
           signature.
         </p>
         <p className="text-sm text-muted-foreground rounded-md border border-border/60 bg-muted/30 px-3 py-2">
-          Using Ledger? Unlock it, open the Solana app (close Ledger Live), turn on Blind signing in the Solana app
-          settings, then approve the Sign Message prompt. On mobile, reconnect Bluetooth or open this page inside
-          Phantom/Solflare. On desktop, USB/WebHID is more reliable than Bluetooth.
+          Using Ledger? Phantom/Solflare often never show Sign Message on the device (even with Blind signing on).
+          Unlock Ledger, open the Solana app, close Ledger Live, then tap{' '}
+          <span className="font-medium text-foreground">Sign with Ledger transaction</span> below — approve the memo
+          on the device. It is not broadcast, so Owltopia does not charge a fee. USB on desktop is more reliable than
+          Bluetooth.
         </p>
         {signInError && <p className="text-destructive text-sm whitespace-pre-wrap">{signInError}</p>}
-        <Button onClick={() => void handleSignIn()} disabled={signingIn || !signMessage}>
-          {signingIn ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              Waiting for wallet / Ledger…
-            </>
-          ) : (
-            'Say hi with wallet'
-          )}
-        </Button>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button
+            onClick={() => void handleSignIn()}
+            disabled={signingIn || (!signMessage && !signTransaction)}
+          >
+            {signingIn ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Waiting for wallet / Ledger…
+              </>
+            ) : (
+              'Say hi with wallet'
+            )}
+          </Button>
+          {signTransaction ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleSignIn({ preferTx: true })}
+              disabled={signingIn}
+              className="min-h-[44px]"
+            >
+              Sign with Ledger transaction
+            </Button>
+          ) : null}
+        </div>
       </main>
     )
   }

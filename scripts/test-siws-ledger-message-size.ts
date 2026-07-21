@@ -1,5 +1,6 @@
 /**
- * Regression: SIWS / nesting sign-in messages must stay Ledger-friendly.
+ * Regression: SIWS / nesting sign-in messages must stay Ledger-friendly,
+ * and memo-tx fallback must verify for hardware wallets that cannot signMessage.
  * Run: npx tsx --env-file=.env.local scripts/test-siws-ledger-message-size.ts
  * (SESSION_SECRET or AUTH_SECRET required.)
  */
@@ -16,6 +17,11 @@ import {
   peekSignInNonceVersion,
   verifySignIn,
 } from '../lib/auth-server'
+import {
+  buildSignInMemoTransaction,
+  serializeUnsignedSignInMemoTransaction,
+  verifySignInMemoTransaction,
+} from '../lib/auth-tx-sign-in'
 import { formatSignMessageError } from '../lib/solana/sign-message-error'
 import { signMessageSignatureToBase64 } from '../lib/solana/sign-message-signature'
 
@@ -74,6 +80,25 @@ function main() {
   const rejectErr = formatSignMessageError(new Error('User rejected the request'), { context: 'sign-in' })
   assert.equal(rejectErr, 'Sign-in cancelled in wallet.')
 
+  // Memo-tx fallback (Ledger path): sign a memo transaction, do not broadcast.
+  const fakeBlockhash = Keypair.generate().publicKey.toBase58()
+  const tx = buildSignInMemoTransaction({ wallet: kp.publicKey, message, blockhash: fakeBlockhash })
+  tx.partialSign(kp)
+  const signedB64 = serializeUnsignedSignInMemoTransaction(tx)
+  const txOk = verifySignInMemoTransaction({
+    wallet,
+    message,
+    signedTransactionBase64: signedB64,
+  })
+  assert.equal(txOk.valid, true, txOk.error)
+
+  const txBad = verifySignInMemoTransaction({
+    wallet,
+    message: message + ' tampered',
+    signedTransactionBase64: signedB64,
+  })
+  assert.equal(txBad.valid, false)
+
   console.log(
     JSON.stringify(
       {
@@ -81,6 +106,7 @@ function main() {
         nonceLength: nonce.length,
         messageBytes: bytes,
         messagePreview: message.split('\n')[0],
+        memoTxFallback: true,
       },
       null,
       2

@@ -224,7 +224,7 @@ export function buildAdminSupportPlaybook(params: {
     recommendations.push({
       action: 'Ask: Ledger via Phantom/Solflare?',
       detail:
-        'Two separate Ledger pain points: (1) Nest "Say hi" / message signing — needs Blind signing on, Solana app open, Ledger Live closed; short SIWS messages help. If Phantom says no sign request on device, reconnect Bluetooth or use USB/WebHID on desktop, or sign in once from a hot wallet. (2) Nest lock tx — complex Metaplex Core versioned txs often never prompt on Ledger even with blind signing. Workaround: nest one NFT from a hot wallet, or keep Solana app open and retry a single NFT over USB.',
+        'Two separate Ledger pain points: (1) Nest "Say hi" — Phantom/Solflare often never deliver off-chain Sign Message to Ledger (Ledger support article: ongoing). Use the My nest button “Sign with Ledger transaction” (memo tx, not broadcast). Unlock device, Solana app open, Ledger Live closed; USB > Bluetooth. (2) Nest lock tx — complex Metaplex Core versioned txs often never prompt; nest one NFT at a time or from a hot wallet.',
     })
   }
 
