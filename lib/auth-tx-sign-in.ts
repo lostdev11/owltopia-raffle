@@ -47,17 +47,12 @@ export function serializeSignedSignInTransaction(signed: SignedTxInput): string 
   if (signed instanceof VersionedTransaction) {
     return Buffer.from(signed.serialize()).toString('base64')
   }
-  // Duck-type VersionedTransaction from some wallet adapters that don't use instanceof.
-  if (
-    signed &&
-    typeof signed === 'object' &&
-    'message' in signed &&
-    'signatures' in signed &&
-    typeof (signed as VersionedTransaction).serialize === 'function' &&
-    !('feePayer' in signed)
-  ) {
-    return Buffer.from((signed as VersionedTransaction).serialize()).toString('base64')
+
+  // Some wallet adapters return a versioned-shaped object that fails `instanceof`.
+  if (isVersionedTransactionLike(signed)) {
+    return Buffer.from(signed.serialize()).toString('base64')
   }
+
   const tx = signed as Transaction
   return Buffer.from(
     tx.serialize({
@@ -65,6 +60,27 @@ export function serializeSignedSignInTransaction(signed: SignedTxInput): string 
       verifySignatures: false,
     })
   ).toString('base64')
+}
+
+function isVersionedTransactionLike(
+  signed: SignedTxInput
+): signed is VersionedTransaction {
+  if (signed instanceof VersionedTransaction) return true
+  if (signed instanceof Transaction) return false
+  const candidate = signed as unknown as {
+    message?: unknown
+    signatures?: unknown
+    serialize?: unknown
+    feePayer?: unknown
+  }
+  return (
+    candidate != null &&
+    typeof candidate === 'object' &&
+    'message' in candidate &&
+    'signatures' in candidate &&
+    typeof candidate.serialize === 'function' &&
+    !('feePayer' in candidate)
+  )
 }
 
 /** @deprecated use serializeSignedSignInTransaction */
