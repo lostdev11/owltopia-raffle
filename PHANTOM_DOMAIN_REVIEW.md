@@ -39,7 +39,7 @@ Phantom’s remediation checklist:
 | Recommendation | Owltopia status |
 | --- | --- |
 | Limit the transaction to **one signer** (fee payer) | Most raffle / payment / escrow deposit txs are single-signer. Gen2 candy-machine mints still need mint keypair (+ optional server cosigner on free phases). |
-| Multi-signer: Phantom **`signTransaction` first**, then other signers (not `signAndSendTransaction`) | Free / gated mint: wallet signs first, then `/api/owl-center/gen2/cosign-mint`, then send — matches docs. Public mint still partial-signs the mint keypair before Phantom `signAndSend` (acceptable for mint accounts; prefer not adding more partial site signers). |
+| Multi-signer: Phantom **`signTransaction` first**, then other signers (not `signAndSendTransaction`) | Free / gated mint: wallet signs first, then `/api/owl-center/gen2/cosign-mint`, then send — matches docs. **Paid public mint (Phantom):** wallet `signAllTransactions` (fee payer) first, then mint keypair(s), then broadcast — matches docs. Allowlist route (single signer) still uses `signAndSend`. |
 | Near size limit: **split** txs or use **Address Lookup Tables** | Gen2 mints one NFT per tx; allowlist route is a separate tx. |
 | Pre-simulate with **`sigVerify: false`** on your RPC before prompting the wallet | Shared helper on Phantom `signAndSend` / UMI escrow deposit paths (`lib/solana/phantom-presimulate.ts`). Failed sims surface before the wallet sheet. |
 | Prefer **`signAndSendTransaction`** so Blowfish can inject [Lighthouse](https://docs.phantom.com/developer-powertools/lighthouse) guards | `useSendTransactionForWallet` + `sendTransactionPreferPhantomSignAndSend`. Do **not** use UMI `walletAdapterIdentity` + `sendAndConfirm` for Phantom user flows. |
@@ -89,5 +89,5 @@ While a review is pending:
 
 1. Keep every new user-facing send on `useSendTransactionForWallet` (no raw `useWallet().sendTransaction` for Phantom).
 2. Keep user txs **unsigned** until the wallet prompt; never attach site partial signers on the same Phantom prompt when avoidable.
-3. When adding multi-signer flows, follow Phantom’s order: **wallet `signTransaction` → other signers → broadcast**, not `signAndSend` with foreign signatures missing.
+3. When adding multi-signer flows, follow Phantom’s order: **wallet `signTransaction` → other signers → broadcast**, not `signAndSend` with foreign signatures missing. Gen2 paid public mint already does this for Phantom.
 4. Pre-sim failures should be user-readable (insufficient SOL, missing ATA, wrong accounts) so users never hit the “malicious” sheet for a doomed tx.
