@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -66,7 +67,8 @@ export function RaffleBuyoutPanel({
 }) {
   const router = useRouter()
   const { connection } = useConnection()
-  const { publicKey, connected, sendTransaction, signMessage } = useWallet()
+  const { publicKey, connected, signMessage } = useWallet()
+  const sendTransaction = useSendTransactionForWallet()
   const [state, setState] = useState<BuyoutApiState | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

@@ -1,86 +1,93 @@
-# Phantom Wallet Domain Review Guide
+# Phantom Domain & Transaction Warnings
 
-## Issue
-Phantom wallet on Android is showing a "This dApp could be malicious" security warning when users try to connect to **owltopia.xyz**.
+Guide for Owltopia (`owltopia.xyz`) based on Phantom’s official docs:
 
-## Solution Steps
+https://docs.phantom.com/developer-powertools/domain-and-transaction-warnings
 
-### 1. Register Your App in Phantom Developer Portal (Recommended - Do This First)
+Phantom shows **different** warnings for domain reputation vs transaction simulation. Do not treat them as the same issue.
 
-1. Visit [Phantom Developer Portal - Edit App Info](https://docs.phantom.com/phantom-portal/edit-app-info)
-2. Add your domain: **owltopia.xyz**
-3. Complete DNS TXT verification to confirm domain ownership
-4. Fill out app details:
-   - App name: Owl Raffle
-   - Description: Trusted raffles with full transparency. Every entry verified on-chain.
-   - Social links: https://x.com/Owltopia_sol
-   - Icon: https://owltopia.xyz/icon.png
-   - Other relevant information
+---
 
-This helps establish legitimacy and can resolve warnings automatically within a few days.
+## 1. New domain warning
 
-### 2. Contact Phantom Domain Review Team
+**User sees:**
 
-If the warning persists after ~1 week:
+> “This domain is new or has not been reviewed yet. Proceed with caution.”
 
-**Email**: review@phantom.com
+**Cause:** Newly detected domain; automatic review usually clears it in a few days.
 
-**Include in your email:**
-- Domain: owltopia.xyz
-- Project description: Owl Raffle - A transparent raffle platform on Solana
-- What the app does: Users can create and enter raffles with full on-chain verification
-- GitHub link (if available): [Your repo URL]
-- Social presence: https://x.com/Owltopia_sol
-- Team information
-- Any audits or security reviews
+**What we do:**
 
-**Subject line example**: "Domain Review Request: owltopia.xyz - Owl Raffle Platform"
+1. Register the app in the [Phantom Developer Portal](https://docs.phantom.com/phantom-portal/edit-app-info) and complete DNS TXT verification for `owltopia.xyz`.
+2. Fill branding: name Owl Raffle / Owltopia, icon `https://owltopia.xyz/icon.png`, socials, description.
+3. If the warning remains **more than a week**, contact Phantom’s domain review team (form linked from the docs page above; historically `review@phantom.com`).
 
-### 3. Alternative: Submit Pull Request to Phantom Blocklist Repo
+**Usually no code change** clears this warning.
 
-If your domain is mistakenly flagged:
+---
 
-1. Visit [Phantom Blocklist Repository](https://github.com/phantom/blocklist)
-2. Check if `owltopia.xyz` appears in `blocklist.yaml`
-3. If it does (and it's a false positive), submit a PR to remove it or add it to `whitelist.yaml`
-4. Explain clearly why it should be whitelisted in the PR description
+## 2. Transaction simulation warning (most common “malicious” prompt)
 
-### 4. Contact Blowfish (Fast Option - 24-48 hours)
+**User sees:**
 
-Phantom uses Blowfish for security/reputation. You can also contact Blowfish directly for whitelisting:
+> “This dApp could be malicious. Do not proceed unless you are certain it is safe.”
 
-- Check if there's a Blowfish approval form or contact method
-- Mention that you're using the domain with Phantom wallet
-- Provide the same information as above
+**Cause:** Phantom/Blowfish could not safely simulate the transaction before signing — **not** the same as the new-domain message.
 
-## Timeframes
+Phantom’s remediation checklist:
 
-- **Automatic review**: New domains are often reviewed automatically within a few days
-- **Manual review**: 1-2 weeks typically
-- **Blowfish whitelisting**: 24-48 hours (if available)
+| Recommendation | Owltopia status |
+| --- | --- |
+| Limit the transaction to **one signer** (fee payer) | Most raffle / payment / escrow deposit txs are single-signer. Gen2 candy-machine mints still need mint keypair (+ optional server cosigner on free phases). |
+| Multi-signer: Phantom **`signTransaction` first**, then other signers (not `signAndSendTransaction`) | Free / gated mint: wallet signs first, then `/api/owl-center/gen2/cosign-mint`, then send — matches docs. Public mint still partial-signs the mint keypair before Phantom `signAndSend` (acceptable for mint accounts; prefer not adding more partial site signers). |
+| Near size limit: **split** txs or use **Address Lookup Tables** | Gen2 mints one NFT per tx; allowlist route is a separate tx. |
+| Pre-simulate with **`sigVerify: false`** on your RPC before prompting the wallet | Shared helper on Phantom `signAndSend` / UMI escrow deposit paths (`lib/solana/phantom-presimulate.ts`). Failed sims surface before the wallet sheet. |
+| Prefer **`signAndSendTransaction`** so Blowfish can inject [Lighthouse](https://docs.phantom.com/developer-powertools/lighthouse) guards | `useSendTransactionForWallet` + `sendTransactionPreferPhantomSignAndSend`. Do **not** use UMI `walletAdapterIdentity` + `sendAndConfirm` for Phantom user flows. |
 
-## For Users (Temporary Workaround)
+### Code map
 
-While waiting for review, users can:
-- Click "Proceed anyway (unsafe)" if they trust the dApp (not recommended for general users)
-- Use alternative wallets (Solflare, Coinbase Wallet, etc.) - already configured in your app
+- `lib/hooks/useSendTransactionForWallet.ts` — default client send path for Phantom
+- `lib/solana/phantom-sign-and-send-transaction.ts` — injected `signAndSendTransaction` / `signAndSendAllTransactions`
+- `lib/solana/phantom-presimulate.ts` — `sigVerify: false` preflight
+- `lib/solana/phantom-safe-umi-send.ts` — noop UMI identity + guards for NFT escrow / Core / cNFT
+- `lib/solana/send-umi-builder-via-wallet.ts` — unsigned UMI build → wallet send
+- `lib/solana/gen2-mint.ts` — Phantom batch mint vs cosign multi-signer path
 
-## Technical Notes
+If simulation warnings persist after the checklist, use the domain review form linked in Phantom’s docs.
 
-Your app configuration has been updated:
-- ✅ App identity uses correct domain: `owltopia.xyz`
-- ✅ Icon is available at: `/icon.png`
-- ✅ Mobile Wallet Adapter is properly configured
-- ✅ Multiple wallet options available (Phantom, Solflare, Coinbase, Trust)
+---
 
-## Next Steps
+## 3. Prediction market token burn warning
 
-1. **Immediately**: Register in Phantom Developer Portal and complete DNS verification
-2. **Within 1 week**: If warning persists, send email to review@phantom.com
-3. **Monitor**: Check Phantom's blocklist repo periodically
+**User sees:**
 
-## Links
+> “This transaction will burn a valuable prediction market token…”
 
-- Phantom Developer Portal: https://docs.phantom.com/phantom-portal/edit-app-info
-- Phantom Blocklist Repo: https://github.com/phantom/blocklist
-- Phantom Review Email: review@phantom.com
+**Not applicable** to Owltopia raffle / mint / nesting flows. If it ever appears, contact Phantom Trust & Safety via the form on the docs page — do not try to work around burns in-app.
+
+---
+
+## Portal & blocklist checklist
+
+1. [Phantom Portal — Edit App Info](https://docs.phantom.com/phantom-portal/edit-app-info) + [Verify Domain](https://docs.phantom.com/phantom-portal/verify-domain)
+2. [Go-Live Checklist](https://docs.phantom.com/best-practices/go-live-checklist)
+3. Confirm `owltopia.xyz` is not on [phantom/blocklist](https://github.com/phantom/blocklist) (false positive → PR to remove / whitelist)
+4. App identity / MWA / OG tags already use `owltopia.xyz` and `/icon.png`
+
+---
+
+## User workarounds (temporary)
+
+While a review is pending:
+
+- Proceed only if they trust Owltopia (not ideal to recommend broadly)
+- Solflare / other Wallet Standard wallets remain available in the app
+
+---
+
+## Engineering follow-ups
+
+1. Keep every new user-facing send on `useSendTransactionForWallet` (no raw `useWallet().sendTransaction` for Phantom).
+2. Keep user txs **unsigned** until the wallet prompt; never attach site partial signers on the same Phantom prompt when avoidable.
+3. When adding multi-signer flows, follow Phantom’s order: **wallet `signTransaction` → other signers → broadcast**, not `signAndSend` with foreign signatures missing.
+4. Pre-sim failures should be user-readable (insufficient SOL, missing ATA, wrong accounts) so users never hit the “malicious” sheet for a doomed tx.

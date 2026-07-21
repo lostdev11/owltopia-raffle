@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { Loader2 } from 'lucide-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
@@ -85,7 +86,8 @@ export function RevealDayPanel({
 }) {
   const revealApi = apiPath ?? `/api/admin/owl-center/collections/${launchId}/reveal-day`
   const isCreatorApi = revealApi.includes('/owl-center/launches/')
-  const { publicKey, sendTransaction } = useWallet()
+  const { publicKey } = useWallet()
+  const sendTransaction = useSendTransactionForWallet()
 
   const [status, setStatus] = useState<RevealDayStatus | null>(null)
   const [loading, setLoading] = useState(true)

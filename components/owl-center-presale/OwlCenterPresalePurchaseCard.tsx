@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Transaction } from '@solana/web3.js'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { Loader2, Minus, Plus } from 'lucide-react'
 
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
@@ -53,7 +54,8 @@ export function OwlCenterPresalePurchaseCard({
   const surface = theme?.surface ?? '#151D24'
 
   const { connection } = useConnection()
-  const { publicKey, sendTransaction, connected } = useWallet()
+  const { publicKey, connected } = useWallet()
+  const sendTransaction = useSendTransactionForWallet()
   const [qty, setQty] = useState(1)
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState<string | null>(null)

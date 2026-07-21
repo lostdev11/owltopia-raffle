@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Transaction } from '@solana/web3.js'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
+import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Loader2, Minus, Plus } from 'lucide-react'
@@ -67,7 +68,8 @@ export function Gen2PurchaseCard({
 }: Props) {
   const router = useRouter()
   const { connection } = useConnection()
-  const { publicKey, sendTransaction, connected } = useWallet()
+  const { publicKey, connected } = useWallet()
+  const sendTransaction = useSendTransactionForWallet()
   const [qty, setQty] = useState(1)
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState<string | null>(null)
