@@ -25,6 +25,7 @@ import {
 } from '../lib/auth-server'
 import {
   buildSignInMemoTransaction,
+  LIGHTHOUSE_PROGRAM_ID,
   serializeSignedSignInTransaction,
   SIGN_IN_MEMO_PROGRAM_ID,
   verifySignInMemoTransaction,
@@ -153,6 +154,68 @@ function main() {
   })
   assert.equal(vtxOk.valid, true, vtxOk.error)
 
+  // Phantom Blowfish injects Lighthouse assertions into signed memo txs (including Ledger path).
+  // verify-tx must accept them — otherwise users see:
+  // Unexpected instruction: L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95
+  const lighthouseIx = new TransactionInstruction({
+    programId: LIGHTHOUSE_PROGRAM_ID,
+    keys: [{ pubkey: kp.publicKey, isSigner: false, isWritable: false }],
+    data: Buffer.from([0]),
+  })
+  const memoWithLh = new TransactionMessage({
+    payerKey: kp.publicKey,
+    recentBlockhash: fakeBlockhash,
+    instructions: [setCuLimit, memoIx, lighthouseIx],
+  }).compileToV0Message()
+  const vtxLh = new VersionedTransaction(memoWithLh)
+  vtxLh.sign([kp])
+  const vtxLhOk = verifySignInMemoTransaction({
+    wallet,
+    message,
+    signedTransactionBase64: serializeSignedSignInTransaction(vtxLh),
+  })
+  assert.equal(vtxLhOk.valid, true, vtxLhOk.error)
+
+  // Legacy wire + Lighthouse (some adapters still return Transaction, not Versioned).
+  const legacyLh = buildSignInMemoTransaction({
+    wallet: kp.publicKey,
+    message,
+    blockhash: fakeBlockhash,
+  })
+  legacyLh.add(lighthouseIx)
+  legacyLh.partialSign(kp)
+  const legacyLhOk = verifySignInMemoTransaction({
+    wallet,
+    message,
+    signedTransactionBase64: serializeSignedSignInTransaction(legacyLh),
+  })
+  assert.equal(legacyLhOk.valid, true, legacyLhOk.error)
+
+  // Still reject unknown programs (auth must stay memo-only aside from wallet guards).
+  const evilProgram = Keypair.generate().publicKey
+  const evilIx = new TransactionInstruction({
+    programId: evilProgram,
+    keys: [],
+    data: Buffer.from([1]),
+  })
+  const evilMsg = new TransactionMessage({
+    payerKey: kp.publicKey,
+    recentBlockhash: fakeBlockhash,
+    instructions: [memoIx, evilIx],
+  }).compileToV0Message()
+  const evilVtx = new VersionedTransaction(evilMsg)
+  evilVtx.sign([kp])
+  const evilOk = verifySignInMemoTransaction({
+    wallet,
+    message,
+    signedTransactionBase64: serializeSignedSignInTransaction(evilVtx),
+  })
+  assert.equal(evilOk.valid, false)
+  assert.ok(
+    evilOk.error?.includes(`Unexpected instruction: ${evilProgram.toBase58()}`),
+    evilOk.error
+  )
+
   console.log(
     JSON.stringify(
       {
@@ -162,6 +225,9 @@ function main() {
         messagePreview: message.split('\n')[0],
         memoTxFallback: true,
         versionedWithComputeBudget: true,
+        versionedWithLighthouse: true,
+        legacyWithLighthouse: true,
+        rejectsUnknownProgram: true,
       },
       null,
       2

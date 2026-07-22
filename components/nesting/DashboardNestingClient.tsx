@@ -2036,48 +2036,117 @@ export function DashboardNestingClient() {
             delegateAddress: string,
             platformFee?: { treasury: string; lamports: number } | null
           ): Promise<{ signature: string | null; confirmedInFallback: boolean }> => {
-            const assetIds = preps.map((p) => p.assetId)
             const perNestFeeLamports =
               platformFee && preps.length > 0 ? Math.floor(platformFee.lamports / preps.length) : 0
-            try {
-              const signature = await sendBatchMplCoreFreezeDelegateApproval(
-                assetIds,
-                delegateAddress,
-                platformFee
-              )
-              return { signature, confirmedInFallback: false }
-            } catch (batchErr) {
-              if (!isNestingBatchSizeError(batchErr) || preps.length <= 1) {
-                throw batchErr
-              }
-              let lastSig: string | null = null
-              for (let i = 0; i < preps.length; i++) {
-                const prep = preps[i]!
-                throwIfNestingAborted(signal)
-                setNftStakeBatchHint(
-                  `Transaction was too large for one approval — locking ${shortenAddress(prep.assetId, 6)} individually (${i + 1} of ${preps.length})…`
-                )
-                setStakeTxPhase('awaiting_wallet_signature')
-                const prepFee =
-                  perNestFeeLamports > 0 && platformFee
-                    ? { treasury: platformFee.treasury, lamports: perNestFeeLamports }
-                    : null
-                lastSig = await sendMplCoreFreezeDelegateApproval(
-                  prep.assetId,
+
+            const lockChunk = async (
+              chunk: PreparedNftNest[],
+              fee: { treasury: string; lamports: number } | null | undefined
+            ): Promise<{ signature: string | null; confirmedInFallback: boolean }> => {
+              const ids = chunk.map((p) => p.assetId)
+              try {
+                const signature = await sendBatchMplCoreFreezeDelegateApproval(
+                  ids,
                   delegateAddress,
-                  prepFee
+                  fee
                 )
-                setStakeTxPhase('syncing')
-                await completeNftNestWithWalletSig(prep, lastSig, lastSig)
-                await refreshNestingUiAfterChange({ heal: false })
-                if (preps.length > 1) {
-                  setNftStakeBatchHint(
-                    `Locked ${i + 1} of ${preps.length} — approve the next wallet prompt…`
-                  )
+                return { signature, confirmedInFallback: false }
+              } catch (batchErr) {
+                if (!isNestingBatchSizeError(batchErr) || chunk.length <= 1) {
+                  throw batchErr
                 }
+
+                // Phantom Lighthouse guards / platform fee can push a full 12-NFT tx over the
+                // packet limit. Halve before falling back to one-by-one so most wallets keep
+                // multi-NFT approvals instead of nesting literally one at a time.
+                if (chunk.length > 2) {
+                  const mid = Math.ceil(chunk.length / 2)
+                  const left = chunk.slice(0, mid)
+                  const right = chunk.slice(mid)
+                  const leftFee =
+                    perNestFeeLamports > 0 && platformFee
+                      ? { treasury: platformFee.treasury, lamports: perNestFeeLamports * left.length }
+                      : null
+                  const rightFee =
+                    perNestFeeLamports > 0 && platformFee
+                      ? { treasury: platformFee.treasury, lamports: perNestFeeLamports * right.length }
+                      : null
+
+                  throwIfNestingAborted(signal)
+                  setNftStakeBatchHint(
+                    `Transaction was too large for ${chunk.length} ${nftAssetLabels.plural} — retrying ${left.length} then ${right.length}…`
+                  )
+                  setStakeTxPhase('awaiting_wallet_signature')
+                  const leftResult = await lockChunk(left, leftFee)
+                  if (!leftResult.confirmedInFallback) {
+                    setStakeTxPhase('syncing')
+                    for (const prep of left) {
+                      throwIfNestingAborted(signal)
+                      await completeNftNestWithWalletSig(
+                        prep,
+                        leftResult.signature,
+                        leftFee ? leftResult.signature : null
+                      )
+                    }
+                    await refreshNestingUiAfterChange({ heal: false })
+                  }
+
+                  throwIfNestingAborted(signal)
+                  setNftStakeBatchHint(
+                    `Locked ${left.length} — approve the next ${right.length} ${nftAssetLabels.plural}…`
+                  )
+                  setStakeTxPhase('awaiting_wallet_signature')
+                  const rightResult = await lockChunk(right, rightFee)
+                  if (!rightResult.confirmedInFallback) {
+                    setStakeTxPhase('syncing')
+                    for (const prep of right) {
+                      throwIfNestingAborted(signal)
+                      await completeNftNestWithWalletSig(
+                        prep,
+                        rightResult.signature,
+                        rightFee ? rightResult.signature : null
+                      )
+                    }
+                    await refreshNestingUiAfterChange({ heal: false })
+                  }
+
+                  return {
+                    signature: rightResult.signature ?? leftResult.signature,
+                    confirmedInFallback: true,
+                  }
+                }
+
+                let lastSig: string | null = null
+                for (let i = 0; i < chunk.length; i++) {
+                  const prep = chunk[i]!
+                  throwIfNestingAborted(signal)
+                  setNftStakeBatchHint(
+                    `Transaction was too large for one approval — locking ${shortenAddress(prep.assetId, 6)} individually (${i + 1} of ${chunk.length})…`
+                  )
+                  setStakeTxPhase('awaiting_wallet_signature')
+                  const prepFee =
+                    perNestFeeLamports > 0 && platformFee
+                      ? { treasury: platformFee.treasury, lamports: perNestFeeLamports }
+                      : null
+                  lastSig = await sendMplCoreFreezeDelegateApproval(
+                    prep.assetId,
+                    delegateAddress,
+                    prepFee
+                  )
+                  setStakeTxPhase('syncing')
+                  await completeNftNestWithWalletSig(prep, lastSig, lastSig)
+                  await refreshNestingUiAfterChange({ heal: false })
+                  if (chunk.length > 1) {
+                    setNftStakeBatchHint(
+                      `Locked ${i + 1} of ${chunk.length} — approve the next wallet prompt…`
+                    )
+                  }
+                }
+                return { signature: lastSig, confirmedInFallback: true }
               }
-              return { signature: lastSig, confirmedInFallback: true }
             }
+
+            return lockChunk(preps, platformFee)
           }
 
           const runNftBatchStake = async (assetIds: string[]) => {
