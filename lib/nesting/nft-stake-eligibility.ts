@@ -77,7 +77,7 @@ export function readNftStakeFreezeEligibilityFromAsset(params: {
     return {
       eligible: false,
       reason:
-        'This NFT is already locked for an Owltopia nest. Finish or leave that nest before opening another.',
+        'This NFT is already locked for an Owltopia nest. Refresh My nest (or Finish opening) so the ledger can catch up — if it still blocks, contact support with this mint.',
       code: 'owltopia_lock_held',
     }
   }

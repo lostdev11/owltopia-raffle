@@ -247,6 +247,14 @@ export function buildAdminSupportPlaybook(params: {
     })
   }
 
+  if (orphanedActiveCount > 0) {
+    recommendations.push({
+      action: 'Admin: heal orphaned active (or user refresh)',
+      detail:
+        `${orphanedActiveCount} active nest(s) looked unlocked on a flaky RPC read and were cleared. If the NFT is still locked on-chain, refresh My nest / heal-wallet restores orphaned_active_cleared — do not ask them to re-pay the platform fee.`,
+    })
+  }
+
   if (warnings.length === 0 && !significantUnpaid && !(audit?.risk_flags.length)) {
     recommendations.push({
       action: 'No high-risk pattern',
