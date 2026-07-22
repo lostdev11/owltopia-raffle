@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { getGenOwlNestRoster, type GenOwlNestRosterPayload } from '@/lib/db/gen-owl-nest-roster'
-import { resolveGenOwlGroupKey, genOwlStakingGroupLabel } from '@/lib/nesting/gen-owl-staking-groups'
+import {
+  nestRosterGroupLabel,
+  resolveNestRosterGroupKey,
+} from '@/lib/nesting/nest-roster-groups'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -37,8 +40,8 @@ function toCsv(payload: GenOwlNestRosterPayload): string {
 }
 
 /**
- * GET /api/admin/staking/nest-roster?group=gen1-owl|gen2-owl[&format=csv]
- * Who nested — open nests per wallet split by 90d vs 180d lock tier,
+ * GET /api/admin/staking/nest-roster?group=owl-nest-coins|gen1-owl|gen2-owl[&format=csv]
+ * Who nested — open nests per wallet split by lock tier,
  * with each nester's referral code for referral-program cross-checks.
  */
 export async function GET(request: NextRequest) {
@@ -47,11 +50,11 @@ export async function GET(request: NextRequest) {
 
   try {
     const sp = request.nextUrl.searchParams
-    const group = resolveGenOwlGroupKey(sp.get('group')) ?? 'gen1-owl'
+    const group = resolveNestRosterGroupKey(sp.get('group')) ?? 'gen1-owl'
     const payload = await getGenOwlNestRoster(group)
 
     if (sp.get('format') === 'csv') {
-      const label = genOwlStakingGroupLabel(group).toLowerCase().replace(/\s+/g, '-')
+      const label = nestRosterGroupLabel(group).toLowerCase().replace(/\s+/g, '-')
       return new NextResponse(toCsv(payload), {
         headers: {
           'Content-Type': 'text/csv; charset=utf-8',

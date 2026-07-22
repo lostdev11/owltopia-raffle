@@ -1,11 +1,8 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
-import { GEN1_OWL_STAKING_POOL_SLUGS, GEN2_OWL_STAKING_POOL_SLUGS } from '@/lib/nesting/gen1-staking-pools'
-
-const GROUP_SLUGS: Record<GenOwlStakingGroupKey, readonly string[]> = {
-  'gen1-owl': GEN1_OWL_STAKING_POOL_SLUGS,
-  'gen2-owl': GEN2_OWL_STAKING_POOL_SLUGS,
-}
+import {
+  NEST_ROSTER_GROUP_SLUGS,
+  type NestRosterGroupKey,
+} from '@/lib/nesting/nest-roster-groups'
 
 const POSITIONS_PAGE_SIZE = 1000
 const WALLET_CHUNK_SIZE = 200
@@ -43,7 +40,7 @@ export type GenOwlNestRosterPosition = {
 }
 
 export type GenOwlNestRosterPayload = {
-  group: GenOwlStakingGroupKey
+  group: NestRosterGroupKey
   generated_at: string
   tiers: GenOwlNestRosterTier[]
   wallets: GenOwlNestRosterWallet[]
@@ -67,17 +64,17 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 /**
- * Who nested — open (active + pending) nests for a Gen 1 / Gen 2 owl group,
- * broken down by 90d vs 180d lock tier, with each nester's referral code.
+ * Who nested — open (active + pending) nests for Owltopia coins or a Gen 1 / Gen 2 owl group,
+ * broken down by lock tier, with each nester's referral code.
  */
-export async function getGenOwlNestRoster(group: GenOwlStakingGroupKey): Promise<GenOwlNestRosterPayload> {
+export async function getGenOwlNestRoster(group: NestRosterGroupKey): Promise<GenOwlNestRosterPayload> {
   const db = getSupabaseAdmin()
   const generatedAt = new Date().toISOString()
 
   const { data: pools, error: poolError } = await db
     .from('staking_pools')
     .select('id, slug, lock_period_days')
-    .in('slug', [...GROUP_SLUGS[group]])
+    .in('slug', [...NEST_ROSTER_GROUP_SLUGS[group]])
   if (poolError) throw new Error(poolError.message)
 
   const poolById = new Map<string, { slug: string; lock_period_days: number }>()
