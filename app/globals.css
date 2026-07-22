@@ -4,6 +4,8 @@
 
 @layer base {
   :root {
+    /* Native form controls / scrollbars follow OS light chrome */
+    color-scheme: light;
     /* Light palette */
     --background: 120 16% 95%;
     --foreground: 220 14% 16%;
@@ -51,6 +53,8 @@
   }
 
   .dark {
+    /* Native form controls / scrollbars follow OS dark chrome */
+    color-scheme: dark;
     /* Existing dark palette */
     --background: 0 0% 3.9%;
     --foreground: 0 0% 98%;

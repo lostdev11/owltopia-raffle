@@ -97,8 +97,8 @@ export function NestSwapOwlPickerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[min(94vw,26rem)] gap-0 rounded-2xl border-emerald-500/20 bg-[#0c100e] p-0">
-        <DialogHeader className="border-b border-white/[0.06] p-4 pb-3">
+      <DialogContent className="flex max-h-[min(90vh,40rem)] max-w-[min(94vw,26rem)] flex-col gap-0 overflow-hidden rounded-2xl border-emerald-500/20 bg-[#0c100e] p-0">
+        <DialogHeader className="shrink-0 border-b border-white/[0.06] p-4 pb-3">
           <DialogTitle className="text-left text-base">
             Select {assetLabels.plural}
           </DialogTitle>
@@ -158,7 +158,7 @@ export function NestSwapOwlPickerDialog({
           </div>
         </DialogHeader>
 
-        <div className="max-h-[min(60vh,26rem)] overflow-y-auto overscroll-contain p-2">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
           {reloading ? (
             <div className="flex min-h-[96px] items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -230,7 +230,7 @@ export function NestSwapOwlPickerDialog({
           )}
         </div>
 
-        <div className="border-t border-white/[0.06] p-3">
+        <div className="shrink-0 border-t border-white/[0.06] p-3">
           <Button
             type="button"
             className="min-h-[48px] w-full touch-manipulation rounded-xl font-semibold"

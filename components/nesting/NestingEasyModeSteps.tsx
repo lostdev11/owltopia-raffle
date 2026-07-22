@@ -43,9 +43,6 @@ export function NestingEasyModeSteps({ current, className, onSafeguardsClick }: 
       )}
       aria-label="Nesting steps"
     >
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2.5 px-0.5">
-        Easy mode
-      </p>
       <ol className="grid grid-cols-3 gap-2 sm:gap-3">
         {STEPS.map((step, idx) => {
           const done = idx < activeIdx
