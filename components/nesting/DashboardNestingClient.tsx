@@ -90,6 +90,7 @@ import { NestingOwlCoinWalletProgressPanel } from '@/components/nesting/NestingO
 import { NestingGomtMigrationNotice } from '@/components/nesting/NestingGomtMigrationNotice'
 import { NestingPlatformFeeNotice } from '@/components/nesting/NestingPlatformFeeNotice'
 import { NestingSecurityNotice } from '@/components/nesting/NestingSecurityNotice'
+import { NestingEasyModeSteps } from '@/components/nesting/NestingEasyModeSteps'
 import { NestingClaimLedger } from '@/components/nesting/NestingClaimLedger'
 import { NestingClaimAllPanel } from '@/components/nesting/NestingClaimAllPanel'
 import { NestingClaimSuccessDialog } from '@/components/nesting/NestingClaimSuccessDialog'
@@ -2763,6 +2764,13 @@ export function DashboardNestingClient() {
 
   const mobileConnectHint = nestingMobileConnectHint()
 
+  const scrollToSafeguards = useCallback(() => {
+    document.getElementById('nesting-security-notice')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    })
+  }, [])
+
   if (!connected) {
     return (
       <main className="relative mx-auto max-w-2xl px-4 py-10 safe-area-bottom">
@@ -2772,6 +2780,7 @@ export function DashboardNestingClient() {
           <p className="text-muted-foreground">
             Connect your wallet to browse perches and open a nest—Owltopia walks you through each step.
           </p>
+          <NestingEasyModeSteps current="connect" />
           {mobileConnectHint ? (
             <p className="text-xs text-muted-foreground leading-relaxed border border-border/50 rounded-lg px-3 py-2">
               {mobileConnectHint}
@@ -3065,6 +3074,11 @@ export function DashboardNestingClient() {
           </p>
         </div>
       ) : null}
+
+      <NestingEasyModeSteps
+        current={securityAck ? 'nest' : 'safeguards'}
+        onSafeguardsClick={securityAck ? undefined : scrollToSafeguards}
+      />
 
       <NestingSecurityNotice
         id="nesting-security-notice"
@@ -3898,13 +3912,24 @@ export function DashboardNestingClient() {
                 : nestingTxPhaseLabel(stakeTxPhase)}
             </Button>
             {confirmNestDisabledReason && stakeTxPhase === 'idle' ? (
-              <p
-                id="nesting-confirm-disabled-reason"
-                className="text-xs text-center text-amber-400/95 leading-relaxed px-1"
-                role="status"
-              >
-                {confirmNestDisabledReason}
-              </p>
+              !securityAck ? (
+                <button
+                  type="button"
+                  id="nesting-confirm-disabled-reason"
+                  className="text-xs text-center text-amber-300 leading-relaxed px-1 underline underline-offset-2 touch-manipulation min-h-[44px] w-full"
+                  onClick={scrollToSafeguards}
+                >
+                  {confirmNestDisabledReason} Tap to jump to the orange safeguards box.
+                </button>
+              ) : (
+                <p
+                  id="nesting-confirm-disabled-reason"
+                  className="text-xs text-center text-amber-400/95 leading-relaxed px-1"
+                  role="status"
+                >
+                  {confirmNestDisabledReason}
+                </p>
+              )
             ) : null}
             </>
           }

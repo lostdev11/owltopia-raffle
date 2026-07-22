@@ -85,7 +85,11 @@ export function NestingStakeProgressCard({
               {phase === 'failed' ? 'Nesting paused — try again' : 'Nesting in progress'}
             </p>
             <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">
-              Keep this page open. On mobile, return here after your wallet closes.
+              Keep this page open
+              {plural
+                ? ` — locking ${nestCount} ${assetPlural} often takes 30–60 seconds`
+                : ' — this usually finishes within about a minute'}
+              . On mobile, return here after your wallet closes.
             </p>
           </div>
           <ol className="space-y-2">
