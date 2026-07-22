@@ -3034,6 +3034,12 @@ export function DashboardNestingClient() {
             preferredPoolId={owlCoinProgressPreferredPoolId}
             preferredGroupKey={activeGenGroupKey}
             positionsVersion={nestedActiveMintKey}
+            lockTiers={genGroupTiers.map((tier) => ({
+              slug: tier.slug,
+              lock_period_days: tier.lock_period_days,
+            }))}
+            selectedLockTierSlug={selectedLockTierSlug}
+            onSelectLockTier={setSelectedLockTierSlug}
             onNestThese={() => {
               setOpenNestFormExpanded(true)
               if (nestableOwlMintIds.length > 0) {

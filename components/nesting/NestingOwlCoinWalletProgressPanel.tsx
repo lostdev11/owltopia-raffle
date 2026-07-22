@@ -7,6 +7,7 @@ import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import {
   NestingOwlCoinWalletProgress,
   type NestingNotNestedAsset,
+  type NestingWalletLockTierOption,
 } from '@/components/nesting/NestingOwlCoinWalletProgress'
 import {
   buildOwlCoinWalletStakeStats,
@@ -41,6 +42,10 @@ type Props = {
   positionsVersion?: string | null
   /** Dashboard: open the owl picker / expand open-nest form instead of linking away. */
   onNestThese?: () => void
+  /** Gen 1 / Gen 2 lock tiers — shown beside Nest these so duration is picked with the assets. */
+  lockTiers?: NestingWalletLockTierOption[]
+  selectedLockTierSlug?: string | null
+  onSelectLockTier?: (slug: string) => void
   className?: string
 }
 
@@ -53,6 +58,9 @@ export function NestingOwlCoinWalletProgressPanel({
   preferredGroupKey = null,
   positionsVersion = null,
   onNestThese,
+  lockTiers = [],
+  selectedLockTierSlug = null,
+  onSelectLockTier,
   className,
 }: Props) {
   const { connected, publicKey } = useWallet()
@@ -250,6 +258,9 @@ export function NestingOwlCoinWalletProgressPanel({
       assetLabels={assetLabels}
       notNestedAssets={notNestedAssets}
       onNestThese={onNestThese}
+      lockTiers={lockTiers}
+      selectedLockTierSlug={selectedLockTierSlug}
+      onSelectLockTier={onSelectLockTier}
       loading={stats.loading}
       className={className}
     />
