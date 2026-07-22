@@ -179,6 +179,20 @@ async function signInViaMemoTransaction(params: {
     if (isSignMessageUserRejection(e)) {
       throw new Error('Sign-in cancelled in wallet.')
     }
+    const hay = `${e instanceof Error ? e.message : String(e)}`.toLowerCase()
+    // Device-side: Ledger Solana app rejects wallet-injected Lighthouse guards before signing.
+    if (
+      hay.includes('lighthouse') ||
+      hay.includes('l2texmfkdjp') ||
+      hay.includes('unexpected instruction') ||
+      hay.includes('assertaccountinfo')
+    ) {
+      throw new Error(
+        'Phantom/Solflare added a Lighthouse security instruction that Ledger cannot clear-sign for sign-in. ' +
+          'Enable Blind signing in the Ledger Solana app, unlock the device, close Ledger Live, prefer USB, then try “Sign with Ledger transaction” again. ' +
+          'If it still fails, sign in from a hot wallet (or transfer SOL to one) — this is a wallet + Ledger limitation, not an Owltopia fee.'
+      )
+    }
     throw new Error(
       formatSignMessageError(e, { walletName: params.walletName, context: 'sign-in' }) +
         ' If Sign Message never appears on Ledger, use “Sign with Ledger transaction” — approve the memo tx on the device (it is not broadcast; no fee is charged by Owltopia).'
