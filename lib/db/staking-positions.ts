@@ -198,7 +198,9 @@ export async function resolveUniqueStakeSignatureForPosition(params: {
 
   const owner = await getStakingPositionByStakeSignature(candidate)
   if (!owner || owner.id === params.positionId) return candidate
-  return existing
+  // Another nest already owns this wallet tx signature — do not re-store it.
+  if (existing && existing !== candidate) return existing
+  return null
 }
 
 export function isStakeSignatureUniqueViolation(error: unknown): boolean {

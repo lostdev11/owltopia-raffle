@@ -406,7 +406,12 @@ export function DashboardNestingClient() {
       const json = result.json ?? {}
       if (!result.ok) {
         if (!opts?.silent) {
-          setError(typeof json.error === 'string' ? json.error : 'Failed to load positions')
+          const apiError = typeof json.error === 'string' ? json.error : ''
+          setError(
+            !apiError || apiError === 'Internal server error'
+              ? nestingFetchNetworkErrorMessage('positions')
+              : apiError
+          )
         }
         return false
       }

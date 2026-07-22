@@ -113,11 +113,20 @@ export async function POST(request: NextRequest) {
       updated = await patchStakingPosition(position.id, activatePatch)
     } catch (e) {
       // Race: another nest in the same batch claimed the signature between lookup and update.
-      if (!isStakeSignatureUniqueViolation(e) || !signature) throw e
-      updated = await patchStakingPosition(position.id, {
-        ...activatePatch,
-        stake_signature: position.stake_signature ?? null,
-      })
+      if (!isStakeSignatureUniqueViolation(e)) throw e
+      try {
+        updated = await patchStakingPosition(position.id, {
+          ...activatePatch,
+          stake_signature: position.stake_signature ?? null,
+        })
+      } catch (e2) {
+        if (!isStakeSignatureUniqueViolation(e2)) throw e2
+        // Existing sig also collided (shared batch) — activate without storing the shared tx id.
+        updated = await patchStakingPosition(position.id, {
+          ...activatePatch,
+          stake_signature: null,
+        })
+      }
     }
 
     return NextResponse.json({
