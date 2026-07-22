@@ -3,7 +3,8 @@
  * Phantom/Solflare often never deliver off-chain signMessage to Ledger; tx signing works.
  *
  * Wallets may return legacy Transaction OR VersionedTransaction, and may inject
- * ComputeBudget instructions — verification must accept both.
+ * ComputeBudget and Phantom/Solflare Lighthouse assertion instructions — verification
+ * must accept all three.
  */
 import {
   PublicKey,
@@ -18,6 +19,15 @@ export const SIGN_IN_MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNc
 
 /** Compute Budget program — wallets often prepend these; ignore during verify. */
 const COMPUTE_BUDGET_PROGRAM_ID = new PublicKey('ComputeBudget111111111111111111111111111111')
+
+/**
+ * Phantom Blowfish / Solflare Lighthouse assertion program.
+ * Wallets inject these into signed memo txs (including Ledger signTransaction);
+ * verification must allow them or Ledger sign-in fails after a successful device approve.
+ * Phantom typically adds 1; Solflare may add 2.
+ * @see https://docs.phantom.com/developer-powertools/lighthouse
+ */
+export const LIGHTHOUSE_PROGRAM_ID = new PublicKey('L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95')
 
 export type SignedTxInput = Transaction | VersionedTransaction
 
@@ -92,6 +102,11 @@ function isComputeBudgetIx(programId: PublicKey): boolean {
   return programId.equals(COMPUTE_BUDGET_PROGRAM_ID)
 }
 
+/** Wallet-injected ixs that do not affect the SIWS memo proof. */
+function isBenignWalletInjectedIx(programId: PublicKey): boolean {
+  return isComputeBudgetIx(programId) || programId.equals(LIGHTHOUSE_PROGRAM_ID)
+}
+
 function memoUtf8FromIxData(data: Uint8Array | Buffer): string {
   return Buffer.from(data).toString('utf8')
 }
@@ -127,7 +142,7 @@ function verifyLegacySignedMemo(params: {
   }
   for (const ix of tx.instructions) {
     if (ix.programId.equals(SIGN_IN_MEMO_PROGRAM_ID)) continue
-    if (isComputeBudgetIx(ix.programId)) continue
+    if (isBenignWalletInjectedIx(ix.programId)) continue
     return { valid: false, error: `Unexpected instruction: ${ix.programId.toBase58()}` }
   }
 
@@ -172,7 +187,7 @@ function verifyVersionedSignedMemo(params: {
       memoText = memoUtf8FromIxData(ix.data)
       continue
     }
-    if (isComputeBudgetIx(programId)) continue
+    if (isBenignWalletInjectedIx(programId)) continue
     return { valid: false, error: `Unexpected instruction: ${programId.toBase58()}` }
   }
 

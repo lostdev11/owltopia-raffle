@@ -130,6 +130,21 @@ export function formatSignMessageError(
 
   const hay = errorHaystack(err)
 
+  // Ledger Solana app rejects Phantom/Solflare Lighthouse guard ixs ("Unexpected instruction").
+  if (
+    hay.includes('lighthouse') ||
+    hay.includes('l2texmfkdjp') ||
+    hay.includes('assertaccountinfo') ||
+    (hay.includes('unexpected instruction') &&
+      (hay.includes('ledger') || context === 'sign-in'))
+  ) {
+    return (
+      'Phantom/Solflare added a Lighthouse security instruction that Ledger cannot clear-sign. ' +
+      'Enable Blind signing in the Ledger Solana app, unlock the device, close Ledger Live, prefer USB, then use “Sign with Ledger transaction”. ' +
+      'If it still fails, sign in from a hot wallet — wallet + Ledger limitation, not an Owltopia fee.'
+    )
+  }
+
   if (
     hay.includes('does not support') ||
     hay.includes('signmessage is not a function') ||
