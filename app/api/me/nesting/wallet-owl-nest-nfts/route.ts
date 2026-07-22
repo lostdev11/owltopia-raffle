@@ -13,6 +13,11 @@ import { STAKING_UUID_RE } from '@/lib/nesting/validation'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { resolveImageUriFromDasAssetPayload } from '@/lib/nft-helius-image'
 import { enrichWalletNestMintsForPool } from '@/lib/nesting/nft-lock-service'
+import type { WalletNestMintNestStatus } from '@/lib/nesting/nft-stake-eligibility'
+import {
+  isNftNestPositionCountedAsNested,
+  isPendingNftNestBeforeFreezeConfirmed,
+} from '@/lib/nesting/position-lifecycle'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,8 +26,10 @@ const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 /**
  * GET /api/me/nesting/wallet-owl-nest-nfts?pool_id=<uuid>
  * Owl Nest NFT mints owned by the signed-in wallet that match the configured collection
- * (pool.collection_key or Owltopia env), excluding mints already in an active nest and pending
- * nests that already recorded `nft_freeze_confirmed:` (mid-open / awaiting-wallet-lock mints stay listed).
+ * (pool.collection_key or Owltopia env), including nested / opening / blocked status on each row.
+ *
+ * nest_status: not_nested | nested | opening | blocked
+ * Consumers that only need nestable rows should filter `nest_status === 'not_nested'`.
  *
  * Any SIWS session — not admin-only — so the staking UI can list wallet NFTs once nesting is public.
  */
@@ -59,7 +66,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         configured: false,
         collectionAddress: null,
-        mints: [] as { mint: string; name: string | null; image: string | null }[],
+        mints: [] as {
+          mint: string
+          name: string | null
+          image: string | null
+          nest_status: WalletNestMintNestStatus
+        }[],
         message: isGen1
           ? 'Set OWLTOPIA_COLLECTION_ADDRESS in the server environment so Gen 1 owl NFTs can be detected.'
           : isGen2
@@ -93,25 +105,20 @@ export async function GET(request: NextRequest) {
     const allItems = [...itemsByMint.values()]
 
     const positions = await listStakingPositionsByWallet(wallet)
-    const alreadyNested = new Set<string>(
-      positions
-        .filter((p) => {
-          const mint = typeof p.asset_identifier === 'string' ? p.asset_identifier.trim() : ''
-          if (!mint) return false
-          if (p.status === 'active') return true
-          if (p.status !== 'pending') return false
-          // Pending without freeze confirmation: not "nested" yet — keep mint in the picker for resume.
-          if (!(p.external_reference ?? '').startsWith('nft_freeze_confirmed:')) return false
-          return true
-        })
-        .map((p) => p.asset_identifier!.trim()),
-    )
+    // Any open nest on this wallet (including sibling Gen tiers) marks the mint status.
+    const nestedMints = new Set<string>()
+    const openingMints = new Set<string>()
+    for (const p of positions) {
+      const mint = typeof p.asset_identifier === 'string' ? p.asset_identifier.trim() : ''
+      if (!mint) continue
+      if (isNftNestPositionCountedAsNested(p)) nestedMints.add(mint)
+      else if (isPendingNftNestBeforeFreezeConfirmed(p)) openingMints.add(mint)
+    }
 
     const mintRowsRaw = await Promise.all(
       allItems.map(async (item) => {
         const mint = item.id?.trim()
         if (!mint || item.burnt === true) return null
-        if (alreadyNested.has(mint)) return null
 
         const content = item.content
         const firstFile = content?.files?.[0]
@@ -130,7 +137,42 @@ export async function GET(request: NextRequest) {
 
     mintRows.sort((a, b) => (a.name || a.mint).localeCompare(b.name || b.mint))
 
-    const mints = await enrichWalletNestMintsForPool(pool, mintRows, wallet)
+    // Skip expensive on-chain enrich for mints already nested or mid-open — status is known from DB.
+    const enrichCandidates = mintRows.filter(
+      (row) => !nestedMints.has(row.mint) && !openingMints.has(row.mint)
+    )
+    const enriched = await enrichWalletNestMintsForPool(pool, enrichCandidates, wallet)
+    const enrichedByMint = new Map(enriched.map((row) => [row.mint, row]))
+
+    const mints = mintRows.map((row) => {
+      if (nestedMints.has(row.mint)) {
+        return { ...row, nest_status: 'nested' as const }
+      }
+      if (openingMints.has(row.mint)) {
+        return { ...row, nest_status: 'opening' as const }
+      }
+      const enrichedRow = enrichedByMint.get(row.mint)
+      if (enrichedRow?.stake_blocked === true) {
+        return {
+          mint: row.mint,
+          name: enrichedRow.name ?? row.name,
+          image: enrichedRow.image ?? row.image,
+          nest_status: 'blocked' as const,
+          stake_blocked: true,
+          stake_block_reason: enrichedRow.stake_block_reason ?? null,
+          stake_block_code: enrichedRow.stake_block_code ?? null,
+        }
+      }
+      return {
+        mint: row.mint,
+        name: enrichedRow?.name ?? row.name,
+        image: enrichedRow?.image ?? row.image,
+        nest_status: 'not_nested' as const,
+        stake_blocked: false,
+        stake_block_reason: null,
+        stake_block_code: null,
+      }
+    })
 
     return NextResponse.json({
       configured: true,

@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo, useState } from 'react'
 import { Check, Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -10,6 +11,7 @@ import {
 } from '@/components/ui/dialog'
 import { NestingStakedAssetThumb } from '@/components/nesting/NestingStakedAssetThumb'
 import { shortenAddress } from '@/lib/nesting/format'
+import type { WalletNestMintNestStatus } from '@/lib/nesting/nft-stake-eligibility'
 import { cn } from '@/lib/utils'
 
 export type NestSwapOwlPickerRow = {
@@ -18,9 +20,12 @@ export type NestSwapOwlPickerRow = {
   image?: string | null
   checked: boolean
   disabled: boolean
+  nestStatus?: WalletNestMintNestStatus
   statusLabel?: string | null
   statusTone?: 'warn' | 'muted'
 }
+
+type FilterChip = 'nestable' | 'opening' | 'nested' | 'blocked'
 
 type Props = {
   open: boolean
@@ -34,6 +39,19 @@ type Props = {
   selectedCount: number
   maxPerRun: number
   assetLabels: { singular: string; plural: string }
+}
+
+const FILTER_CHIPS: { id: FilterChip; label: string }[] = [
+  { id: 'nestable', label: 'Nestable' },
+  { id: 'opening', label: 'Opening' },
+  { id: 'nested', label: 'Nested' },
+  { id: 'blocked', label: 'Blocked' },
+]
+
+function rowMatchesFilter(row: NestSwapOwlPickerRow, filter: FilterChip): boolean {
+  const status = row.nestStatus ?? (row.disabled ? 'nested' : 'not_nested')
+  if (filter === 'nestable') return status === 'not_nested'
+  return status === filter
 }
 
 /** Jupiter-token-list-style picker: choose which owls to nest, one row per NFT. */
@@ -50,8 +68,32 @@ export function NestSwapOwlPickerDialog({
   maxPerRun,
   assetLabels,
 }: Props) {
+  const [filter, setFilter] = useState<FilterChip>('nestable')
+
   const capitalizedPlural =
     assetLabels.plural.charAt(0).toUpperCase() + assetLabels.plural.slice(1)
+
+  const counts = useMemo(() => {
+    const c: Record<FilterChip, number> = {
+      nestable: 0,
+      opening: 0,
+      nested: 0,
+      blocked: 0,
+    }
+    for (const row of rows) {
+      const status = row.nestStatus ?? (row.disabled ? 'nested' : 'not_nested')
+      if (status === 'not_nested') c.nestable++
+      else if (status === 'opening') c.opening++
+      else if (status === 'nested') c.nested++
+      else if (status === 'blocked') c.blocked++
+    }
+    return c
+  }, [rows])
+
+  const visibleRows = useMemo(
+    () => rows.filter((row) => rowMatchesFilter(row, filter)),
+    [rows, filter]
+  )
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -72,7 +114,7 @@ export function NestSwapOwlPickerDialog({
                 variant="ghost"
                 size="sm"
                 className="h-8 px-2 text-xs text-theme-prime disabled:opacity-40"
-                disabled={selectAllDisabled}
+                disabled={selectAllDisabled || filter !== 'nestable'}
                 onClick={onSelectAll}
               >
                 Select all
@@ -90,6 +132,30 @@ export function NestSwapOwlPickerDialog({
               </Button>
             </div>
           </div>
+          <div className="flex flex-wrap gap-1.5 pt-3" role="tablist" aria-label="Filter by nest status">
+            {FILTER_CHIPS.map((chip) => {
+              const count = counts[chip.id]
+              const active = filter === chip.id
+              return (
+                <button
+                  key={chip.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={cn(
+                    'min-h-[36px] touch-manipulation rounded-full px-3 text-[11px] font-semibold uppercase tracking-wide transition-colors',
+                    active
+                      ? 'bg-emerald-500/20 text-theme-prime ring-1 ring-emerald-500/40'
+                      : 'bg-white/[0.04] text-muted-foreground hover:bg-white/[0.08]'
+                  )}
+                  onClick={() => setFilter(chip.id)}
+                >
+                  {chip.label}
+                  <span className="ml-1 tabular-nums opacity-80">{count}</span>
+                </button>
+              )
+            })}
+          </div>
         </DialogHeader>
 
         <div className="max-h-[min(60vh,26rem)] overflow-y-auto overscroll-contain p-2">
@@ -98,13 +164,15 @@ export function NestSwapOwlPickerDialog({
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
               Loading your {assetLabels.plural}…
             </div>
-          ) : rows.length === 0 ? (
+          ) : visibleRows.length === 0 ? (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground leading-relaxed">
-              No {assetLabels.plural} found in this wallet.
+              {rows.length === 0
+                ? `No ${assetLabels.plural} found in this wallet.`
+                : `No ${filter === 'nestable' ? 'nestable' : filter} ${assetLabels.plural} here.`}
             </p>
           ) : (
             <ul className="space-y-1" role="list">
-              {rows.map((row) => (
+              {visibleRows.map((row) => (
                 <li key={row.mint}>
                   <button
                     type="button"

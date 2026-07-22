@@ -22,6 +22,8 @@ import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import { StakingPoolCard } from '@/components/nesting/StakingPoolCard'
 import { AdminGenOwlNestRosterSection } from '@/components/nesting/AdminGenOwlNestRosterSection'
 import { SupportNestFamilyBreakdown } from '@/components/nesting/SupportNestFamilyBreakdown'
+import { AdminWalletNestAssetsPanel } from '@/components/nesting/AdminWalletNestAssetsPanel'
+import type { NestingWalletNestAsset } from '@/lib/nesting/admin-wallet-diagnostics'
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { PoolOnChainSettingsForm } from '@/components/nesting/PoolOnChainSettingsForm'
 import { NESTING_RECONCILE_MAX_BATCH } from '@/lib/nesting/rpc-policy'
@@ -119,6 +121,7 @@ export function AdminNestingClient() {
       active: number
       pending: number
     }>
+    wallet_nest_assets?: NestingWalletNestAsset[]
     positions_under_wallet: { active: number; pending: number; unstaked: number; ghost_active?: number }
     cross_wallet_rows: Array<{
       position_id: string
@@ -1741,6 +1744,10 @@ export function AdminNestingClient() {
                 </p>
                 {walletDiagReport.nest_families && walletDiagReport.nest_families.length > 0 ? (
                   <SupportNestFamilyBreakdown families={walletDiagReport.nest_families} />
+                ) : null}
+                {walletDiagReport.wallet_nest_assets &&
+                walletDiagReport.wallet_nest_assets.length > 0 ? (
+                  <AdminWalletNestAssetsPanel assets={walletDiagReport.wallet_nest_assets} />
                 ) : null}
                 {walletDiagReport.cross_wallet_rows.length > 0 ? (
                   <div>

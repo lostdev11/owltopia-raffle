@@ -25,10 +25,14 @@ export type NftStakeEligibility =
   | { eligible: true }
   | { eligible: false; reason: string; code: NftStakeEligibilityCode }
 
+/** Wallet inventory status for nestable NFT / Owltopia coin mints. */
+export type WalletNestMintNestStatus = 'not_nested' | 'nested' | 'opening' | 'blocked'
+
 export type WalletNestMintRow = {
   mint: string
   name: string | null
   image: string | null
+  nest_status?: WalletNestMintNestStatus
   stake_blocked?: boolean
   stake_block_reason?: string | null
   stake_block_code?: NftStakeEligibilityCode | null

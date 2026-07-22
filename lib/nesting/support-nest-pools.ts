@@ -65,6 +65,8 @@ export function listSupportNestCollectionCandidates(pools: StakingPoolRow[]): st
  */
 export async function listSupportNestMintAddressesInWallet(wallet: string): Promise<{
   mints: string[]
+  /** Same mints with nest family for inventory / diagnostics. */
+  mint_assets: Array<{ mint: string; family: SupportNestFamilyKey }>
   skipped_reason?: 'helius_unconfigured' | 'no_pools' | 'no_mints_in_wallet'
   mint_counts_by_family: Record<SupportNestFamilyKey, number>
 }> {
@@ -75,17 +77,32 @@ export async function listSupportNestMintAddressesInWallet(wallet: string): Prom
   }
   const holder = wallet.trim()
   if (!holder) {
-    return { mints: [], skipped_reason: 'no_mints_in_wallet', mint_counts_by_family: emptyCounts }
+    return {
+      mints: [],
+      mint_assets: [],
+      skipped_reason: 'no_mints_in_wallet',
+      mint_counts_by_family: emptyCounts,
+    }
   }
 
   const heliusRpcUrl = getHeliusMainnetRpcUrl()
   if (!heliusRpcUrl) {
-    return { mints: [], skipped_reason: 'helius_unconfigured', mint_counts_by_family: emptyCounts }
+    return {
+      mints: [],
+      mint_assets: [],
+      skipped_reason: 'helius_unconfigured',
+      mint_counts_by_family: emptyCounts,
+    }
   }
 
   const pools = await loadSupportNestPools()
   if (pools.length === 0) {
-    return { mints: [], skipped_reason: 'no_pools', mint_counts_by_family: emptyCounts }
+    return {
+      mints: [],
+      mint_assets: [],
+      skipped_reason: 'no_pools',
+      mint_counts_by_family: emptyCounts,
+    }
   }
 
   /** collection address → nest family (first pool that claims it wins). */
@@ -115,9 +132,11 @@ export async function listSupportNestMintAddressesInWallet(wallet: string): Prom
     mint_counts_by_family[family] += 1
   }
 
-  const mints = [...itemsByMint.keys()]
+  const mint_assets = [...itemsByMint.entries()].map(([mint, family]) => ({ mint, family }))
+  const mints = mint_assets.map((a) => a.mint)
   return {
     mints,
+    mint_assets,
     skipped_reason: mints.length === 0 ? 'no_mints_in_wallet' : undefined,
     mint_counts_by_family,
   }

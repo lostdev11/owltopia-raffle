@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
-import { getStakingPositionForWallet, patchStakingPosition } from '@/lib/db/staking-positions'
+import {
+  getStakingPositionForWallet,
+  isStakeSignatureUniqueViolation,
+  patchStakingPosition,
+  resolveUniqueStakeSignatureForPosition,
+} from '@/lib/db/staking-positions'
 import { stakingPositionHasPlatformFeeLinked } from '@/lib/db/staking-platform-fee-payments'
 import { assertWalletNftFrozenForPool } from '@/lib/nesting/nft-lock-service'
 import { requireStakingPlatformFeeLinked } from '@/lib/nesting/link-staking-platform-fee'
@@ -86,14 +91,34 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const updated = await patchStakingPosition(position.id, {
-      status: 'active',
-      stake_signature: signature ?? position.stake_signature ?? null,
-      sync_status: 'confirmed',
+    // Batch NFT locks share one wallet signature across many nests. The unique index on
+    // stake_signature (token-stake idempotency) only allows one row to store it.
+    const stakeSignature = await resolveUniqueStakeSignatureForPosition({
+      positionId: position.id,
+      requestedSignature: signature,
+      existingSignature: position.stake_signature,
+    })
+
+    const activatePatch = {
+      status: 'active' as const,
+      stake_signature: stakeSignature,
+      sync_status: 'confirmed' as const,
       last_synced_at: new Date().toISOString(),
       last_transaction_error: null,
       external_reference: `nft_freeze_confirmed:${frozen.tokenAccount}`,
-    })
+    }
+
+    let updated
+    try {
+      updated = await patchStakingPosition(position.id, activatePatch)
+    } catch (e) {
+      // Race: another nest in the same batch claimed the signature between lookup and update.
+      if (!isStakeSignatureUniqueViolation(e) || !signature) throw e
+      updated = await patchStakingPosition(position.id, {
+        ...activatePatch,
+        stake_signature: position.stake_signature ?? null,
+      })
+    }
 
     return NextResponse.json({
       position: updated,

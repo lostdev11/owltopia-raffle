@@ -110,17 +110,22 @@ export function formatNestingWalletError(
     )
   }
 
+  // Ledger + Solflare/Phantom: wallets inject Lighthouse ("Phantom protection") guard ixs that
+  // Ledger's Solana app often surfaces as "Unexpected instruction" and will not clear-sign.
+  // Match before the generic "instruction" / simulation branch below.
   if (
-    hay.includes('simulation') ||
-    hay.includes('simulación') ||
-    hay.includes('algo salió mal') ||
-    hay.includes('failed to process') ||
-    hay.includes('instruction')
+    hay.includes('unexpected instruction') ||
+    hay.includes('lighthouse') ||
+    hay.includes('l2texmfkdjp') ||
+    hay.includes('assertaccountinfo') ||
+    ((hay.includes('ledger') || hay.includes('blind signing') || hay.includes('blind-signing')) &&
+      (hay.includes('instruction') || hay.includes('unknown program')))
   ) {
-    const backpackHint = isBackpack
-      ? ` In Backpack, confirm you own the ${asset}, it is not listed for sale, and you have a little SOL for fees. If simulation keeps failing, try Phantom or Solflare for the wallet-lock step.`
-      : ` Confirm you own the ${asset}, it is not delegated or listed, and you have SOL for fees.`
-    return `Your wallet rejected the nest lock transaction during simulation.${backpackHint}`
+    return (
+      `Your wallet added a Lighthouse security instruction that Ledger cannot clear-sign for this nest lock. ` +
+      `That is a Solflare/Phantom + Ledger limitation (not an Owltopia nest bug). ` +
+      `Nest one ${asset} at a time from a hot wallet, or transfer the ${asset} to a hot wallet and nest there.`
+    )
   }
 
   // Ledger-via-Phantom/Solflare often never surfaces complex MPL Core nest locks on-device.
@@ -140,6 +145,19 @@ export function formatNestingWalletError(
       `Unlock Ledger, open the Solana app (close Ledger Live), enable Blind signing, and nest one ${asset} at a time. ` +
       `USB/WebHID on desktop is more reliable than Bluetooth. If the device never prompts, nest from a hot wallet.`
     )
+  }
+
+  if (
+    hay.includes('simulation') ||
+    hay.includes('simulación') ||
+    hay.includes('algo salió mal') ||
+    hay.includes('failed to process') ||
+    hay.includes('instruction')
+  ) {
+    const backpackHint = isBackpack
+      ? ` In Backpack, confirm you own the ${asset}, it is not listed for sale, and you have a little SOL for fees. If simulation keeps failing, try Phantom or Solflare for the wallet-lock step.`
+      : ` Confirm you own the ${asset}, it is not delegated or listed, and you have SOL for fees.`
+    return `Your wallet rejected the nest lock transaction during simulation.${backpackHint}`
   }
 
   return msg || 'Nest transaction failed'

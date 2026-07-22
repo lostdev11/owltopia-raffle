@@ -4,7 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
-import { NestingOwlCoinWalletProgress } from '@/components/nesting/NestingOwlCoinWalletProgress'
+import {
+  NestingOwlCoinWalletProgress,
+  type NestingNotNestedAsset,
+} from '@/components/nesting/NestingOwlCoinWalletProgress'
 import {
   buildOwlCoinWalletStakeStats,
   poolIdsForNftWalletProgressStats,
@@ -13,10 +16,18 @@ import {
 } from '@/lib/nesting/owl-coin-wallet-stake-stats'
 import { nestingNftAssetLabels } from '@/lib/nesting/gen1-staking-pools'
 import { findStakingPoolByIdOrSlug } from '@/lib/nesting/format'
+import type { WalletNestMintNestStatus } from '@/lib/nesting/nft-stake-eligibility'
+
+type MintScanRow = {
+  mint: string
+  name: string | null
+  image: string | null
+  nest_status: WalletNestMintNestStatus
+}
 
 type MintScanState = {
   status: 'idle' | 'loading' | 'done'
-  mints: { mint: string }[]
+  mints: MintScanRow[]
   configured: boolean
 }
 
@@ -28,6 +39,8 @@ type Props = {
   preferredGroupKey?: string | null
   /** Bumps when parent nest rows change so this panel stays in sync without a full page reload. */
   positionsVersion?: string | null
+  /** Dashboard: open the owl picker / expand open-nest form instead of linking away. */
+  onNestThese?: () => void
   className?: string
 }
 
@@ -39,6 +52,7 @@ export function NestingOwlCoinWalletProgressPanel({
   preferredPoolId = null,
   preferredGroupKey = null,
   positionsVersion = null,
+  onNestThese,
   className,
 }: Props) {
   const { connected, publicKey } = useWallet()
@@ -135,11 +149,29 @@ export function NestingOwlCoinWalletProgressPanel({
         return
       }
       const rows = Array.isArray(raw?.mints) ? raw.mints : []
-      const mints = rows
-        .map((row: { mint?: unknown }) => ({
-          mint: typeof row.mint === 'string' ? row.mint.trim() : '',
-        }))
-        .filter((row: { mint: string }) => row.mint.length > 0)
+      const mints: MintScanRow[] = rows
+        .map((row: {
+          mint?: unknown
+          name?: unknown
+          image?: unknown
+          nest_status?: unknown
+        }) => {
+          const mint = typeof row.mint === 'string' ? row.mint.trim() : ''
+          const nest_status: WalletNestMintNestStatus =
+            row.nest_status === 'nested' ||
+            row.nest_status === 'opening' ||
+            row.nest_status === 'blocked' ||
+            row.nest_status === 'not_nested'
+              ? row.nest_status
+              : 'not_nested'
+          return {
+            mint,
+            name: typeof row.name === 'string' ? row.name : null,
+            image: typeof row.image === 'string' ? row.image : null,
+            nest_status,
+          }
+        })
+        .filter((row: MintScanRow) => row.mint.length > 0)
       setMintScan({ status: 'done', mints, configured: true })
     } catch {
       setMintScan({ status: 'done', mints: [], configured: true })
@@ -166,17 +198,28 @@ export function NestingOwlCoinWalletProgressPanel({
     void loadWalletMints()
   }, [positionsLoaded, needsSignIn, poolId, mintScan.status, loadWalletMints])
 
+  const notNestedAssets = useMemo((): NestingNotNestedAsset[] => {
+    if (mintScan.status !== 'done' || !mintScan.configured) return []
+    return mintScan.mints
+      .filter((m) => m.nest_status === 'not_nested')
+      .map((m) => ({ mint: m.mint, name: m.name, image: m.image }))
+  }, [mintScan.status, mintScan.configured, mintScan.mints])
+
   const stats = useMemo(() => {
     if (!poolId) return null
     const scanDone = mintScan.status === 'done' && mintScan.configured
+    // eligible = wallet mints that are not already counted as nested (keeps total = nested + eligible)
+    const eligibleMintCount = scanDone
+      ? mintScan.mints.filter((m) => m.nest_status !== 'nested').length
+      : null
     return buildOwlCoinWalletStakeStats({
       poolId,
       poolIds: statsPoolIds,
       positions,
-      eligibleMintCount: scanDone ? mintScan.mints.length : null,
+      eligibleMintCount,
       scanLoading: mintScan.status === 'loading',
     })
-  }, [poolId, statsPoolIds, positions, mintScan.status, mintScan.configured, mintScan.mints.length])
+  }, [poolId, statsPoolIds, positions, mintScan.status, mintScan.configured, mintScan.mints])
 
   if (!connected || !publicKey || !poolId || !stats) return null
 
@@ -205,6 +248,8 @@ export function NestingOwlCoinWalletProgressPanel({
       nestedCount={stats.nestedCount}
       totalCount={stats.totalCount}
       assetLabels={assetLabels}
+      notNestedAssets={notNestedAssets}
+      onNestThese={onNestThese}
       loading={stats.loading}
       className={className}
     />
