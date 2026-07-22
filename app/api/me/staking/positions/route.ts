@@ -77,9 +77,17 @@ export async function GET(request: NextRequest) {
       healPartial = true
     }
 
-    const emptyClear = {
+    const emptyClearPending = {
       cleared_count: 0,
       results: [] as Awaited<ReturnType<typeof clearOrphanedPendingNftNestsForWallet>>['results'],
+    }
+    const emptyClearCrossWallet = {
+      cleared_count: 0,
+      results: [] as Awaited<ReturnType<typeof clearCrossWalletStaleNestsForWallet>>['results'],
+    }
+    const emptyClearActive = {
+      cleared_count: 0,
+      results: [] as Awaited<ReturnType<typeof clearOrphanedActiveNftNestsForWallet>>['results'],
     }
     const emptyHealFrozen = {
       healed_count: 0,
@@ -96,7 +104,7 @@ export async function GET(request: NextRequest) {
     const { cleared_count, results: clear_results } = await runHealStep(
       'clearOrphanedPending',
       () => false,
-      emptyClear,
+      emptyClearPending,
       () => clearOrphanedPendingNftNestsForWallet(session.wallet),
       markPartial
     )
@@ -105,7 +113,7 @@ export async function GET(request: NextRequest) {
       await runHealStep(
         'clearCrossWalletStale',
         healBudgetExceeded,
-        emptyClear,
+        emptyClearCrossWallet,
         () => clearCrossWalletStaleNestsForWallet(session.wallet),
         markPartial
       )
@@ -143,7 +151,7 @@ export async function GET(request: NextRequest) {
     const { cleared_count: cleared_active_count, results: clear_active_results } = await runHealStep(
       'clearOrphanedActive',
       healBudgetExceeded,
-      emptyClear,
+      emptyClearActive,
       () => clearOrphanedActiveNftNestsForWallet(session.wallet),
       markPartial
     )
