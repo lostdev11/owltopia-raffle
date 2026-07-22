@@ -7,11 +7,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SectionHeader } from '@/components/council/SectionHeader'
-import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
-import { genOwlStakingGroupLabel } from '@/lib/nesting/gen-owl-staking-groups'
 import type { GenOwlNestRosterPayload } from '@/lib/db/gen-owl-nest-roster'
-
-const GROUPS: GenOwlStakingGroupKey[] = ['gen1-owl', 'gen2-owl']
+import {
+  NEST_ROSTER_GROUP_KEYS,
+  nestRosterGroupLabel,
+  type NestRosterGroupKey,
+} from '@/lib/nesting/nest-roster-groups'
 
 function tierShortLabel(poolSlug: string, lockDays: number): string {
   if (lockDays > 0) return `${lockDays}d`
@@ -19,13 +20,13 @@ function tierShortLabel(poolSlug: string, lockDays: number): string {
 }
 
 export function AdminGenOwlNestRosterSection() {
-  const [group, setGroup] = useState<GenOwlStakingGroupKey>('gen1-owl')
+  const [group, setGroup] = useState<NestRosterGroupKey>('gen1-owl')
   const [roster, setRoster] = useState<GenOwlNestRosterPayload | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [walletFilter, setWalletFilter] = useState('')
 
-  const loadRoster = useCallback(async (nextGroup: GenOwlStakingGroupKey) => {
+  const loadRoster = useCallback(async (nextGroup: NestRosterGroupKey) => {
     setLoading(true)
     setError(null)
     try {
@@ -47,7 +48,7 @@ export function AdminGenOwlNestRosterSection() {
   }, [])
 
   const selectGroup = useCallback(
-    (next: GenOwlStakingGroupKey) => {
+    (next: NestRosterGroupKey) => {
       setGroup(next)
       void loadRoster(next)
     },
@@ -70,8 +71,8 @@ export function AdminGenOwlNestRosterSection() {
   return (
     <section className="space-y-4">
       <SectionHeader
-        title="Who nested — 90 vs 180 day roster"
-        description="Every wallet with an open Gen 1 / Gen 2 owl nest, split by lock tier. Includes each nester's referral code and how many confirmed ticket purchases their code has referred, so you can cross-check the referral program. Export CSV for the full per-NFT list."
+        title="Who nested — nest roster by collection"
+        description="Every wallet with an open Owltopia coin, Gen 1, or Gen 2 nest, split by lock tier. Includes each nester's referral code and how many confirmed ticket purchases their code has referred, so you can cross-check the referral program. Export CSV for the full per-NFT list."
       />
       <Card className="rounded-xl border-border/60">
         <CardHeader>
@@ -82,7 +83,7 @@ export function AdminGenOwlNestRosterSection() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-3">
-            {GROUPS.map((g) => (
+            {NEST_ROSTER_GROUP_KEYS.map((g) => (
               <Button
                 key={g}
                 type="button"
@@ -92,7 +93,7 @@ export function AdminGenOwlNestRosterSection() {
                 onClick={() => selectGroup(g)}
               >
                 {loading && group === g ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
-                {genOwlStakingGroupLabel(g)}
+                {nestRosterGroupLabel(g)}
               </Button>
             ))}
             {roster ? (
@@ -112,14 +113,14 @@ export function AdminGenOwlNestRosterSection() {
 
           {!roster && !loading && !error ? (
             <p className="text-sm text-muted-foreground">
-              Pick Gen 1 or Gen 2 to load every open nest by lock tier.
+              Pick Owltopia coin NFTs, Gen 1, or Gen 2 to load every open nest by lock tier.
             </p>
           ) : null}
 
           {roster ? (
             <>
               <p className="text-xs text-muted-foreground">
-                {genOwlStakingGroupLabel(roster.group)} · generated{' '}
+                {nestRosterGroupLabel(roster.group)} · generated{' '}
                 {new Date(roster.generated_at).toLocaleString()}
               </p>
 
