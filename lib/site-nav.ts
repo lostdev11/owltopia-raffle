@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   Bird,
+  Gavel,
   Gift,
   HeartHandshake,
   Landmark,
@@ -72,6 +73,12 @@ export const RAFFLES_NAV_GROUP: SiteNavGroup = {
       label: 'Partner hub',
       description: 'Host dashboard after partner onboarding',
       icon: HeartHandshake,
+    },
+    {
+      href: '/auctions',
+      label: 'Partner auctions',
+      description: 'Beta — partners & admins only (NFT / SOL / USDC)',
+      icon: Gavel,
     },
   ],
 }

@@ -54,6 +54,10 @@
     {
       "path": "/api/cron/owl-center-reveal-day",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/end-nft-auctions",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

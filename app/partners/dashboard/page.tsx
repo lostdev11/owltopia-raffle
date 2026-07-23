@@ -580,6 +580,31 @@ export default function PartnerHostDashboardPage() {
         </CardContent>
       </Card>
 
+      <Card className={`${CARD_SURFACE} mb-6`}>
+        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+          <div className="flex gap-3 min-w-0">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15">
+              <Plus className="h-5 w-5 text-emerald-600 dark:text-emerald-400" aria-hidden />
+            </div>
+            <div className="min-w-0">
+              <p className="font-semibold text-foreground">Partner auctions (beta)</p>
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                Host English auctions for NFTs, SOL, or USDC with an optional hidden reserve. Same fee
+                tiers as raffles. Partners and admins only while we keep quality high.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+            <Button asChild variant="outline" className="min-h-[44px] w-full touch-manipulation sm:w-auto">
+              <Link href="/auctions">Browse auctions</Link>
+            </Button>
+            <Button asChild className="min-h-[44px] w-full touch-manipulation sm:w-auto">
+              <Link href="/auctions/new">Create auction</Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {data.creatorRefundRaffles.length > 0 && (
         <Card className={`${CARD_SURFACE} mb-6 border-amber-500/35 bg-amber-500/[0.06]`}>
           <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
