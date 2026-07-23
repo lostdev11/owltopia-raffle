@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { editOriginalInteractionResponse } from '@/lib/discord-interaction-edit-original'
 import { handleDiscordApplicationCommand } from '@/lib/discord-handle-interaction'
+import { handleDiscordMarketplaceMessageComponent } from '@/lib/discord-marketplace-handle-interaction'
 import {
   normalizeDiscordApplicationPublicKeyHex,
   verifyDiscordInteractionRequest,
@@ -14,6 +15,7 @@ export const maxDuration = 60
 /** @see https://discord.com/developers/docs/interactions/receiving-and-responding */
 const DISCORD_INTERACTION_PING = 1
 const DISCORD_INTERACTION_APPLICATION_COMMAND = 2
+const DISCORD_INTERACTION_MESSAGE_COMPONENT = 3
 /** DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE — Discord allows ~3s; we finish via PATCH @original */
 const DISCORD_INTERACTION_DEFERRED_CHANNEL_MESSAGE = 5
 
@@ -63,7 +65,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ type: DISCORD_INTERACTION_PING })
   }
 
-  if (t === DISCORD_INTERACTION_APPLICATION_COMMAND) {
+  if (t === DISCORD_INTERACTION_APPLICATION_COMMAND || t === DISCORD_INTERACTION_MESSAGE_COMPONENT) {
     const interaction = body as {
       application_id?: string
       token?: string
@@ -79,7 +81,10 @@ export async function POST(request: NextRequest) {
 
     after(async () => {
       try {
-        const response = await handleDiscordApplicationCommand(body as never)
+        const response =
+          t === DISCORD_INTERACTION_MESSAGE_COMPONENT
+            ? await handleDiscordMarketplaceMessageComponent(body as never)
+            : await handleDiscordApplicationCommand(body as never)
         await editOriginalInteractionResponse(applicationId, interactionToken, response)
       } catch (e) {
         console.error('[discord/interactions] deferred handler:', e)

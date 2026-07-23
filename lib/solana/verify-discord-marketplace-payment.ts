@@ -1,5 +1,6 @@
 /**
  * Verify SOL or OWL payment for Discord marketplace NFT purchases (memo OWLSHOP:…).
+ * When a platform fee is quoted, the same tx must also send that SOL to OWL_PLATFORM_FEE_TREASURY_WALLET.
  */
 import {
   LAMPORTS_PER_SOL,
@@ -9,8 +10,10 @@ import {
   type ParsedTransactionWithMeta,
   type PartiallyDecodedInstruction,
 } from '@solana/web3.js'
+import { platformFeeLamportsWithinTolerance } from '@/lib/discord-marketplace-purchase-fee'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { getDiscordMarketplacePaymentWalletPubkey } from '@/lib/solana/discord-marketplace-payment-wallet'
+import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 import type { NftListingCurrency } from '@/lib/db/discord-marketplace-nfts'
 
@@ -85,6 +88,8 @@ export async function verifyDiscordMarketplaceNftPayment(params: {
   expectedAmount: number
   expectedMemo: string
   payerWallet: string
+  /** Frozen platform fee quoted at buy time (lamports). 0 / omit = no fee required. */
+  expectedPlatformFeeLamports?: number
   parsedTransaction?: ParsedTransactionWithMeta | null
 }): Promise<VerifyMarketplaceNftPaymentResult> {
   const sig = params.signature.trim()
@@ -124,6 +129,36 @@ export async function verifyDiscordMarketplaceNftPayment(params: {
   const treasuryB58 = treasury.toBase58()
   const payerB58 = payer.toBase58()
   const tolerance = 1n
+  const expectedFee = BigInt(Math.max(0, Math.floor(Number(params.expectedPlatformFeeLamports ?? 0))))
+  const feeTreasury = getPlatformFeeTreasuryWalletAddress()
+
+  if (expectedFee > 0n) {
+    if (!feeTreasury) {
+      return { ok: false, error: 'Platform fee treasury not configured (OWL_PLATFORM_FEE_TREASURY_WALLET)' }
+    }
+    // Listing price and platform fee can both land on the payment wallet when fee treasury
+    // equals payment wallet; otherwise fee must be a distinct SOL transfer.
+    if (feeTreasury === treasuryB58 && params.currency === 'SOL') {
+      const expectedPrice = BigInt(Math.round(params.expectedAmount * LAMPORTS_PER_SOL))
+      const expectedTotal = expectedPrice + expectedFee
+      const received = solTransferDeltaToTreasury(tx, treasuryB58, payerB58)
+      if (!platformFeeLamportsWithinTolerance(expectedTotal, received)) {
+        return {
+          ok: false,
+          error: `SOL total mismatch: expected listing price + platform fee to \`${treasuryB58}\``,
+        }
+      }
+      return { ok: true }
+    }
+
+    const feeReceived = solTransferDeltaToTreasury(tx, feeTreasury, payerB58)
+    if (!platformFeeLamportsWithinTolerance(expectedFee, feeReceived)) {
+      return {
+        ok: false,
+        error: `Platform fee missing or wrong amount: send ${formatFeeSol(expectedFee)} SOL to \`${feeTreasury}\` in the same transaction as your payment (with memo).`,
+      }
+    }
+  }
 
   if (params.currency === 'SOL') {
     const expectedLamports = BigInt(Math.round(params.expectedAmount * LAMPORTS_PER_SOL))
@@ -132,7 +167,7 @@ export async function verifyDiscordMarketplaceNftPayment(params: {
     if (received < expectedLamports - tolerance || received > expectedLamports + tolerance) {
       return {
         ok: false,
-        error: `SOL amount mismatch: expected ${params.expectedAmount} SOL to treasury, observed ${Number(received) / LAMPORTS_PER_SOL} SOL`,
+        error: `SOL amount mismatch: expected ${params.expectedAmount} SOL to payment wallet, observed ${Number(received) / LAMPORTS_PER_SOL} SOL`,
       }
     }
     return { ok: true }
@@ -165,4 +200,9 @@ export async function verifyDiscordMarketplaceNftPayment(params: {
   }
 
   return { ok: true }
+}
+
+function formatFeeSol(lamports: bigint): string {
+  const sol = Number(lamports) / LAMPORTS_PER_SOL
+  return sol >= 0.01 ? sol.toFixed(4) : sol.toFixed(6)
 }
