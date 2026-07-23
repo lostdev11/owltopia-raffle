@@ -35,7 +35,7 @@ function toBase58(pk: PublicKey | { toBase58(): string }): string {
   return pk instanceof PublicKey ? pk.toBase58() : pk.toBase58()
 }
 
-function getPhantomInjectedProviderForPublicKey(expected: PublicKey): PhantomSolanaLike | null {
+export function getPhantomInjectedProviderForPublicKey(expected: PublicKey): PhantomSolanaLike | null {
   if (typeof window === 'undefined') return null
   const want = expected.toBase58()
   const candidates: unknown[] = [(window as unknown as { phantom?: { solana?: unknown } }).phantom?.solana]
