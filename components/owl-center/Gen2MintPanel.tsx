@@ -36,6 +36,7 @@ import { preloadConfetti } from '@/lib/confetti'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { Gen2MintCheckPhasePreview, OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 import { mintGen2FromCandyMachine, warmGen2MintPrep } from '@/lib/solana/gen2-mint'
+import { GEN2_TEAM_GUARD_LABEL } from '@/lib/solana/gen2-guards'
 import { shouldCollectOwlCenterPlatformMintFeeClient } from '@/lib/solana/owl-center-platform-mint-fee'
 import {
   getGen2CandyMachineId,
@@ -360,6 +361,7 @@ export function Gen2MintPanel({
     if (isMintInProgress(step)) return stepLabel(step)
     if (connected && eligLoading && !elig) return 'Checking eligibility…'
     if (soldOut) return 'Sold out'
+    if (elig?.reason === 'team_backstop') return 'Mint leftovers (team)'
     if (publicPoolSoldOut || elig?.reason === 'public_pool_exhausted') return 'Public sold out'
     if (elig?.reason === 'sold_out') return 'Sold out'
     if (elig?.reason === 'allocation_minted') return 'Allocation complete'
@@ -416,6 +418,12 @@ export function Gen2MintPanel({
           phase,
           launch,
           sessionDeadline,
+          ...(elig?.reason === 'team_backstop'
+            ? {
+                guardGroupOverride: GEN2_TEAM_GUARD_LABEL,
+                allowListProofPhase: 'TEAM_BACKSTOP' as const,
+              }
+            : {}),
           // Attach the ~$1 Owltopia platform fee (SOL) to each mint tx when a treasury is configured.
           collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
           platformFeeLamports:
@@ -549,7 +557,10 @@ export function Gen2MintPanel({
   if (trading) {
     return (
       <MintPanelShell embedded={embedded} label="trading.sys">
-        <p className="text-sm text-[#9BA8B4]">Trading is now active — secondary markets only.</p>
+        <p className="font-mono text-lg font-bold text-[#00FF9C]">Minted out — trade on secondary</p>
+        <p className="mt-2 text-sm text-[#9BA8B4]">
+          Primary mint is closed. Buy or sell Gen2 on Magic Eden or Tensor.
+        </p>
         <div className="mt-4">
           <TradingButtons magicEdenUrl={launch.magic_eden_url} tensorUrl={launch.tensor_url} />
         </div>
@@ -560,10 +571,10 @@ export function Gen2MintPanel({
   if (soldOut) {
     return (
       <MintPanelShell embedded={embedded} label="sold_out.sys">
-        <p className="font-mono text-lg font-bold text-[#FF9C9C]">SOLD OUT</p>
+        <p className="font-mono text-lg font-bold text-[#FF9C9C]">Minted out — trade on secondary</p>
         <p className="mt-2 text-sm text-[#9BA8B4]">
-          All {launch.total_supply.toLocaleString()} Gen2 spots have minted. Primary mint is closed — check secondary
-          markets below.
+          All {launch.total_supply.toLocaleString()} Gen2 spots have minted. Primary mint is closed — trade on
+          secondary markets below.
         </p>
         <div className="mt-4">
           <TradingButtons magicEdenUrl={launch.magic_eden_url} tensorUrl={launch.tensor_url} />
@@ -648,7 +659,7 @@ export function Gen2MintPanel({
             </p>
           ) : null}
 
-          {publicPoolSoldOut ? (
+          {publicPoolSoldOut && elig?.reason !== 'team_backstop' ? (
             <p className="border border-[#FF9C9C]/40 bg-[#FF9C9C]/10 px-3 py-2 text-sm text-[#FF9C9C]">
               {reasonLabel('public_pool_exhausted')}
               {remaining > 0

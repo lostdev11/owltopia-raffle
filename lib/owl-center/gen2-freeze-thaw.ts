@@ -1,0 +1,269 @@
+/**
+ * Gen2 Candy Machine freezeSolPayment lifecycle (shared by CLI + admin/cron).
+ *
+ * All guard groups freeze to the same distribution wallet, so the freeze escrow PDA is shared —
+ * init/unlock once; thaw each minted NFT at its current owner.
+ */
+import bs58 from 'bs58'
+import {
+  createSignerFromKeypair,
+  publicKey,
+  signerIdentity,
+  type Umi,
+} from '@metaplex-foundation/umi'
+import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
+import {
+  fetchCandyMachine,
+  mplCandyMachine,
+  route,
+  safeFetchCandyGuard,
+  type CandyGuard,
+  type CandyMachine,
+} from '@metaplex-foundation/mpl-candy-machine'
+import { TokenStandard } from '@metaplex-foundation/mpl-token-metadata'
+
+import { getGen2MintProceedsWalletAddress } from '@/lib/owl-center/gen2-mint-proceeds'
+import type { OwlCenterFreezeProgress } from '@/lib/owl-center/types'
+import { getGen2CandyMachineId, getGen2CollectionMint } from '@/lib/solana/network'
+
+export const GEN2_FREEZE_GROUP = 'pub'
+export const GEN2_FREEZE_PERIOD_SECONDS = 30 * 24 * 60 * 60
+/** Per cron/admin batch — keeps serverless invocations under typical time limits. */
+export const GEN2_THAW_BATCH_SIZE = 30
+
+export type Gen2DasAsset = { id: string; ownership?: { owner?: string } }
+
+export type Gen2FreezeIds = {
+  candyMachineId: string
+  collectionMint: string
+  rpcUrl: string
+}
+
+export function resolveGen2FreezeIds(overrides?: Partial<Gen2FreezeIds>): Gen2FreezeIds {
+  const candyMachineId =
+    overrides?.candyMachineId?.trim() ||
+    getGen2CandyMachineId(null) ||
+    process.env.NEXT_PUBLIC_GEN2_CANDY_MACHINE_ID?.trim() ||
+    'BYBehCvckib5edwST3K3Z13YB9Gap5sSBXqbBWiiMm6Q'
+  const collectionMint =
+    overrides?.collectionMint?.trim() ||
+    getGen2CollectionMint(null) ||
+    process.env.NEXT_PUBLIC_GEN2_COLLECTION_MINT?.trim() ||
+    'GkLgT4KuwAPKeMSzfcPPmzuGimRNPvK1FWNPks4kzFVA'
+  const rpcUrl =
+    overrides?.rpcUrl?.trim() ||
+    process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
+    'https://api.mainnet-beta.solana.com'
+  return { candyMachineId, collectionMint, rpcUrl }
+}
+
+export function resolveGen2FreezeDistributionWallet(): string {
+  const dest = getGen2MintProceedsWalletAddress()
+  if (!dest) {
+    throw new Error(
+      'GEN2_MINT_PROCEEDS_SECRET_KEY (or GEN2_MINT_PROCEEDS_WALLET) not set — must match the destination used in gen2-cm-setup guards.'
+    )
+  }
+  return dest
+}
+
+export function loadGen2GuardAuthorityUmi(rpcUrl?: string): Umi {
+  const raw = process.env.GEN2_GUARD_AUTHORITY_SECRET_KEY?.trim() || process.env.IRYS_PRIVATE_KEY?.trim()
+  if (!raw) throw new Error('GEN2_GUARD_AUTHORITY_SECRET_KEY (or IRYS_PRIVATE_KEY) not set')
+  let secret: Uint8Array
+  try {
+    secret = bs58.decode(raw)
+  } catch {
+    secret = Uint8Array.from(JSON.parse(raw) as number[])
+  }
+  const rpc = rpcUrl?.trim() || resolveGen2FreezeIds().rpcUrl
+  const umi = createUmi(rpc, { commitment: 'confirmed' }).use(mplCandyMachine())
+  const kp = umi.eddsa.createKeypairFromSecretKey(secret)
+  umi.use(signerIdentity(createSignerFromKeypair(umi, kp)))
+  return umi
+}
+
+export async function loadGen2CandyGuard(
+  umi: Umi,
+  candyMachineId: string
+): Promise<{ cm: CandyMachine; guard: CandyGuard }> {
+  const cm = await fetchCandyMachine(umi, publicKey(candyMachineId))
+  const guard = await safeFetchCandyGuard(umi, cm.mintAuthority)
+  if (!guard) throw new Error('No candy guard at CM mintAuthority.')
+  if (String(guard.authority) !== String(umi.identity.publicKey)) {
+    throw new Error(
+      `Configured key ${umi.identity.publicKey} is not the guard authority ${guard.authority}.`
+    )
+  }
+  return { cm, guard }
+}
+
+export async function fetchGen2CollectionAssets(
+  collectionMint: string,
+  rpcUrl: string
+): Promise<Gen2DasAsset[]> {
+  const out: Gen2DasAsset[] = []
+  for (let page = 1; ; page++) {
+    const res = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'gen2-thaw',
+        method: 'getAssetsByGroup',
+        params: { groupKey: 'collection', groupValue: collectionMint, page, limit: 1000 },
+      }),
+    })
+    const json = (await res.json()) as {
+      result?: { items?: Gen2DasAsset[] }
+      error?: { message?: string }
+    }
+    if (json.error) throw new Error(`DAS getAssetsByGroup failed: ${json.error.message}`)
+    const items = json.result?.items ?? []
+    out.push(...items)
+    if (items.length < 1000) break
+  }
+  return out
+}
+
+export async function initGen2FreezeEscrow(ids?: Partial<Gen2FreezeIds>): Promise<{ signature: string | null; already: boolean }> {
+  const { candyMachineId, rpcUrl } = resolveGen2FreezeIds(ids)
+  const umi = loadGen2GuardAuthorityUmi(rpcUrl)
+  const DEST = resolveGen2FreezeDistributionWallet()
+  const { guard } = await loadGen2CandyGuard(umi, candyMachineId)
+  try {
+    const res = await route(umi, {
+      candyMachine: publicKey(candyMachineId),
+      candyGuard: guard.publicKey,
+      guard: 'freezeSolPayment',
+      group: GEN2_FREEZE_GROUP,
+      routeArgs: {
+        path: 'initialize',
+        destination: publicKey(DEST),
+        period: GEN2_FREEZE_PERIOD_SECONDS,
+        candyGuardAuthority: umi.identity,
+      },
+    }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
+    return { signature: bs58.encode(res.signature), already: false }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (/already in use|already initialized|already exists|FreezeEscrowAlreadyExists|0x1796|0x0\b/i.test(msg)) {
+      return { signature: null, already: true }
+    }
+    throw e
+  }
+}
+
+export type Gen2ThawBatchResult = {
+  attempted: number
+  thawed: number
+  skipped: number
+  remaining_unprocessed: number
+  last_signature: string | null
+}
+
+/**
+ * Thaw up to `limit` assets that still have an owner. Caller should pass the full DAS list and
+ * track progress via `offset` (skip already-processed indices from prior batches).
+ */
+export async function thawGen2AssetBatch(params: {
+  assets: Gen2DasAsset[]
+  offset?: number
+  limit?: number
+  ids?: Partial<Gen2FreezeIds>
+}): Promise<Gen2ThawBatchResult> {
+  const { candyMachineId, rpcUrl } = resolveGen2FreezeIds(params.ids)
+  const umi = loadGen2GuardAuthorityUmi(rpcUrl)
+  const DEST = resolveGen2FreezeDistributionWallet()
+  const { guard } = await loadGen2CandyGuard(umi, candyMachineId)
+  const offset = Math.max(0, params.offset ?? 0)
+  const limit = Math.max(1, params.limit ?? GEN2_THAW_BATCH_SIZE)
+  const slice = params.assets.slice(offset, offset + limit)
+
+  let thawed = 0
+  let skipped = 0
+  let last_signature: string | null = null
+
+  for (const a of slice) {
+    const owner = a.ownership?.owner
+    if (!owner) {
+      skipped++
+      continue
+    }
+    try {
+      const res = await route(umi, {
+        candyMachine: publicKey(candyMachineId),
+        candyGuard: guard.publicKey,
+        guard: 'freezeSolPayment',
+        group: GEN2_FREEZE_GROUP,
+        routeArgs: {
+          path: 'thaw',
+          destination: publicKey(DEST),
+          nftMint: publicKey(a.id),
+          nftOwner: publicKey(owner),
+          nftTokenStandard: TokenStandard.NonFungible,
+        },
+      }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
+      thawed++
+      last_signature = bs58.encode(res.signature)
+    } catch {
+      // Already thawed / not frozen — safe to skip.
+      skipped++
+    }
+  }
+
+  const processedEnd = offset + slice.length
+  return {
+    attempted: slice.length,
+    thawed,
+    skipped,
+    remaining_unprocessed: Math.max(0, params.assets.length - processedEnd),
+    last_signature,
+  }
+}
+
+/** Thaw every asset (CLI / full run). Prefer `thawGen2AssetBatch` under serverless time limits. */
+export async function thawGen2AllAssets(ids?: Partial<Gen2FreezeIds>): Promise<{
+  total: number
+  thawed: number
+  skipped: number
+}> {
+  const resolved = resolveGen2FreezeIds(ids)
+  const assets = await fetchGen2CollectionAssets(resolved.collectionMint, resolved.rpcUrl)
+  let thawed = 0
+  let skipped = 0
+  let offset = 0
+  while (offset < assets.length) {
+    const batch = await thawGen2AssetBatch({ assets, offset, limit: GEN2_THAW_BATCH_SIZE, ids: resolved })
+    thawed += batch.thawed
+    skipped += batch.skipped
+    offset += batch.attempted
+  }
+  return { total: assets.length, thawed, skipped }
+}
+
+export async function unlockGen2FreezeEscrow(ids?: Partial<Gen2FreezeIds>): Promise<{ signature: string }> {
+  const { candyMachineId, rpcUrl } = resolveGen2FreezeIds(ids)
+  const umi = loadGen2GuardAuthorityUmi(rpcUrl)
+  const DEST = resolveGen2FreezeDistributionWallet()
+  const { guard } = await loadGen2CandyGuard(umi, candyMachineId)
+  const res = await route(umi, {
+    candyMachine: publicKey(candyMachineId),
+    candyGuard: guard.publicKey,
+    guard: 'freezeSolPayment',
+    group: GEN2_FREEZE_GROUP,
+    routeArgs: {
+      path: 'unlockFunds',
+      destination: publicKey(DEST),
+      candyGuardAuthority: umi.identity,
+    },
+  }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
+  return { signature: bs58.encode(res.signature) }
+}
+
+export function mergeFreezeProgress(
+  prev: OwlCenterFreezeProgress | null | undefined,
+  patch: OwlCenterFreezeProgress
+): OwlCenterFreezeProgress {
+  return { ...(prev ?? {}), ...patch }
+}

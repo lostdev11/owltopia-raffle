@@ -399,6 +399,32 @@ export async function buildGen2Eligibility(
       wlMinted: wlMintedGlobal,
     })
     const max = gen2PublicWalletLimitRemaining({ publicPoolRemaining, supplyRemaining: remaining })
+
+    // Admin team leftover mint after public pool is empty (temporary on-chain `team` guard).
+    if (
+      max <= 0 &&
+      remaining > 0 &&
+      launch.freeze_progress.backstop_mint_enabled &&
+      w
+    ) {
+      const team = new Set(
+        (launch.freeze_progress.backstop_team_wallets ?? [])
+          .map((x) => normalizeSolanaWalletAddress(x))
+          .filter((x): x is string => Boolean(x))
+      )
+      if (team.has(w)) {
+        return {
+          ...base,
+          is_eligible: true,
+          max_mintable: Math.min(25, remaining),
+          reason: 'team_backstop',
+          unit_lamports_estimate: null,
+          sol_usd_price: quote?.solUsdPrice ?? null,
+          price_usdc: 0,
+        }
+      }
+    }
+
     return {
       ...base,
       is_eligible: max > 0,

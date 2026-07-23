@@ -62,6 +62,18 @@ export type OwlCenterFreezeProgress = {
   remaining_count?: number
   error?: string
   attempts?: number
+  /** DAS asset count when thaw started. */
+  total?: number
+  /** Next DAS list offset for batched thaw. */
+  offset?: number
+  started_at?: string
+  updated_at?: string
+  unlocked_at?: string
+  last_signature?: string
+  /** Admin team backstop mint after public pool exhausts. */
+  backstop_mint_enabled?: boolean
+  backstop_team_wallets?: string[]
+  backstop_enabled_at?: string
 }
 
 export type OwlCenterLaunchPublic = {

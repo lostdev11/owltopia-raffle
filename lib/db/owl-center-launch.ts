@@ -72,12 +72,24 @@ function parseFreezeStatus(raw: unknown): OwlCenterFreezeStatus {
 function parseFreezeProgress(raw: unknown): OwlCenterFreezeProgress {
   if (!raw || typeof raw !== 'object') return {}
   const o = raw as Record<string, unknown>
+  const teamWallets = Array.isArray(o.backstop_team_wallets)
+    ? o.backstop_team_wallets.filter((w): w is string => typeof w === 'string' && w.trim().length > 0)
+    : undefined
   return {
     last_run_at: typeof o.last_run_at === 'string' ? o.last_run_at : undefined,
     thawed_count: typeof o.thawed_count === 'number' ? o.thawed_count : undefined,
     remaining_count: typeof o.remaining_count === 'number' ? o.remaining_count : undefined,
     error: typeof o.error === 'string' ? o.error : undefined,
     attempts: typeof o.attempts === 'number' ? o.attempts : undefined,
+    total: typeof o.total === 'number' ? o.total : undefined,
+    offset: typeof o.offset === 'number' ? o.offset : undefined,
+    started_at: typeof o.started_at === 'string' ? o.started_at : undefined,
+    updated_at: typeof o.updated_at === 'string' ? o.updated_at : undefined,
+    unlocked_at: typeof o.unlocked_at === 'string' ? o.unlocked_at : undefined,
+    last_signature: typeof o.last_signature === 'string' ? o.last_signature : undefined,
+    backstop_mint_enabled: typeof o.backstop_mint_enabled === 'boolean' ? o.backstop_mint_enabled : undefined,
+    backstop_team_wallets: teamWallets,
+    backstop_enabled_at: typeof o.backstop_enabled_at === 'string' ? o.backstop_enabled_at : undefined,
   }
 }
 
@@ -246,6 +258,9 @@ export async function updateOwlCenterLaunchAdmin(
     phase_schedule: Record<string, string>
     generator_project_id: string | null
     wl_supply: number
+    freeze_status: OwlCenterFreezeStatus
+    freeze_thawed_at: string | null
+    freeze_progress: OwlCenterFreezeProgress
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()

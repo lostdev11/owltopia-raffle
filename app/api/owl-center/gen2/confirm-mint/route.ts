@@ -10,11 +10,15 @@ import { evaluateGen2MintMilestones } from '@/lib/owl-center/gen2-milestones/eva
 
 import { notifyGen2MintDiscordFeedForTx } from '@/lib/owl-center/gen2-mint-discord-feed'
 
+import { enqueueGen2ThawIfSoldOut } from '@/lib/owl-center/gen2-thaw-ops'
+
+import { ensureGen2TeamBackstopAutoEnabled } from '@/lib/owl-center/gen2-backstop-ops'
+
 import { getOwlCenterLaunchBySlug, getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 
 import { getLivePhases } from '@/lib/owl-center/phase-schedule'
 
-import { gen2GuardGroupLabel, isGen2MintablePhase } from '@/lib/solana/gen2-guards'
+import { gen2GuardGroupLabel, GEN2_TEAM_GUARD_LABEL, isGen2MintablePhase } from '@/lib/solana/gen2-guards'
 
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
 
@@ -158,7 +162,17 @@ export async function POST(request: NextRequest) {
 
   // Bind the confirmed on-chain tx to the guard group of the claimed phase, so a wallet cannot mint
   // in one (cheaper / free) group on-chain and record it under a different live phase.
-  const expectedGuardGroupLabel = isGen2MintablePhase(phase) ? gen2GuardGroupLabel(phase) : null
+  let expectedGuardGroupLabel = isGen2MintablePhase(phase) ? gen2GuardGroupLabel(phase) : null
+  if (
+    phase === 'PUBLIC' &&
+    launch.freeze_progress.backstop_mint_enabled &&
+    (launch.freeze_progress.backstop_team_wallets ?? []).some((w) => {
+      const n = normalizeSolanaWalletAddress(w)
+      return n != null && n === wallet
+    })
+  ) {
+    expectedGuardGroupLabel = GEN2_TEAM_GUARD_LABEL
+  }
 
   const verified = await verifyGen2MintTransaction({
 
@@ -411,7 +425,31 @@ export async function POST(request: NextRequest) {
     }
   }
 
-
+  // Full collection sellout → enqueue Candy Machine thaw (cron finishes batches).
+  // Public pool empty with leftovers → auto-enable team backstop mint.
+  if (launchPublic) {
+    waitUntil(
+      (async () => {
+        const adminLaunch = await getOwlCenterLaunchBySlugAdmin('gen2')
+        try {
+          const thaw = await enqueueGen2ThawIfSoldOut(adminLaunch)
+          if (thaw.enqueued) console.info('[confirm-mint] gen2 thaw enqueued after SOLD_OUT')
+        } catch (e) {
+          console.error('[confirm-mint] enqueue thaw failed', e)
+        }
+        try {
+          const backstop = await ensureGen2TeamBackstopAutoEnabled({ launch: adminLaunch })
+          if (backstop.ok && backstop.enabled && !backstop.already) {
+            console.info('[confirm-mint] gen2 team backstop auto-enabled', backstop.signature)
+          } else if (!backstop.ok) {
+            console.warn('[confirm-mint] gen2 team backstop auto-enable failed', backstop.error)
+          }
+        } catch (e) {
+          console.error('[confirm-mint] team backstop auto-enable failed', e)
+        }
+      })()
+    )
+  }
 
   return NextResponse.json({
 

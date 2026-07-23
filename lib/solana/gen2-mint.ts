@@ -154,14 +154,21 @@ async function loadGuardMintPlan(
   umi: ReturnType<typeof createOwlCenterUmi>,
   candyMachine: ReturnType<typeof publicKey>,
   cmId: string,
-  phase: Gen2MintablePhase
+  phase: Gen2MintablePhase,
+  groupLabelOverride?: string | null
 ): Promise<{ ok: true; plan: Gen2GuardMintPlan } | { ok: false; error: string }> {
-  const key = mintPlanCacheKey(cmId, phase)
+  const key = mintPlanCacheKey(cmId, phase) + (groupLabelOverride ? `:g=${groupLabelOverride}` : '')
   const cached = mintPlanCache.get(key)
   if (cached && cached.expires > Date.now()) {
     return { ok: true, plan: cached.plan }
   }
-  const planRes = await withSolanaRpcRetry(() => buildGen2GuardMintPlan(umi, candyMachine, phase), MINT_PREP_SOLANA_RPC_RETRY)
+  const planRes = await withSolanaRpcRetry(
+    () =>
+      buildGen2GuardMintPlan(umi, candyMachine, phase, {
+        groupLabelOverride: groupLabelOverride !== undefined ? groupLabelOverride : undefined,
+      }),
+    MINT_PREP_SOLANA_RPC_RETRY
+  )
   if (!planRes.ok) return planRes
   mintPlanCache.set(key, { expires: Date.now() + MINT_PREP_CACHE_TTL_MS, plan: planRes.plan })
   return planRes
@@ -195,6 +202,10 @@ export type MintGen2Params = {
   sessionDeadline?: MintSessionDeadline
   /** Called before each on-chain mint (1-indexed current, total quantity). */
   onMintProgress?: (current: number, total: number) => void
+  /** Force candy-guard group (e.g. `team` for leftover backstop mint). */
+  guardGroupOverride?: string | null
+  /** Allowlist proof phase when different from mint phase (e.g. TEAM_BACKSTOP). */
+  allowListProofPhase?: Gen2MintablePhase | 'TEAM_BACKSTOP'
 }
 
 export type MintGen2Result =
@@ -409,6 +420,8 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     prefetchedWalletBalanceLamports,
     sessionDeadline: sessionDeadlineParam,
     onMintProgress,
+    guardGroupOverride,
+    allowListProofPhase,
   } = params
   if (!walletAdapter.publicKey) {
     return { ok: false, error: 'Wallet not connected' }
@@ -440,7 +453,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       () =>
         Promise.all([
           loadCollectionUpdateAuthority(umi, colMint, collectionMetadata),
-          loadGuardMintPlan(umi, candyMachine, cmId, phase),
+          loadGuardMintPlan(umi, candyMachine, cmId, phase, guardGroupOverride),
           collectPlatformMintFee
             ? platformFeeLamportsOverride != null && platformFeeLamportsOverride > 0n
               ? Promise.resolve({
@@ -493,7 +506,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
           candyGuard: plan.candyGuard.publicKey,
           groupLabel: plan.groupLabel,
           merkleRoot: plan.allowListMerkleRoot,
-          phase,
+          phase: allowListProofPhase ?? phase,
         }).then((routeRes) => {
           if (!routeRes.ok) throw new Error(routeRes.error)
           allowListRoutePlan = routeRes.plan
