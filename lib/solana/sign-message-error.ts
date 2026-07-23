@@ -209,6 +209,6 @@ export function formatSignMessageError(
 
   return (
     `Wallet signing failed (${msg || 'unexpected error'}). ` +
-    `Approve the Sign Message request in ${walletLabel}, or reconnect and try again. ${LEDGER_SIGN_MESSAGE_HINT}`
+    `Approve the Sign Message request in ${walletLabel}, or reconnect and try again. ${ledgerSignMessageHint(context)}`
   )
 }

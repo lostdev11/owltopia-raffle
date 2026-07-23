@@ -228,7 +228,7 @@ export function useNestingSecurityAck(publicKey: PublicKey | null) {
         const preferTx = opts?.preferTx === true
 
         if (preferTx) {
-          if (!canSignTransaction || !signTransaction) {
+          if (!canSignTransaction || typeof signTransaction !== 'function') {
             throw new Error(
               'This wallet cannot sign transactions for Ledger safeguards. Try Phantom/Solflare desktop with USB, or a hot wallet.'
             )
@@ -244,7 +244,7 @@ export function useNestingSecurityAck(publicKey: PublicKey | null) {
           return true
         }
 
-        if (!canSignMessage && canSignTransaction && signTransaction) {
+        if (!canSignMessage && canSignTransaction && typeof signTransaction === 'function') {
           await completeViaMemoTransaction({
             addr,
             publicKey,
@@ -256,7 +256,7 @@ export function useNestingSecurityAck(publicKey: PublicKey | null) {
           return true
         }
 
-        if (!canSignMessage || !signMessage) {
+        if (!canSignMessage || typeof signMessage !== 'function') {
           throw new Error('Your wallet does not support message signing.')
         }
 
@@ -293,7 +293,11 @@ export function useNestingSecurityAck(publicKey: PublicKey | null) {
           }
 
           // Auto-fallback for Ledger / Phantom "Unexpected error" / Sign message rejected.
-          if (canSignTransaction && signTransaction && isLikelyHardwareWalletSignMessageFailure(e)) {
+          if (
+            canSignTransaction &&
+            typeof signTransaction === 'function' &&
+            isLikelyHardwareWalletSignMessageFailure(e)
+          ) {
             try {
               await completeViaMemoTransaction({
                 addr,
