@@ -7,7 +7,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { PublicKey } from '@solana/web3.js'
 import nacl from 'tweetnacl'
-import { isAdmin } from '@/lib/db/admins'
+import { getAdminRole, isAdmin } from '@/lib/db/admins'
+import { isFullAdminRole } from '@/lib/admin/roles'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
 
 export const SESSION_COOKIE_NAME = 'owl_session'
@@ -381,7 +382,8 @@ export async function requireSession(
 }
 
 /**
- * Use in admin routes: returns 401/403 response or the admin wallet.
+ * Use in admin routes that any Owl Vision role may call (`mod` or `full`).
+ * Returns 401/403 or the admin wallet.
  */
 export async function requireAdminSession(
   request: NextRequest
@@ -395,11 +397,20 @@ export async function requireAdminSession(
   return session
 }
 
-/** Same as {@link requireAdminSession} — kept for call-site clarity on privileged routes. */
+/**
+ * Full Owl Vision only — refunds, winners, prize moves, nesting heal, treasury, irreversible ops.
+ * Junior `mod` sessions receive 403.
+ */
 export async function requireFullAdminSession(
   request: NextRequest
 ): Promise<{ wallet: string } | NextResponse> {
-  return requireAdminSession(request)
+  const session = await requireSession(request)
+  if (session instanceof NextResponse) return session
+  const role = await getAdminRole(session.wallet)
+  if (!isFullAdminRole(role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  return session
 }
 
 export function setSessionCookieInResponse(response: NextResponse, wallet: string): void {

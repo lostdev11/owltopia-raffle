@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { updatePartnerProgramApplicationStatus } from '@/lib/db/partner-program-applications'
 
@@ -9,7 +9,7 @@ const VALID_STATUSES = new Set(['new', 'contacted', 'active', 'closed'])
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireFullAdminSession(request)
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const params = await context.params

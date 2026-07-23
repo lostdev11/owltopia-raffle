@@ -20,7 +20,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { mirrorAdminTweetShareToDiscord } from '@/lib/client/raffle-share'
-import { getCachedAdmin, getCachedAdminRole, setCachedAdmin } from '@/lib/admin-check-cache'
+import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
+import { parseAdminRole } from '@/lib/admin/roles'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import type { CreatorHealthRow } from '@/lib/db/creator-health'
@@ -127,7 +128,9 @@ export default function AdminDashboardPage() {
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
   const cachedRole = typeof window !== 'undefined' && wallet ? getCachedAdminRole(wallet) : null
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
-  const [adminRole, setAdminRole] = useState<'full' | null>(() => cachedRole)
+  const [adminRole, setAdminRole] = useState<AdminRole | null>(() => cachedRole)
+  const isFullAdmin = adminRole === 'full'
+  const canUseModTools = adminRole === 'mod' || adminRole === 'full'
   const [loading, setLoading] = useState(() => !cachedTrue)
   const [adminCheckError, setAdminCheckError] = useState<string | null>(null)
   const [sessionReady, setSessionReady] = useState<boolean | null>(null)
@@ -408,7 +411,7 @@ export default function AdminDashboardPage() {
         return
       }
       const admin = data?.isAdmin === true
-      const role = admin && data?.role ? data.role : null
+      const role = admin ? parseAdminRole(data?.role) : null
       setCachedAdmin(addr, admin, role)
       setIsAdmin(admin)
       setAdminRole(role)
@@ -565,7 +568,7 @@ export default function AdminDashboardPage() {
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
   const fetchPendingManualRefunds = async () => {
-    if (!connected || !publicKey || !isAdmin || !sessionReady) return
+    if (!connected || !publicKey || !isAdmin || !sessionReady || !isFullAdmin) return
 
     setLoadingPendingManualRefunds(true)
     try {
@@ -588,10 +591,10 @@ export default function AdminDashboardPage() {
   }
 
   useEffect(() => {
-    if (isAdmin && sessionReady) {
+    if (isAdmin && sessionReady && isFullAdmin) {
       fetchPendingManualRefunds()
     }
-  }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
+  }, [connected, publicKey, isAdmin, sessionReady, isFullAdmin, visibilityTick, autoRefreshTick])
 
   const fetchPendingCancellations = async () => {
     if (!connected || !publicKey || !isAdmin || !sessionReady) return
@@ -668,7 +671,7 @@ export default function AdminDashboardPage() {
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
   useEffect(() => {
-    if (!connected || !publicKey || !isAdmin || !sessionReady) {
+    if (!connected || !publicKey || !isAdmin || !sessionReady || !isFullAdmin) {
       revenueHasDataRef.current = false
       setRevenue(null)
       setRevenueLoadError(null)
@@ -707,10 +710,10 @@ export default function AdminDashboardPage() {
       }
     }
     void fetchRevenue()
-  }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
+  }, [connected, publicKey, isAdmin, sessionReady, isFullAdmin, visibilityTick, autoRefreshTick])
 
   useEffect(() => {
-    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    if (!connected || !publicKey || !isAdmin || !sessionReady || !canUseModTools) return
     let cancelled = false
     setLoadingCreatorHealth(true)
     fetch('/api/admin/creator-health', { credentials: 'include', cache: 'no-store' })
@@ -731,7 +734,7 @@ export default function AdminDashboardPage() {
   }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick])
 
   useEffect(() => {
-    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    if (!connected || !publicKey || !isAdmin || !sessionReady || !canUseModTools) return
     let cancelled = false
     setLoadingHotCommunities(true)
     fetch('/api/admin/hot-communities', { credentials: 'include', cache: 'no-store' })
@@ -755,7 +758,7 @@ export default function AdminDashboardPage() {
   }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick])
 
   const fetchLiveRafflesForDiscord = useCallback(async () => {
-    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    if (!connected || !publicKey || !isAdmin || !sessionReady || !canUseModTools) return
     setLoadingLiveDiscord(true)
     setLiveDiscordLoadError(null)
     try {
@@ -776,12 +779,12 @@ export default function AdminDashboardPage() {
   }, [connected, publicKey, isAdmin, sessionReady, adminRole])
 
   useEffect(() => {
-    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    if (!connected || !publicKey || !isAdmin || !sessionReady || !canUseModTools) return
     void fetchLiveRafflesForDiscord()
   }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick, fetchLiveRafflesForDiscord])
 
   const fetchDailyRaidBatch = useCallback(async () => {
-    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    if (!connected || !publicKey || !isAdmin || !sessionReady || !canUseModTools) return
     setLoadingDailyRaid(true)
     setDailyRaidLoadError(null)
     setDailyRaidMessage(null)
@@ -817,7 +820,7 @@ export default function AdminDashboardPage() {
   }, [connected, publicKey, isAdmin, sessionReady, adminRole])
 
   useEffect(() => {
-    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    if (!connected || !publicKey || !isAdmin || !sessionReady || !canUseModTools) return
     void fetchDailyRaidBatch()
   }, [connected, publicKey, isAdmin, sessionReady, adminRole, visibilityTick, autoRefreshTick, fetchDailyRaidBatch])
 
@@ -1076,7 +1079,7 @@ export default function AdminDashboardPage() {
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
 
   useEffect(() => {
-    if (!connected || !publicKey || !isAdmin || !sessionReady || adminRole !== 'full') return
+    if (!connected || !publicKey || !isAdmin || !sessionReady || !canUseModTools) return
     let cancelled = false
     const run = async () => {
       setLoadingSiteMaint(true)
@@ -1853,6 +1856,12 @@ export default function AdminDashboardPage() {
           <p className="text-muted-foreground">
             Manage raffles and oversee the {PLATFORM_NAME} platform
           </p>
+          {adminRole === 'mod' && (
+            <p className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm text-amber-800 dark:text-amber-200">
+              Junior admin — support tools only. Refunds, winners, prize moves, and treasury actions need a full
+              admin. When in doubt, add a dev task and ping senior ops.
+            </p>
+          )}
         </div>
 
         <AdminActionInboxTerminal
@@ -1862,7 +1871,7 @@ export default function AdminDashboardPage() {
           refreshTick={visibilityTick + autoRefreshTick}
         />
 
-        {adminRole === 'full' && (
+        {isFullAdmin && (
           <OwlVisionDisclosure
             className="mb-8"
             variant="amber"
@@ -2351,6 +2360,8 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* Projected Revenue - confirmed entries only */}
+        {isFullAdmin && (
+        <>
         <OwlVisionDisclosure
           className="mb-8"
           variant="default"
@@ -2706,8 +2717,10 @@ export default function AdminDashboardPage() {
             </Button>
           </div>
         </OwlVisionDisclosure>
+        </>
+        )}
 
-        {adminRole === 'full' && (
+        {isFullAdmin && (
           <OwlVisionDisclosure
             className="mb-8"
             variant="amber-soft"
@@ -2722,7 +2735,7 @@ export default function AdminDashboardPage() {
           </OwlVisionDisclosure>
         )}
 
-        {adminRole === 'full' && (
+        {canUseModTools && (
           <OwlVisionDisclosure
             className="mb-8"
             variant="green"
@@ -2737,7 +2750,7 @@ export default function AdminDashboardPage() {
           </OwlVisionDisclosure>
         )}
 
-        {adminRole === 'full' && (
+        {isFullAdmin && (
           <OwlVisionDisclosure
             className="mb-8"
             variant="green"
@@ -2752,7 +2765,7 @@ export default function AdminDashboardPage() {
           </OwlVisionDisclosure>
         )}
 
-        {adminRole === 'full' && (
+        {isFullAdmin && (
           <OwlVisionDisclosure
             className="mb-8"
             variant="green"
@@ -2767,7 +2780,7 @@ export default function AdminDashboardPage() {
           </OwlVisionDisclosure>
         )}
 
-        {adminRole === 'full' && (
+        {canUseModTools && (
           <OwlVisionDisclosure
             className="mb-8"
             variant="amber-soft"
@@ -2872,7 +2885,7 @@ export default function AdminDashboardPage() {
           </OwlVisionDisclosure>
         )}
 
-        {adminRole === 'full' && (
+        {canUseModTools && (
           <OwlVisionDisclosure
             className="mb-8"
             variant="amber-soft"
@@ -2998,7 +3011,7 @@ export default function AdminDashboardPage() {
           </OwlVisionDisclosure>
         )}
 
-        {adminRole === 'full' && (
+        {canUseModTools && (
           <OwlVisionDisclosure
             className="mb-8"
             variant="violet"
@@ -3211,7 +3224,7 @@ export default function AdminDashboardPage() {
           </OwlVisionDisclosure>
         )}
 
-        {adminRole === 'full' && (
+        {canUseModTools && (
           <OwlVisionDisclosure
             className="mb-8"
             variant="violet"
@@ -3423,7 +3436,7 @@ export default function AdminDashboardPage() {
             </Link>
           </Card>
 
-          {adminRole === 'full' && (
+          {isFullAdmin && (
             <Card className="hover:border-primary transition-colors">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -3473,6 +3486,8 @@ export default function AdminDashboardPage() {
             </Card>
           )}
 
+          {isFullAdmin && (
+          <>
           <Card className="hover:border-primary transition-colors cursor-pointer">
             <Link href="/admin/gen2-presale">
               <CardHeader>
@@ -3517,9 +3532,13 @@ export default function AdminDashboardPage() {
               </CardHeader>
             </Link>
           </Card>
+          </>
+          )}
 
-          {adminRole === 'full' && (
+          {canUseModTools && (
             <>
+              {isFullAdmin && (
+              <>
               <Card className="hover:border-primary transition-colors cursor-pointer">
                 <Link href="/admin/community-giveaways">
                   <CardHeader>
@@ -3576,6 +3595,22 @@ export default function AdminDashboardPage() {
                 </Link>
               </Card>
               <Card className="hover:border-primary transition-colors cursor-pointer">
+                <Link href="/admin/nesting">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Bird className="h-5 w-5" />
+                      Owl Nesting
+                    </CardTitle>
+                    <CardDescription>
+                      Nest perches (coins, Gen 1, Gen 2), public landing toggle, rev-share roster, and support playbook
+                      for holder wallet diagnostics / heal.
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+              </>
+              )}
+              <Card className="hover:border-primary transition-colors cursor-pointer">
                 <Link href="/admin/partner-applications">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -3597,20 +3632,6 @@ export default function AdminDashboardPage() {
                     </CardTitle>
                     <CardDescription>
                       Moderate proposal status. OWL holders create proposals from the site; votes are OWL-weighted.
-                    </CardDescription>
-                  </CardHeader>
-                </Link>
-              </Card>
-              <Card className="hover:border-primary transition-colors cursor-pointer">
-                <Link href="/admin/nesting">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Bird className="h-5 w-5" />
-                      Owl Nesting
-                    </CardTitle>
-                    <CardDescription>
-                      Nest perches (coins, Gen 1, Gen 2), public landing toggle, rev-share roster, and support playbook
-                      for holder wallet diagnostics / heal.
                     </CardDescription>
                   </CardHeader>
                 </Link>
@@ -3725,7 +3746,9 @@ export default function AdminDashboardPage() {
                 </div>
               )}
 
-              <div className="pt-4 border-t border-border space-y-3">
+              {isFullAdmin && (
+              <>
+<div className="pt-4 border-t border-border space-y-3">
                 <p className="text-sm font-semibold">Wallet refund lookup</p>
                 <p className="text-xs text-muted-foreground">
                   Enter a buyer wallet to find ticket and buyout refunds. Items in funds escrow can be sent automatically;
@@ -4104,6 +4127,9 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
 
+                            </>
+              )}
+
               {verifyResult && (
                 <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/20">
                   <p className="text-sm text-green-600 dark:text-green-400 font-semibold mb-2">
@@ -4228,7 +4254,8 @@ export default function AdminDashboardPage() {
         </OwlVisionDisclosure>
         </div>
 
-        <OwlVisionDisclosure
+        {isFullAdmin && (
+<OwlVisionDisclosure
           className="mb-8"
           variant="teal"
           title={
@@ -4282,6 +4309,8 @@ export default function AdminDashboardPage() {
             )}
           </div>
         </OwlVisionDisclosure>
+        )}
+
 
         {/* Restored Entries Section */}
         <OwlVisionDisclosure

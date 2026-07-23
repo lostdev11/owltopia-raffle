@@ -313,8 +313,8 @@ export function PositionNestRow({
       <NestingActionStatusLine phase={showLinePhase} className="w-full min-h-[1.25rem]" />
       {securityAckRequired ? (
         <p className="w-full text-xs text-amber-200/95 leading-relaxed">
-          Sign the nesting safeguards with your wallet near the top of this page (Peek at safeguards before you nest) to
-          unlock claim and leave actions.
+          Sign the nesting safeguards with your wallet near the top of this page (orange box — Sign safeguards before
+          you nest) to unlock claim and leave actions.
         </p>
       ) : null}
       {paysOwlRewards && claimable > 0 && !canClaimOwl ? (

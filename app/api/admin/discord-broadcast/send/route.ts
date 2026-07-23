@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import { sendDiscordBroadcastBody } from '@/lib/discord-broadcast/run-schedules'
 import { getDiscordBroadcastTemplate } from '@/lib/db/discord-broadcast'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
@@ -14,7 +14,7 @@ export const maxDuration = 30
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireFullAdminSession(request)
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const ip = getClientIp(request)

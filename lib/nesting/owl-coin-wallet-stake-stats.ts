@@ -5,6 +5,7 @@ import {
   findStakingPoolByIdOrSlug,
   isNftStakingPool,
 } from '@/lib/nesting/format'
+import { isNftNestPositionCountedAsNested } from '@/lib/nesting/position-lifecycle'
 
 export function countNestedOwlCoinsForPool(positions: StakingPositionRow[], poolId: string): number {
   return countNestedNftsForPools(positions, [poolId])
@@ -19,16 +20,7 @@ export function countNestedNftsForPools(
   let count = 0
   for (const pos of positions) {
     if (!ids.has(pos.pool_id)) continue
-    if (pos.status === 'active') {
-      count++
-      continue
-    }
-    if (
-      pos.status === 'pending' &&
-      (pos.external_reference ?? '').startsWith('nft_freeze_confirmed:')
-    ) {
-      count++
-    }
+    if (isNftNestPositionCountedAsNested(pos)) count++
   }
   return count
 }

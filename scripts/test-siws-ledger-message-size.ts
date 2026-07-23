@@ -154,7 +154,7 @@ function main() {
   })
   assert.equal(vtxOk.valid, true, vtxOk.error)
 
-  // Phantom Blowfish injects Lighthouse assertions into signed memo txs (including Ledger path).
+  // Phantom/Solflare inject Lighthouse assertions into signed memo txs (including Ledger).
   // verify-tx must accept them — otherwise users see:
   // Unexpected instruction: L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95
   const lighthouseIx = new TransactionInstruction({
@@ -162,10 +162,16 @@ function main() {
     keys: [{ pubkey: kp.publicKey, isSigner: false, isWritable: false }],
     data: Buffer.from([0]),
   })
+  // Solflare often injects two Lighthouse ixs; Phantom typically one.
+  const lighthouseIx2 = new TransactionInstruction({
+    programId: LIGHTHOUSE_PROGRAM_ID,
+    keys: [{ pubkey: kp.publicKey, isSigner: false, isWritable: false }],
+    data: Buffer.from([1]),
+  })
   const memoWithLh = new TransactionMessage({
     payerKey: kp.publicKey,
     recentBlockhash: fakeBlockhash,
-    instructions: [setCuLimit, memoIx, lighthouseIx],
+    instructions: [setCuLimit, memoIx, lighthouseIx, lighthouseIx2],
   }).compileToV0Message()
   const vtxLh = new VersionedTransaction(memoWithLh)
   vtxLh.sign([kp])

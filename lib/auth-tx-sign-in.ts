@@ -3,7 +3,8 @@
  * Phantom/Solflare often never deliver off-chain signMessage to Ledger; tx signing works.
  *
  * Wallets may return legacy Transaction OR VersionedTransaction, and may inject
- * ComputeBudget and Phantom Lighthouse assertion instructions — verification must accept all three.
+ * ComputeBudget and Phantom/Solflare Lighthouse assertion instructions — verification
+ * must accept all three.
  */
 import {
   PublicKey,
@@ -20,8 +21,10 @@ export const SIGN_IN_MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNc
 const COMPUTE_BUDGET_PROGRAM_ID = new PublicKey('ComputeBudget111111111111111111111111111111')
 
 /**
- * Phantom Blowfish / Lighthouse assertion program.
- * Wallets inject these into signed (even unsigned-for-broadcast) txs; verification must allow them.
+ * Phantom Blowfish / Solflare Lighthouse assertion program.
+ * Wallets inject these into signed memo txs (including Ledger signTransaction);
+ * verification must allow them or Ledger sign-in fails after a successful device approve.
+ * Phantom typically adds 1; Solflare may add 2.
  * @see https://docs.phantom.com/developer-powertools/lighthouse
  */
 export const LIGHTHOUSE_PROGRAM_ID = new PublicKey('L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95')

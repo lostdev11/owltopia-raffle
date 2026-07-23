@@ -17,6 +17,7 @@ import { Menu } from 'lucide-react'
 import { HeaderRafflesMenuDesktop, HeaderRafflesMenuMobile } from '@/components/HeaderRafflesMenu'
 import { HeaderNavGroupMenuDesktop, HeaderNavGroupMenuMobile } from '@/components/HeaderNavGroupMenu'
 import { getCachedAdmin, getCachedAdminRole, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
+import { parseAdminRole } from '@/lib/admin/roles'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import {
   ADMIN_NAV_GROUP,
@@ -54,7 +55,12 @@ export function Header() {
       })
       .then((data) => {
         if (cancelled || data === undefined) return
-        setAdminSessionActive(data?.isAdmin === true)
+        const admin = data?.isAdmin === true
+        const role = admin ? parseAdminRole(data?.role) : null
+        setAdminSessionActive(admin)
+        if (admin && role) {
+          setAdminRole(role)
+        }
       })
       .catch(() => {
         /* keep prior session hint on transient errors */
@@ -87,7 +93,7 @@ export function Header() {
       .then((data) => {
         if (cancelled || data === undefined) return
         const admin = data?.isAdmin === true
-        const role = admin && data?.role ? data.role : null
+        const role = admin ? parseAdminRole(data?.role) : null
         setCachedAdmin(addr, admin, role)
         setIsAdmin(admin)
         setAdminRole(role)
@@ -108,9 +114,9 @@ export function Header() {
   const adminNavGroup = useMemo<SiteNavGroup>(
     () => ({
       ...ADMIN_NAV_GROUP,
-      items: filterAdminNavItems({ showOwlVision }),
+      items: filterAdminNavItems({ showOwlVision, adminRole }),
     }),
-    [showOwlVision]
+    [showOwlVision, adminRole]
   )
 
   const mobileNavGroups = useMemo(

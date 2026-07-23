@@ -34,6 +34,38 @@ export function isPendingNftNestFreezeConfirmedButNotActive(
 }
 
 /**
+ * Counts toward “nested” wallet coverage (progress bar, nestable filters, admin inventory).
+ * Active nests and freeze-confirmed pending — opening pending before freeze does not count.
+ */
+export function isNftNestPositionCountedAsNested(
+  position: Pick<StakingPositionRow, 'status' | 'external_reference'>
+): boolean {
+  if (position.status === 'active') return true
+  return isPendingNftNestFreezeConfirmedButNotActive(position)
+}
+
+/** True when this mint has a counted-nested open position in any of the given pool ids. */
+export function nftMintIsNestedInPools(
+  mint: string,
+  poolIds: string[],
+  positions: Pick<
+    StakingPositionRow,
+    'pool_id' | 'asset_identifier' | 'status' | 'external_reference'
+  >[]
+): boolean {
+  const trimmed = mint.trim()
+  if (!trimmed) return false
+  const ids = new Set(poolIds.map((id) => id.trim()).filter(Boolean))
+  if (ids.size === 0) return false
+  for (const p of positions) {
+    if (!ids.has(p.pool_id)) continue
+    if (p.asset_identifier?.trim() !== trimmed) continue
+    if (isNftNestPositionCountedAsNested(p)) return true
+  }
+  return false
+}
+
+/**
  * Pending on-chain NFT nest before wallet freeze is confirmed — user may cancel without waiting for lock.
  * Also true for orphaned `awaiting_nft_freeze` rows that never completed the wallet lock step.
  */

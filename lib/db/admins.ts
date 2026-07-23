@@ -1,8 +1,9 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
 import { withRetry } from '@/lib/db-retry'
+import { parseAdminRole } from '@/lib/admin/roles'
 
-export type AdminRole = 'full'
+export type AdminRole = 'full' | 'mod'
 
 /**
  * Check if a wallet address is an admin
@@ -69,11 +70,7 @@ export async function getAdminRole(walletAddress: string): Promise<AdminRole | n
       return null
     }
 
-    const role = data?.role
-    if (role === 'full') {
-      return 'full'
-    }
-    return 'full'
+    return parseAdminRole(data?.role)
   }, { maxRetries: 0 })
 }
 
@@ -95,14 +92,18 @@ export async function getAdmins() {
   return data || []
 }
 
-/** Add a new admin (admin only function). */
-export async function addAdmin(walletAddress: string, createdBy?: string) {
+/** Add a new admin (admin only function). Defaults to full; pass `mod` for junior access. */
+export async function addAdmin(
+  walletAddress: string,
+  createdBy?: string,
+  role: AdminRole = 'full'
+) {
   const { data, error } = await getSupabaseAdmin()
     .from('admins')
     .insert({
       wallet_address: walletAddress,
       created_by: createdBy || null,
-      role: 'full',
+      role,
     })
     .select()
     .single()

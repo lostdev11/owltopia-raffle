@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import {
   getAdminReferralPerformance,
   type AdminReferralPerformancePayload,
@@ -28,7 +28,7 @@ function toCsv(payload: AdminReferralPerformancePayload): string {
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await requireFullAdminSession(request)
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const sp = request.nextUrl.searchParams

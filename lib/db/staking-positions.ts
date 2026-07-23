@@ -181,6 +181,36 @@ export async function getStakingPositionByStakeSignature(
   return data as StakingPositionRow | null
 }
 
+/**
+ * `staking_positions_stake_signature_unique` allows each signature on at most one row
+ * (token stake idempotency). Batch NFT nest locks share one wallet tx across many nests —
+ * only the first row may store that signature; siblings keep their existing value or null.
+ */
+export async function resolveUniqueStakeSignatureForPosition(params: {
+  positionId: string
+  requestedSignature: string | null | undefined
+  existingSignature: string | null | undefined
+}): Promise<string | null> {
+  const existing = params.existingSignature?.trim() || null
+  const requested = params.requestedSignature?.trim() || null
+  const candidate = requested || existing
+  if (!candidate) return null
+
+  const owner = await getStakingPositionByStakeSignature(candidate)
+  if (!owner || owner.id === params.positionId) return candidate
+  // Another nest already owns this wallet tx signature — do not re-store it.
+  if (existing && existing !== candidate) return existing
+  return null
+}
+
+export function isStakeSignatureUniqueViolation(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error ?? '')
+  return (
+    msg.includes('staking_positions_stake_signature_unique') ||
+    (msg.toLowerCase().includes('duplicate key') && msg.includes('stake_signature'))
+  )
+}
+
 export async function markPositionUnstaked(
   positionId: string,
   wallet: string,

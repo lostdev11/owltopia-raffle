@@ -10,7 +10,10 @@ import { clearOrphanedPendingNftNestsForWallet } from '@/lib/nesting/clear-orpha
 import { clearCrossWalletStaleNestsForWallet } from '@/lib/nesting/clear-cross-wallet-stale-nests'
 import { positionRequiresOnChainNftFreezeLock } from '@/lib/nesting/nft-nest-onchain-lock'
 import { readNestLockEligibilityForPool } from '@/lib/nesting/nft-lock-service'
-import { isPendingNftNestBeforeFreezeConfirmed } from '@/lib/nesting/position-lifecycle'
+import {
+  isNftNestPositionCountedAsNested,
+  isPendingNftNestBeforeFreezeConfirmed,
+} from '@/lib/nesting/position-lifecycle'
 import {
   NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS,
   NESTING_DIAGNOSTIC_MAX_WALLET_MINT_CROSS_CHECKS,
@@ -26,6 +29,7 @@ import { OWL_NEST_365_SLUG } from '@/lib/nesting/owl-nest-365-stats'
 
 const LOCK_SAMPLE_MAX = 8
 const LOCK_RPC_CONCURRENCY = 4
+const OPEN_ROWS_IN_CHUNK = 80
 
 export type DiagnoseNestingWalletOptions = {
   /** Cap per-active-nest MPL Core / SPL lock reads (default NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS). */
@@ -82,6 +86,18 @@ export type NestingWalletFamilyStats = {
   pending: number
 }
 
+export type NestingWalletAssetNestStatus = 'nested' | 'not_nested' | 'opening' | 'cross_wallet'
+
+export type NestingWalletNestAsset = {
+  mint: string
+  family: SupportNestFamilyKey
+  nest_status: NestingWalletAssetNestStatus
+  position_id?: string
+  pool_slug?: string
+  wallet_status?: 'active' | 'pending' | null
+  cross_wallet?: { wallet: string; position_id: string; status: string } | null
+}
+
 export type NestingWalletDiagnostics = {
   wallet: string
   helius_configured: boolean
@@ -91,6 +107,8 @@ export type NestingWalletDiagnostics = {
   pool_slugs: string[]
   wallet_nest_mint_count: number
   nest_families: NestingWalletFamilyStats[]
+  /** Per-mint inventory: nested vs not nested (DB join; no per-mint lock RPC). */
+  wallet_nest_assets: NestingWalletNestAsset[]
   positions_under_wallet: {
     active: number
     pending: number
@@ -128,14 +146,27 @@ async function listCrossWalletOpenRows(holderWallet: string, mints: string[]) {
 async function listOpenRowsForMints(mints: string[]) {
   if (mints.length === 0) return []
   const db = getSupabaseAdmin()
-  const { data, error } = await db
-    .from('staking_positions')
-    .select('id, wallet_address, asset_identifier, status, pool_id')
-    .in('asset_identifier', mints)
-    .in('status', ['active', 'pending'])
-
-  if (error) throw new Error(error.message)
-  return data ?? []
+  const out: Array<{
+    id: string
+    wallet_address: string
+    asset_identifier: string | null
+    status: string
+    pool_id: string
+    external_reference: string | null
+  }> = []
+  for (let i = 0; i < mints.length; i += OPEN_ROWS_IN_CHUNK) {
+    const chunk = mints.slice(i, i + OPEN_ROWS_IN_CHUNK)
+    const { data, error } = await db
+      .from('staking_positions')
+      .select('id, wallet_address, asset_identifier, status, pool_id, external_reference')
+      .in('asset_identifier', chunk)
+      .in('status', ['active', 'pending'])
+    if (error) throw new Error(error.message)
+    for (const row of data ?? []) {
+      out.push(row as (typeof out)[number])
+    }
+  }
+  return out
 }
 
 function emptyFamilyStats(
@@ -172,6 +203,74 @@ function buildFamilyStats(
   }
 
   return [...stats.values()]
+}
+
+function buildWalletNestAssets(params: {
+  mintAssets: Array<{ mint: string; family: SupportNestFamilyKey }>
+  holder: string
+  openRows: Awaited<ReturnType<typeof listOpenRowsForMints>>
+  poolById: Map<string, StakingPoolRow>
+}): NestingWalletNestAsset[] {
+  const openByMint = new Map<string, (typeof params.openRows)[number]>()
+  for (const row of params.openRows) {
+    const mint = String(row.asset_identifier ?? '').trim()
+    if (!mint || openByMint.has(mint)) continue
+    openByMint.set(mint, row)
+  }
+
+  const assets: NestingWalletNestAsset[] = []
+  for (const { mint, family } of params.mintAssets) {
+    const open = openByMint.get(mint)
+    if (!open) {
+      assets.push({ mint, family, nest_status: 'not_nested', wallet_status: null, cross_wallet: null })
+      continue
+    }
+    const prior = String(open.wallet_address ?? '').trim()
+    const pool = params.poolById.get(open.pool_id)
+    const status = open.status === 'active' || open.status === 'pending' ? open.status : null
+    if (prior && prior !== params.holder) {
+      assets.push({
+        mint,
+        family,
+        nest_status: 'cross_wallet',
+        position_id: String(open.id),
+        pool_slug: pool?.slug,
+        wallet_status: status,
+        cross_wallet: {
+          wallet: prior,
+          position_id: String(open.id),
+          status: String(open.status),
+        },
+      })
+      continue
+    }
+    const refPos = {
+      status: open.status as StakingPositionRow['status'],
+      external_reference: open.external_reference,
+    }
+    const nest_status: NestingWalletAssetNestStatus = isNftNestPositionCountedAsNested(refPos)
+      ? 'nested'
+      : isPendingNftNestBeforeFreezeConfirmed(refPos)
+        ? 'opening'
+        : 'nested'
+    assets.push({
+      mint,
+      family,
+      nest_status,
+      position_id: String(open.id),
+      pool_slug: pool?.slug,
+      wallet_status: status,
+      cross_wallet: null,
+    })
+  }
+
+  assets.sort((a, b) => {
+    const order = { not_nested: 0, opening: 1, cross_wallet: 2, nested: 3 }
+    const d = order[a.nest_status] - order[b.nest_status]
+    if (d !== 0) return d
+    return a.mint.localeCompare(b.mint)
+  })
+  return assets
 }
 
 export async function diagnoseNestingWallet(
@@ -227,6 +326,7 @@ export async function diagnoseNestingWallet(
 
   const heliusRpcUrl = getHeliusMainnetRpcUrl()
   let walletMints: string[] = []
+  let mintAssets: Array<{ mint: string; family: SupportNestFamilyKey }> = []
   let mintCountsByFamily: Record<SupportNestFamilyKey, number> = {
     'owl-nest-coins': 0,
     'gen1-owl': 0,
@@ -247,6 +347,7 @@ export async function diagnoseNestingWallet(
       pool_slugs: [],
       wallet_nest_mint_count: 0,
       nest_families: emptyFamilyStats(mintCountsByFamily),
+      wallet_nest_assets: [],
       positions_under_wallet: byStatus,
       issues,
       cross_wallet_rows: [],
@@ -265,10 +366,31 @@ export async function diagnoseNestingWallet(
   } else {
     const scanned = await listSupportNestMintAddressesInWallet(holder)
     walletMints = scanned.mints
+    mintAssets = scanned.mint_assets
     mintCountsByFamily = scanned.mint_counts_by_family
   }
 
   const nest_families = buildFamilyStats(positions, poolById, mintCountsByFamily)
+
+  // Full wallet mint inventory join (DB only — no lock RPC).
+  const allOpenRows = await listOpenRowsForMints(walletMints)
+  // Ensure pool rows for open positions on other wallets / missing support list.
+  const openPoolIds = [
+    ...new Set(allOpenRows.map((r) => r.pool_id).filter((id) => id && !poolById.has(id))),
+  ]
+  if (openPoolIds.length > 0) {
+    const db = getSupabaseAdmin()
+    const { data } = await db.from('staking_pools').select('*').in('id', openPoolIds)
+    for (const row of (data ?? []) as StakingPoolRow[]) {
+      poolById.set(row.id, row)
+    }
+  }
+  const wallet_nest_assets = buildWalletNestAssets({
+    mintAssets,
+    holder,
+    openRows: allOpenRows,
+    poolById,
+  })
 
   const crossRows = await listCrossWalletOpenRows(holder, walletMints)
   for (const row of crossRows) {
@@ -395,7 +517,9 @@ export async function diagnoseNestingWallet(
     })
   }
 
-  const openByMint = await listOpenRowsForMints(mintsForCrossCheck)
+  const openByMint = allOpenRows.filter((open) =>
+    mintsForCrossCheck.includes(String(open.asset_identifier ?? '').trim())
+  )
   for (const open of openByMint) {
     const mint = String(open.asset_identifier ?? '').trim()
     const prior = String(open.wallet_address ?? '').trim()
@@ -442,6 +566,7 @@ export async function diagnoseNestingWallet(
     pool_slugs: poolSlugs,
     wallet_nest_mint_count: walletMints.length,
     nest_families,
+    wallet_nest_assets,
     positions_under_wallet: byStatus,
     issues,
     cross_wallet_rows: crossRows.map((r) => ({

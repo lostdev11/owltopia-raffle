@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, Bird, Coins, Layers, Shield } from 'lucide-react'
+import { ArrowLeft, Bird, Shield, Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
@@ -212,39 +212,53 @@ export function NestingLandingClient({
         ))}
       </div>
 
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          {
-            icon: Layers,
-            title: 'Pick your perch',
-            body: 'Choose a perch that fits what you hold. Your reward rate locks in the moment you join.',
-          },
-          {
-            icon: Coins,
-            title: 'Rewards add up',
-            body: 'Watch OWL drip in over time—you can tap claim whenever you like (daily is totally fine).',
-          },
-          {
-            icon: Shield,
-            title: 'Fair countdowns',
-            body: 'Every perch spells out its lock timer. When it hits zero, you are free to spread your wings again.',
-          },
-          {
-            icon: Bird,
-            title: 'Built for Owltopia',
-            body: 'Homegrown for Owl holders first—with room for partner nests down the road.',
-          },
-        ].map(({ icon: Icon, title, body }) => (
-          <Card key={title} className="rounded-xl border-border/60 bg-card/80">
-            <CardHeader className="pb-2">
-              <Icon className="h-8 w-8 text-theme-prime mb-1" aria-hidden />
-              <CardTitle className="text-base font-display tracking-wide">{title}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground leading-relaxed">{body}</p>
-            </CardContent>
-          </Card>
-        ))}
+      <section className="space-y-4" aria-labelledby="nesting-easy-mode-heading">
+        <div>
+          <h2 id="nesting-easy-mode-heading" className="text-xl font-semibold tracking-tight text-foreground">
+            Easy mode — nest in 3 steps
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground leading-relaxed max-w-2xl">
+            Connect, sign safeguards once per session, then pick your owls and confirm. Stay on the page while the wallet
+            lock finishes (often under a minute).
+          </p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {[
+            {
+              n: '1',
+              icon: Wallet,
+              title: 'Connect & sign in',
+              body: 'Open My nest, connect your wallet, then approve the short sign-in so we know it is you.',
+            },
+            {
+              n: '2',
+              icon: Shield,
+              title: 'Sign the orange safeguards',
+              body: 'One wallet signature unlocks nesting for this browsing session. You cannot Confirm nest until this is done.',
+            },
+            {
+              n: '3',
+              icon: Bird,
+              title: 'Pick owls → Confirm nest',
+              body: 'Choose your perch and NFTs, then Confirm. Keep the page open — locking a few owls can take 30–60 seconds.',
+            },
+          ].map(({ n, icon: Icon, title, body }) => (
+            <Card key={title} className="rounded-xl border-border/60 bg-card/80">
+              <CardHeader className="pb-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-500/15 text-amber-300 text-xs font-bold">
+                    {n}
+                  </span>
+                  <Icon className="h-6 w-6 text-theme-prime" aria-hidden />
+                </div>
+                <CardTitle className="text-base font-display tracking-wide">{title}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground leading-relaxed">{body}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </section>
 
       {connected && positionPreview !== null && (
@@ -323,6 +337,10 @@ export function NestingLandingClient({
             {
               q: 'When can I claim OWL rewards?',
               a: 'OWL accrues daily while nested, but you claim it yourself from My nest when you are ready — at least 1 OWL per nest claim, or use Claim all on mobile when multiple nests are ready.',
+            },
+            {
+              q: 'Why does nesting take so long?',
+              a: 'Opening a nest freezes each NFT in your wallet and confirms it on Owltopia. One or two owls often finish in about 30–60 seconds — keep the page open, approve the wallet prompt, and wait for the success state. On mobile, return to Owltopia after the wallet app closes.',
             },
             {
               q: 'Why do you ask me to sign a message on the dashboard?',

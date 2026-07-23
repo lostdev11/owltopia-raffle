@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import { pushDiscordRaidPingToXPosts } from '@/lib/discord-raffle-webhooks'
 import { DAILY_RAID_MAX_RAFFLES } from '@/lib/raffles/daily-raid-batch'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireFullAdminSession(request)
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const ip = getClientIp(request)

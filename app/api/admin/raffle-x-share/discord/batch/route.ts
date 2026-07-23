@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { pushAdminXTweetMirrorsBatchToDiscord } from '@/lib/discord-raffle-webhooks'
 import { MAX_X_POST_TWEET_MIRRORS } from '@/lib/raffles/x-tweet-discord-mirror'
@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireFullAdminSession(request)
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const ip = getClientIp(request)

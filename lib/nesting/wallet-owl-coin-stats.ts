@@ -1,4 +1,8 @@
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
+import {
+  isNftNestPositionCountedAsNested,
+  isPendingNftNestBeforeFreezeConfirmed,
+} from '@/lib/nesting/position-lifecycle'
 
 /** Active nests plus freeze-confirmed pending; opening pending stays out of `nested`. */
 export function countNestedOwlCoinsForPool(
@@ -12,14 +16,11 @@ export function countNestedOwlCoinsForPool(
   for (const p of positions) {
     if (p.pool_id?.trim() !== pid) continue
     if (!p.asset_identifier?.trim()) continue
-    if (p.status === 'active') {
+    if (isNftNestPositionCountedAsNested(p)) {
       nested++
       continue
     }
-    if (p.status === 'pending') {
-      if ((p.external_reference ?? '').startsWith('nft_freeze_confirmed:')) nested++
-      else opening++
-    }
+    if (isPendingNftNestBeforeFreezeConfirmed(p)) opening++
   }
   return { nested, opening }
 }

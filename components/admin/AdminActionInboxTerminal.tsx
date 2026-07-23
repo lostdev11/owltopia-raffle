@@ -17,6 +17,15 @@ const SEVERITY_PREFIX: Record<AdminActionInboxSeverity, string> = {
   info: '[i]',
 }
 
+/** Inbox types that require a full admin to execute — mods triage / escalate only. */
+const ESCALATE_TO_FULL_TYPES = new Set([
+  'cancellation_pending',
+  'manual_refund',
+  'ready_to_draw',
+  'prize_return_pending',
+  'launch_submission_pending',
+])
+
 function formatOccurredAt(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -27,7 +36,7 @@ function formatOccurredAt(iso: string | null): string {
 type Props = {
   wallet: string
   sessionReady: boolean
-  adminRole: 'full' | null
+  adminRole: 'full' | 'mod' | null
   refreshTick: number
 }
 
@@ -39,7 +48,8 @@ export function AdminActionInboxTerminal({ wallet, sessionReady, adminRole, refr
   const [readMap, setReadMap] = useState<Record<string, string>>({})
   const [bootLine, setBootLine] = useState(0)
 
-  const enabled = sessionReady && adminRole === 'full' && !!wallet.trim()
+  const enabled = sessionReady && (adminRole === 'full' || adminRole === 'mod') && !!wallet.trim()
+  const isJuniorMod = adminRole === 'mod'
 
   const loadInbox = useCallback(async () => {
     if (!enabled) return
@@ -152,6 +162,14 @@ export function AdminActionInboxTerminal({ wallet, sessionReady, adminRole, refr
           {bootLine >= 2 && (
             <p className="text-emerald-500/70">
               {'>'} scanning unresolved platform actions…
+              {isJuniorMod ? ' · role=mod (support tools)' : ' · role=full'}
+            </p>
+          )}
+
+          {isJuniorMod && bootLine >= 2 && (
+            <p className="mt-1 text-amber-300/90">
+              {'>'} tip: refunds, cancellations, winners, and prize returns need a full admin — create a
+              dev task or ping senior ops.
             </p>
           )}
 
@@ -172,6 +190,7 @@ export function AdminActionInboxTerminal({ wallet, sessionReady, adminRole, refr
             <ul className="mt-3 space-y-3">
               {unreadItems.map((item) => {
                 const when = formatOccurredAt(item.occurredAt)
+                const escalate = isJuniorMod && ESCALATE_TO_FULL_TYPES.has(item.type)
                 return (
                   <li
                     key={item.id}
@@ -187,8 +206,18 @@ export function AdminActionInboxTerminal({ wallet, sessionReady, adminRole, refr
                           >
                             {item.title}
                           </Link>
+                          {escalate && (
+                            <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-400">
+                              escalate
+                            </span>
+                          )}
                         </p>
                         <p className="mt-1 text-emerald-300/80">{item.detail}</p>
+                        {escalate && (
+                          <p className="mt-1 text-[11px] text-amber-300/80">
+                            View only for junior admins — ping a full admin to execute.
+                          </p>
+                        )}
                         {when && <p className="mt-1 text-[11px] text-emerald-500/60">{when}</p>}
                       </div>
                       <div className="flex shrink-0 flex-wrap gap-2">

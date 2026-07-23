@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import { diagnoseNestingWallet } from '@/lib/nesting/admin-wallet-diagnostics'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -11,7 +11,7 @@ export const maxDuration = 60
  * Support audit: ledger vs on-chain vs cross-wallet blockers for Owltopia coins, Gen 1, and Gen 2 nests.
  */
 export async function GET(request: NextRequest) {
-  const session = await requireFullAdminSession(request)
+  const session = await requireAdminSession(request)
   if (session instanceof NextResponse) return session
 
   try {
