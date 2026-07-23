@@ -1,6 +1,6 @@
 'use client'
 
-import { AlertTriangle, CheckCircle2, Loader2, PenLine, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, PenLine, ShieldCheck, Usb } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -11,6 +11,9 @@ import {
 type Props = {
   acknowledged: boolean
   onSignAcknowledgment: () => void | Promise<void>
+  /** Ledger / hardware path: sign a memo transaction (not broadcast). */
+  onSignWithLedger?: () => void | Promise<void>
+  canSignWithLedger?: boolean
   signing?: boolean
   signError?: string | null
   walletConnected?: boolean
@@ -21,6 +24,8 @@ type Props = {
 export function NestingSecurityNotice({
   acknowledged,
   onSignAcknowledgment,
+  onSignWithLedger,
+  canSignWithLedger = false,
   signing = false,
   signError = null,
   walletConnected = true,
@@ -101,26 +106,52 @@ export function NestingSecurityNotice({
             </p>
           </div>
         ) : (
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            className="min-h-[48px] touch-manipulation w-full sm:w-auto font-semibold bg-amber-500 text-amber-950 hover:bg-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.35)]"
-            onClick={() => void onSignAcknowledgment()}
-            disabled={signing || !walletConnected}
-          >
-            {signing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-            ) : (
-              <PenLine className="mr-2 h-4 w-4" aria-hidden />
-            )}
-            Sign safeguards with wallet
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              className="min-h-[48px] touch-manipulation w-full sm:w-auto font-semibold bg-amber-500 text-amber-950 hover:bg-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.35)]"
+              onClick={() => void onSignAcknowledgment()}
+              disabled={signing || !walletConnected}
+            >
+              {signing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+              ) : (
+                <PenLine className="mr-2 h-4 w-4" aria-hidden />
+              )}
+              Sign safeguards with wallet
+            </Button>
+            {canSignWithLedger && onSignWithLedger ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-h-[48px] touch-manipulation w-full sm:w-auto border-amber-500/50 bg-amber-950/30 text-amber-50 hover:bg-amber-900/40 hover:text-amber-50"
+                onClick={() => void onSignWithLedger()}
+                disabled={signing || !walletConnected}
+              >
+                {signing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <Usb className="mr-2 h-4 w-4" aria-hidden />
+                )}
+                Sign safeguards with Ledger
+              </Button>
+            ) : null}
+          </div>
         )}
+        {!acknowledged && canSignWithLedger ? (
+          <p className="text-[11px] text-amber-200/80 leading-relaxed">
+            Using Ledger? Phantom Sign Message often fails with error Code 1. Use{' '}
+            <span className="font-medium text-amber-50">Sign safeguards with Ledger</span> — approve the memo on the
+            device (not broadcast, no Owltopia fee). Unlock Ledger, open Solana app, close Ledger Live, prefer USB.
+          </p>
+        ) : null}
         {!walletConnected && !acknowledged ? (
           <p className="text-xs text-amber-200/95">Connect your wallet in the header to sign.</p>
         ) : null}
-        {signError ? <p className="text-xs text-red-400">{signError}</p> : null}
+        {signError ? <p className="text-xs text-red-400 whitespace-pre-wrap">{signError}</p> : null}
       </div>
       <p
         className={cn(

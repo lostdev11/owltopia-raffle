@@ -1,9 +1,11 @@
 /**
  * Signed challenge for nesting safeguards acknowledgment (session-only gate in UI).
  * The connected wallet signs; no SIWS session required.
+ * Ledger via Phantom/Solflare often cannot complete off-chain signMessage — use memo-tx verify.
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { verifySignIn } from '@/lib/auth-server'
+import { verifySignInMemoTransaction } from '@/lib/auth-tx-sign-in'
 import { getSiteBaseUrl } from '@/lib/site-config'
 import { NESTING_SECURITY_ACK_STATEMENT } from '@/lib/nesting/security-notice-content'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
@@ -132,11 +134,10 @@ export function parseWalletFromNestingSecurityAckMessage(message: string): strin
   return normalizeSolanaWalletAddress(raw)
 }
 
-export function verifyNestingSecurityAckSignature(
+function validateNestingSecurityAckMessageShape(
   wallet: string,
-  message: string,
-  signatureBase64: string
-): { valid: boolean; error?: string } {
+  message: string
+): { valid: true; nonce: string } | { valid: false; error: string } {
   const parsedWallet = parseWalletFromNestingSecurityAckMessage(message)
   const normalized = normalizeSolanaWalletAddress(wallet)
   if (!normalized || !parsedWallet || parsedWallet !== normalized) {
@@ -145,11 +146,55 @@ export function verifyNestingSecurityAckSignature(
   if (!message.includes(NESTING_SECURITY_ACK_STATEMENT)) {
     return { valid: false, error: 'Invalid acknowledgment message' }
   }
-
+  if (!message.includes('Acknowledge nesting safeguards for')) {
+    return { valid: false, error: 'Invalid acknowledgment message format' }
+  }
   const nonce = parseNonceFromNestingSecurityAckMessage(message)
-  if (!nonce || !consumeNestingSecurityAckNonce(nonce, wallet)) {
+  if (!nonce) {
+    return { valid: false, error: 'Invalid or expired acknowledgment nonce' }
+  }
+  return { valid: true, nonce }
+}
+
+export function verifyNestingSecurityAckSignature(
+  wallet: string,
+  message: string,
+  signatureBase64: string
+): { valid: boolean; error?: string } {
+  const shape = validateNestingSecurityAckMessageShape(wallet, message)
+  if (!shape.valid) return shape
+
+  if (!consumeNestingSecurityAckNonce(shape.nonce, wallet)) {
     return { valid: false, error: 'Invalid or expired acknowledgment nonce' }
   }
 
   return verifySignIn(wallet, message, signatureBase64)
+}
+
+/**
+ * Ledger / hardware fallback: verify a signed (unsent) memo transaction that embeds the
+ * safeguards challenge as memo data. Same wire format as SIWS verify-tx.
+ */
+export function verifyNestingSecurityAckMemoTransaction(
+  wallet: string,
+  message: string,
+  signedTransactionBase64: string
+): { valid: boolean; error?: string } {
+  const shape = validateNestingSecurityAckMessageShape(wallet, message)
+  if (!shape.valid) return shape
+
+  const txResult = verifySignInMemoTransaction({
+    wallet,
+    message,
+    signedTransactionBase64,
+  })
+  if (!txResult.valid) {
+    return { valid: false, error: txResult.error || 'Invalid signed transaction' }
+  }
+
+  if (!consumeNestingSecurityAckNonce(shape.nonce, wallet)) {
+    return { valid: false, error: 'Invalid or expired acknowledgment nonce' }
+  }
+
+  return { valid: true }
 }

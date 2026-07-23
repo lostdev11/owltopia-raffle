@@ -71,6 +71,12 @@ export function isLikelyHardwareWalletSignMessageFailure(err: unknown): boolean 
     isAmbiguousLedgerSignCancel(err) ||
     isLedgerOffchainSignApduError(err) ||
     hay.includes('ledger') ||
+    hay.includes('hardware wallet') ||
+    hay.includes('hardware account') ||
+    hay.includes('sign message rejected') ||
+    hay.includes('rejected on ledger') ||
+    (hay.includes('error code 1') &&
+      (hay.includes('ledger') || hay.includes('hardware') || hay.includes('phantom'))) ||
     hay.includes('blind signing') ||
     hay.includes('blind-signing') ||
     hay.includes('device timeout') ||
@@ -106,10 +112,20 @@ export function isLedgerOffchainSignApduError(err: unknown): boolean {
   )
 }
 
-const LEDGER_SIGN_MESSAGE_HINT =
-  'Ledger cannot complete Phantom/Solflare Sign Message (error 0x6a81 is common). ' +
-  'Tap “Sign with Ledger transaction” on My nest — approve the memo on the device (not broadcast, no Owltopia fee). ' +
-  'Unlock Ledger, open the Solana app, close Ledger Live; prefer USB on desktop.'
+function ledgerSignMessageHint(context: 'sign-in' | 'safeguards' | 'generic'): string {
+  if (context === 'safeguards') {
+    return (
+      'Ledger cannot complete Phantom/Owltopia Sign Message (error Code 1 / 0x6a81 is common). ' +
+      'Tap “Sign safeguards with Ledger” below — approve the memo on the device (not broadcast, no Owltopia fee). ' +
+      'Unlock Ledger, open the Solana app, close Ledger Live; prefer USB on desktop.'
+    )
+  }
+  return (
+    'Ledger cannot complete Phantom/Solflare Sign Message (error 0x6a81 is common). ' +
+    'Tap “Sign with Ledger transaction” on My nest — approve the memo on the device (not broadcast, no Owltopia fee). ' +
+    'Unlock Ledger, open the Solana app, close Ledger Live; prefer USB on desktop.'
+  )
+}
 
 /**
  * Format a `signMessage` failure for SIWS / nesting “say hi” / safeguards.
@@ -136,12 +152,20 @@ export function formatSignMessageError(
     hay.includes('l2texmfkdjp') ||
     hay.includes('assertaccountinfo') ||
     (hay.includes('unexpected instruction') &&
-      (hay.includes('ledger') || context === 'sign-in'))
+      (hay.includes('ledger') || context === 'sign-in' || context === 'safeguards'))
   ) {
+    const action =
+      context === 'safeguards'
+        ? 'then use “Sign safeguards with Ledger”'
+        : 'then use “Sign with Ledger transaction”'
+    const fallback =
+      context === 'safeguards'
+        ? 'If it still fails, sign safeguards from a hot wallet — wallet + Ledger limitation, not an Owltopia fee.'
+        : 'If it still fails, sign in from a hot wallet — wallet + Ledger limitation, not an Owltopia fee.'
     return (
       'Phantom/Solflare added a Lighthouse security instruction that Ledger cannot clear-sign. ' +
-      'Enable Blind signing in the Ledger Solana app, unlock the device, close Ledger Live, prefer USB, then use “Sign with Ledger transaction”. ' +
-      'If it still fails, sign in from a hot wallet — wallet + Ledger limitation, not an Owltopia fee.'
+      `Enable Blind signing in the Ledger Solana app, unlock the device, close Ledger Live, prefer USB, ${action}. ` +
+      fallback
     )
   }
 
@@ -153,10 +177,22 @@ export function formatSignMessageError(
     return `${walletLabel} does not support message signing. Try Phantom or Solflare, or a different account.`
   }
 
-  if (isLedgerOffchainSignApduError(err) || isLikelyHardwareWalletSignMessageFailure(err)) {
+  // Phantom Ledger UI often says "Sign message rejected on Ledger device" (error Code 1).
+  const rejectedOnDevice =
+    hay.includes('sign message rejected') ||
+    hay.includes('rejected on ledger') ||
+    (hay.includes('error code 1') && (hay.includes('ledger') || hay.includes('hardware')))
+
+  if (
+    rejectedOnDevice ||
+    isLedgerOffchainSignApduError(err) ||
+    isLikelyHardwareWalletSignMessageFailure(err)
+  ) {
     const lead =
       context === 'safeguards'
-        ? 'Hardware wallet did not complete the safeguards signature.'
+        ? rejectedOnDevice
+          ? 'Hardware wallet did not complete the safeguards signature. Ledger rejected Phantom/Owltopia Sign Message (error Code 1).'
+          : 'Hardware wallet did not complete the safeguards signature.'
         : context === 'sign-in'
           ? isLedgerOffchainSignApduError(err)
             ? 'Ledger rejected Sign Message (0x6a81) — Phantom/Solflare cannot finish off-chain signing on this device.'
@@ -164,7 +200,7 @@ export function formatSignMessageError(
               ? 'Ledger approved something, but Phantom/Solflare cancelled the Sign Message step (common with hardware wallets).'
               : 'Hardware wallet did not complete the nest sign-in message.'
           : 'Hardware wallet did not complete the message signature.'
-    return `${lead} ${LEDGER_SIGN_MESSAGE_HINT}`
+    return `${lead} ${ledgerSignMessageHint(context)}`
   }
 
   if (msg && msg.toLowerCase() !== 'unexpected error' && msg.toLowerCase() !== 'unknown error') {
@@ -173,6 +209,6 @@ export function formatSignMessageError(
 
   return (
     `Wallet signing failed (${msg || 'unexpected error'}). ` +
-    `Approve the Sign Message request in ${walletLabel}, or reconnect and try again. ${LEDGER_SIGN_MESSAGE_HINT}`
+    `Approve the Sign Message request in ${walletLabel}, or reconnect and try again. ${ledgerSignMessageHint(context)}`
   )
 }

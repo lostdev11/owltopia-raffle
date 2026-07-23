@@ -30,7 +30,17 @@ import {
   SIGN_IN_MEMO_PROGRAM_ID,
   verifySignInMemoTransaction,
 } from '../lib/auth-tx-sign-in'
-import { formatSignMessageError } from '../lib/solana/sign-message-error'
+import {
+  buildNestingSecurityAckMessage,
+  generateNestingSecurityAckNonce,
+  verifyNestingSecurityAckMemoTransaction,
+  verifyNestingSecurityAckSignature,
+} from '../lib/nesting/security-ack-auth'
+import { verifyNestingSecurityAckMemoClient } from '../lib/nesting/verify-security-ack-memo-client'
+import {
+  formatSignMessageError,
+  isLikelyHardwareWalletSignMessageFailure,
+} from '../lib/solana/sign-message-error'
 import { signMessageSignatureToBase64 } from '../lib/solana/sign-message-signature'
 
 /** Solana off-chain format 0/1 hardware limit (preamble + body). Stay comfortably under. */
@@ -222,6 +232,53 @@ function main() {
     evilOk.error
   )
 
+  // Nesting safeguards ack — same Ledger Sign Message gap; memo-tx must verify.
+  const ackExpiresAtMs = Date.now() + 10 * 60 * 1000
+  const ackNonce = generateNestingSecurityAckNonce(wallet, ackExpiresAtMs)
+  const ackMessage = buildNestingSecurityAckMessage(wallet, ackNonce, new Date(ackExpiresAtMs))
+  const ackBytes = Buffer.byteLength(ackMessage, 'utf8')
+  assert.ok(
+    ackBytes <= LEDGER_SAFE_MESSAGE_BYTES,
+    `safeguards message too large for Ledger comfort: ${ackBytes} bytes`
+  )
+
+  const ackSig = nacl.sign.detached(new TextEncoder().encode(ackMessage), kp.secretKey)
+  const ackSigB64 = signMessageSignatureToBase64(ackSig)
+  const ackMsgOk = verifyNestingSecurityAckSignature(wallet, ackMessage, ackSigB64)
+  assert.equal(ackMsgOk.valid, true, ackMsgOk.error)
+
+  // Fresh nonce for memo-tx path (message path consumes nonce).
+  const ackNonceTx = generateNestingSecurityAckNonce(wallet, ackExpiresAtMs)
+  const ackMessageTx = buildNestingSecurityAckMessage(wallet, ackNonceTx, new Date(ackExpiresAtMs))
+  const ackTx = buildSignInMemoTransaction({
+    wallet: kp.publicKey,
+    message: ackMessageTx,
+    blockhash: fakeBlockhash,
+  })
+  ackTx.partialSign(kp)
+  const ackTxB64 = serializeSignedSignInTransaction(ackTx)
+  const ackClientOk = verifyNestingSecurityAckMemoClient(kp.publicKey, ackMessageTx, ackTxB64)
+  assert.equal(ackClientOk.valid, true, ackClientOk.error)
+  const ackTxOk = verifyNestingSecurityAckMemoTransaction(wallet, ackMessageTx, ackTxB64)
+  assert.equal(ackTxOk.valid, true, ackTxOk.error)
+
+  const phantomLedgerReject = new Error('Sign message rejected on Ledger device')
+  assert.ok(isLikelyHardwareWalletSignMessageFailure(phantomLedgerReject))
+  const safeguardsErr = formatSignMessageError(phantomLedgerReject, {
+    walletName: 'Phantom',
+    context: 'safeguards',
+  })
+  assert.ok(safeguardsErr.toLowerCase().includes('safeguards'), safeguardsErr)
+  assert.ok(
+    safeguardsErr.toLowerCase().includes('sign safeguards with ledger') ||
+      safeguardsErr.toLowerCase().includes('ledger'),
+    safeguardsErr
+  )
+  assert.ok(
+    safeguardsErr.toLowerCase().includes('error code 1') || safeguardsErr.includes('0x6a81'),
+    safeguardsErr
+  )
+
   console.log(
     JSON.stringify(
       {
@@ -234,6 +291,9 @@ function main() {
         versionedWithLighthouse: true,
         legacyWithLighthouse: true,
         rejectsUnknownProgram: true,
+        safeguardsAckMessageBytes: ackBytes,
+        safeguardsAckMemoTxFallback: true,
+        safeguardsPhantomLedgerRejectHint: true,
       },
       null,
       2

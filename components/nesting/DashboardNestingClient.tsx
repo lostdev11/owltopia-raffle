@@ -165,6 +165,7 @@ export function DashboardNestingClient() {
     signing: securityAckSigning,
     error: securityAckError,
     signAcknowledgment: signSecurityAck,
+    canSignTransaction: canSignSecurityAckTx,
     clearError: clearSecurityAckError,
   } = useNestingSecurityAck(publicKey)
   const { connection } = useConnection()
@@ -3197,6 +3198,11 @@ export function DashboardNestingClient() {
           clearSecurityAckError()
           void signSecurityAck()
         }}
+        onSignWithLedger={() => {
+          clearSecurityAckError()
+          void signSecurityAck({ preferTx: true })
+        }}
+        canSignWithLedger={canSignSecurityAckTx}
         signing={securityAckSigning}
         signError={securityAckError}
         walletConnected={connected}
