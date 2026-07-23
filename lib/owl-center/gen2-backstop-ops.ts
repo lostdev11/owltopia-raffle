@@ -14,6 +14,7 @@ import {
 } from '@/lib/owl-center/gen2-team-backstop-guards'
 import { sumOwlCenterPhaseMinted } from '@/lib/owl-center/presale-mint-pool'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
+import { resolveEffectiveCmRemaining } from '@/lib/owl-center/effective-cm-remaining'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { getGen2CandyMachineId, isDevnetMintEnabled } from '@/lib/solana/network'
 
@@ -73,9 +74,21 @@ export async function ensureGen2TeamBackstopAutoEnabled(opts?: {
   const launch = opts?.launch ?? (await getOwlCenterLaunchBySlugAdmin('gen2'))
   if (!launch) return { ok: false, error: 'Launch not found' }
 
-  const remaining = Math.max(0, launch.total_supply - launch.minted_count)
+  const network = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
+  const cmRemaining = await resolveEffectiveCmRemaining({
+    totalSupply: launch.total_supply,
+    mintedCount: launch.minted_count,
+    candyMachineId: getGen2CandyMachineId(launch),
+    network,
+  })
+  const remaining = cmRemaining.remaining
   if (remaining <= 0) {
-    return { ok: true, enabled: false, skipped: true, reason: 'collection_sold_out' }
+    return {
+      ok: true,
+      enabled: false,
+      skipped: true,
+      reason: cmRemaining.onChainSoldOut ? 'on_chain_sold_out' : 'collection_sold_out',
+    }
   }
 
   if (launch.freeze_progress.backstop_mint_enabled) {

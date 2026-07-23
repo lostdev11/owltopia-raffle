@@ -26,8 +26,15 @@ export type ReconcileLaunchMintsResult = {
   sellout_prep: boolean
 }
 
-/** Mark launch sold out when DB supply is exhausted (e.g. after orphan backfill). */
-export async function syncLaunchSoldOutPhaseIfExhausted(launchId: string): Promise<boolean> {
+/**
+ * Mark launch sold out when DB supply is exhausted (e.g. after orphan backfill),
+ * or when `force` is set because the Candy Machine is empty on-chain while the
+ * DB ledger still shows leftovers.
+ */
+export async function syncLaunchSoldOutPhaseIfExhausted(
+  launchId: string,
+  opts?: { force?: boolean; reason?: string }
+): Promise<boolean> {
   const db = getSupabaseAdmin()
   const { data, error } = await db
     .from('owl_center_launches')
@@ -42,7 +49,7 @@ export async function syncLaunchSoldOutPhaseIfExhausted(launchId: string): Promi
     active_phase: string
     status: string
   }
-  if (row.minted_count < row.total_supply) return false
+  if (!opts?.force && row.minted_count < row.total_supply) return false
   if (row.active_phase === 'TRADING_ACTIVE') return false
   if (row.active_phase === 'SOLD_OUT' && row.status === 'SOLD_OUT') return false
 
@@ -57,9 +64,15 @@ export async function syncLaunchSoldOutPhaseIfExhausted(launchId: string): Promi
 
   if (updErr) return false
 
+  const detail =
+    opts?.reason?.trim() ||
+    (opts?.force
+      ? `on-chain Candy Machine empty (DB ${row.minted_count}/${row.total_supply})`
+      : `supply exhausted (${row.minted_count}/${row.total_supply})`)
+
   await db.from('owl_center_activity_logs').insert({
     launch_id: launchId,
-    message: `SELL_OUT supply exhausted (${row.minted_count}/${row.total_supply}) — phase synced`,
+    message: `SELL_OUT ${detail} — phase synced`,
     event_type: 'system',
   })
 
@@ -157,8 +170,14 @@ export async function reconcileOrphanCandyMachineMints(
   }
 
   let sold_out_synced = false
-  if (launch.minted_count >= launch.total_supply || supply.remaining <= 0) {
-    sold_out_synced = await syncLaunchSoldOutPhaseIfExhausted(launch.id)
+  const onChainEmpty = supply.itemsLoaded > 0 && supply.remaining <= 0
+  if (launch.minted_count >= launch.total_supply || onChainEmpty) {
+    sold_out_synced = await syncLaunchSoldOutPhaseIfExhausted(launch.id, {
+      force: onChainEmpty && launch.minted_count < launch.total_supply,
+      reason: onChainEmpty
+        ? `on-chain Candy Machine empty (DB ${launch.minted_count}/${launch.total_supply})`
+        : undefined,
+    })
   }
 
   let sellout_prep = false
@@ -189,7 +208,13 @@ export async function maybeReconcileLaunchMintsFromChain(
   if (!supply.ok) return { recorded: 0, sold_out_synced: false, sellout_prep: false }
 
   if (supply.itemsRedeemed <= launch.minted_count) {
-    const sold_out_synced = await syncLaunchSoldOutPhaseIfExhausted(launch.id)
+    const onChainEmpty = supply.itemsLoaded > 0 && supply.remaining <= 0
+    const sold_out_synced = await syncLaunchSoldOutPhaseIfExhausted(launch.id, {
+      force: onChainEmpty && launch.minted_count < launch.total_supply,
+      reason: onChainEmpty
+        ? `on-chain Candy Machine empty (DB ${launch.minted_count}/${launch.total_supply})`
+        : undefined,
+    })
     let sellout_prep = false
     const fresh = await getOwlCenterLaunchBySlugAdmin(launch.slug)
     if (fresh) {

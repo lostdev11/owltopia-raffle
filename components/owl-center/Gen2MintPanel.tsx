@@ -363,7 +363,7 @@ export function Gen2MintPanel({
     if (soldOut) return 'Sold out'
     if (elig?.reason === 'team_backstop') return 'Mint leftovers (team)'
     if (publicPoolSoldOut || elig?.reason === 'public_pool_exhausted') return 'Public sold out'
-    if (elig?.reason === 'sold_out') return 'Sold out'
+    if (elig?.reason === 'sold_out' || elig?.reason === 'on_chain_sold_out') return 'Sold out'
     if (elig?.reason === 'allocation_minted') return 'Allocation complete'
     if (!connected) return 'Connect wallet to mint'
     if (!elig?.is_eligible) return 'Not eligible'
@@ -659,7 +659,13 @@ export function Gen2MintPanel({
             </p>
           ) : null}
 
-          {publicPoolSoldOut && elig?.reason !== 'team_backstop' ? (
+          {elig?.reason === 'on_chain_sold_out' ? (
+            <p className="border border-[#FF9C9C]/40 bg-[#FF9C9C]/10 px-3 py-2 text-sm text-[#FF9C9C]">
+              {reasonLabel('on_chain_sold_out')}
+            </p>
+          ) : null}
+
+          {publicPoolSoldOut && elig?.reason !== 'team_backstop' && elig?.reason !== 'on_chain_sold_out' ? (
             <p className="border border-[#FF9C9C]/40 bg-[#FF9C9C]/10 px-3 py-2 text-sm text-[#FF9C9C]">
               {reasonLabel('public_pool_exhausted')}
               {remaining > 0

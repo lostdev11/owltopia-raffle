@@ -20,6 +20,9 @@ const REASON_LABELS: Record<string, string> = {
   wl_pending_allocation: 'On Discord WL — mint slots not assigned yet (admin assigns spots before WL opens)',
   wallet_mint_limit: 'Wallet mint limit reached',
   public_pool_exhausted: 'Public sold out — every spot outside the reserved GEN1 + presale pools has minted',
+  sold_out: 'Sold out',
+  on_chain_sold_out:
+    'Sold out on-chain — no NFTs remain in the Candy Machine. Refresh if the counter still looks wrong.',
 }
 
 export function reasonLabel(reason: string | null): string {
