@@ -8,7 +8,7 @@ import { gen2PhasePoolCap, gen2PublicPhaseSupplyDisplay, gen2PublicPoolCap, gen2
 import { OWL_CENTER_MINTABLE_PHASES } from '@/lib/owl-center/phase-schedule'
 import { reconcileLaunchMintedCount } from '@/lib/owl-center/reconcile-gen2-minted-count'
 import { resolveEffectiveCmRemaining } from '@/lib/owl-center/effective-cm-remaining'
-import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/reconcile-launch-mints'
+import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/sync-launch-sold-out'
 import { isGen2PresaleSoldOut } from '@/lib/gen2-presale/purchase-availability'
 import { buildGen2PresalePublicStats } from '@/lib/gen2-presale/public-stats'
 import { listGen2PresaleParticipants } from '@/lib/gen2-presale/db'

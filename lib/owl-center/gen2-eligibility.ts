@@ -36,7 +36,7 @@ import {
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 import { resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
 import { resolveEffectiveCmRemaining } from '@/lib/owl-center/effective-cm-remaining'
-import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/reconcile-launch-mints'
+import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/sync-launch-sold-out'
 import { getLaunchSolanaRpcUrl } from '@/lib/solana/launch-cm'
 import { Connection, PublicKey } from '@solana/web3.js'
 import { getGen2CandyMachineId, isDevnetMintEnabled } from '@/lib/solana/network'
