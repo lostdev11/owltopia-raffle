@@ -35,9 +35,11 @@ import {
 } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 import { resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
+import { resolveEffectiveCmRemaining } from '@/lib/owl-center/effective-cm-remaining'
+import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/sync-launch-sold-out'
 import { getLaunchSolanaRpcUrl } from '@/lib/solana/launch-cm'
 import { Connection, PublicKey } from '@solana/web3.js'
-import { isDevnetMintEnabled } from '@/lib/solana/network'
+import { getGen2CandyMachineId, isDevnetMintEnabled } from '@/lib/solana/network'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 type WlRow = { wallet: string; allowed_mints: number; used_mints: number; community?: string | null }
@@ -146,7 +148,20 @@ export async function buildGen2Eligibility(
   const w = walletRaw ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
   const phase = (phaseOverride ?? launch.active_phase) as OwlCenterPhase
   const nowMs = Date.now()
-  const remaining = Math.max(0, launch.total_supply - launch.minted_count)
+  // Cap by live Candy Machine supply so DB leftovers cannot advertise mintable qty when CM is empty.
+  const cmRemaining = await resolveEffectiveCmRemaining({
+    totalSupply: launch.total_supply,
+    mintedCount: launch.minted_count,
+    candyMachineId: getGen2CandyMachineId(launch),
+    network,
+  })
+  const remaining = cmRemaining.remaining
+  if (cmRemaining.onChainSoldOut) {
+    void syncLaunchSoldOutPhaseIfExhausted(launch.id, {
+      force: true,
+      reason: `on-chain Candy Machine empty (DB ${launch.minted_count}/${launch.total_supply})`,
+    })
+  }
   const overageSupply = launch.presale_overage_supply ?? 13
 
   // Platform mint fee (~$1, collected as SOL to the treasury in the same tx as each mint). Surfaced
@@ -218,7 +233,12 @@ export async function buildGen2Eligibility(
   }
 
   if (remaining <= 0) {
-    return { ...base, is_eligible: false, max_mintable: 0, reason: 'sold_out' }
+    return {
+      ...base,
+      is_eligible: false,
+      max_mintable: 0,
+      reason: cmRemaining.onChainSoldOut ? 'on_chain_sold_out' : 'sold_out',
+    }
   }
 
   if (!w) {

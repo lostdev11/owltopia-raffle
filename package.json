@@ -39,6 +39,7 @@
     "test:cart-checkout-restore": "npx --yes tsx scripts/test-cart-checkout-restore.ts",
     "test:gen2-gen1-delegations": "npx --yes tsx scripts/test-gen2-gen1-delegations.ts",
     "test:gen2-phase-advance": "npx --yes tsx scripts/test-gen2-phase-advance.ts",
+    "test:effective-cm-remaining": "npx --yes tsx scripts/test-effective-cm-remaining.ts",
     "test:min-threshold-second-round": "npx --yes tsx scripts/test-min-threshold-second-round.ts",
     "test:claim-all-combined": "npx --yes tsx scripts/test-claim-all-combined-threshold.ts",
     "test:siws-ledger-message": "npx --yes tsx scripts/test-siws-ledger-message-size.ts",

@@ -7,13 +7,15 @@ import { getPresaleMintPoolSnapshot, sumOwlCenterPhaseMinted } from '@/lib/owl-c
 import { gen2PhasePoolCap, gen2PublicPhaseSupplyDisplay, gen2PublicPoolCap, gen2EffectiveWlSupply, maybeSyncGen2WlSupplyOnClose } from '@/lib/owl-center/gen2-phase-advance'
 import { OWL_CENTER_MINTABLE_PHASES } from '@/lib/owl-center/phase-schedule'
 import { reconcileLaunchMintedCount } from '@/lib/owl-center/reconcile-gen2-minted-count'
+import { resolveEffectiveCmRemaining } from '@/lib/owl-center/effective-cm-remaining'
+import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/sync-launch-sold-out'
 import { isGen2PresaleSoldOut } from '@/lib/gen2-presale/purchase-availability'
 import { buildGen2PresalePublicStats } from '@/lib/gen2-presale/public-stats'
 import { listGen2PresaleParticipants } from '@/lib/gen2-presale/db'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { buildOwlCenterMintControls } from '@/lib/owl-center/mint-policy'
-import { isDevnetMintEnabled } from '@/lib/solana/network'
+import { getGen2CandyMachineId, isDevnetMintEnabled } from '@/lib/solana/network'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
@@ -79,8 +81,29 @@ export async function GET(request: NextRequest) {
   // drifted (e.g. emergency override or devnet test mints) so the supply always matches.
   const minted = await reconcileLaunchMintedCount(launch.id, network)
   launch.minted_count = minted
-  const remaining = Math.max(0, launch.total_supply - minted)
-  const pct = launch.total_supply > 0 ? (minted / launch.total_supply) * 100 : 0
+  // Cap overview remaining by live Candy Machine supply so a ledger lag cannot show
+  // leftovers after the CM is empty (team backstop / "Can mint N" read this counter).
+  const cmRemaining = await resolveEffectiveCmRemaining({
+    totalSupply: launch.total_supply,
+    mintedCount: minted,
+    candyMachineId: getGen2CandyMachineId(launch),
+    network,
+  })
+  const remaining = cmRemaining.remaining
+  if (cmRemaining.onChainSoldOut) {
+    const synced = await syncLaunchSoldOutPhaseIfExhausted(launch.id, {
+      force: true,
+      reason: `on-chain Candy Machine empty (DB ${minted}/${launch.total_supply})`,
+    })
+    if (synced) {
+      launch.active_phase = 'SOLD_OUT'
+      launch.status = 'SOLD_OUT'
+    }
+  }
+  const pct =
+    launch.total_supply > 0
+      ? ((launch.total_supply - remaining) / launch.total_supply) * 100
+      : 0
 
   const { data: mpRow } = await db
     .from('owl_center_marketplace_readiness')
