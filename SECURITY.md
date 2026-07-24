@@ -98,3 +98,26 @@ This document summarizes security practices and findings for Owl Raffle Site.
 ---
 
 *Last security review: March 2025. Hardening applied: admin/check rate limit and wallet validation; upload error response; entries GET raffleId UUID validation.*
+
+---
+
+## Security & domain notes: July 2026
+
+### Wallet "this dApp could be malicious" warning
+
+`owltopia.xyz` is **not** on any wallet/anti-phishing blocklist we checked (Phantom, Blowfish/ChainPatrol, ScamSniffer, Sinking Yachts, Google Safe Browsing — all clean or "unknown"). The warning users see is produced by Phantom's transaction scanner (**Blowfish**) treating an **unverified domain's outgoing transfer** cautiously — it shows up first when buying tickets because that is the first place the site asks the wallet to send funds. It is a domain-reputation/verification gap, not a code defect.
+
+Clearing it is an owner action; code alone cannot lift a third-party wallet reputation flag:
+
+1. **Verify the exact production origin, `www.owltopia.xyz`, with Phantom.** The apex `owltopia.xyz` redirects to `www`, so `www` is the host wallets actually see and the one that must be verified (DNS TXT in the Phantom Developer Portal). Registering only the apex will not clear it.
+2. **Request a dApp review / allowlist** from Phantom (`review@phantom.com`) and Blowfish, referencing the verified domain. Steps in [`PHANTOM_DOMAIN_REVIEW.md`](PHANTOM_DOMAIN_REVIEW.md).
+3. Keep `NEXT_PUBLIC_SITE_URL` and the wallet app identity pointed at that same host so the origin the wallet sees always equals the verified domain.
+
+### Key-material hygiene
+
+- `.gitignore` now ignores key material broadly (`*-keypair.json`, `*keypair*.json`, `governance-anchor/keys/*.json`, `*.key`, `id_rsa`) so keypairs cannot be committed by accident.
+- Anchor / Solana program keypairs must be generated fresh at deploy time and kept out of the repo. Never deploy a program ID whose keypair has ever been committed; generate a new keypair and update the program ID before first deploy.
+
+### Review scope
+
+Authentication, payment verification, cron authorization, and admin access were reviewed. Detailed findings were shared privately with the maintainers rather than published here. Verified OK: cron routes require the shared secret; admin routes require an authenticated admin session; Discord interactions verify Ed25519; session cookies are HMAC-signed and constant-time compared; no live third-party secrets are present in the working tree (`.env.example` files hold placeholders and public on-chain addresses only).
