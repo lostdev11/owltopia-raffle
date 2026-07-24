@@ -130,6 +130,9 @@ import {
   NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX,
   NESTING_NFT_STAKE_MAX_PER_RUN,
 } from '@/lib/solana/mpl-core-freeze'
+import {
+  approveTokenMetadataNestDelegatesInWallet,
+} from '@/lib/solana/token-metadata-nest-approve'
 import { isNestingStakeFlowError, NestingStakeFlowError } from '@/lib/nesting/errors'
 import {
   formatNestingWalletError,
@@ -1676,6 +1679,28 @@ export function DashboardNestingClient() {
     [connection, publicKey, wallet, sendTransaction]
   )
 
+  const sendTokenMetadataNestApprove = useCallback(
+    async (
+      mintIds: string[],
+      delegateAddress: string,
+      platformFee?: { treasury: string; lamports: number } | null
+    ): Promise<string | null> => {
+      const adapter = wallet?.adapter
+      if (!adapter || !publicKey) {
+        throw new Error('Connect your wallet first.')
+      }
+      return approveTokenMetadataNestDelegatesInWallet({
+        connection,
+        wallet: adapter,
+        mintIds,
+        delegateAddress,
+        platformFee,
+        sendTransaction,
+      })
+    },
+    [connection, publicKey, wallet, sendTransaction]
+  )
+
   const chunkNestPlatformFee = useCallback(
     (nestCount: number): { treasury: string; lamports: number } | null => {
       if (!platformFeeActive || !platformFeeTxConfig || nestCount <= 0) return null
@@ -1793,7 +1818,11 @@ export function DashboardNestingClient() {
             const json = (await res.json().catch(() => ({}))) as {
               error?: string
               position?: StakingPositionRow
-              execution?: { path?: string; freeze_delegate?: string | null }
+              execution?: {
+                path?: string
+                freeze_delegate?: string | null
+                nft_lock_standard?: string | null
+              }
             }
             if (!res.ok) {
               const err =
@@ -1855,6 +1884,8 @@ export function DashboardNestingClient() {
             stakeSignature: string | null
             needsWalletFreeze: boolean
             needsServerFreeze: boolean
+            /** From stake execution — Gen 2 uses Token Metadata Approve; Gen 1 uses Core freeze. */
+            nftLockStandard: string | null
           }
 
           const isNestFreezeConfirmedRow = (row: StakingPositionRow | undefined): boolean =>
@@ -2036,6 +2067,10 @@ export function DashboardNestingClient() {
             if (needsWalletFreeze && !delegateAddress) {
               throw new NestingStakeFlowError('Freeze delegate is not configured for this perch.')
             }
+            const nftLockStandard =
+              typeof json.execution?.nft_lock_standard === 'string'
+                ? json.execution.nft_lock_standard.trim()
+                : null
             return {
               positionId,
               assetId: positionAssetId,
@@ -2043,6 +2078,7 @@ export function DashboardNestingClient() {
               stakeSignature: json.position?.stake_signature ?? null,
               needsWalletFreeze,
               needsServerFreeze,
+              nftLockStandard,
             }
           }
 
@@ -2062,6 +2098,29 @@ export function DashboardNestingClient() {
           ): Promise<{ signature: string | null; confirmedInFallback: boolean }> => {
             const perNestFeeLamports =
               platformFee && preps.length > 0 ? Math.floor(platformFee.lamports / preps.length) : 0
+            const usesTokenMetadataApprove = preps.some(
+              (p) => p.nftLockStandard === 'spl_token_account_freeze'
+            )
+
+            const lockOne = async (
+              prep: PreparedNftNest,
+              fee: { treasury: string; lamports: number } | null | undefined
+            ): Promise<string | null> => {
+              if (usesTokenMetadataApprove) {
+                return sendTokenMetadataNestApprove([prep.assetId], delegateAddress, fee)
+              }
+              return sendMplCoreFreezeDelegateApproval(prep.assetId, delegateAddress, fee)
+            }
+
+            const lockBatch = async (
+              ids: string[],
+              fee: { treasury: string; lamports: number } | null | undefined
+            ): Promise<string | null> => {
+              if (usesTokenMetadataApprove) {
+                return sendTokenMetadataNestApprove(ids, delegateAddress, fee)
+              }
+              return sendBatchMplCoreFreezeDelegateApproval(ids, delegateAddress, fee)
+            }
 
             const lockChunk = async (
               chunk: PreparedNftNest[],
@@ -2069,11 +2128,7 @@ export function DashboardNestingClient() {
             ): Promise<{ signature: string | null; confirmedInFallback: boolean }> => {
               const ids = chunk.map((p) => p.assetId)
               try {
-                const signature = await sendBatchMplCoreFreezeDelegateApproval(
-                  ids,
-                  delegateAddress,
-                  fee
-                )
+                const signature = await lockBatch(ids, fee)
                 return { signature, confirmedInFallback: false }
               } catch (batchErr) {
                 if (!isNestingBatchSizeError(batchErr) || chunk.length <= 1) {
@@ -2152,11 +2207,7 @@ export function DashboardNestingClient() {
                     perNestFeeLamports > 0 && platformFee
                       ? { treasury: platformFee.treasury, lamports: perNestFeeLamports }
                       : null
-                  lastSig = await sendMplCoreFreezeDelegateApproval(
-                    prep.assetId,
-                    delegateAddress,
-                    prepFee
-                  )
+                  lastSig = await lockOne(prep, prepFee)
                   setStakeTxPhase('syncing')
                   await completeNftNestWithWalletSig(prep, lastSig, lastSig)
                   await refreshNestingUiAfterChange({ heal: false })

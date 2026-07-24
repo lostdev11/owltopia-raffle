@@ -26,10 +26,13 @@ export function nestStakeExecutionPathForLock(
   standard: ResolvedNftLockStandard
 ): NestStakeExecutionPath {
   if (standard === 'database_only') return 'database_mock'
-  if (standard === 'spl_token_account_freeze') return 'onchain_nft_server_freeze'
+  /**
+   * Gen 1 Core and Gen 2 Token Metadata both need a wallet signature phase
+   * (FreezeDelegate add / SPL Approve) before the nest is confirmed.
+   */
   return 'onchain_nft_freeze_required'
 }
 
 export function nestLockRequiresWalletSignature(standard: ResolvedNftLockStandard): boolean {
-  return standard === 'mpl_core_freeze_delegate'
+  return standard === 'mpl_core_freeze_delegate' || standard === 'spl_token_account_freeze'
 }

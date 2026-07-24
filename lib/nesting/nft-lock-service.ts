@@ -29,6 +29,11 @@ import {
   readSplTokenNestAccountState,
   thawSplTokenNestAccount,
 } from '@/lib/solana/spl-token-nest-lock'
+import {
+  detectSplNestFreezePath,
+  freezeTokenMetadataNestAccount,
+  thawTokenMetadataNestAccount,
+} from '@/lib/solana/token-metadata-nest-lock'
 
 export type { NestStakeExecutionPath, NftLockStandard, ResolvedNftLockStandard }
 
@@ -92,8 +97,8 @@ function mintCollectionFrozenMessage(): string {
 
 function splIncompatibleFreezeMessage(): string {
   return (
-    'This NFT mint freeze authority is not assigned to Owltopia nesting yet. ' +
-    'Partner collections must delegate freeze authority to the nesting authority before holders can nest.'
+    'This NFT cannot use Owltopia nest locks (unsupported freeze authority). ' +
+    'Contact support with the mint address if this is a partner collection.'
   )
 }
 
@@ -102,7 +107,7 @@ async function readSplStakeEligibility(params: {
   ownerWallet: string
 }): Promise<NftStakeEligibility> {
   try {
-    const state = await readSplTokenNestAccountState({
+    const { path, state } = await detectSplNestFreezePath({
       mint: params.assetId,
       ownerWallet: params.ownerWallet,
     })
@@ -124,7 +129,7 @@ async function readSplStakeEligibility(params: {
       }
     }
 
-    if (!state.nestingAuthorityCanFreeze) {
+    if (!path) {
       return {
         eligible: false,
         reason: splIncompatibleFreezeMessage(),
@@ -224,6 +229,17 @@ export async function assertWalletNftFrozenForPool(params: {
     return { tokenAccount: params.assetId.trim(), resolved_standard: resolved }
   }
   if (resolved === 'spl_token_account_freeze') {
+    const { path } = await detectSplNestFreezePath({
+      mint: params.assetId,
+      ownerWallet: params.ownerWallet,
+    })
+    if (path === 'freeze_delegated_account') {
+      const frozen = await freezeTokenMetadataNestAccount({
+        mint: params.assetId,
+        ownerWallet: params.ownerWallet,
+      })
+      return { tokenAccount: frozen.tokenAccount, resolved_standard: resolved }
+    }
     const frozen = await freezeSplTokenNestAccount({
       mint: params.assetId,
       ownerWallet: params.ownerWallet,
@@ -251,6 +267,17 @@ export async function thawWalletNftForPool(params: {
     return { signature: null, tokenAccount: params.assetId.trim(), resolved_standard: resolved }
   }
   if (resolved === 'spl_token_account_freeze') {
+    const { path, state } = await detectSplNestFreezePath({
+      mint: params.assetId,
+      ownerWallet: params.ownerWallet,
+    })
+    if (path === 'freeze_delegated_account' || state.nestingIsTokenDelegate) {
+      const thawed = await thawTokenMetadataNestAccount({
+        mint: params.assetId,
+        ownerWallet: params.ownerWallet,
+      })
+      return { signature: thawed.signature, tokenAccount: thawed.tokenAccount, resolved_standard: resolved }
+    }
     const thawed = await thawSplTokenNestAccount({
       mint: params.assetId,
       ownerWallet: params.ownerWallet,

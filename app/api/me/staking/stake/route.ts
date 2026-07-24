@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
         freeze_delegate:
           position.sync_status === 'pending' &&
           pool.asset_type === 'nft' &&
-          execution.requires_wallet_signature
+          (execution.requires_wallet_signature || execution.path === 'onchain_nft_freeze_required')
             ? getNestingNftFreezeDelegateAddress()
             : null,
         nft_lock_standard: resolvedStandard,

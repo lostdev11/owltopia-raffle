@@ -96,7 +96,8 @@ export async function ensureGen1StakingPoolsReady(): Promise<void> {
   await bindStakingPoolCollection(GEN1_OWL_STAKING_POOL_SLUGS, resolveGen1OwlCollectionAddress, 'auto')
 }
 
-/** Bind Gen 2 pool rows to NEXT_PUBLIC_GEN2_COLLECTION_MINT when configured in env. */
+/** Bind Gen 2 pool rows to NEXT_PUBLIC_GEN2_COLLECTION_MINT when configured in env.
+ * Lock path: wallet Approve + server FreezeDelegatedAccount (Master Edition freeze authority). */
 export async function ensureGen2StakingPoolsReady(): Promise<void> {
   await bindStakingPoolCollection(
     GEN2_OWL_STAKING_POOL_SLUGS,

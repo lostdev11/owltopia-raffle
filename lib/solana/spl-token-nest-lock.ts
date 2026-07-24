@@ -24,6 +24,8 @@ export type SplTokenNestAccountState = {
   mintFreezeAuthority: string | null
   delegate: string | null
   nestingAuthorityCanFreeze: boolean
+  /** True when the token account delegate is the nesting freeze authority. */
+  nestingIsTokenDelegate: boolean
   heldByNestingLock: boolean
 }
 
@@ -35,7 +37,8 @@ export function resolveSplTokenNestAta(mint: string, ownerWallet: string): Publi
   return getAssociatedTokenAddressSync(
     new PublicKey(mint.trim()),
     new PublicKey(ownerWallet.trim()),
-    false,
+    /** Token accounts owned by PDAs (rare) still resolve for diagnostics. */
+    true,
     TOKEN_PROGRAM_ID
   )
 }
@@ -67,7 +70,14 @@ export async function readSplTokenNestAccountState(params: {
     // Missing ATA — treat as not frozen / not held.
   }
 
-  const heldByNestingLock = isFrozen && nestingAuthorityCanFreeze
+  const nestingIsTokenDelegate =
+    nestingPk != null && delegate != null && new PublicKey(delegate).equals(nestingPk)
+  /**
+   * Nesting holds the lock when:
+   * - mint freeze authority is the nesting wallet (partner SPL freeze), or
+   * - token account is frozen with nesting as SPL delegate (Metaplex FreezeDelegatedAccount / Gen 2).
+   */
+  const heldByNestingLock = isFrozen && (nestingAuthorityCanFreeze || nestingIsTokenDelegate)
 
   return {
     mint: mintPk.toBase58(),
@@ -77,6 +87,7 @@ export async function readSplTokenNestAccountState(params: {
     mintFreezeAuthority,
     delegate,
     nestingAuthorityCanFreeze,
+    nestingIsTokenDelegate,
     heldByNestingLock,
   }
 }
