@@ -12,30 +12,37 @@ import { raffleCheckoutBlockedReason } from '../lib/cart/validate-raffle-checkou
 import { raffleEligibleForReferralFreeEntry } from '../lib/referrals/program'
 import type { Raffle } from '../lib/types'
 
-const now = new Date('2026-07-24T12:00:00.000Z')
-const past = '2026-07-24T11:00:00.000Z'
-const future = '2026-07-24T13:00:00.000Z'
-const later = '2026-07-24T18:00:00.000Z'
+/** Fixed clock for helpers that accept an explicit `now`. */
+const fixedNow = new Date('2026-07-24T12:00:00.000Z')
+const fixedPast = '2026-07-24T11:00:00.000Z'
+const fixedFuture = '2026-07-24T13:00:00.000Z'
+const fixedLater = '2026-07-24T18:00:00.000Z'
 
-assert.equal(raffleHasStarted({ start_time: past }, now), true)
-assert.equal(raffleHasStarted({ start_time: future }, now), false)
-assert.equal(raffleHasStarted({ start_time: '' }, now), false)
-assert.equal(raffleHasEnded({ end_time: past }, now), true)
-assert.equal(raffleHasEnded({ end_time: later }, now), false)
+assert.equal(raffleHasStarted({ start_time: fixedPast }, fixedNow), true)
+assert.equal(raffleHasStarted({ start_time: fixedFuture }, fixedNow), false)
+assert.equal(raffleHasStarted({ start_time: '' }, fixedNow), false)
+assert.equal(raffleHasEnded({ end_time: fixedPast }, fixedNow), true)
+assert.equal(raffleHasEnded({ end_time: fixedLater }, fixedNow), false)
 
 assert.equal(
-  raffleIsWithinPurchaseWindow({ start_time: past, end_time: later }, now),
+  raffleIsWithinPurchaseWindow({ start_time: fixedPast, end_time: fixedLater }, fixedNow),
   true
 )
 assert.equal(
-  raffleIsWithinPurchaseWindow({ start_time: future, end_time: later }, now),
+  raffleIsWithinPurchaseWindow({ start_time: fixedFuture, end_time: fixedLater }, fixedNow),
   false,
   'future start must block purchases'
 )
 assert.equal(
-  raffleIsWithinPurchaseWindow({ start_time: past, end_time: past }, now),
+  raffleIsWithinPurchaseWindow({ start_time: fixedPast, end_time: fixedPast }, fixedNow),
   false
 )
+
+/** Relative times so client/referral helpers that call `new Date()` stay correct. */
+const wallNowMs = Date.now()
+const past = new Date(wallNowMs - 60_000).toISOString()
+const future = new Date(wallNowMs + 3_600_000).toISOString()
+const later = new Date(wallNowMs + 7_200_000).toISOString()
 
 function baseRaffle(overrides: Partial<Raffle> = {}): Raffle {
   return {
@@ -86,24 +93,6 @@ function baseRaffle(overrides: Partial<Raffle> = {}): Raffle {
   } as Raffle
 }
 
-// Freeze Date.now used by raffleCheckoutBlockedReason / referral helper.
-const RealDate = Date
-class FakeDate extends RealDate {
-  constructor(...args: ConstructorParameters<typeof Date>) {
-    if (args.length === 0) {
-      super(now.getTime())
-    } else {
-      // @ts-expect-error spread Date ctor args
-      super(...args)
-    }
-  }
-  static now() {
-    return now.getTime()
-  }
-}
-// @ts-expect-error test double
-globalThis.Date = FakeDate
-
 assert.equal(
   raffleCheckoutBlockedReason(baseRaffle({ start_time: future })),
   'This raffle has not started yet.'
@@ -128,7 +117,5 @@ assert.equal(
   }),
   true
 )
-
-globalThis.Date = RealDate
 
 console.log('purchase-window: ok')
