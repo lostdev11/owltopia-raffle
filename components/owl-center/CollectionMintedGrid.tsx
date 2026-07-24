@@ -1,13 +1,14 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { Download, ExternalLink, Loader2 } from 'lucide-react'
+import { useEffect, useId, useState } from 'react'
+import { ChevronDown, ChevronUp, Download, ExternalLink, Loader2 } from 'lucide-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { buildOwlCenterHubCardImageChain } from '@/lib/owl-center/hub-card-image-url'
 import { fetchMintNftMetadata } from '@/lib/client/nft-metadata-client'
 import { useSaveImage } from '@/components/use-save-image'
 import { useNearViewportOnce } from '@/hooks/use-near-viewport-once'
+import { cn } from '@/lib/utils'
 
 function MintedPieceCard({
   mint,
@@ -152,24 +153,81 @@ export function CollectionMintedGrid({
   preferMainnet = true,
   label,
   description = 'Pieces already minted from this drop. Pull to refresh in your wallet if you just minted — new entries appear here after confirm-mint records the tx.',
+  /** Cap grid height and scroll inside the card (default on). */
+  scrollable = true,
+  /** Show expand/collapse control for the mint grid (default on). */
+  collapsible = true,
+  /** Initial open state when `collapsible` is true. */
+  defaultExpanded = true,
 }: {
   mints: string[]
   preferMainnet?: boolean
   label?: string
   description?: string
+  scrollable?: boolean
+  collapsible?: boolean
+  defaultExpanded?: boolean
 }) {
+  const gridId = useId()
+  const [expanded, setExpanded] = useState(defaultExpanded)
+
   if (!mints.length) return null
+
+  // Only offer collapse once the grid is longer than ~2 rows (3-col layout).
+  const showCollapse = collapsible && mints.length > 6
+  const gridVisible = !showCollapse || expanded
 
   return (
     <CommandCard label={label ?? `MINTED // ${mints.length}`}>
       <p className="mb-4 text-sm leading-relaxed text-[#9BA8B4]">{description}</p>
-      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:gap-4">
-        {mints.map((mint, index) => (
-          <li key={mint}>
-            <MintedPieceCard mint={mint} preferMainnet={preferMainnet} index={index} />
-          </li>
-        ))}
-      </ul>
+
+      {showCollapse ? (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+            {expanded
+              ? `Showing ${mints.length} mint${mints.length === 1 ? '' : 's'}`
+              : `${mints.length} mint${mints.length === 1 ? '' : 's'} hidden`}
+          </p>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            aria-controls={gridId}
+            className="inline-flex min-h-[44px] touch-manipulation items-center gap-1.5 border border-[#1A222B] bg-[#0B0F13] px-3 font-mono text-[10px] uppercase tracking-widest text-[#00FF9C] hover:border-[#00FF9C]/35"
+          >
+            {expanded ? (
+              <>
+                <ChevronUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                Collapse
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                Expand
+              </>
+            )}
+          </button>
+        </div>
+      ) : null}
+
+      {gridVisible ? (
+        <div
+          id={gridId}
+          className={cn(
+            scrollable &&
+              'max-h-[min(36rem,55vh)] overflow-y-auto overscroll-contain [scrollbar-gutter:stable] scrollbar-themed',
+            scrollable && 'rounded-none border border-[#1A222B] bg-[#0B0F13]/40 p-3 sm:p-4'
+          )}
+        >
+          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:gap-4">
+            {mints.map((mint, index) => (
+              <li key={mint}>
+                <MintedPieceCard mint={mint} preferMainnet={preferMainnet} index={index} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </CommandCard>
   )
 }

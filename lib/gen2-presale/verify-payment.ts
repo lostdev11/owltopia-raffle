@@ -8,6 +8,10 @@ import {
   SystemProgram,
 } from '@solana/web3.js'
 
+import {
+  SOL_USD_PRICE_TOLERANCE,
+  unitLamportsBoundsFromOracle,
+} from '@/lib/gen2-presale/sol-usd-bounds'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 function isParsed(ix: ParsedInstruction | PartiallyDecodedInstruction): ix is ParsedInstruction {
@@ -170,8 +174,23 @@ export function verifyGen2PresalePaymentChainAligned(params: {
   pctB: number
   priceUsdc: number
   quantity: number
+  /** Live server oracle SOL/USD — required to bound per-spot lamports. */
+  oracleSolUsd: number
+  /** Accepted drift vs oracle unit lamports (default {@link SOL_USD_PRICE_TOLERANCE}). */
+  tolerance?: number
 }): ChainAlignedPayment {
-  const { parsed, buyerWallet, founderA, founderB, pctA, pctB, priceUsdc, quantity } = params
+  const {
+    parsed,
+    buyerWallet,
+    founderA,
+    founderB,
+    pctA,
+    pctB,
+    priceUsdc,
+    quantity,
+    oracleSolUsd,
+    tolerance = SOL_USD_PRICE_TOLERANCE,
+  } = params
   if (parsed.meta?.err) {
     return { ok: false, reason: 'failed' }
   }
@@ -214,8 +233,15 @@ export function verifyGen2PresalePaymentChainAligned(params: {
   if (!Number.isFinite(unitSol) || unitSol <= 0) {
     return { ok: false, reason: 'unreasonable_unit' }
   }
-  /** Reject only absurd totals (split + divisibility are the real checks). High SOL/USD yields small SOL per spot. */
-  if (unitSol < 0.0005 || unitSol > 100) {
+
+  let minUnit: bigint
+  let maxUnit: bigint
+  try {
+    ;({ minUnit, maxUnit } = unitLamportsBoundsFromOracle(priceUsdc, oracleSolUsd, tolerance))
+  } catch {
+    return { ok: false, reason: 'unreasonable_unit' }
+  }
+  if (unit < minUnit || unit > maxUnit) {
     return { ok: false, reason: 'unreasonable_unit' }
   }
 

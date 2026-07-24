@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import { loadAdminSupportPlaybook } from '@/lib/nesting/admin-support-playbook'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -8,10 +8,11 @@ export const maxDuration = 120
 
 /**
  * GET /api/admin/staking/support-playbook?wallet=<address>
- * Combined claim-ledger audit + nest diagnostics with do-not-harm guards for catch-up vs wallet heal.
+ * Combined claim-ledger audit + nest diagnostics (Owltopia coins + Gen 1 + Gen 2)
+ * with do-not-harm guards for catch-up vs wallet heal.
  */
 export async function GET(request: NextRequest) {
-  const session = await requireFullAdminSession(request)
+  const session = await requireAdminSession(request)
   if (session instanceof NextResponse) return session
 
   try {

@@ -83,7 +83,7 @@ export function MyRafflesList({ deletedOnly = false }: MyRafflesListProps) {
           <CardDescription>
             {deletedOnly
               ? 'Raffles you deleted from your active list.'
-              : 'Raffles you created. Open to edit or delete.'}
+              : 'Raffles you created. Open drafts to edit, or edit a live raffle’s description from its page.'}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -122,7 +122,7 @@ export function MyRafflesList({ deletedOnly = false }: MyRafflesListProps) {
                 <ListTodo className="h-5 w-5" />
                 My raffles
               </CardTitle>
-              <CardDescription>Raffles you created will appear here. You can open any to edit or delete it.</CardDescription>
+              <CardDescription>Raffles you created will appear here. Edit descriptions on the raffle page anytime.</CardDescription>
             </div>
             <Button variant="ghost" size="sm" onClick={fetchRaffles} disabled={loading}>
               <RotateCcw className="h-4 w-4" />
@@ -148,7 +148,7 @@ export function MyRafflesList({ deletedOnly = false }: MyRafflesListProps) {
             <CardDescription>
               {deletedOnly
                 ? 'Raffles you deleted from your active list.'
-                : 'Raffles you created. Open to edit or delete.'}
+                : 'Raffles you created. Open drafts to edit, or edit a live raffle’s description from its page.'}
             </CardDescription>
           </div>
           <Button variant="ghost" size="sm" onClick={fetchRaffles} disabled={loading} title="Refresh list">
@@ -222,7 +222,7 @@ export function MyRafflesList({ deletedOnly = false }: MyRafflesListProps) {
                   </Button>
                 </Link>
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   <Button
                     type="button"
                     variant="outline"
@@ -238,6 +238,13 @@ export function MyRafflesList({ deletedOnly = false }: MyRafflesListProps) {
                       Post to X
                     </a>
                   </Button>
+                  <Link href={`/raffles/${raffle.slug}?editDescription=1`}>
+                    <Button variant="outline" size="sm" className="touch-manipulation min-h-[44px]">
+                      <Pencil className="h-4 w-4 mr-1 sm:mr-2" />
+                      <span className="hidden sm:inline">Edit description</span>
+                      <span className="sm:hidden">Edit</span>
+                    </Button>
+                  </Link>
                   <Link href={`/raffles/${raffle.slug}`}>
                     <Button variant="ghost" size="sm" className="touch-manipulation min-h-[44px]">
                       View

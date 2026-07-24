@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': '60' } })
     }
 
-    let body: { buyerWallet?: string; quantity?: number; txSignature?: string; solUsdPriceUsed?: number | string }
+    let body: { buyerWallet?: string; quantity?: number; txSignature?: string }
     try {
       body = (await request.json()) as typeof body
     } catch {
@@ -55,20 +55,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid transaction signature' }, { status: 400 })
     }
 
-    const rawSolUsd = body.solUsdPriceUsed
-    let solUsdOverride: number | undefined
-    if (typeof rawSolUsd === 'number' && Number.isFinite(rawSolUsd) && rawSolUsd > 0) {
-      solUsdOverride = rawSolUsd
-    } else if (typeof rawSolUsd === 'string' && rawSolUsd.trim()) {
-      const n = Number(rawSolUsd.trim())
-      if (Number.isFinite(n) && n > 0) solUsdOverride = n
-    }
-
     const result = await executeGen2PresaleConfirm({
       buyerWallet: buyerNorm,
       quantity: qty,
       txSignature,
-      solUsdPriceUsed: solUsdOverride,
     })
 
     if (!result.ok) {

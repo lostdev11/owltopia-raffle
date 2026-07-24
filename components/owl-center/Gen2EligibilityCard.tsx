@@ -69,8 +69,8 @@ export function Gen2EligibilityCard({
               {eligibility.gen1_snapshot.collection_configured === false
                 ? 'Gen1 collection address not configured on server'
                 : eligibility.gen1_snapshot.is_holder
-                  ? `Holder · ${eligibility.gen1_snapshot.gen1_nft_count} NFT${eligibility.gen1_snapshot.gen1_nft_count === 1 ? '' : 's'} detected · 1 free Gen2 mint per Gen1`
-                  : 'No Gen1 NFT detected on this wallet — confirm the NFT is in the connected wallet on mainnet'}
+                  ? `Snapshot holder · ${eligibility.gen1_snapshot.gen1_nft_count} Gen1 NFT${eligibility.gen1_snapshot.gen1_nft_count === 1 ? '' : 's'} · 1 free Gen2 mint per snapshotted Gen1`
+                  : 'Not on the Gen1 airdrop snapshot — post-snapshot purchases do not qualify'}
             </p>
           </div>
         ) : null}

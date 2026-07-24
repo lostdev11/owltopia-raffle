@@ -28,6 +28,7 @@ import { depositOwlToMarketplaceEscrowFromWallet } from '@/lib/solana/deposit-ow
 import { depositPrizeNftToEscrowFromWallet } from '@/lib/solana/deposit-prize-nft-to-escrow-wallet'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
 import { minimalWalletNftForEscrowTransfer } from '@/lib/solana/wallet-tokens'
+import { fetchWalletNftsWithRetry } from '@/lib/solana/fetch-wallet-nfts-api'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 
 type DepositOption = {
@@ -230,18 +231,14 @@ export function AdminDiscordShopClient() {
     setWalletNftsError(null)
     const walletAddr = publicKey.toBase58()
     try {
-      const [apiRes, escrowRes] = await Promise.all([
-        fetch(`/api/wallet/nfts?wallet=${encodeURIComponent(walletAddr)}`, { credentials: 'include' }),
+      const [apiResult, escrowRes] = await Promise.all([
+        fetchWalletNftsWithRetry(walletAddr),
         fetch(`/api/wallet/escrowed-nft-mints?wallet=${encodeURIComponent(walletAddr)}`, {
           credentials: 'include',
         }),
       ])
-      let nfts: WalletNft[] = []
-      if (apiRes.ok) {
-        const data = await apiRes.json()
-        nfts = Array.isArray(data) ? data : []
-      }
-      if (nfts.length === 0 || apiRes.status === 503) {
+      let nfts: WalletNft[] = apiResult.nfts
+      if (nfts.length === 0 || apiResult.res?.status === 503) {
         const { getWalletNfts } = await import('@/lib/solana/wallet-tokens')
         try {
           nfts = await getWalletNfts(connection, publicKey)

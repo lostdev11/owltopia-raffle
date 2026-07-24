@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import { getHotCommunityRows } from '@/lib/db/hot-communities'
 import { safeErrorMessage } from '@/lib/safe-error'
 
@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await requireFullAdminSession(request)
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const communities = await getHotCommunityRows()

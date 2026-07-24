@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { authorizeCronBearer } from '@/lib/cron-auth'
 
 import { repriceGen2GuardIfDrifted } from '@/lib/owl-center/gen2-guard-reprice'
 
@@ -13,16 +14,8 @@ export const maxDuration = 60
  * guard-authority key (GEN2_GUARD_AUTHORITY_SECRET_KEY) is set. Secured by CRON_SECRET.
  */
 export async function GET(request: NextRequest) {
-  const secret = process.env.CRON_SECRET
-  if (!secret) {
-    console.error('CRON_SECRET is not set')
-    return NextResponse.json({ error: 'server error' }, { status: 500 })
-  }
-
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: 'server error' }, { status: 401 })
-  }
+  const cronAuth = authorizeCronBearer(request)
+  if (cronAuth) return cronAuth
 
   try {
     const result = await repriceGen2GuardIfDrifted()

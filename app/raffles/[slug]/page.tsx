@@ -27,6 +27,7 @@ import { lookupOrbisNftUrl } from '@/lib/nft-marketplace-orbis'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
+import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 // Force dynamic rendering to prevent caching stale data
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -197,7 +198,7 @@ export default async function RaffleDetailPage({
   const isCreator =
     Boolean(viewerWallet) &&
     Boolean(creatorWallet) &&
-    viewerWallet!.trim() === creatorWallet
+    walletsEqualSolana(viewerWallet!, creatorWallet)
 
   let viewerReferralCode: string | null = null
   if (viewerWallet) {

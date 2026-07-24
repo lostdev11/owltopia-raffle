@@ -133,6 +133,30 @@ export const authVerifyBody = z.object({
   signature: z.string().min(1),
 })
 
+/** Ledger fallback: signed memo transaction (not broadcast) proving SIWS message. */
+export const authVerifyTxBody = z.object({
+  wallet: solanaAddress,
+  message: z.string().min(1).max(2000),
+  /** Base64 wire bytes — versioned + compute-budget txs need headroom over legacy size. */
+  signedTransaction: z.string().min(64).max(8000),
+})
+
+export const owlCenterSubmitBody = z.object({
+  collection_name: z.string().trim().min(1).max(120),
+  symbol: z.string().trim().min(1).max(16),
+  description: z.string().max(4000).optional().nullable(),
+  image_url: z.string().trim().max(2000).optional().nullable(),
+  total_supply: z.coerce.number().int().min(1).max(1_000_000),
+  mint_price: z.coerce.number().finite().min(0),
+  currency: z.enum(['SOL', 'USDC']).default('SOL'),
+  wallet_mint_limit: z.coerce.number().int().min(1).max(50),
+  launch_date: z.string().max(64).optional().nullable(),
+  creator_wallet: solanaAddress,
+  treasury_wallet: solanaAddress.optional().nullable(),
+  magic_eden_url: z.string().trim().max(2000).optional().nullable(),
+  tensor_url: z.string().trim().max(2000).optional().nullable(),
+})
+
 export const walletLinkVerifyBody = z.object({
   linked_wallet: solanaAddress,
   message: z.string().min(1),

@@ -3,15 +3,15 @@ import { getGen1SnapshotCount } from '@/lib/db/gen2-gen1-snapshot'
 import { getOwltopiaGen1Snapshot, type OwltopiaGen1Snapshot } from '@/lib/owl-center/owltopia-gen1'
 
 /**
- * Gen1 holder snapshot resolved through the admin "switch wallet for mint" delegations
- * (migration 170). Used by the AIRDROP eligibility + mint-check paths so the live
- * holder check honors a wallet switch.
+ * Gen1 AIRDROP entitlement resolved through admin "switch wallet for mint" delegations
+ * (migration 170). Eligibility uses the frozen Gen1 snapshot only — live DAS holdings
+ * never increase allocation.
  *
- * - Connected wallet is a delegation `mint_wallet`: credit it with the live Gen1 count
- *   of the mapped `source_wallet` (`delegated_from`).
+ * - Connected wallet is a delegation `mint_wallet`: credit it with the frozen snapshot
+ *   entitlement keyed to this mint wallet (`delegated_from` for UI).
  * - Connected wallet is a delegated `source_wallet`: it has handed its entitlement to
  *   another wallet, so block it from minting (`delegated_away_to`).
- * - Otherwise: the unmodified on-chain holder check for the connected wallet.
+ * - Otherwise: frozen snapshot entitlement for the connected wallet.
  *
  * The raw `getOwltopiaGen1Snapshot` is intentionally left untouched so cluster hints
  * (lib/owl-center/gen2-mint-check-cluster.ts) keep reporting true on-chain holdings.
@@ -44,27 +44,27 @@ export function decideGen1Delegation(
 }
 
 /**
- * Floor the live DAS holder count with the frozen Gen1 snapshot for the wallet that the
- * on-chain `gen1` candy guard actually gates (`merkleWallet` — the mint wallet, since the
- * snapshot rewrites delegated source wallets to their mint wallet). The snapshot is the exact
- * allocation the merkle proof enforces on-chain, so trusting it as a floor means a flaky or
- * rate-limited Helius scan (which silently falls back to a count of 1) can no longer
- * under-report holdings and block a holder from claiming their remaining free Gen2s.
+ * AIRDROP mint entitlement is the frozen Gen1 snapshot only — never live DAS holdings.
  *
- * Only ever raises the count — never lowers it — so it can't shrink anyone's allocation.
+ * The on-chain `gen1` candy guard gates on the merkle wallet (`merkleWallet` — the mint
+ * wallet, since the snapshot rewrites delegated source wallets to their mint wallet).
+ * Post-snapshot Gen1 purchases must not raise free Gen2 allocation; wallets absent from
+ * the snapshot get zero entitlement even if they hold Gen1s on-chain now.
+ *
+ * Live DAS is still fetched upstream for collection_configured / holder_check_available
+ * plumbing; those flags are preserved, but count + is_holder always come from the snapshot.
  */
-async function applyFrozenSnapshotFloor(
+async function applyFrozenSnapshotEntitlement(
   live: ResolvedGen1Snapshot,
   merkleWallet: string
 ): Promise<ResolvedGen1Snapshot> {
   const frozen = await getGen1SnapshotCount(merkleWallet)
-  if (frozen <= live.gen1_nft_count) return live
   return {
     ...live,
-    is_holder: true,
+    is_holder: frozen > 0,
     gen1_nft_count: frozen,
-    collection_configured: true,
-    holder_check_available: true,
+    collection_configured: live.collection_configured || frozen > 0,
+    holder_check_available: live.holder_check_available || frozen > 0,
   }
 }
 
@@ -88,18 +88,18 @@ export async function resolveGen1SnapshotForMint(connectedWallet: string): Promi
     }
   }
 
-  // Connected wallet mints on behalf of a source wallet — credit the source's live count,
-  // floored by the frozen snapshot keyed to the connected (mint) wallet.
+  // Connected wallet mints on behalf of a source wallet — entitlement is the frozen
+  // snapshot keyed to the connected (mint) wallet, not the source's live holdings.
   if (decision.kind === 'on_behalf') {
     const snapshot = await getOwltopiaGen1Snapshot(decision.source_wallet)
-    return applyFrozenSnapshotFloor(
+    return applyFrozenSnapshotEntitlement(
       { ...snapshot, delegated_from: decision.source_wallet, delegated_away_to: null },
       connectedWallet
     )
   }
 
   const snapshot = await getOwltopiaGen1Snapshot(connectedWallet)
-  return applyFrozenSnapshotFloor(
+  return applyFrozenSnapshotEntitlement(
     { ...snapshot, delegated_from: null, delegated_away_to: null },
     connectedWallet
   )

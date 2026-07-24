@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
-import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
+import { getRaffleDisplayImageUrl, proxyThumbImageUrl } from '@/lib/raffle-display-image-url'
 import { useCoarsePointer } from '@/lib/hooks/use-coarse-pointer'
 import {
   filterWalletNfts,
@@ -45,6 +45,9 @@ export interface WalletNftPickerProps {
   mintInputId?: string
 }
 
+/** Picker tiles are ≤160px; NFT art can be a 5–8MB original, so prefer the server-downscaled proxy. */
+const PICKER_THUMB_WIDTH = 192
+
 function NftThumb({
   nft,
   className,
@@ -55,13 +58,23 @@ function NftThumb({
   if (nft.image) {
     return (
       <img
-        src={getRaffleDisplayImageUrl(nft.image) ?? nft.image}
+        src={
+          proxyThumbImageUrl(nft.image, PICKER_THUMB_WIDTH) ??
+          getRaffleDisplayImageUrl(nft.image) ??
+          nft.image
+        }
         alt={nft.name ?? nft.mint}
+        loading="lazy"
         className={className}
         onError={(e) => {
+          // Resized/proxied src failed: retry the display URL, then the raw metadata URL.
           const el = e.currentTarget
+          const display = getRaffleDisplayImageUrl(nft.image) ?? nft.image
           const fallback = nft.image
-          if (fallback && el.src !== fallback) {
+          const current = el.getAttribute('src') ?? ''
+          if (display && current !== display && fallback && current !== fallback) {
+            el.src = display
+          } else if (fallback && current !== fallback) {
             el.src = fallback
           }
         }}

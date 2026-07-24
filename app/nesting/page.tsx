@@ -6,6 +6,7 @@ import { getAdminRole } from '@/lib/db/admins'
 import { isNestingLandingPublic } from '@/lib/db/nesting-public-settings'
 import { getNestingActionsPauseBreakdown } from '@/lib/nesting/policy'
 import { getOwlNest365PublicStats } from '@/lib/nesting/owl-nest-365-stats'
+import { getGenOwlNestPublicStatsByGroup } from '@/lib/nesting/gen-owl-nest-stats'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { NestingLandingClient } from '@/components/nesting/NestingLandingClient'
 import {
@@ -45,15 +46,17 @@ export default async function NestingPage() {
     redirect('/dashboard/nesting')
   }
 
-  const [pools, pause, owlNest365Stats] = await Promise.all([
+  const [pools, pause, owlNest365Stats, genOwlNestStats] = await Promise.all([
     listActiveStakingPools({ includeAdminOnlyPools: Boolean(role) }),
     getNestingActionsPauseBreakdown(),
     getOwlNest365PublicStats(),
+    getGenOwlNestPublicStatsByGroup(),
   ])
   return (
     <NestingLandingClient
       initialPools={pools}
       initialOwlNest365Stats={owlNest365Stats}
+      initialGenOwlNestStats={genOwlNestStats}
       nestingDisabled={pause.disabled}
       nestingPausedByDeployEnv={pause.envKillSwitch}
       nestingPausedByAdmin={pause.adminDbPaused}

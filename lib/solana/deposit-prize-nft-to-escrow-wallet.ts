@@ -21,6 +21,7 @@ import {
   logEscrowDepositStart,
   type EscrowDepositLogBase,
 } from '@/lib/solana/escrow-deposit-log'
+import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
 import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import {
@@ -31,11 +32,7 @@ import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-tr
 import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
 import { getNftHolderInWallet, type NftHolderInWallet, type WalletNft } from '@/lib/solana/wallet-tokens'
 
-export type SendTxFn = (
-  transaction: Transaction,
-  connection: Connection,
-  options?: { skipPreflight?: boolean; preflightCommitment?: 'processed' | 'confirmed' | 'finalized'; maxRetries?: number }
-) => Promise<string>
+export type SendTxFn = WalletSendTransactionFn
 
 export type DepositPrizeNftToEscrowWalletParams = {
   connection: Connection
@@ -137,6 +134,7 @@ export async function depositPrizeNftToEscrowFromWallet(
           wallet: walletAdapter,
           mintAddress: prizeMintAddress.trim(),
           escrowAddress,
+          sendTransaction,
         })
         logEscrowDepositSigned(logCtx, 'token_metadata', depositSig)
       } catch (tmErr) {
@@ -201,6 +199,7 @@ export async function depositPrizeNftToEscrowFromWallet(
         wallet: walletAdapter,
         assetId: selectedNft.mint,
         escrowAddress,
+        sendTransaction,
       })
       logEscrowDepositSigned(logCtx, 'fallback_compressed', depositSig)
     } catch (cErr) {
@@ -217,6 +216,7 @@ export async function depositPrizeNftToEscrowFromWallet(
           wallet: walletAdapter,
           assetId: selectedNft.mint,
           escrowAddress,
+          sendTransaction,
         })
         logEscrowDepositSigned(logCtx, 'fallback_mpl_core', depositSig)
       } catch (coreErr) {

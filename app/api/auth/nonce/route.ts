@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Connection } from '@solana/web3.js'
 import { generateNonce, buildSignInMessage } from '@/lib/auth-server'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
+import { resolveServerSolanaReadRpcUrl } from '@/lib/solana-rpc-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,6 +13,7 @@ const NONCE_WINDOW_MS = 60_000
 /**
  * GET /api/auth/nonce?wallet=<address>
  * Returns a nonce and the message the client must sign for SIWS.
+ * Also returns a recent blockhash for Ledger memo-tx fallback (signTransaction, not broadcast).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -47,23 +50,39 @@ export async function GET(request: NextRequest) {
       const errorMessage = isDev
         ? 'Server configuration error: SESSION_SECRET or AUTH_SECRET not found. Please ensure .env.local exists with SESSION_SECRET set (min 16 chars) and restart your dev server.'
         : 'Server configuration error: authentication secret not configured. Please set SESSION_SECRET or AUTH_SECRET in your hosting platform\'s environment variables.'
-      
-      return NextResponse.json(
-        { error: errorMessage },
-        { status: 500 }
-      )
+
+      return NextResponse.json({ error: errorMessage }, { status: 500 })
     }
-    
+
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000)
     const nonce = generateNonce(wallet, expiresAt.getTime())
     const message = buildSignInMessage(wallet, nonce, expiresAt)
-    return NextResponse.json({ nonce, message, expiresAt: expiresAt.toISOString() })
+
+    let blockhash: string | null = null
+    let lastValidBlockHeight: number | null = null
+    try {
+      const connection = new Connection(resolveServerSolanaReadRpcUrl(), 'confirmed')
+      const latest = await connection.getLatestBlockhash('confirmed')
+      blockhash = latest.blockhash
+      lastValidBlockHeight = latest.lastValidBlockHeight
+    } catch (e) {
+      console.warn(
+        '[auth/nonce] blockhash for Ledger tx fallback unavailable:',
+        e instanceof Error ? e.message : e
+      )
+    }
+
+    return NextResponse.json({
+      nonce,
+      message,
+      expiresAt: expiresAt.toISOString(),
+      blockhash,
+      lastValidBlockHeight,
+      txFallback: true,
+    })
   } catch (error) {
     console.error('[auth/nonce]', error instanceof Error ? error.message : String(error))
     const message = error instanceof Error ? error.message : 'Internal server error'
-    return NextResponse.json(
-      { error: message },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

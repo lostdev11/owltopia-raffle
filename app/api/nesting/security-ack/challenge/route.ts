@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Connection } from '@solana/web3.js'
 
 import {
   buildNestingSecurityAckMessage,
@@ -6,6 +7,7 @@ import {
 } from '@/lib/nesting/security-ack-auth'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import { resolveServerSolanaReadRpcUrl } from '@/lib/solana-rpc-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,6 +18,7 @@ const CHALLENGE_WINDOW_MS = 60_000
 /**
  * GET /api/nesting/security-ack/challenge?wallet=<address>
  * Returns a message the connected wallet must sign before opening a new nest.
+ * Also returns a recent blockhash for Ledger memo-tx fallback (signTransaction, not broadcast).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -36,13 +39,30 @@ export async function GET(request: NextRequest) {
     }
 
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
-    const nonce = generateNestingSecurityAckNonce(wallet)
+    const nonce = generateNestingSecurityAckNonce(wallet, expiresAt.getTime())
     const message = buildNestingSecurityAckMessage(wallet, nonce, expiresAt)
+
+    let blockhash: string | null = null
+    let lastValidBlockHeight: number | null = null
+    try {
+      const connection = new Connection(resolveServerSolanaReadRpcUrl(), 'confirmed')
+      const latest = await connection.getLatestBlockhash('confirmed')
+      blockhash = latest.blockhash
+      lastValidBlockHeight = latest.lastValidBlockHeight
+    } catch (e) {
+      console.warn(
+        '[nesting/security-ack/challenge] blockhash for Ledger tx fallback unavailable:',
+        e instanceof Error ? e.message : e
+      )
+    }
 
     return NextResponse.json({
       wallet,
       message,
       expiresAt: expiresAt.toISOString(),
+      blockhash,
+      lastValidBlockHeight,
+      txFallback: true,
     })
   } catch (e) {
     console.error('[nesting/security-ack/challenge]', e)

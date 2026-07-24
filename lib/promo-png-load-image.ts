@@ -97,16 +97,43 @@ async function tryCrossOriginPromoImage(
   })
 }
 
-async function fetchWithTimeout(url: string, ms: number): Promise<Response | null> {
+async function fetchWithTimeout(
+  url: string,
+  ms: number,
+  cache: RequestCache = 'force-cache'
+): Promise<Response | 'timeout' | null> {
   const ctrl = new AbortController()
-  const timer = window.setTimeout(() => ctrl.abort(), ms)
+  let timedOut = false
+  const timer = window.setTimeout(() => {
+    timedOut = true
+    ctrl.abort()
+  }, ms)
   try {
-    return await fetch(url, { signal: ctrl.signal, cache: 'force-cache' })
+    return await fetch(url, { signal: ctrl.signal, cache })
   } catch {
-    return null
+    return timedOut ? 'timeout' : null
   } finally {
     window.clearTimeout(timer)
   }
+}
+
+/**
+ * Art >4MB makes `/api/proxy-image` 307 to the upstream CDN. If the page already showed that
+ * art via a plain `<img>` (no `crossorigin`), the browser cached the CDN response WITHOUT
+ * `Access-Control-Allow-Origin` (hosts like pinit.io only send it when `Origin` is present).
+ * Our CORS-mode fetch then reuses that poisoned cache entry and instantly throws
+ * `Failed to fetch`, so exported cards lost their NFT art. `cache: 'reload'` bypasses the
+ * poisoned entry; we only retry on non-timeout errors so slow candidates don't wait twice.
+ */
+async function fetchPromoArtWithCorsCacheRetry(
+  url: string,
+  ms: number
+): Promise<Response | null> {
+  const res = await fetchWithTimeout(url, ms)
+  if (res === 'timeout') return null
+  if (res) return res
+  const retried = await fetchWithTimeout(url, ms, 'reload')
+  return retried === 'timeout' ? null : retried
 }
 
 export type LoadedPromoImage = {
@@ -133,7 +160,7 @@ export async function loadPromoPngArt(
 
   for (const fetchUrl of fetchUrls) {
     const sourceUrl = sourceByFetch.get(fetchUrl) ?? fetchUrl
-    const res = await fetchWithTimeout(fetchUrl, LOAD_TIMEOUT_MS)
+    const res = await fetchPromoArtWithCorsCacheRetry(fetchUrl, LOAD_TIMEOUT_MS)
     if (res?.ok) {
       const contentType = res.headers.get('content-type') ?? ''
       let blob: Blob | null = null
@@ -171,7 +198,7 @@ export async function loadPromoPngSiteAsset(src: string): Promise<HTMLImageEleme
   if (typeof window === 'undefined') return null
   const fetchUrl = toPromoCanvasFetchUrl(src)
   const res = await fetchWithTimeout(fetchUrl, 8_000)
-  if (!res?.ok) return null
+  if (res === 'timeout' || !res?.ok) return null
   let blob: Blob
   try {
     blob = await res.blob()

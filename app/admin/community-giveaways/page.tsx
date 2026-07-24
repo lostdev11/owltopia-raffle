@@ -20,6 +20,7 @@ import {
   type WalletNft,
 } from '@/lib/solana/wallet-tokens'
 import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
+import { fetchWalletNftsWithRetry } from '@/lib/solana/fetch-wallet-nfts-api'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import {
   verifyCommunityGiveawayDepositWithRetries,
@@ -179,18 +180,14 @@ export default function AdminCommunityGiveawaysPage() {
     setWalletNftsError(null)
     const walletAddr = publicKey.toBase58()
     try {
-      const [apiRes, escrowRes] = await Promise.all([
-        fetch(`/api/wallet/nfts?wallet=${encodeURIComponent(walletAddr)}`, { credentials: 'include' }),
+      const [apiResult, escrowRes] = await Promise.all([
+        fetchWalletNftsWithRetry(walletAddr),
         fetch(`/api/wallet/escrowed-nft-mints?wallet=${encodeURIComponent(walletAddr)}`, {
           credentials: 'include',
         }),
       ])
-      let nfts: WalletNft[] = []
-      if (apiRes.ok) {
-        const data = await apiRes.json()
-        nfts = Array.isArray(data) ? data : []
-      }
-      if (nfts.length === 0 || apiRes.status === 503) {
+      let nfts: WalletNft[] = apiResult.nfts
+      if (nfts.length === 0 || apiResult.res?.status === 503) {
         const { getWalletNfts } = await import('@/lib/solana/wallet-tokens')
         try {
           nfts = await getWalletNfts(connection, publicKey)

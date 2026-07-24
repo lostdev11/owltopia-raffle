@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import {
   getPrizeEscrowKeypair,
   getPrizeEscrowPublicKey,
@@ -32,7 +32,7 @@ function redactUrl(url: string | null): string | null {
  */
 export async function GET(request: NextRequest) {
   try {
-    const session = await requireFullAdminSession(request)
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
     const raw = process.env.PRIZE_ESCROW_SECRET_KEY?.trim() ?? ''

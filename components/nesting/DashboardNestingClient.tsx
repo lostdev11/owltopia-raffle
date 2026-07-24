@@ -39,6 +39,7 @@ import {
   isOpeningNftNestAbortable,
   nftMintBlocksDuplicateStakeExceptResume,
 } from '@/lib/nesting/position-lifecycle'
+import type { WalletNestMintNestStatus } from '@/lib/nesting/nft-stake-eligibility'
 import {
   buildOwlClaimAllPreview,
   isOwlRewardPosition,
@@ -85,11 +86,12 @@ import {
   type NestingTxPhase,
 } from '@/lib/nesting/tx-states'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
-import { NestingActionStatusLine } from '@/components/nesting/NestingActionStatusLine'
+import { NestingStakeProgressCard } from '@/components/nesting/NestingStakeProgressCard'
 import { NestingOwlCoinWalletProgressPanel } from '@/components/nesting/NestingOwlCoinWalletProgressPanel'
 import { NestingGomtMigrationNotice } from '@/components/nesting/NestingGomtMigrationNotice'
 import { NestingPlatformFeeNotice } from '@/components/nesting/NestingPlatformFeeNotice'
 import { NestingSecurityNotice } from '@/components/nesting/NestingSecurityNotice'
+import { NestingEasyModeSteps } from '@/components/nesting/NestingEasyModeSteps'
 import { NestingClaimLedger } from '@/components/nesting/NestingClaimLedger'
 import { NestingClaimAllPanel } from '@/components/nesting/NestingClaimAllPanel'
 import { NestingClaimSuccessDialog } from '@/components/nesting/NestingClaimSuccessDialog'
@@ -97,6 +99,10 @@ import {
   NestSwapAssetChip,
   NestSwapFlowShell,
 } from '@/components/nesting/nest-swap-ui'
+import {
+  NestSwapOwlPickerDialog,
+  type NestSwapOwlPickerRow,
+} from '@/components/nesting/NestSwapOwlPickerDialog'
 import { useNestingSecurityAck } from '@/hooks/use-nesting-security-ack'
 import {
   findStakingPoolByIdOrSlug,
@@ -125,7 +131,11 @@ import {
   NESTING_NFT_STAKE_MAX_PER_RUN,
 } from '@/lib/solana/mpl-core-freeze'
 import { isNestingStakeFlowError, NestingStakeFlowError } from '@/lib/nesting/errors'
-import { formatNestingWalletError } from '@/lib/nesting/wallet-error'
+import {
+  formatNestingWalletError,
+  isNestingBatchSizeError,
+  isNestingWalletUserRejection,
+} from '@/lib/nesting/wallet-error'
 import {
   fetchNestingJson,
   formatNestingApiFetchError,
@@ -149,12 +159,13 @@ function rpcEndpointLooksDevnet(endpoint: string | undefined): boolean {
 }
 
 export function DashboardNestingClient() {
-  const { publicKey, connected, signMessage, wallet } = useWallet()
+  const { publicKey, connected, signMessage, signTransaction, wallet } = useWallet()
   const {
     acknowledged: securityAck,
     signing: securityAckSigning,
     error: securityAckError,
     signAcknowledgment: signSecurityAck,
+    canSignTransaction: canSignSecurityAckTx,
     clearError: clearSecurityAckError,
   } = useNestingSecurityAck(publicKey)
   const { connection } = useConnection()
@@ -191,12 +202,15 @@ export function DashboardNestingClient() {
     hint?: string
     title?: string
     placement: 'modal'
+    tone?: 'success' | 'error'
   } | null>(null)
   const [claimLedgerNotice, setClaimLedgerNotice] = useState<string | null>(null)
   const [claimLedgerHealBusy, setClaimLedgerHealBusy] = useState(false)
   const [stakeAmount, setStakeAmount] = useState('')
   const [stakeAssetId, setStakeAssetId] = useState('')
   const [stakeAssetIds, setStakeAssetIds] = useState<string[]>([])
+  /** Jupiter-style owl selector sheet on the "You nest" panel. */
+  const [owlPickerOpen, setOwlPickerOpen] = useState(false)
   const [stakeTxPhase, setStakeTxPhase] = useState<NestingTxPhase>('idle')
   const [claimAllTxPhase, setClaimAllTxPhase] = useState<NestingTxPhase>('idle')
   /** Multi NFT confirm: show which coin the wallet is locking so the flow does not look frozen. */
@@ -212,6 +226,7 @@ export function DashboardNestingClient() {
       mint: string
       name: string | null
       image?: string | null
+      nest_status?: WalletNestMintNestStatus
       stake_blocked?: boolean
       stake_block_reason?: string | null
     }[]
@@ -335,11 +350,13 @@ export function DashboardNestingClient() {
   }, [connected, publicKey])
 
   const applyPositionsPayload = useCallback(
-    (json: Record<string, unknown>) => {
+    (json: Record<string, unknown>, opts?: { showHealSuccess?: boolean }) => {
       setPositions(Array.isArray(json.positions) ? (json.positions as StakingPositionRow[]) : [])
       const healedCount =
         typeof json.healed_count === 'number' && json.healed_count > 0 ? json.healed_count : 0
-      if (healedCount > 0) {
+      // Silent refreshes (e.g. after a failed Confirm) must not overwrite an error modal
+      // with a delayed "Nest opened successfully" once background heal catches up.
+      if (healedCount > 0 && opts?.showHealSuccess !== false) {
         setSuccessNotice({
           placement: 'modal',
           title: healedCount === 1 ? 'Nest opened successfully' : 'Nests opened successfully',
@@ -390,13 +407,18 @@ export function DashboardNestingClient() {
       const json = result.json ?? {}
       if (!result.ok) {
         if (!opts?.silent) {
-          setError(typeof json.error === 'string' ? json.error : 'Failed to load positions')
+          const apiError = typeof json.error === 'string' ? json.error : ''
+          setError(
+            !apiError || apiError === 'Internal server error'
+              ? nestingFetchNetworkErrorMessage('positions')
+              : apiError
+          )
         }
         return false
       }
 
       setNeedsSignIn(false)
-      applyPositionsPayload(json)
+      applyPositionsPayload(json, { showHealSuccess: !opts?.silent })
       void loadClaimLedger()
       return true
     },
@@ -812,7 +834,7 @@ export function DashboardNestingClient() {
   const owlNestEligibleMintsKey = useMemo(
     () =>
       owlNestMintScan.mints
-        .map((m) => m.mint)
+        .map((m) => `${m.mint}:${m.nest_status ?? (m.stake_blocked ? 'blocked' : 'not_nested')}`)
         .sort()
         .join('|'),
     [owlNestMintScan.mints],
@@ -904,11 +926,35 @@ export function DashboardNestingClient() {
       }
       const rows = Array.isArray(raw?.mints) ? raw.mints : []
       const mints = rows
-        .map((row: { mint?: unknown; name?: unknown; image?: unknown }) => ({
-          mint: typeof row.mint === 'string' ? row.mint.trim() : '',
-          name: typeof row.name === 'string' ? row.name : null,
-          image: typeof row.image === 'string' ? row.image : null,
-        }))
+        .map(
+          (row: {
+            mint?: unknown
+            name?: unknown
+            image?: unknown
+            nest_status?: unknown
+            stake_blocked?: unknown
+            stake_block_reason?: unknown
+          }) => {
+            const nest_status: WalletNestMintNestStatus =
+              row.nest_status === 'nested' ||
+              row.nest_status === 'opening' ||
+              row.nest_status === 'blocked' ||
+              row.nest_status === 'not_nested'
+                ? row.nest_status
+                : row.stake_blocked === true
+                  ? 'blocked'
+                  : 'not_nested'
+            return {
+              mint: typeof row.mint === 'string' ? row.mint.trim() : '',
+              name: typeof row.name === 'string' ? row.name : null,
+              image: typeof row.image === 'string' ? row.image : null,
+              nest_status,
+              stake_blocked: nest_status === 'blocked' || row.stake_blocked === true,
+              stake_block_reason:
+                typeof row.stake_block_reason === 'string' ? row.stake_block_reason : null,
+            }
+          }
+        )
         .filter((row: { mint: string }) => mintLooksValid(row.mint))
       owlNestLastLoadedPoolIdRef.current = poolId
       const resolvedCollectionAddress =
@@ -1192,21 +1238,6 @@ export function DashboardNestingClient() {
     lockedPerch,
   ])
 
-  const resumeOpeningNest = useCallback(
-    (position: StakingPositionRow) => {
-      const mint = position.asset_identifier?.trim()
-      if (!mint) return
-      setStakeAssetId(mint)
-      setStakeAssetIds([mint])
-      setActionError(null)
-      setOpenNestFormExpanded(true)
-      if (typeof document !== 'undefined') {
-        document.getElementById('nesting-open-nest-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }
-    },
-    []
-  )
-
   const canOnlyResumeFreeze = useMemo(() => {
     const pid = selectedPerch?.id?.trim() ?? ''
     if (!nestingDisabled || !pid) return false
@@ -1227,7 +1258,9 @@ export function DashboardNestingClient() {
   }, [nestingDisabled, selectedPerch?.id, poolById, selectedNftStakeAssetIds, positions])
 
   const confirmNestDisabledReason = useMemo(() => {
-    if (stakeTxPhase !== 'idle') return null
+    if (stakeTxPhase !== 'idle') {
+      return 'Nesting in progress — approve in your wallet if asked, and stay on this page.'
+    }
     if (activeGenGroupKey && !selectedLockTierSlug) return 'Pick 90 or 180 days first.'
     if (!selectedPerch) return 'Choose a perch first.'
     if (!securityAck) return 'Sign the nesting safeguards with your wallet above before confirming.'
@@ -1259,8 +1292,13 @@ export function DashboardNestingClient() {
     const pool = selectedPerch?.asset_type === 'nft' ? selectedPerch : null
     if (!pool || owlNestMintScan.status !== 'done') return []
     return owlNestMintScan.mints
-      .filter((row) => row.stake_blocked !== true)
-      .filter((row) => !nftMintBlocksDuplicateStakeExceptResume(row.mint, pool, positions))
+      .filter((row) => {
+        if (row.nest_status === 'nested' || row.nest_status === 'blocked') return false
+        if (row.nest_status === 'opening') return false
+        if (row.stake_blocked === true) return false
+        if (nftMintBlocksDuplicateStakeExceptResume(row.mint, pool, positions)) return false
+        return true
+      })
       .map((m) => m.mint)
   }, [selectedPerch, owlNestMintScan.status, owlNestMintScan.mints, positions])
 
@@ -1272,6 +1310,62 @@ export function DashboardNestingClient() {
     setOpenNestFormExpanded(true)
   }, [nestableOwlMintIds])
 
+  /** Rows for the swap-style owl selector sheet — same eligibility rules as the old inline grid. */
+  const owlPickerRows = useMemo<NestSwapOwlPickerRow[]>(() => {
+    const pool = selectedPerch?.asset_type === 'nft' ? selectedPerch : null
+    return owlNestMintScan.mints.map((m) => {
+      const nestStatus: WalletNestMintNestStatus =
+        m.nest_status ??
+        (m.stake_blocked
+          ? 'blocked'
+          : pool && nftMintBlocksDuplicateStakeExceptResume(m.mint, pool, positions)
+            ? 'nested'
+            : 'not_nested')
+      const externallyBlocked = nestStatus === 'blocked'
+      const alreadyNestedHere = nestStatus === 'nested'
+      const resumeFreezeOnly = nestStatus === 'opening'
+      return {
+        mint: m.mint,
+        name: m.name,
+        image: m.image ?? null,
+        checked: stakeAssetIds.includes(m.mint),
+        disabled: nestStatus !== 'not_nested',
+        nestStatus,
+        statusLabel: externallyBlocked
+          ? 'Frozen elsewhere — unstake there first'
+          : alreadyNestedHere
+            ? 'Already nested'
+            : resumeFreezeOnly
+              ? 'Open nest — finish lock on confirm'
+              : null,
+        statusTone: externallyBlocked || alreadyNestedHere ? ('warn' as const) : ('muted' as const),
+      }
+    })
+  }, [owlNestMintScan.mints, selectedPerch, positions, stakeAssetIds])
+
+  /** Pool whose rate applies to the current selection (gen tier or locked perch). */
+  const earnRatePool = useMemo(() => {
+    if (activeGenGroupKey) return selectedGenTierPool ?? null
+    return selectedPerch ?? null
+  }, [activeGenGroupKey, selectedGenTierPool, selectedPerch])
+
+  /** Swap-quote style projection: total reward rate for the selected owls. */
+  const projectedNftEarnLabel = useMemo(() => {
+    if (!nftMintRequired || !earnRatePool) return null
+    const count = Math.max(1, selectedNftStakeAssetIds.length)
+    const rate = Number(earnRatePool.reward_rate)
+    if (!Number.isFinite(rate)) return null
+    const total = Math.round(rate * count * 1e6) / 1e6
+    return formatRewardRate(total, earnRatePool.reward_rate_unit)
+  }, [nftMintRequired, earnRatePool, selectedNftStakeAssetIds.length])
+
+  const projectedUnlockDateLabel = useMemo(() => {
+    const days = earnRatePool?.lock_period_days ?? 0
+    if (!earnRatePool || days <= 0) return null
+    const d = new Date(Date.now() + days * 24 * 60 * 60 * 1000)
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  }, [earnRatePool])
+
   const openingNestMintIds = useMemo(
     () =>
       openingNestsNeedingWalletLock
@@ -1280,25 +1374,45 @@ export function DashboardNestingClient() {
     [openingNestsNeedingWalletLock]
   )
 
-  const selectOpeningNestsUpToMax = useCallback(() => {
-    const capped = capNftStakeAssetIds(openingNestMintIds)
-    if (capped.length === 0) return
-    setStakeAssetIds(capped)
-    setStakeAssetId(capped[0] ?? '')
-    setActionError(null)
-    setOpenNestFormExpanded(true)
-    document.getElementById('nesting-open-nest-form')?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    })
-  }, [openingNestMintIds])
+  const handleStakeRef = useRef<(opts?: { assetIdsOverride?: string[] }) => Promise<void>>(async () => {})
+
+  /** Finish interrupted opens: select mints and continue the wallet lock automatically. */
+  const finishOpeningNestsAndContinue = useCallback(
+    (mints?: string[]) => {
+      const capped = capNftStakeAssetIds(mints?.length ? mints : openingNestMintIds)
+      if (capped.length === 0) return
+      if (isNestingTxPhaseInFlight(stakeTxPhase)) return
+      setStakeAssetIds(capped)
+      setStakeAssetId(capped[0] ?? '')
+      setActionError(null)
+      setOpenNestFormExpanded(true)
+      document.getElementById('nesting-open-nest-form')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+      void handleStakeRef.current({ assetIdsOverride: capped })
+    },
+    [openingNestMintIds, stakeTxPhase]
+  )
+
+  const resumeOpeningNest = useCallback(
+    (position: StakingPositionRow) => {
+      const mint = position.asset_identifier?.trim()
+      if (!mint) return
+      finishOpeningNestsAndContinue([mint])
+    },
+    [finishOpeningNestsAndContinue]
+  )
 
   const toggleSelectedOwlNestMint = useCallback(
     (mint: string) => {
       const pool = selectedPerch
       const row = owlNestMintScan.mints.find((m) => m.mint === mint)
-      if (row?.stake_blocked) {
+      if (row?.nest_status === 'blocked' || row?.stake_blocked) {
         setActionError(row.stake_block_reason ?? 'This NFT cannot be nested while it is frozen elsewhere.')
+        return
+      }
+      if (row?.nest_status === 'nested' || row?.nest_status === 'opening') {
         return
       }
       if (
@@ -1330,41 +1444,28 @@ export function DashboardNestingClient() {
     if (owlNestMintScan.status !== 'done') return
     if (!owlNestMintScan.configured) return
     const pool = selectedPerch?.asset_type === 'nft' ? selectedPerch : null
-    if (owlNestMintScan.mints.length === 1) {
-      const m0 = owlNestMintScan.mints[0].mint.trim()
+    const nestable = owlNestMintScan.mints.filter((m) => {
+      if (m.nest_status === 'nested' || m.nest_status === 'blocked' || m.nest_status === 'opening') {
+        return false
+      }
+      if (m.stake_blocked === true) return false
       if (
         pool &&
-        m0 &&
-        (owlNestMintScan.mints[0].stake_blocked === true ||
-          nftMintBlocksDuplicateStakeExceptResume(m0, pool, positions))
+        nftMintBlocksDuplicateStakeExceptResume(m.mint, pool, positions)
       ) {
-        setStakeAssetId('')
-        setStakeAssetIds([])
-      } else {
-        setStakeAssetId(owlNestMintScan.mints[0].mint)
-        setStakeAssetIds([owlNestMintScan.mints[0].mint])
+        return false
       }
-    } else if (owlNestMintScan.mints.length === 0) {
+      return true
+    })
+    if (nestable.length === 1) {
+      setStakeAssetId(nestable[0].mint)
+      setStakeAssetIds([nestable[0].mint])
+    } else if (nestable.length === 0) {
       setStakeAssetId('')
       setStakeAssetIds([])
     } else {
-      const validMints = new Set(owlNestMintScan.mints.map((m) => m.mint))
-      setStakeAssetIds((prev) =>
-        prev.filter((id) => {
-          const idtrim = id.trim()
-          if (!validMints.has(id)) return false
-          const row = owlNestMintScan.mints.find((m) => m.mint === id)
-          if (row?.stake_blocked) return false
-          if (
-            pool?.asset_type === 'nft' &&
-            idtrim &&
-            nftMintBlocksDuplicateStakeExceptResume(idtrim, pool, positions)
-          ) {
-            return false
-          }
-          return true
-        })
-      )
+      const validMints = new Set(nestable.map((m) => m.mint))
+      setStakeAssetIds((prev) => prev.filter((id) => validMints.has(id)))
     }
     // Intentionally keyed on the stable mint key, not the array instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- owlNestEligibleMintsKey captures owlNestMintScan.mints
@@ -1414,53 +1515,41 @@ export function DashboardNestingClient() {
   )
   const nestsPendingOnly = pendingOpenCount > 0 && totals.activeCount === 0
 
-  const handleSignIn = useCallback(async () => {
-    if (!publicKey || !signMessage) {
-      setSignInError('Your wallet does not support message signing.')
-      return
-    }
-    setSignInError(null)
-    setSigningIn(true)
-    try {
-      const addr = publicKey.toBase58()
-      const nonceRes = await fetch(nestingClientApiUrl(`/api/auth/nonce?wallet=${encodeURIComponent(addr)}`), {
-        credentials: 'include',
-      })
-      if (!nonceRes.ok) {
-        const data = await nonceRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Failed to get sign-in nonce')
+  const handleSignIn = useCallback(
+    async (opts?: { preferTx?: boolean; preferMessage?: boolean }) => {
+      if (!publicKey || (!signMessage && !signTransaction)) {
+        setSignInError('Your wallet does not support signing.')
+        return
       }
-      const { message } = (await nonceRes.json()) as { message: string }
-      const messageBytes = new TextEncoder().encode(message)
-      const signature = await signMessage(messageBytes)
-      const signatureBase64 =
-        typeof signature === 'string'
-          ? btoa(signature)
-          : btoa(String.fromCharCode(...new Uint8Array(signature)))
-
-      const verifyRes = await fetch(nestingClientApiUrl('/api/auth/verify'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          wallet: addr,
-          message,
-          signature: signatureBase64,
-        }),
-      })
-
-      if (!verifyRes.ok) {
-        const data = await verifyRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Sign-in verification failed')
+      setSignInError(null)
+      setSigningIn(true)
+      try {
+        const { performSiwsSignIn } = await import('@/lib/client/siws-sign-in')
+        // Nesting default: memo-tx first when available — Ledger Sign Message hits 0x6a81 via Phantom/Solflare.
+        const useTx =
+          opts?.preferTx === true ||
+          (opts?.preferMessage !== true && Boolean(signTransaction))
+        await performSiwsSignIn({
+          wallet: publicKey.toBase58(),
+          signMessage,
+          signTransaction,
+          preferTx: useTx,
+          apiUrl: nestingClientApiUrl,
+          walletName: wallet?.adapter?.name,
+          getBlockhash: async () => {
+            const latest = await connection.getLatestBlockhash('confirmed')
+            return latest.blockhash
+          },
+        })
+        await refreshAll()
+      } catch (e) {
+        setSignInError(formatNestingApiFetchError(e, 'generic'))
+      } finally {
+        setSigningIn(false)
       }
-
-      await refreshAll()
-    } catch (e) {
-      setSignInError(formatNestingApiFetchError(e, 'generic'))
-    } finally {
-      setSigningIn(false)
-    }
-  }, [publicKey, signMessage, refreshAll])
+    },
+    [publicKey, signMessage, signTransaction, wallet?.adapter?.name, connection, refreshAll]
+  )
 
   const sendOnChainTokenStakeTransfer = useCallback(
     async (pool: StakingPoolRow, amountUi: string): Promise<string> => {
@@ -1559,9 +1648,10 @@ export function DashboardNestingClient() {
         assetId,
         delegateAddress,
         platformFee,
+        sendTransaction,
       })
     },
-    [connection, publicKey, wallet]
+    [connection, publicKey, wallet, sendTransaction]
   )
 
   const sendBatchMplCoreFreezeDelegateApproval = useCallback(
@@ -1580,9 +1670,10 @@ export function DashboardNestingClient() {
         assetIds,
         delegateAddress,
         platformFee,
+        sendTransaction,
       })
     },
-    [connection, publicKey, wallet]
+    [connection, publicKey, wallet, sendTransaction]
   )
 
   const chunkNestPlatformFee = useCallback(
@@ -1600,8 +1691,29 @@ export function DashboardNestingClient() {
     stakeTxAbortRef.current?.abort()
   }, [])
 
-  const handleStake = async () => {
+  /**
+   * Nest open finished without success: keep the inline error for reference AND pop
+   * the same result box holders get on success, so the outcome is never missed.
+   */
+  const reportNestOpenFailure = useCallback((error: unknown, message: string) => {
+    setActionError(message)
+    const cancelledInWallet = isNestingWalletUserRejection(error)
+    setSuccessNotice({
+      placement: 'modal',
+      tone: 'error',
+      title: cancelledInWallet ? 'Nesting cancelled' : 'Nesting did not finish',
+      message: cancelledInWallet
+        ? 'You closed or declined the wallet approval, so nothing was locked or charged.'
+        : message,
+      hint: cancelledInWallet
+        ? 'Your NFT is untouched in your wallet. Tap Confirm nest whenever you are ready to try again.'
+        : 'Your NFT stays safe in your wallet. If it shows Opening… after a refresh, tap Finish opening nest and we resume where you left off.',
+    })
+  }, [])
+
+  const handleStake = async (opts?: { assetIdsOverride?: string[] }) => {
     if (!publicKey) return
+    if (isNestingTxPhaseInFlight(stakeTxPhase)) return
     setActionError(null)
     setSuccessNotice(null)
     const pool = selectedPerch
@@ -1611,7 +1723,12 @@ export function DashboardNestingClient() {
     }
     const pool_id = pool.id
     const amountNum = Number(stakeAmount)
-    const nftAssetIds = pool.asset_type === 'nft' ? selectedNftStakeAssetIds : []
+    const nftAssetIds =
+      pool.asset_type === 'nft'
+        ? opts?.assetIdsOverride?.length
+          ? opts.assetIdsOverride.map((id) => id.trim()).filter(Boolean)
+          : selectedNftStakeAssetIds
+        : []
     if (pool.asset_type === 'token') {
       if (Number.isNaN(amountNum) || amountNum <= 0) {
         setActionError('Enter a positive amount.')
@@ -1627,7 +1744,7 @@ export function DashboardNestingClient() {
       return
     }
 
-    stakeTxAbortRef.current?.abort()
+    // Do not abort an in-flight flow on re-entry — Confirm is disabled while busy.
     const stakeFlowAbort = new AbortController()
     const signal = stakeFlowAbort.signal
     stakeTxAbortRef.current = stakeFlowAbort
@@ -1636,6 +1753,7 @@ export function DashboardNestingClient() {
       const result = await runNestingTxAction({
         signal,
         onPhase: setStakeTxPhase,
+        phasesOwnedByExecute: pool.asset_type === 'nft',
         async execute() {
           const stakeOne = async (
             assetId?: string,
@@ -1739,6 +1857,66 @@ export function DashboardNestingClient() {
             needsServerFreeze: boolean
           }
 
+          const isNestFreezeConfirmedRow = (row: StakingPositionRow | undefined): boolean =>
+            Boolean(
+              row &&
+                (row.status === 'active' ||
+                  (row.external_reference ?? '').startsWith('nft_freeze_confirmed:'))
+            )
+
+          /**
+           * Read the server's view of this wallet's positions. With `heal`, the server
+           * also promotes pending nests whose wallet lock is already on-chain — the same
+           * work behind the manual "Finish opening nest" tap, run automatically.
+           */
+          const fetchServerNestPositions = async (opts?: {
+            heal?: boolean
+          }): Promise<StakingPositionRow[] | null> => {
+            throwIfNestingAborted(signal)
+            try {
+              const res = await fetch(
+                nestingClientApiUrl(
+                  opts?.heal ? '/api/me/staking/positions' : '/api/me/staking/positions?heal=0'
+                ),
+                {
+                  credentials: 'include',
+                  cache: 'no-store',
+                  headers: { 'X-Connected-Wallet': publicKey.toBase58() },
+                  signal,
+                }
+              )
+              if (!res.ok) return null
+              const json = (await res.json().catch(() => ({}))) as {
+                positions?: StakingPositionRow[]
+              }
+              return Array.isArray(json.positions) ? json.positions : null
+            } catch (e) {
+              if (e instanceof DOMException && e.name === 'AbortError') throw e
+              if (e instanceof Error && e.name === 'AbortError') throw e
+              return null
+            }
+          }
+
+          const checkNestFreezeConfirmedOnServer = async (
+            positionId: string,
+            opts?: { heal?: boolean }
+          ): Promise<boolean> => {
+            const rows = await fetchServerNestPositions(opts)
+            return isNestFreezeConfirmedRow(rows?.find((p) => p.id === positionId))
+          }
+
+          /** True when this mint already has a confirmed nest on the selected perch. */
+          const checkMintNestConfirmedOnServer = async (
+            mint: string,
+            opts?: { heal?: boolean }
+          ): Promise<boolean> => {
+            const rows = await fetchServerNestPositions(opts)
+            const trimmed = mint.trim()
+            return isNestFreezeConfirmedRow(
+              rows?.find((p) => p.pool_id === pool_id && p.asset_identifier?.trim() === trimmed)
+            )
+          }
+
           const confirmNftNestFreezeForPrep = async (
             prep: PreparedNftNest,
             freezeSignature?: string | null,
@@ -1746,28 +1924,103 @@ export function DashboardNestingClient() {
           ) => {
             throwIfNestingAborted(signal)
             setStakeTxPhase('syncing')
-            const freezeRes = await fetch(nestingClientApiUrl('/api/me/staking/freeze'), {
-              method: 'POST',
-              credentials: 'include',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Connected-Wallet': publicKey.toBase58(),
-              },
-              body: JSON.stringify({
-                position_id: prep.positionId,
-                ...(freezeSignature?.trim() ? { signature: freezeSignature.trim() } : {}),
-                ...(platformFeeSignature?.trim()
-                  ? { platform_fee_signature: platformFeeSignature.trim() }
-                  : {}),
-              }),
-              signal,
-            })
-            const freezeJson = (await freezeRes.json().catch(() => ({}))) as { error?: string }
-            if (!freezeRes.ok) {
-              throw new NestingStakeFlowError(
-                typeof freezeJson.error === 'string' ? freezeJson.error : 'Could not confirm NFT freeze'
-              )
+            setNftStakeBatchHint('Confirming your nest on Owltopia — almost done…')
+
+            // The wallet approval is done at this point; what remains is server-side
+            // (RPC/DAS indexes catching up + the DB confirm). Keep retrying inside
+            // "Confirming on Owltopia" long enough that holders never need the manual
+            // "Finish opening nest" tap for a lock that already succeeded on-chain.
+            // First attempt is immediate (in-sync RPC confirms instantly); gaps are
+            // capped at 6s so success is detected quickly once the chain catches up.
+            const delaysMs = [0, 700, 1400, 2200, 3000, 4000, 5000, 6000, 6000, 6000, 6000, 6000]
+            let lastError: unknown = null
+            for (let attempt = 0; attempt < delaysMs.length; attempt++) {
+              const wait = delaysMs[attempt]!
+              if (wait > 0) {
+                await new Promise<void>((resolve) => setTimeout(resolve, wait))
+              }
+              throwIfNestingAborted(signal)
+              if (attempt === 4) {
+                setNftStakeBatchHint(
+                  'Still confirming on Owltopia — your wallet lock is approved, no more wallet actions needed. Hang tight…'
+                )
+              }
+              // An earlier confirm may have landed server-side even if its response was
+              // lost (mobile network blips) — cheap DB read before retrying the confirm.
+              if (attempt > 0 && (await checkNestFreezeConfirmedOnServer(prep.positionId))) {
+                return
+              }
+              throwIfNestingAborted(signal)
+              try {
+                const freezeRes = await fetch(nestingClientApiUrl('/api/me/staking/freeze'), {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Connected-Wallet': publicKey.toBase58(),
+                  },
+                  body: JSON.stringify({
+                    position_id: prep.positionId,
+                    ...(freezeSignature?.trim() ? { signature: freezeSignature.trim() } : {}),
+                    ...(platformFeeSignature?.trim()
+                      ? { platform_fee_signature: platformFeeSignature.trim() }
+                      : {}),
+                  }),
+                  signal,
+                })
+                const freezeJson = (await freezeRes.json().catch(() => ({}))) as {
+                  error?: string
+                  code?: string
+                }
+                if (freezeRes.ok) return
+                const freezeErrMsg =
+                  typeof freezeJson.error === 'string'
+                    ? freezeJson.error
+                    : 'Could not confirm NFT freeze'
+                lastError = new NestingStakeFlowError(freezeErrMsg)
+                // Fee already linked (or race after a lost success response): treat as
+                // progress and heal/confirm instead of surfacing a dead-end modal.
+                if (/platform fee was already recorded/i.test(freezeErrMsg)) {
+                  if (await checkNestFreezeConfirmedOnServer(prep.positionId, { heal: true })) {
+                    return
+                  }
+                  continue
+                }
+                // `nest_relock_required` right after the wallet-lock step usually means the
+                // server RPC has not seen our transaction yet — keep retrying (the heal
+                // fallback settles it). Without a wallet step this run it is genuine
+                // (a new approval is required) — fail fast so the holder is not stalled.
+                const staleRelockRead =
+                  freezeJson.code === 'nest_relock_required' &&
+                  (prep.needsWalletFreeze || Boolean(freezeSignature?.trim()))
+                // Retrying cannot fix these — surface immediately instead of stalling.
+                if (
+                  freezeRes.status === 401 ||
+                  freezeRes.status === 404 ||
+                  (freezeJson.code === 'nest_relock_required' && !staleRelockRead)
+                ) {
+                  break
+                }
+              } catch (e) {
+                if (e instanceof DOMException && e.name === 'AbortError') throw e
+                if (e instanceof Error && e.name === 'AbortError') throw e
+                lastError = e
+              }
             }
+
+            // Last resort inside "Confirming on Owltopia": ask the server to heal
+            // (promote pending → active when the wallet lock is on-chain). Success here
+            // completes the nest without the user ever seeing "Finish opening nest".
+            if (await checkNestFreezeConfirmedOnServer(prep.positionId, { heal: true })) {
+              return
+            }
+            await loadPositions({ heal: false, silent: true })
+            throw (
+              lastError ??
+              new NestingStakeFlowError(
+                'Could not confirm your nest yet. Pull to refresh — if it still shows Opening…, tap Finish opening.'
+              )
+            )
           }
 
           const prepareNftNest = async (assetId: string): Promise<PreparedNftNest> => {
@@ -1817,16 +2070,17 @@ export function DashboardNestingClient() {
                 platformFee
               )
               return { signature, confirmedInFallback: false }
-            } catch {
+            } catch (batchErr) {
+              if (!isNestingBatchSizeError(batchErr) || preps.length <= 1) {
+                throw batchErr
+              }
               let lastSig: string | null = null
               for (let i = 0; i < preps.length; i++) {
                 const prep = preps[i]!
                 throwIfNestingAborted(signal)
-                if (preps.length > 1) {
-                  setNftStakeBatchHint(
-                    `Batch tx failed — locking ${shortenAddress(prep.assetId, 6)} individually (${i + 1} of ${preps.length})…`
-                  )
-                }
+                setNftStakeBatchHint(
+                  `Transaction was too large for one approval — locking ${shortenAddress(prep.assetId, 6)} individually (${i + 1} of ${preps.length})…`
+                )
                 setStakeTxPhase('awaiting_wallet_signature')
                 const prepFee =
                   perNestFeeLamports > 0 && platformFee
@@ -1853,8 +2107,14 @@ export function DashboardNestingClient() {
           const runNftBatchStake = async (assetIds: string[]) => {
             const totalNests = assetIds.length
             const prepared: PreparedNftNest[] = []
+            let alreadyConfirmedCount = 0
 
             setStakeTxPhase('preparing')
+            setNftStakeBatchHint(
+              totalNests > 1
+                ? `Setting up ${totalNests} nests — wallet approval comes next…`
+                : 'Setting up your nest — wallet approval comes next…'
+            )
             for (let idx = 0; idx < assetIds.length; idx++) {
               const assetId = assetIds[idx]!
               throwIfNestingAborted(signal)
@@ -1863,20 +2123,29 @@ export function DashboardNestingClient() {
               }
               try {
                 prepared.push(await prepareNftNest(assetId))
-                await refreshNestingUiAfterChange({ heal: false })
+                // Avoid mid-flow list refresh — it flashes the amber "still opening" banner.
               } catch (e) {
                 if (e instanceof DOMException && e.name === 'AbortError') throw e
                 if (e instanceof Error && e.name === 'AbortError') throw e
+                // "Already in an open staking position" on a resume usually means the
+                // earlier lock finally confirmed (heal promoted it). Verify server-side
+                // and count it as nested instead of surfacing a false error.
+                if (
+                  isNestingStakeFlowError(e) &&
+                  /already in an open (staking position|nest)/i.test(e.userMessage) &&
+                  (await checkMintNestConfirmedOnServer(assetId, { heal: true }))
+                ) {
+                  alreadyConfirmedCount += 1
+                  continue
+                }
                 const detail = isNestingStakeFlowError(e)
                   ? e.userMessage
-                  : e instanceof Error
-                    ? e.message
-                    : 'Something went wrong while nesting.'
+                  : formatNestingWalletError(e, wallet?.adapter?.name, nftAssetLabels.singular)
                 const prefix =
                   prepared.length > 0
                     ? `Prepared ${prepared.length} of ${totalNests} before stopping — `
                     : ''
-                setActionError(`${prefix}${detail}`)
+                reportNestOpenFailure(e, `${prefix}${detail}`)
                 void loadPositions({ heal: true, silent: true })
                 throw new Error('stake')
               }
@@ -1884,7 +2153,8 @@ export function DashboardNestingClient() {
 
             const freezePreps = prepared.filter((p) => p.needsWalletFreeze)
             const serverFreezePreps = prepared.filter((p) => p.needsServerFreeze)
-            let completed = prepared.length - freezePreps.length - serverFreezePreps.length
+            let completed =
+              alreadyConfirmedCount + prepared.length - freezePreps.length - serverFreezePreps.length
 
             if (serverFreezePreps.length > 0) {
               setStakeTxPhase('syncing')
@@ -1893,11 +2163,11 @@ export function DashboardNestingClient() {
                 throwIfNestingAborted(signal)
                 if (serverFreezePreps.length > 1) {
                   setNftStakeBatchHint(
-                    `Applying nest lock in your wallet (${i + 1} of ${serverFreezePreps.length}) — your NFT stays put, only transfers are blocked…`
+                    `Locking nest ${i + 1} of ${serverFreezePreps.length} — approve the fee in your wallet if asked…`
                   )
                 } else {
                   setNftStakeBatchHint(
-                    'Applying nest lock in your wallet — your NFT stays put; only transfers are blocked for your chosen lock…'
+                    'Applying nest lock — approve the fee in your wallet if asked. Your NFT stays in your wallet…'
                   )
                 }
                 let platformFeeSig: string | null = null
@@ -1935,11 +2205,17 @@ export function DashboardNestingClient() {
               if (totalNests > 1) {
                 setNftStakeBatchHint(
                   walletApprovals > 1
-                    ? `Approve nest batch ${chunkIdx + 1} of ${walletApprovals} in your wallet (${chunkPreps.length} ${nftAssetLabels.plural}${platformFeeActive ? `, ${chunkFeeLabel} included` : ''})…`
-                    : `Approve in your wallet to confirm ${chunkPreps.length} nest${chunkPreps.length === 1 ? '' : 's'}${platformFeeActive ? ` (${chunkFeeLabel} included)` : ''}…`
+                    ? `Approve batch ${chunkIdx + 1} of ${walletApprovals} in your wallet (${chunkPreps.length} ${nftAssetLabels.plural}${platformFeeActive ? ` + ${chunkFeeLabel}` : ''} in one signature)…`
+                    : `Approve once in your wallet to nest ${chunkPreps.length} ${nftAssetLabels.plural}${platformFeeActive ? ` (${chunkFeeLabel} included)` : ''}…`
                 )
               } else if (platformFeeActive && chunkFeeLabel) {
-                setNftStakeBatchHint(`Approve in your wallet to confirm your nest (${chunkFeeLabel} included)…`)
+                setNftStakeBatchHint(
+                  `Approve once in your wallet — nest lock and ${chunkFeeLabel} are in the same signature. On Ledger, keep the Solana app open and Ledger Live closed…`
+                )
+              } else {
+                setNftStakeBatchHint(
+                  'Approve once in your wallet to lock your nest. On Ledger, keep the Solana app open and Ledger Live closed…'
+                )
               }
 
               const platformFee = chunkNestPlatformFee(chunkPreps.length)
@@ -1954,7 +2230,16 @@ export function DashboardNestingClient() {
                 setStakeTxPhase('syncing')
                 for (const prep of chunkPreps) {
                   throwIfNestingAborted(signal)
-                  await completeNftNestWithWalletSig(prep, walletSig, feeSig)
+                  try {
+                    await completeNftNestWithWalletSig(prep, walletSig, feeSig)
+                  } catch (confirmErr) {
+                    // Wallet lock already succeeded; a confirm 500 (e.g. shared batch
+                    // stake_signature unique race) must not fail the whole flock if heal can finish it.
+                    if (await checkNestFreezeConfirmedOnServer(prep.positionId, { heal: true })) {
+                      continue
+                    }
+                    throw confirmErr
+                  }
                 }
               }
               completed += chunkPreps.length
@@ -1980,8 +2265,18 @@ export function DashboardNestingClient() {
           setStakeAmount('')
           setStakeAssetId('')
           setStakeAssetIds([])
-          await refreshNestingUiAfterChange()
-          await loadPools()
+          // Nest open already succeeded on-chain/DB — a flaky positions/pools refresh
+          // must not surface as "Nesting did not finish" / Internal server error.
+          try {
+            await refreshNestingUiAfterChange()
+          } catch {
+            void refreshNestingUiAfterChange({ heal: true })
+          }
+          try {
+            await loadPools()
+          } catch {
+            /* ignore */
+          }
         },
       })
       const nestedCount = result.nestedCount
@@ -2018,13 +2313,68 @@ export function DashboardNestingClient() {
         void loadPositions()
         return
       }
+      if (e instanceof Error && e.message === 'stake') return
+
+      // Wallet lock may have succeeded even when confirm returned 500 — if heal shows
+      // every selected mint already nested, show success instead of a false failure modal.
+      const mintIds =
+        pool.asset_type === 'nft'
+          ? (opts?.assetIdsOverride?.length ? opts.assetIdsOverride : selectedNftStakeAssetIds)
+              .map((id) => id.trim())
+              .filter(Boolean)
+          : []
+      if (mintIds.length > 0 && publicKey) {
+        try {
+          const healRes = await fetch(nestingClientApiUrl('/api/me/staking/positions'), {
+            credentials: 'include',
+            cache: 'no-store',
+            headers: { 'X-Connected-Wallet': publicKey.toBase58() },
+          })
+          if (healRes.ok) {
+            const healJson = (await healRes.json().catch(() => ({}))) as {
+              positions?: StakingPositionRow[]
+            }
+            const rows = Array.isArray(healJson.positions) ? healJson.positions : []
+            applyPositionsPayload(healJson as Record<string, unknown>, { showHealSuccess: false })
+            const confirmedCount = mintIds.filter((mint) =>
+              rows.some(
+                (p) =>
+                  p.pool_id === pool_id &&
+                  p.asset_identifier?.trim() === mint &&
+                  (p.status === 'active' ||
+                    (p.external_reference ?? '').startsWith('nft_freeze_confirmed:'))
+              )
+            ).length
+            if (confirmedCount === mintIds.length) {
+              setActionError(null)
+              setSuccessNotice({
+                placement: 'modal',
+                title: confirmedCount === 1 ? 'Nest opened successfully' : 'Nests opened successfully',
+                message:
+                  confirmedCount === 1
+                    ? `Your ${nftAssetLabels.singular} is nested and the wallet lock is confirmed.`
+                    : `${confirmedCount} ${nftAssetLabels.plural} are nested and wallet locks are confirmed.`,
+                hint: `Your ${nftAssetLabels.plural} stay in your wallet while rewards accrue. Claim OWL anytime in Your nests below.`,
+              })
+              return
+            }
+          }
+        } catch {
+          /* fall through to error UI */
+        }
+      }
+
       if (isNestingStakeFlowError(e)) {
-        setActionError(e.userMessage)
-        void refreshNestingUiAfterChange()
+        reportNestOpenFailure(e, e.userMessage)
+        void refreshNestingUiAfterChange({ heal: true })
         return
       }
-      if (e instanceof Error && e.message === 'stake') return
-      setActionError(formatNestingApiFetchError(e, 'generic'))
+      reportNestOpenFailure(
+        e,
+        formatNestingWalletError(e, wallet?.adapter?.name, nftAssetLabels.singular) ||
+          formatNestingApiFetchError(e, 'generic')
+      )
+      void refreshNestingUiAfterChange({ heal: true })
     } finally {
       setNftStakeBatchHint(null)
       if (stakeTxAbortRef.current === stakeFlowAbort) {
@@ -2032,6 +2382,8 @@ export function DashboardNestingClient() {
       }
     }
   }
+
+  handleStakeRef.current = handleStake
 
   const handleUnstake = async (positionId: string) => {
     if (!publicKey) return
@@ -2504,6 +2856,13 @@ export function DashboardNestingClient() {
 
   const mobileConnectHint = nestingMobileConnectHint()
 
+  const scrollToSafeguards = useCallback(() => {
+    document.getElementById('nesting-security-notice')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    })
+  }, [])
+
   if (!connected) {
     return (
       <main className="relative mx-auto max-w-2xl px-4 py-10 safe-area-bottom">
@@ -2513,6 +2872,7 @@ export function DashboardNestingClient() {
           <p className="text-muted-foreground">
             Connect your wallet to browse perches and open a nest—Owltopia walks you through each step.
           </p>
+          <NestingEasyModeSteps current="connect" />
           {mobileConnectHint ? (
             <p className="text-xs text-muted-foreground leading-relaxed border border-border/50 rounded-lg px-3 py-2">
               {mobileConnectHint}
@@ -2576,21 +2936,45 @@ export function DashboardNestingClient() {
         </Button>
         <h1 className="text-2xl font-bold">Almost there</h1>
         <p className="text-muted-foreground">
-          Say hi with one wallet message so we can pull up your nests and show{' '}
-          <span className="font-medium text-foreground">Claim all</span> when OWL is ready—no gas fees, just a
-          signature.
+          Confirm this wallet so we can pull up your nests and show{' '}
+          <span className="font-medium text-foreground">Claim all</span> when OWL is ready. Ledger users: we use a
+          short memo transaction (not broadcast — no Owltopia fee).
         </p>
-        {signInError && <p className="text-destructive text-sm">{signInError}</p>}
-        <Button onClick={() => void handleSignIn()} disabled={signingIn || !signMessage}>
-          {signingIn ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              Signing in…
-            </>
-          ) : (
-            'Say hi with wallet'
-          )}
-        </Button>
+        <p className="text-sm text-muted-foreground rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+          Using Ledger? Phantom/Solflare Sign Message fails with{' '}
+          <span className="font-medium text-foreground">0x6a81</span> on many devices. Tap the green button below —
+          unlock Ledger, open the Solana app, close Ledger Live, prefer USB on desktop, then approve the memo on the
+          device.
+        </p>
+        {signInError && <p className="text-destructive text-sm whitespace-pre-wrap">{signInError}</p>}
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button
+            onClick={() => void handleSignIn(signTransaction ? { preferTx: true } : undefined)}
+            disabled={signingIn || (!signMessage && !signTransaction)}
+          >
+            {signingIn ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Waiting for wallet / Ledger…
+              </>
+            ) : signTransaction ? (
+              'Sign with Ledger / wallet'
+            ) : (
+              'Say hi with wallet'
+            )}
+          </Button>
+          {signTransaction && signMessage ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleSignIn({ preferMessage: true })}
+              disabled={signingIn}
+              className="min-h-[44px]"
+            >
+              Try message sign-in instead
+            </Button>
+          ) : null}
+        </div>
       </main>
     )
   }
@@ -2656,6 +3040,25 @@ export function DashboardNestingClient() {
             preferredPoolId={owlCoinProgressPreferredPoolId}
             preferredGroupKey={activeGenGroupKey}
             positionsVersion={nestedActiveMintKey}
+            lockTiers={genGroupTiers.map((tier) => ({
+              slug: tier.slug,
+              lock_period_days: tier.lock_period_days,
+            }))}
+            selectedLockTierSlug={selectedLockTierSlug}
+            onSelectLockTier={setSelectedLockTierSlug}
+            onNestThese={() => {
+              setOpenNestFormExpanded(true)
+              if (nestableOwlMintIds.length > 0) {
+                selectAllNestableOwlMints()
+              }
+              if (owlNestMintScan.mints.length > 0) {
+                setOwlPickerOpen(true)
+              }
+              document.getElementById('nesting-open-nest-form')?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start',
+              })
+            }}
             className="mt-3 max-w-md rounded-xl border border-emerald-500/20 bg-black/30 px-3 py-3"
           />
           <GenOwlRevShareClaimPanel
@@ -2688,7 +3091,7 @@ export function DashboardNestingClient() {
         onClaimAll={() => void handleClaimAll()}
       />
 
-      {claimableNestCount < 1 && nestsPendingOnly ? (
+      {claimableNestCount < 1 && nestsPendingOnly && stakeTxPhase === 'idle' ? (
         <div
           className="rounded-xl border border-amber-500/45 bg-amber-500/[0.08] px-4 py-3 text-sm leading-relaxed"
           role="status"
@@ -2783,6 +3186,11 @@ export function DashboardNestingClient() {
         </div>
       ) : null}
 
+      <NestingEasyModeSteps
+        current={securityAck ? 'nest' : 'safeguards'}
+        onSafeguardsClick={securityAck ? undefined : scrollToSafeguards}
+      />
+
       <NestingSecurityNotice
         id="nesting-security-notice"
         acknowledged={securityAck}
@@ -2790,6 +3198,11 @@ export function DashboardNestingClient() {
           clearSecurityAckError()
           void signSecurityAck()
         }}
+        onSignWithLedger={() => {
+          clearSecurityAckError()
+          void signSecurityAck({ preferTx: true })
+        }}
+        canSignWithLedger={canSignSecurityAckTx}
         signing={securityAckSigning}
         signError={securityAckError}
         walletConnected={connected}
@@ -2853,7 +3266,7 @@ export function DashboardNestingClient() {
         ))}
       </div>
 
-      {openingNestsNeedingWalletLock.length > 0 ? (
+      {openingNestsNeedingWalletLock.length > 0 && stakeTxPhase === 'idle' ? (
         <div
           className="rounded-xl border border-amber-500/45 bg-amber-500/[0.08] px-4 py-3 text-sm space-y-3"
           role="status"
@@ -2866,11 +3279,9 @@ export function DashboardNestingClient() {
                 : `${openingNestsNeedingWalletLock.length} nests are still opening`}
             </p>
             <p className="text-muted-foreground leading-relaxed text-xs sm:text-sm">
-              The wallet lock step did not finish. We try to fix this automatically when you load the page; if a nest
-              still shows <span className="font-medium text-foreground/90">Opening…</span>, tap below and approve each
-              prompt in your wallet — <span className="font-medium text-foreground/90">batched approvals</span> (up to{' '}
-              {NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} {nftAssetLabels.plural} per transaction on Backpack, Phantom, etc.). The count
-              here updates as each batch completes; stay on this page until the list is clear.
+              The wallet lock step did not finish. Tap below to continue — we will resume automatically and ask for{' '}
+              <span className="font-medium text-foreground/90">one wallet approval</span> when possible (lock + fee
+              together). Stay on this page until you see success.
             </p>
           </div>
           <Button
@@ -2878,10 +3289,10 @@ export function DashboardNestingClient() {
             variant="default"
             className="min-h-[48px] w-full touch-manipulation font-semibold"
             disabled={stakeTxPhase !== 'idle'}
-            onClick={() => selectOpeningNestsUpToMax()}
+            onClick={() => finishOpeningNestsAndContinue()}
           >
             {openingNestsNeedingWalletLock.length > NESTING_NFT_STAKE_MAX_PER_RUN
-              ? `Finish opening — select up to ${NESTING_NFT_STAKE_MAX_PER_RUN}`
+              ? `Finish opening — continue up to ${NESTING_NFT_STAKE_MAX_PER_RUN}`
               : `Finish opening ${openingNestsNeedingWalletLock.length === 1 ? 'nest' : 'nests'}`}
           </Button>
           {openingNestsNeedingWalletLock.length > NESTING_NFT_STAKE_MAX_PER_RUN ? (
@@ -2947,7 +3358,18 @@ export function DashboardNestingClient() {
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
                 {nftMintRequired ? (
-                  <>
+                  <button
+                    type="button"
+                    className="block w-full touch-manipulation text-left focus-visible:outline-none"
+                    onClick={() => {
+                      if (owlNestMintScan.status === 'done' && owlNestMintScan.mints.length > 0) {
+                        setOwlPickerOpen(true)
+                      } else if (owlNestMintScan.status !== 'loading') {
+                        void loadOwlNestNftsFromWallet()
+                      }
+                    }}
+                    aria-label={`Choose ${nftAssetLabels.plural} to nest`}
+                  >
                     <p className="min-h-[48px] text-2xl font-semibold tabular-nums text-foreground sm:min-h-[52px] sm:text-[1.75rem]">
                       {selectedNftStakeAssetIds.length > 0
                         ? selectedNftStakeAssetIds.length
@@ -2955,10 +3377,12 @@ export function DashboardNestingClient() {
                     </p>
                     <p className="text-xs text-muted-foreground leading-relaxed">
                       {selectedNftStakeAssetIds.length > 0
-                        ? `nest${selectedNftStakeAssetIds.length === 1 ? '' : 's'} selected`
-                        : `Select ${nftAssetLabels.plural} below`}
+                        ? `${selectedNftStakeAssetIds.length === 1 ? nftAssetLabels.singular : nftAssetLabels.plural} selected — tap to change`
+                        : owlNestMintScan.status === 'done' && owlNestMintScan.mints.length > 0
+                          ? `Tap to choose ${nftAssetLabels.plural}`
+                          : `Choose ${nftAssetLabels.plural} to nest`}
                     </p>
-                  </>
+                  </button>
                 ) : (
                   <>
                     <Label htmlFor="stake-amt" className="sr-only">
@@ -3045,9 +3469,43 @@ export function DashboardNestingClient() {
                     Choose a perch below to load assets from your wallet.
                   </p>
                 ) : nftMintRequired ? (
-                  <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-                    One {nftAssetLabels.singular} = one nest. Load your wallet, then pick {nftAssetLabels.plural} below.
-                  </p>
+                  <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+                    <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                      {!connected ? (
+                        <>Connect wallet to see your {nftAssetLabels.plural}</>
+                      ) : owlNestMintScan.status === 'loading' ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                          Loading {nftAssetLabels.plural}…
+                        </span>
+                      ) : owlNestMintScan.status === 'done' ? (
+                        <>
+                          <span className="text-muted-foreground">Balance </span>
+                          <span className="font-medium tabular-nums text-foreground/90">
+                            {owlNestMintScan.mints.length}
+                          </span>
+                          {owlNestMintScan.mints.length > 0 &&
+                          nestableOwlMintIds.length !== owlNestMintScan.mints.length ? (
+                            <span className="text-muted-foreground">
+                              {' '}
+                              · {nestableOwlMintIds.length} nestable
+                            </span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>Balance —</>
+                      )}
+                    </span>
+                    {connected && nestableOwlMintIds.length > 0 ? (
+                      <button
+                        type="button"
+                        className="touch-manipulation rounded-lg bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-theme-prime hover:bg-emerald-500/25"
+                        onClick={selectAllNestableOwlMints}
+                      >
+                        Max
+                      </button>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
               <NestSwapAssetChip
@@ -3068,7 +3526,14 @@ export function DashboardNestingClient() {
                     <Coins className="h-4 w-4 text-theme-prime" aria-hidden />
                   )
                 }
-                aria-label="Asset you pay with"
+                onClick={
+                  nftMintRequired && owlNestMintScan.status === 'done' && owlNestMintScan.mints.length > 0
+                    ? () => setOwlPickerOpen(true)
+                    : undefined
+                }
+                aria-label={
+                  nftMintRequired ? `Choose ${nftAssetLabels.plural} to nest` : 'Asset you pay with'
+                }
               />
             </div>
           }
@@ -3115,12 +3580,42 @@ export function DashboardNestingClient() {
                 />
               </div>
             ) : activeGenGroupKey ? (
-              <div className="space-y-4">
-                <div>
-                  <p className="text-lg font-semibold text-foreground">{genOwlStakingGroupLabel(activeGenGroupKey)}</p>
-                  <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                    Load your {nftAssetLabels.plural} below, then pick 90 or 180 days before you confirm.
-                  </p>
+              <div className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="min-h-[48px] text-2xl font-semibold tabular-nums text-foreground sm:min-h-[52px] sm:text-[1.75rem]">
+                      {selectedGenTierPool && projectedNftEarnLabel ? (
+                        <>
+                          <span className="text-theme-prime">{projectedNftEarnLabel}</span>
+                          {selectedGenTierPool.reward_token ? (
+                            <span className="ml-1.5 text-base font-medium text-muted-foreground sm:text-lg">
+                              {selectedGenTierPool.reward_token}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground/40">0</span>
+                      )}
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {selectedGenTierPool
+                        ? `${Math.max(1, selectedNftStakeAssetIds.length)} ${
+                            Math.max(1, selectedNftStakeAssetIds.length) === 1
+                              ? nftAssetLabels.singular
+                              : nftAssetLabels.plural
+                          } × ${formatRewardRate(
+                            Number(selectedGenTierPool.reward_rate),
+                            selectedGenTierPool.reward_rate_unit
+                          )}${projectedUnlockDateLabel ? ` · unlocks ~${projectedUnlockDateLabel}` : ''}`
+                        : 'Pick a lock period to see what you earn'}
+                    </p>
+                  </div>
+                  <NestSwapAssetChip
+                    label={selectedGenTierPool?.reward_token ?? genGroupTiers[0]?.reward_token ?? 'OWL'}
+                    sublabel={genOwlStakingGroupLabel(activeGenGroupKey)}
+                    icon={<Egg className="h-4 w-4 text-theme-prime" aria-hidden />}
+                    aria-label="What you earn"
+                  />
                 </div>
                 <NestingLockTierPicker
                   tiers={genGroupTiers}
@@ -3129,20 +3624,6 @@ export function DashboardNestingClient() {
                   required={Boolean(activeGenGroupKey && !selectedLockTierSlug)}
                 />
                 <GenOwlRevShareNotice groupKey={activeGenGroupKey} />
-                {selectedGenTierPool ? (
-                  <div className="rounded-lg border border-emerald-500/20 bg-black/20 px-3 py-3 text-xs text-muted-foreground leading-relaxed">
-                    <span className="font-medium text-foreground">
-                      {selectedGenTierPool.lock_period_days}-day nest
-                    </span>
-                    {' · '}
-                    {selectedGenTierPool.reward_token ? `${selectedGenTierPool.reward_token} · ` : ''}
-                    {formatRewardRate(
-                      Number(selectedGenTierPool.reward_rate),
-                      selectedGenTierPool.reward_rate_unit
-                    )}{' '}
-                    per {nftAssetLabels.singular}
-                  </div>
-                ) : null}
               </div>
             ) : preselectedPerchMissing ? (
               <div className="space-y-3">
@@ -3349,43 +3830,37 @@ export function DashboardNestingClient() {
               </p>
             ) : (
               <>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Wallet · {nftAssetLabels.plural}
-                </p>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Load {nftAssetLabels.plural} from this collection, then select one or more to nest.
-                </p>
-
                 {selectedNftStakeAssetIds.length > 0 ? (
-                  <div className="space-y-2 rounded-lg border border-emerald-500/20 bg-black/25 p-3 touch-manipulation">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      You&apos;re nesting {selectedNftStakeAssetIds.length}{' '}
-                      {selectedNftStakeAssetIds.length === 1 ? nftAssetLabels.singular : nftAssetLabels.plural}
-                    </p>
-                    <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    className="flex w-full touch-manipulation items-center gap-2 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-prime/50"
+                    onClick={() => setOwlPickerOpen(true)}
+                    aria-label={`Change selected ${nftAssetLabels.plural}`}
+                  >
+                    <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
                       {(selectedOwlNestMintRows.length > 0
                         ? selectedOwlNestMintRows
                         : selectedNftStakeAssetIds.map((mint) => ({ mint, name: null, image: null }))
-                      ).map((m) => (
-                        <div key={m.mint} className="flex min-w-0 items-center gap-3">
+                      )
+                        .slice(0, 4)
+                        .map((m) => (
                           <NestingStakedAssetThumb
+                            key={m.mint}
                             mint={m.mint}
                             hintImageUrl={m.image ?? null}
                             name={m.name ?? null}
-                            size="md"
+                            size="sm"
+                            className="h-10 w-10 min-h-[40px] min-w-[40px] rounded-lg"
                           />
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-foreground">
-                              {m.name?.trim() || nftAssetLabels.singular}
-                            </p>
-                            <p className="truncate font-mono text-[11px] text-muted-foreground">
-                              {shortenAddress(m.mint, 6)}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                        ))}
+                      {selectedNftStakeAssetIds.length > 4 ? (
+                        <span className="shrink-0 text-xs font-medium text-muted-foreground">
+                          +{selectedNftStakeAssetIds.length - 4}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="shrink-0 text-xs font-medium text-theme-prime">Change</span>
+                  </button>
                 ) : null}
 
                 {owlNestMintScan.status === 'idle' ? (
@@ -3424,203 +3899,114 @@ export function DashboardNestingClient() {
                   <p className="text-xs text-amber-400/90 leading-relaxed">{owlNestMintScan.hint}</p>
                 ) : null}
 
-                {owlNestMintScan.status === 'done' && owlNestMintScan.mints.length > 1 ? (
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <Label className="text-xs font-normal text-muted-foreground">
-                        Choose one or more
-                      </Label>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="min-h-[36px] h-auto px-2 text-xs text-theme-prime disabled:opacity-40"
-                        disabled={
-                          owlNestMintScan.mints.every((row) =>
-                            selectedPerch?.asset_type === 'nft'
-                              ? nftMintBlocksDuplicateStakeExceptResume(
-                                  row.mint,
-                                  selectedPerch,
-                                  positions
-                                )
-                              : false
-                          )
-                        }
-                        onClick={() => {
-                          const pool = selectedPerch
-                          const nestable =
-                            pool?.asset_type === 'nft'
-                              ? owlNestMintScan.mints.filter(
-                                  (row) =>
-                                    !nftMintBlocksDuplicateStakeExceptResume(
-                                      row.mint,
-                                      pool,
-                                      positions
-                                    )
-                                )
-                              : owlNestMintScan.mints
-                          const all = nestable.map((m) => m.mint)
-                          setStakeAssetIds(all)
-                          setStakeAssetId(all[0] ?? '')
-                        }}
-                      >
-                        Select all nestable
-                      </Button>
-                    </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      <span className="font-medium text-foreground/85">Recommended:</span> select every{' '}
-                      {nftAssetLabels.singular} you want, then tap confirm below — your wallet signs{' '}
-                      <span className="font-medium text-foreground/85">
-                        up to {NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} {nftAssetLabels.plural} per transaction
-                      </span>{' '}
-                      (large flocks may need a few approvals). Stay on this page until finished; the opening count
-                      updates after each batch.
-                    </p>
-                    {selectedPerch?.asset_type === 'nft' &&
-                    owlNestMintScan.mints.some((row) =>
-                      nftMintBlocksDuplicateStakeExceptResume(row.mint, selectedPerch, positions)
-                    ) ? (
-                      <p className="text-xs text-muted-foreground/85 leading-relaxed">
-                        {nftAssetLabels.plural.charAt(0).toUpperCase() + nftAssetLabels.plural.slice(1)}{' '}
-                        <span className="font-medium text-foreground/80">already nested</span> on this perch stay
-                        listed for reference — they&apos;re skipped for new nests unless you&apos;re finishing a nest that
-                        is still waiting on a wallet freeze step.
-                      </p>
-                    ) : null}
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {owlNestMintScan.mints.map((m) => {
-                        const externallyBlocked = m.stake_blocked === true
-                        const alreadyNestedHere =
-                          !externallyBlocked &&
-                          selectedPerch?.asset_type === 'nft' &&
-                          nftMintBlocksDuplicateStakeExceptResume(m.mint, selectedPerch, positions)
-                        const resumeFreezeOnly =
-                          selectedPerch?.asset_type === 'nft' &&
-                          !alreadyNestedHere &&
-                          !externallyBlocked &&
-                          positions.some(
-                            (p) =>
-                              isOpeningNftNestAbortable(p, selectedPerch) &&
-                              p.pool_id === selectedPerch.id &&
-                              p.asset_identifier?.trim() === m.mint.trim()
-                          )
-                        const checked = stakeAssetIds.includes(m.mint)
-                        const disabled = Boolean(alreadyNestedHere || externallyBlocked)
-                        return (
-                          <button
-                            key={m.mint}
-                            type="button"
-                            disabled={disabled}
-                            aria-pressed={checked}
-                            aria-disabled={disabled ? true : undefined}
-                            onClick={() => toggleSelectedOwlNestMint(m.mint)}
-                            className={cn(
-                              'flex min-h-[56px] items-center gap-3 rounded-xl border px-3 py-2 text-left touch-manipulation transition-colors',
-                              disabled
-                                ? 'cursor-not-allowed border-white/[0.06] bg-black/20 opacity-70'
-                                : checked
-                                  ? 'border-emerald-500/50 bg-emerald-500/12'
-                                  : 'border-white/[0.08] bg-[#1c2620]/60 hover:border-emerald-500/35 hover:bg-[#243328]/80'
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                'flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[11px] font-bold',
-                                disabled
-                                  ? 'border-muted-foreground/30 bg-muted/40 text-muted-foreground/50'
-                                  : checked
-                                    ? 'border-emerald-400 bg-emerald-400 text-black'
-                                    : 'border-muted-foreground/50 text-transparent'
-                              )}
-                              aria-hidden
+                {owlNestMintScan.status === 'done' && nestableOwlMintIds.length > 1 ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-[48px] w-full touch-manipulation rounded-xl border-emerald-500/30 text-sm font-semibold"
+                    onClick={() => setOwlPickerOpen(true)}
+                  >
+                    {selectedNftStakeAssetIds.length > 0
+                      ? `Change ${nftAssetLabels.plural} (${selectedNftStakeAssetIds.length} selected)`
+                      : `Choose ${nftAssetLabels.plural} (${nestableOwlMintIds.length} nestable · ${owlNestMintScan.mints.length} in wallet)`}
+                  </Button>
+                ) : null}
+
+                {owlNestMintScan.status === 'done' &&
+                nestableOwlMintIds.length === 0 &&
+                owlNestMintScan.mints.length > 1 ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-[48px] w-full touch-manipulation rounded-xl border-border/50 text-sm font-medium"
+                    onClick={() => setOwlPickerOpen(true)}
+                  >
+                    View {nftAssetLabels.plural} in wallet ({owlNestMintScan.mints.length})
+                  </Button>
+                ) : null}
+
+                {owlNestMintScan.status === 'done' && nestableOwlMintIds.length === 1
+                  ? (() => {
+                      const sole = owlNestMintScan.mints.find((m) => m.mint === nestableOwlMintIds[0])
+                      if (!sole) return null
+                      return (
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            <span className="font-medium text-foreground/90">Ready to nest</span>
+                            {' — '}
+                            {sole.name?.trim() || `your ${nftAssetLabels.singular}`}
+                            <span className="font-mono text-theme-prime/85">{` (${shortenAddress(sole.mint, 5)})`}</span>
+                          </p>
+                          {owlNestMintScan.mints.length > 1 ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="min-h-[40px] w-full touch-manipulation text-xs text-muted-foreground"
+                              onClick={() => setOwlPickerOpen(true)}
                             >
-                              x
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block truncate text-sm font-medium text-foreground">
-                                {(m.name?.trim() && m.name.trim().slice(0, 88)) || nftAssetLabels.singular}
-                              </span>
-                              <span className="block truncate font-mono text-[11px] text-muted-foreground">
-                                {shortenAddress(m.mint, 6)}
-                              </span>
-                              {externallyBlocked ? (
-                                <span className="mt-1 block text-[11px] font-medium leading-snug text-amber-400/95">
-                                  Frozen elsewhere — unstake on GOMT Labz (or wait for lock) first
-                                </span>
-                              ) : alreadyNestedHere ? (
-                                <span className="mt-1 block truncate text-[11px] font-medium text-amber-400/95">
-                                  Already nested
-                                </span>
-                              ) : resumeFreezeOnly ? (
-                                <span className="mt-1 block truncate text-[11px] text-muted-foreground">
-                                  Open nest — finish freeze in wallet when you confirm below
-                                </span>
-                              ) : null}
-                            </span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                ) : null}
+                              View all {owlNestMintScan.mints.length} in wallet
+                            </Button>
+                          ) : null}
+                        </div>
+                      )
+                    })()
+                  : null}
 
-                {owlNestMintScan.status === 'done' && owlNestMintScan.mints.length === 1 ? (
-                  <div className="space-y-2">
-                    {owlNestMintScan.mints[0].stake_blocked ? (
-                      <p className="text-xs text-amber-400/95 leading-relaxed">
-                        This {nftAssetLabels.singular} is{' '}
-                        <span className="font-semibold text-foreground/90">frozen elsewhere</span> (for example on GOMT
-                        Labz). Unstake or wait for the lock to end there before nesting on Owltopia.
-                      </p>
-                    ) : selectedPerch?.asset_type === 'nft' &&
-                    nftMintBlocksDuplicateStakeExceptResume(
-                      owlNestMintScan.mints[0].mint,
-                      selectedPerch,
-                      positions
-                    ) ? (
-                      <p className="text-xs text-amber-400/95 leading-relaxed">
-                        This {nftAssetLabels.singular} is{' '}
-                        <span className="font-semibold text-foreground/90">already nested</span> on this perch. Manage or
-                        claim rewards from{' '}
-                        <span className="font-medium text-foreground/90">Your nests</span> below — you don&apos;t need to open
-                        a new nest for it unless you left a nest halfway through and still need to finish the wallet freeze
-                        step for this same {nftAssetLabels.singular}.
-                      </p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        <span className="font-medium text-foreground/90">Ready to nest</span>
-                        {' — '}
-                        {owlNestMintScan.mints[0].name?.trim() ? (
-                          <>{owlNestMintScan.mints[0].name.trim()}</>
-                        ) : (
-                          <>your {nftAssetLabels.singular} </>
-                        )}
-                        <span className="font-mono text-theme-prime/85">{` (${shortenAddress(owlNestMintScan.mints[0].mint, 5)})`}</span>
-                        .
-                      </p>
-                    )}
-                  </div>
-                ) : null}
-
-                {owlNestMintScan.status === 'done' && owlNestMintScan.configured && owlNestMintScan.mints.length === 0 ? (
+                {owlNestMintScan.status === 'done' &&
+                owlNestMintScan.configured &&
+                !owlNestMintScan.hint &&
+                owlNestMintScan.mints.length > 0 &&
+                nestableOwlMintIds.length === 0 &&
+                owlNestMintScan.mints.every(
+                  (m) => m.nest_status === 'nested' || m.nest_status === 'opening'
+                ) ? (
                   <div className="space-y-2">
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      No {nftAssetLabels.plural} from this perch&apos;s collection showed up for the wallet we queried (
-                      <span className="font-mono text-foreground/80">{shortenAddress(walletAddr, 5)}</span>
-                      ){owlNestMintScan.resolvedCollectionAddress ? (
-                        <>
-                          {' '}
-                          for collection{' '}
-                          <span className="font-mono text-theme-prime/85">
-                            {shortenAddress(owlNestMintScan.resolvedCollectionAddress, 6)}
-                          </span>
-                        </>
-                      ) : null}
-                      . Recheck you signed in with that wallet on the correct network, then reload the list.
+                      All your {nftAssetLabels.plural} in this wallet are already nested
+                      {owlNestMintScan.mints.some((m) => m.nest_status === 'opening')
+                        ? ' or finishing their lock'
+                        : ''}
+                      . Manage them from{' '}
+                      <button
+                        type="button"
+                        className="font-medium text-theme-prime underline-offset-4 hover:underline touch-manipulation"
+                        onClick={() =>
+                          document
+                            .getElementById('nesting-your-nests')
+                            ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                        }
+                      >
+                        Your nests
+                      </button>
+                      .
                     </p>
                   </div>
                 ) : null}
 
-                {owlNestMintScan.status === 'done' ? (
+                {owlNestMintScan.status === 'done' &&
+                owlNestMintScan.configured &&
+                !owlNestMintScan.hint &&
+                owlNestMintScan.mints.length === 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      No {nftAssetLabels.plural} found in wallet{' '}
+                      <span className="font-mono text-foreground/80">{shortenAddress(walletAddr, 5)}</span>. Check you
+                      signed in with the right wallet, then reload.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="min-h-[44px] w-full touch-manipulation gap-2 border-border/60 text-sm font-medium"
+                      disabled={!connected || needsSignIn || loading || error !== null}
+                      onClick={() => void loadOwlNestNftsFromWallet()}
+                    >
+                      <RefreshCw className="h-4 w-4 shrink-0" aria-hidden />
+                      Reload {nftAssetLabels.plural}
+                    </Button>
+                  </div>
+                ) : null}
+
+                {owlNestMintScan.status === 'done' && owlNestMintScan.hint && owlNestMintScan.mints.length === 0 ? (
                   <Button
                     type="button"
                     variant="outline"
@@ -3629,7 +4015,7 @@ export function DashboardNestingClient() {
                     onClick={() => void loadOwlNestNftsFromWallet()}
                   >
                     <RefreshCw className="h-4 w-4 shrink-0" aria-hidden />
-                    Reload {nftAssetLabels.plural}
+                    Try again
                   </Button>
                 ) : null}
               </>
@@ -3638,33 +4024,25 @@ export function DashboardNestingClient() {
           }
           actions={
             <>
-            <NestingActionStatusLine phase={stakeTxPhase} className="min-h-[1.25rem] text-center sm:text-left" />
+            <NestingStakeProgressCard
+              phase={stakeTxPhase}
+              hint={nftStakeBatchHint}
+              nestCount={
+                nftMintRequired
+                  ? Math.max(1, selectedNftStakeAssetIds.length || openingNestMintIds.length || 1)
+                  : 1
+              }
+              assetSingular={nftAssetLabels.singular}
+              assetPlural={nftAssetLabels.plural}
+              feeIncluded={platformFeeActive}
+            />
             {nftMintRequired && stakeTxPhase === 'idle' ? (
               <p className="text-xs text-center text-muted-foreground leading-relaxed px-1" role="note">
-                {selectedNftStakeAssetIds.length > 1 ? (
-                  <>
-                    Your wallet may ask{' '}
-                    {chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length === 1
-                      ? 'once'
-                      : `${chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length} times`}{' '}
-                    (up to {NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} {nftAssetLabels.plural} per approval).{' '}
-                  </>
-                ) : null}
-                One approval locks your {nftAssetLabels.singular}
-                {selectedNftStakeAssetIds.length > 1 ? 's' : ''}
-                {platformFeePerNestLabel ? (
-                  <>
-                    {' '}
-                    and includes the <span className="font-medium text-foreground/90">{platformFeePerNestLabel}</span>{' '}
-                    platform fee
-                  </>
-                ) : null}{' '}
-                in the same transaction. Stay on this page until you see success.
-              </p>
-            ) : null}
-            {nftStakeBatchHint ? (
-              <p className="text-xs text-center text-muted-foreground leading-relaxed px-1" role="status">
-                {nftStakeBatchHint}
+                {chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length > 1
+                  ? `${chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length} wallet approvals (up to ${NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} ${nftAssetLabels.plural} each)`
+                  : 'One wallet approval'}
+                {platformFeePerNestLabel ? ` · includes ${platformFeePerNestLabel} fee` : ''} · stay on this page until
+                you see success.
               </p>
             ) : null}
             <Button
@@ -3673,8 +4051,14 @@ export function DashboardNestingClient() {
               size="lg"
               className="min-h-[52px] w-full touch-manipulation rounded-xl font-semibold text-base shadow-[0_0_24px_rgba(0,255,136,0.2)] hover:shadow-[0_0_32px_rgba(0,255,136,0.28)] disabled:opacity-50"
               disabled={Boolean(confirmNestDisabledReason)}
-              title={confirmNestDisabledReason ?? undefined}
-              aria-describedby={confirmNestDisabledReason ? 'nesting-confirm-disabled-reason' : undefined}
+              title={
+                stakeTxPhase === 'idle' ? (confirmNestDisabledReason ?? undefined) : undefined
+              }
+              aria-describedby={
+                confirmNestDisabledReason && stakeTxPhase === 'idle'
+                  ? 'nesting-confirm-disabled-reason'
+                  : undefined
+              }
               onClick={() => void handleStake()}
             >
               {stakeTxPhase !== 'idle' ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
@@ -3684,17 +4068,41 @@ export function DashboardNestingClient() {
                   : 'Confirm nest'
                 : nestingTxPhaseLabel(stakeTxPhase)}
             </Button>
-            {confirmNestDisabledReason ? (
-              <p
-                id="nesting-confirm-disabled-reason"
-                className="text-xs text-center text-amber-400/95 leading-relaxed px-1"
-                role="status"
-              >
-                {confirmNestDisabledReason}
-              </p>
+            {confirmNestDisabledReason && stakeTxPhase === 'idle' ? (
+              !securityAck ? (
+                <button
+                  type="button"
+                  id="nesting-confirm-disabled-reason"
+                  className="text-xs text-center text-amber-300 leading-relaxed px-1 underline underline-offset-2 touch-manipulation min-h-[44px] w-full"
+                  onClick={scrollToSafeguards}
+                >
+                  {confirmNestDisabledReason} Tap to jump to the orange safeguards box.
+                </button>
+              ) : (
+                <p
+                  id="nesting-confirm-disabled-reason"
+                  className="text-xs text-center text-amber-400/95 leading-relaxed px-1"
+                  role="status"
+                >
+                  {confirmNestDisabledReason}
+                </p>
+              )
             ) : null}
             </>
           }
+        />
+        <NestSwapOwlPickerDialog
+          open={owlPickerOpen}
+          onOpenChange={setOwlPickerOpen}
+          rows={owlPickerRows}
+          onToggle={toggleSelectedOwlNestMint}
+          onSelectAll={selectAllNestableOwlMints}
+          selectAllDisabled={nestableOwlMintIds.length === 0}
+          onReload={() => void loadOwlNestNftsFromWallet()}
+          reloading={owlNestMintScan.status === 'loading'}
+          selectedCount={selectedNftStakeAssetIds.length}
+          maxPerRun={NESTING_NFT_STAKE_MAX_PER_RUN}
+          assetLabels={nftAssetLabels}
         />
         </div>
         ) : null}
@@ -3810,6 +4218,7 @@ export function DashboardNestingClient() {
         title={successNotice?.title}
         message={successNotice?.message ?? ''}
         hint={successNotice?.hint}
+        tone={successNotice?.tone ?? 'success'}
       />
     </main>
   )

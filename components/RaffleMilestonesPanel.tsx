@@ -31,7 +31,6 @@ import {
   ticketsSoldFromEntries,
 } from '@/lib/raffles/milestones/draw'
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
-import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { fetchFundsEscrowAddress } from '@/lib/client/create-raffle-milestone-deposit'
 import { getTokenInfo } from '@/lib/tokens'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
@@ -136,9 +135,16 @@ export function RaffleMilestonesPanel({
       setActionError(null)
       setLoadingId(`deposit-${m.id}`)
       try {
-        const escrow = getFundsEscrowPublicKey()
+        // Client cannot read FUNDS_ESCROW_SECRET_KEY — use snapshot or public config API.
+        let escrow = (fundsEscrowAddress || '').trim()
         if (!escrow) {
-          setActionError('Funds escrow is not configured.')
+          escrow = (await fetchFundsEscrowAddress())?.trim() || ''
+          if (escrow) setFundsEscrowAddress(escrow)
+        }
+        if (!escrow) {
+          setActionError(
+            'Funds escrow is not configured. Refresh the page, or contact support if this persists.'
+          )
           return
         }
         const amount = Number(m.prize_amount ?? 0)
@@ -220,7 +226,7 @@ export function RaffleMilestonesPanel({
         setLoadingId(null)
       }
     },
-    [publicKey, connected, connection, sendTransaction, raffle.id, onRefresh]
+    [publicKey, connected, connection, sendTransaction, raffle.id, onRefresh, fundsEscrowAddress]
   )
 
   const verifyManualTx = useCallback(

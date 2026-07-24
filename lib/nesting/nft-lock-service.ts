@@ -1,5 +1,6 @@
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { StakingUserError } from '@/lib/nesting/errors'
+import { nestingNftAssetLabels } from '@/lib/nesting/gen1-staking-pools'
 import { detectResolvedNftLockStandardFromAsset } from '@/lib/nesting/nft-lock/detect-asset-standard'
 import {
   isNftLockStandard,
@@ -110,7 +111,7 @@ async function readSplStakeEligibility(params: {
       return {
         eligible: false,
         reason:
-          'This NFT is already locked for an Owltopia nest. Finish or leave that nest before opening another.',
+          'This NFT is already locked for an Owltopia nest. Refresh My nest (or Finish opening) so the ledger can catch up — if it still blocks, contact support with this mint.',
         code: 'owltopia_lock_held',
       }
     }
@@ -213,7 +214,7 @@ export async function enrichWalletNestMintsForPool(
 }
 
 export async function assertWalletNftFrozenForPool(params: {
-  pool: Pick<StakingPoolRow, 'nft_lock_standard' | 'asset_type' | 'collection_key'>
+  pool: Pick<StakingPoolRow, 'nft_lock_standard' | 'asset_type' | 'collection_key' | 'slug'>
   ownerWallet: string
   assetId: string
   collectionMint?: string | null
@@ -233,6 +234,7 @@ export async function assertWalletNftFrozenForPool(params: {
     ownerWallet: params.ownerWallet,
     assetId: params.assetId,
     collectionMint: params.collectionMint ?? params.pool.collection_key,
+    assetSingular: nestingNftAssetLabels(params.pool).singular,
   })
   return { tokenAccount: frozen.tokenAccount, resolved_standard: resolved }
 }

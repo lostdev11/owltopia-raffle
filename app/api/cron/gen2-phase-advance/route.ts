@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { authorizeCronBearer } from '@/lib/cron-auth'
 
 import { advanceGen2PhaseIfScheduled } from '@/lib/owl-center/gen2-phase-advance'
 import { flushPendingGen2MintDiscordFeed } from '@/lib/owl-center/gen2-mint-discord-feed'
+import { ensureGen2TeamBackstopAutoEnabled } from '@/lib/owl-center/gen2-backstop-ops'
 import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 import { reconcileGen2LaunchMintsFromChain } from '@/lib/owl-center/reconcile-gen2-wallet-mints'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 30
+export const maxDuration = 60
 
 /**
  * GET /api/cron/gen2-phase-advance
@@ -16,16 +18,8 @@ export const maxDuration = 30
  * Holds while the mint is paused/not operational. Secured by CRON_SECRET (Bearer token).
  */
 export async function GET(request: NextRequest) {
-  const secret = process.env.CRON_SECRET
-  if (!secret) {
-    console.error('CRON_SECRET is not set')
-    return NextResponse.json({ error: 'server error' }, { status: 500 })
-  }
-
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: 'server error' }, { status: 401 })
-  }
+  const cronAuth = authorizeCronBearer(request)
+  if (cronAuth) return cronAuth
 
   try {
     const result = await advanceGen2PhaseIfScheduled()
@@ -53,7 +47,16 @@ export async function GET(request: NextRequest) {
       console.error('gen2-phase-advance discord flush', e)
     }
 
-    return NextResponse.json({ ...result, reconciled, discord_flushed })
+    // Self-heal: public pool empty + leftovers → enable team backstop if not already on.
+    let team_backstop: unknown = null
+    try {
+      team_backstop = await ensureGen2TeamBackstopAutoEnabled()
+    } catch (e) {
+      console.error('gen2-phase-advance team backstop', e)
+      team_backstop = { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+
+    return NextResponse.json({ ...result, reconciled, discord_flushed, team_backstop })
   } catch (e) {
     console.error('gen2-phase-advance cron', e)
     return NextResponse.json({ error: 'server error' }, { status: 500 })

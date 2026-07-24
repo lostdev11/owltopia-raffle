@@ -1,4 +1,5 @@
 import type { WalletAdapter } from '@solana/wallet-adapter-base'
+import { Connection } from '@solana/web3.js'
 import bs58 from 'bs58'
 import {
   generateSigner,
@@ -8,6 +9,7 @@ import {
   type Transaction,
   type TransactionBuilder,
 } from '@metaplex-foundation/umi'
+import { toWeb3JsTransaction } from '@metaplex-foundation/umi-web3js-adapters'
 import { fetchMetadata, findMetadataPda, findMasterEditionPda } from '@metaplex-foundation/mpl-token-metadata'
 import { mintV2 } from '@metaplex-foundation/mpl-candy-machine'
 import { setComputeUnitLimit, setComputeUnitPrice } from '@metaplex-foundation/mpl-toolbox'
@@ -35,6 +37,11 @@ import {
   findRecentCandyMachineMintSignature,
   pollTransactionSignatureStatus,
 } from '@/lib/solana/recover-candy-machine-mint'
+import {
+  sendTransactionPreferPhantomSignAndSend,
+  walletAdapterIsPhantom,
+} from '@/lib/solana/phantom-sign-and-send-transaction'
+import { assertTransactionSimulatesClean } from '@/lib/solana/phantom-presimulate'
 import type { MintSessionDeadline } from '@/lib/owl-center/mint-time-budget'
 import {
   createMintSessionDeadline,
@@ -82,7 +89,10 @@ function friendlyMintSimulationError(msg: string, collectPlatformMintFee?: boole
     low.includes('security') ||
     low.includes('dapp could be')
   ) {
-    return 'Your wallet blocked this mint for security. If you trust Owltopia, ask Phantom to review owltopia.xyz at review@phantom.com — or try Solflare.'
+    return (
+      'Your wallet blocked this mint after simulation. Owltopia signs with Phantom first, then the mint key, then broadcasts — ' +
+      'if this keeps happening, try Solflare or ask Phantom to review the failing mint (see PHANTOM_DOMAIN_REVIEW.md).'
+    )
   }
   if (low.includes('accountnotfound') || low.includes('account does not exist')) {
     return 'Mint setup error — a required on-chain account was not found. Refresh and retry; if this persists, contact the collection team.'
@@ -144,14 +154,21 @@ async function loadGuardMintPlan(
   umi: ReturnType<typeof createOwlCenterUmi>,
   candyMachine: ReturnType<typeof publicKey>,
   cmId: string,
-  phase: Gen2MintablePhase
+  phase: Gen2MintablePhase,
+  groupLabelOverride?: string | null
 ): Promise<{ ok: true; plan: Gen2GuardMintPlan } | { ok: false; error: string }> {
-  const key = mintPlanCacheKey(cmId, phase)
+  const key = mintPlanCacheKey(cmId, phase) + (groupLabelOverride ? `:g=${groupLabelOverride}` : '')
   const cached = mintPlanCache.get(key)
   if (cached && cached.expires > Date.now()) {
     return { ok: true, plan: cached.plan }
   }
-  const planRes = await withSolanaRpcRetry(() => buildGen2GuardMintPlan(umi, candyMachine, phase), MINT_PREP_SOLANA_RPC_RETRY)
+  const planRes = await withSolanaRpcRetry(
+    () =>
+      buildGen2GuardMintPlan(umi, candyMachine, phase, {
+        groupLabelOverride: groupLabelOverride !== undefined ? groupLabelOverride : undefined,
+      }),
+    MINT_PREP_SOLANA_RPC_RETRY
+  )
   if (!planRes.ok) return planRes
   mintPlanCache.set(key, { expires: Date.now() + MINT_PREP_CACHE_TTL_MS, plan: planRes.plan })
   return planRes
@@ -185,6 +202,10 @@ export type MintGen2Params = {
   sessionDeadline?: MintSessionDeadline
   /** Called before each on-chain mint (1-indexed current, total quantity). */
   onMintProgress?: (current: number, total: number) => void
+  /** Force candy-guard group (e.g. `team` for leftover backstop mint). */
+  guardGroupOverride?: string | null
+  /** Allowlist proof phase when different from mint phase (e.g. TEAM_BACKSTOP). */
+  allowListProofPhase?: Gen2MintablePhase | 'TEAM_BACKSTOP'
 }
 
 export type MintGen2Result =
@@ -399,6 +420,8 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     prefetchedWalletBalanceLamports,
     sessionDeadline: sessionDeadlineParam,
     onMintProgress,
+    guardGroupOverride,
+    allowListProofPhase,
   } = params
   if (!walletAdapter.publicKey) {
     return { ok: false, error: 'Wallet not connected' }
@@ -430,7 +453,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       () =>
         Promise.all([
           loadCollectionUpdateAuthority(umi, colMint, collectionMetadata),
-          loadGuardMintPlan(umi, candyMachine, cmId, phase),
+          loadGuardMintPlan(umi, candyMachine, cmId, phase, guardGroupOverride),
           collectPlatformMintFee
             ? platformFeeLamportsOverride != null && platformFeeLamportsOverride > 0n
               ? Promise.resolve({
@@ -483,7 +506,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
           candyGuard: plan.candyGuard.publicKey,
           groupLabel: plan.groupLabel,
           merkleRoot: plan.allowListMerkleRoot,
-          phase,
+          phase: allowListProofPhase ?? phase,
         }).then((routeRes) => {
           if (!routeRes.ok) throw new Error(routeRes.error)
           allowListRoutePlan = routeRes.plan
@@ -626,6 +649,228 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
 
     onMintProgress?.(quantity, quantity)
     pauseMintSessionDeadline(sessionDeadline)
+
+    /**
+     * Paid public (no server co-sign) + Phantom multi-signer mint txs:
+     * Phantom docs require wallet `signTransaction` / `signAllTransactions` first, then other
+     * signers (mint keypair), then broadcast — not `signAndSend` on a pre-partial-signed tx.
+     * Allowlist route stays single-signer → `signAndSend` (Blowfish/Lighthouse OK).
+     *
+     * @see https://docs.phantom.com/developer-powertools/domain-and-transaction-warnings
+     */
+    const usePhantomMultiSignerMint =
+      !plan.thirdPartySignerKey && walletAdapterIsPhantom(walletAdapter)
+
+    if (usePhantomMultiSignerMint) {
+      try {
+        const connection = new Connection(rpcUrl, { commitment: 'confirmed' })
+        const blockhash = await withSolanaRpcRetry(
+          () => umi.rpc.getLatestBlockhash({ commitment: 'confirmed' }),
+          MINT_SOLANA_SEND_RETRY
+        )
+        const feePayer = walletAdapter.publicKey
+        if (!feePayer) {
+          resumeMintSessionDeadline(sessionDeadline)
+          return { ok: false, error: 'Wallet not connected' }
+        }
+
+        const fallbackSend = (
+          transaction: Parameters<NonNullable<typeof walletAdapter.sendTransaction>>[0],
+          conn: Connection,
+          options?: Parameters<NonNullable<typeof walletAdapter.sendTransaction>>[2]
+        ) => {
+          if (typeof walletAdapter.sendTransaction !== 'function') {
+            throw new Error('Wallet cannot send transactions')
+          }
+          return walletAdapter.sendTransaction(transaction, conn, options)
+        }
+
+        // Allowlist proof must land before mintV2 (own tx — keeps mint txs under size limit).
+        if (includeAllowListRoute) {
+          const routeRes = buildRouteBuilder()
+          if (!routeRes.ok) {
+            resumeMintSessionDeadline(sessionDeadline)
+            return { ok: false, error: routeRes.error }
+          }
+          const routeBuilt = routeRes.builder.setBlockhash(blockhash).build(umi)
+          const routeWeb3 = toWeb3JsTransaction(routeBuilt)
+          const routeSig = await sendTransactionPreferPhantomSignAndSend({
+            transaction: routeWeb3,
+            connection,
+            adapter: walletAdapter,
+            publicKey: feePayer,
+            fallbackSendTransaction: fallbackSend,
+            options: { skipPreflight: false, preflightCommitment: 'confirmed', maxRetries: 3 },
+          })
+          const routeConfirmMs = Math.max(
+            MINT_SEND_MIN_MS,
+            mintSessionRemainingMs(sessionDeadline) - MINT_RECOVERY_RESERVE_MS
+          )
+          const routeOk = await pollTransactionSignatureStatus(rpcUrl, routeSig, {
+            maxWaitMs: routeConfirmMs,
+            intervalMs: 400,
+            minCommitment: 'confirmed',
+          })
+          if (!routeOk) {
+            resumeMintSessionDeadline(sessionDeadline)
+            return {
+              ok: false,
+              error:
+                'Allowlist setup didn’t confirm — tap Mint again to finish (your spots are still reserved).',
+              plannedMintB58s: plannedB58s,
+            }
+          }
+        }
+
+        const builtMints: Transaction[] = []
+        for (let i = 0; i < quantity; i++) {
+          const nftMint = nftMints[i]!
+          const res = buildSingleMintBuilder(nftMint)
+          if (!res.ok) {
+            resumeMintSessionDeadline(sessionDeadline)
+            return { ok: false, error: res.error, plannedMintB58s: plannedB58s }
+          }
+          builtMints.push(res.builder.setBlockhash(blockhash).build(umi))
+        }
+
+        // Pre-sim before the wallet sheet so doomed mints do not look "malicious".
+        for (const built of builtMints) {
+          await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(built), {
+            failMessagePrefix: 'Mint would fail on-chain before wallet approval.',
+          })
+        }
+
+        // 1) Phantom signs fee payer only (one prompt for the batch).
+        const walletSigned = await signAllTransactions(
+          builtMints.map((transaction) => ({
+            transaction,
+            signers: [umi.identity],
+          }))
+        )
+
+        // 2) Mint keypairs sign after Phantom (required account signer for each mint).
+        const fullySigned: Transaction[] = []
+        for (let i = 0; i < quantity; i++) {
+          fullySigned.push(await nftMints[i]!.signTransaction(walletSigned[i]!))
+        }
+
+        resumeMintSessionDeadline(sessionDeadline)
+
+        // 3) Broadcast fully signed txs (no second wallet prompt).
+        let firstSendError: unknown = null
+        const sendOneMint = async (
+          tx: Transaction
+        ): Promise<{ sig: string | null; confirmed: boolean }> => {
+          let sig: string | null = null
+          try {
+            const sigBytes = await withSolanaRpcRetry(
+              () => umi.rpc.sendTransaction(tx, { skipPreflight: false }),
+              MINT_SOLANA_SEND_RETRY
+            )
+            sig = typeof sigBytes === 'string' ? sigBytes : bs58.encode(sigBytes)
+            const confirmMs = Math.max(
+              MINT_SEND_MIN_MS,
+              mintSessionRemainingMs(sessionDeadline) - MINT_RECOVERY_RESERVE_MS
+            )
+            const confirmed = await pollTransactionSignatureStatus(rpcUrl, sig, {
+              maxWaitMs: confirmMs,
+              intervalMs: 400,
+              minCommitment: 'confirmed',
+            })
+            return { sig, confirmed }
+          } catch (e) {
+            firstSendError = firstSendError ?? e
+            return { sig: sig ?? extractTxSignatureFromUnknownError(e), confirmed: false }
+          }
+        }
+
+        const sendResults: Array<{ sig: string | null; confirmed: boolean }> = []
+        const all = await Promise.all(fullySigned.map((tx) => sendOneMint(tx)))
+        all.forEach((r) => sendResults.push(r))
+
+        const confirmedSigs: string[] = []
+        const confirmedMints: string[] = []
+        for (let i = 0; i < quantity; i++) {
+          const r = sendResults[i]
+          if (r?.confirmed && r.sig) {
+            confirmedSigs.push(r.sig)
+            confirmedMints.push(plannedB58s[i]!)
+          }
+        }
+
+        const pendingIdx = Array.from({ length: quantity }, (_, i) => i).filter(
+          (i) => !(sendResults[i]?.confirmed && sendResults[i]?.sig)
+        )
+        if (pendingIdx.length > 0 && mintSessionRemainingMs(sessionDeadline) > 400) {
+          const pendingB58s = pendingIdx.map((i) => plannedB58s[i]!)
+          const onChain = new Set(
+            await detectPlannedMintAccounts(rpcUrl, pendingB58s, { attempts: 3, delayMs: 600 })
+          )
+          for (const i of pendingIdx) {
+            const b58 = plannedB58s[i]!
+            if (!onChain.has(b58)) continue
+            const sig =
+              sendResults[i]?.sig ??
+              (await findRecentCandyMachineMintSignature(rpcUrl, walletB58, cmId, [b58]))
+            if (sig) {
+              confirmedSigs.push(sig)
+              confirmedMints.push(b58)
+            }
+          }
+        }
+
+        if (confirmedMints.length >= quantity) {
+          return { ok: true, txSignatures: confirmedSigs, mintedNftMints: confirmedMints }
+        }
+        if (confirmedMints.length > 0) {
+          return {
+            ok: false,
+            error:
+              'Your wallet reported an error, but your mint appears on-chain — saving it now. Open your wallet Collectibles if the reveal is slow.',
+            txSignatures: confirmedSigs,
+            mintedNftMints: confirmedMints,
+            plannedMintB58s: plannedB58s.filter((b) => !confirmedMints.includes(b)),
+          }
+        }
+        const msg =
+          firstSendError instanceof Error
+            ? firstSendError.message
+            : String(firstSendError ?? 'Mint transaction failed to confirm — check your wallet Collectibles, then retry.')
+        const simulationHint = friendlyMintSimulationError(msg, collectPlatformMintFee)
+        return {
+          ok: false,
+          error:
+            simulationHint ??
+            friendlySolanaRpcErrorMessage(firstSendError) ??
+            msg,
+          plannedMintB58s: plannedB58s,
+        }
+      } catch (e) {
+        resumeMintSessionDeadline(sessionDeadline)
+        const msg = e instanceof Error ? e.message : String(e)
+        const low = msg.toLowerCase()
+        if (low.includes('user rejected') || low.includes('cancel')) {
+          return { ok: false, error: 'Mint transaction rejected in wallet' }
+        }
+        if (isTransactionTooLargeError(e)) {
+          return {
+            ok: false,
+            error: friendlyTransactionTooLargeError(quantity),
+            plannedMintB58s: plannedB58s,
+          }
+        }
+        const simulationHint = friendlyMintSimulationError(msg, collectPlatformMintFee)
+        if (simulationHint) {
+          return { ok: false, error: simulationHint, plannedMintB58s: plannedB58s }
+        }
+        return {
+          ok: false,
+          error: friendlySolanaRpcErrorMessage(e) ?? msg,
+          plannedMintB58s: plannedB58s,
+        }
+      }
+    }
+
     // The optional allowList proof tx (if any) is signed in the SAME wallet prompt as the mints —
     // UMI's signAllTransactions invokes the wallet once — then split out so it can be sent first and
     // kept OUT of the co-sign round-trip (the cosign endpoint requires exactly one mintV2 per tx).

@@ -19,7 +19,7 @@ import {
 } from '@solana-mobile/wallet-adapter-mobile'
 
 import { isMobileDevice, shouldMobileAutoConnect } from '@/lib/utils'
-import { PLATFORM_NAME } from '@/lib/site-config'
+import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
 import { warnIfWalletRpcIsHeliusDevOnce } from '@/lib/rpc-cost-hint'
 import { resolvePublicSolanaRpcUrl, resolveWalletAdapterRpcUrl } from '@/lib/solana-rpc-url'
 import { getSolanaRpcUrl, isDevnetMintEnabled, walletAdapterShouldUseDevnet } from '@/lib/solana/network'
@@ -33,6 +33,20 @@ import '@solana/wallet-adapter-react-ui/styles.css'
 
 interface WalletContextProviderProps {
   children: ReactNode
+}
+
+/** Canonical origin for mobile wallet appIdentity (www in production; local on localhost). */
+function resolveWalletAppIdentityOrigin(): string {
+  if (typeof window === 'undefined') return getSiteBaseUrl()
+  const host = window.location.hostname
+  if (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local')) {
+    return window.location.origin
+  }
+  try {
+    return new URL(getSiteBaseUrl()).origin
+  } catch {
+    return window.location.origin
+  }
 }
 
 /** Inner provider; mounts only when page/extensions are ready, with autoConnect true from the start. */
@@ -52,13 +66,14 @@ function WalletContextProviderInner({ children }: WalletContextProviderProps) {
     () => {
       const walletAdapters = []
       if (typeof window !== 'undefined' && isMobileDevice()) {
+        const identityOrigin = resolveWalletAppIdentityOrigin()
         walletAdapters.push(
           new SolanaMobileWalletAdapter({
             addressSelector: createDefaultAddressSelector(),
             appIdentity: {
               name: PLATFORM_NAME,
-              uri: window.location.origin,
-              icon: `${window.location.origin}/icon.png`,
+              uri: identityOrigin,
+              icon: `${identityOrigin}/icon.png`,
             },
             authorizationResultCache: createDefaultAuthorizationResultCache(),
             cluster: network === WalletAdapterNetwork.Mainnet

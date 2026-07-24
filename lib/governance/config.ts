@@ -1,7 +1,7 @@
 import { PublicKey } from '@solana/web3.js'
 
 /** Default program id (matches `governance-anchor` workspace). */
-export const DEFAULT_GOVERNANCE_PROGRAM_ID = 'FwEAjseYTP6vTp9g6SpBTgySWzm4yxCtBc3Ti7Rvcfyz'
+export const DEFAULT_GOVERNANCE_PROGRAM_ID = 'CJD7H2URWfCqUBqntRgaEe6yzB2f1MmHofoXDi7BuYQR'
 
 export function getGovernanceProgramId(): PublicKey {
   const raw = process.env.NEXT_PUBLIC_GOVERNANCE_PROGRAM_ID?.trim()

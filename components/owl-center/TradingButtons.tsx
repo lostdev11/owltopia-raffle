@@ -12,8 +12,8 @@ export function TradingButtons({
 }) {
   if (!magicEdenUrl && !tensorUrl) {
     return (
-      <p className="font-mono text-xs text-[#5C6773]">
-        // Marketplace URLs — configure in Owl Center admin when trading opens.
+      <p className="font-mono text-xs text-[#FFD769]">
+        // Marketplace links coming soon — Magic Eden & Tensor URLs are set in Owl Center admin at mint-out.
       </p>
     )
   }

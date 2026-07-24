@@ -147,6 +147,56 @@ export function getRaffleDisplayImageUrl(imageUrl: string | null | undefined): s
   }
 }
 
+/**
+ * `/api/proxy-image?url=…&w=…` URL for small thumbnails (listing cards, wallet NFT picker).
+ * NFT art is frequently a 5–8MB PNG; the proxy downscales it server-side to a few-KB WebP so
+ * mobile browsers stop downloading originals for ~100px squares. Returns null when resizing
+ * is not applicable (local site assets, or hosts where server-side fetch is unreliable) —
+ * callers fall back to the regular display chain.
+ */
+export function proxyThumbImageUrl(
+  imageUrl: string | null | undefined,
+  width: number
+): string | null {
+  if (!imageUrl?.trim()) return null
+  const w = Math.round(width)
+  if (!Number.isFinite(w) || w <= 0) return null
+  let url = imageUrl.trim()
+
+  if (url.startsWith('/api/proxy-image')) {
+    try {
+      const parsed = new URL(url, 'https://placeholder.local')
+      const inner = parsed.searchParams.get('url')
+      if (!inner) return null
+      url = fullyDecodeURIComponentSafe(inner)
+    } catch {
+      return null
+    }
+  }
+
+  // Local site assets (SOL/USDC marks, icons) never need the resize proxy.
+  if (url.startsWith('/') && !url.startsWith('//')) return null
+
+  url = rewriteDeadIpfsGatewayHttpsUrl(url)
+  const arHttps = arweaveUriToHttps(url)
+  if (arHttps) url = arHttps
+
+  if (/^ipfs:\/\//i.test(url)) {
+    return `/api/proxy-image?url=${encodeURIComponent(url)}&w=${w}`
+  }
+
+  try {
+    const u = new URL(url)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+    // Firebase/GCS/Supabase often 404 or block server-side fetches (see isDirectRaffleImageHost);
+    // those hosts stay browser-direct instead of wasting a doomed proxy attempt per thumb.
+    if (isDirectRaffleImageHost(u.hostname)) return null
+    return `/api/proxy-image?url=${encodeURIComponent(u.toString())}&w=${w}`
+  } catch {
+    return null
+  }
+}
+
 /** When `/api/proxy-image` fails in the browser, try a direct HTTPS URL (gateway for ipfs://). */
 export function getRaffleImageFallbackRawUrl(
   displayImageUrl: string | null | undefined,

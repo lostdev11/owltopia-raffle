@@ -1,84 +1,57 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { useWallet } from '@solana/wallet-adapter-react'
+import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { useRouter } from 'next/navigation'
+import { performSiwsSignIn } from '@/lib/client/siws-sign-in'
 
 /**
  * Sign-In with Solana (nonce → signMessage → /api/auth/verify) + router.refresh().
- * Used by council VotePanel and CouncilOwlEscrowPanel so escrow can run on /council without a proposal card.
+ * Ledger / hardware wallets auto-fall back to a signed memo transaction (not broadcast).
  */
 export function useSiwsSignIn() {
   const router = useRouter()
-  const { publicKey, signMessage } = useWallet()
+  const { connection } = useConnection()
+  const { publicKey, signMessage, signTransaction, wallet } = useWallet()
   const [signingIn, setSigningIn] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const signIn = useCallback(async (opts?: { onSuccess?: () => void | Promise<void> }): Promise<boolean> => {
-    if (!publicKey || !signMessage) {
-      setError('Your wallet does not support message signing.')
-      return false
-    }
-    setError(null)
-    setSigningIn(true)
-    try {
-      const walletAddr = publicKey.toBase58()
-      const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(walletAddr)}`, {
-        credentials: 'include',
-      })
-      if (!nonceRes.ok) {
-        const data = await nonceRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Failed to get sign-in nonce')
+  const signIn = useCallback(
+    async (opts?: { onSuccess?: () => void | Promise<void>; preferTx?: boolean }): Promise<boolean> => {
+      if (!publicKey) {
+        setError('Connect a wallet first.')
+        return false
       }
-      const { message } = (await nonceRes.json()) as { message: string }
-      const messageBytes = new TextEncoder().encode(message)
-
-      const SIGN_TIMEOUT_MS = 120_000
-      const signature = await Promise.race([
-        signMessage(messageBytes),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(
-                  'Timed out waiting for a wallet signature. Open Phantom (or your wallet), approve the Sign Message request, or disconnect and reconnect if nothing appears.'
-                )
-              ),
-            SIGN_TIMEOUT_MS
-          )
-        ),
-      ])
-      const signatureBase64 =
-        typeof signature === 'string'
-          ? btoa(signature)
-          : btoa(String.fromCharCode(...new Uint8Array(signature)))
-
-      const verifyRes = await fetch('/api/auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          wallet: walletAddr,
-          message,
-          signature: signatureBase64,
-        }),
-      })
-
-      if (!verifyRes.ok) {
-        const data = await verifyRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Sign-in verification failed')
+      if (!signMessage && !signTransaction) {
+        setError('Your wallet does not support signing.')
+        return false
       }
+      setError(null)
+      setSigningIn(true)
+      try {
+        await performSiwsSignIn({
+          wallet: publicKey.toBase58(),
+          signMessage,
+          signTransaction,
+          preferTx: opts?.preferTx,
+          walletName: wallet?.adapter?.name,
+          getBlockhash: async () => {
+            const latest = await connection.getLatestBlockhash('confirmed')
+            return latest.blockhash
+          },
+        })
+        await opts?.onSuccess?.()
+        router.refresh()
+        return true
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Sign-in failed')
+        return false
+      } finally {
+        setSigningIn(false)
+      }
+    },
+    [publicKey, signMessage, signTransaction, wallet?.adapter?.name, connection, router]
+  )
 
-      await opts?.onSuccess?.()
-      router.refresh()
-      return true
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Sign-in failed')
-      return false
-    } finally {
-      setSigningIn(false)
-    }
-  }, [publicKey, signMessage, router])
-
-  return { signIn, signingIn, error }
+  return { signIn, signingIn, error, canSignTransaction: Boolean(signTransaction) }
 }

@@ -1,4 +1,4 @@
-import { Connection, LAMPORTS_PER_SOL, type ParsedTransactionWithMeta, PublicKey } from '@solana/web3.js'
+import { Connection, type ParsedTransactionWithMeta, PublicKey } from '@solana/web3.js'
 
 import {
   getGen2PresalePublicOffer,
@@ -18,6 +18,7 @@ import {
   type Gen2PriceBreakdown,
 } from '@/lib/gen2-presale/pricing'
 import { bigintToRpcParam } from '@/lib/gen2-presale/rpc-bigint'
+import { unitLamportsBoundsFromOracle } from '@/lib/gen2-presale/sol-usd-bounds'
 import {
   feePayerMatchesBuyer,
   fetchParsedTransactionConfirmed,
@@ -31,23 +32,30 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
-/** Matches {@link verifyGen2PresalePaymentChainAligned} per-spot SOL bounds (unreasonable_unit). */
-const CHAIN_INFERENCE_MIN_UNIT_LAMPORTS = BigInt(Math.ceil(0.0005 * LAMPORTS_PER_SOL))
-const CHAIN_INFERENCE_MAX_UNIT_LAMPORTS = BigInt(Math.floor(100 * LAMPORTS_PER_SOL))
-
 /**
  * Integer spot counts compatible with `total` lamports to founders under chain-aligned rules.
+ * Per-spot floor/ceiling come from the live oracle (±tolerance), not a fixed tiny SOL amount.
  * Results are clamped to {@link GEN2_PRESALE_MAX_SPOTS_CHAIN_INFERENCE}.
  */
 export function computeGen2PresaleQuantityBoundsFromTotal(
-  total: bigint
+  total: bigint,
+  cfg: Pick<Gen2PresaleEnvConfig, 'priceUsdc' | 'solUsdPrice'>
 ): { minQ: number; maxQ: number } | null {
-  if (total <= 0n || CHAIN_INFERENCE_MIN_UNIT_LAMPORTS <= 0n) return null
+  if (total <= 0n) return null
 
-  let maxQ = total / CHAIN_INFERENCE_MIN_UNIT_LAMPORTS
+  let minUnit: bigint
+  let maxUnit: bigint
+  try {
+    ;({ minUnit, maxUnit } = unitLamportsBoundsFromOracle(cfg.priceUsdc, cfg.solUsdPrice))
+  } catch {
+    return null
+  }
+  if (minUnit <= 0n || maxUnit <= 0n) return null
+
+  let maxQ = total / minUnit
   if (maxQ < 1n) return null
 
-  let minQ = (total + CHAIN_INFERENCE_MAX_UNIT_LAMPORTS - 1n) / CHAIN_INFERENCE_MAX_UNIT_LAMPORTS
+  let minQ = (total + maxUnit - 1n) / maxUnit
   if (minQ < 1n) minQ = 1n
 
   if (maxQ > BigInt(GEN2_PRESALE_MAX_SPOTS_CHAIN_INFERENCE)) {
@@ -208,6 +216,7 @@ export function getVerifiedBreakdownForQuantity(
       pctB: cfg.founderBPercent,
       priceUsdc: cfg.priceUsdc,
       quantity: qty,
+      oracleSolUsd: cfg.solUsdPrice,
     })
     if (chain.ok) {
       breakdown = {
@@ -240,6 +249,7 @@ export function getVerifiedBreakdownForQuantity(
 export async function resolveGen2PresaleQuantityFromParsedTx(params: {
   buyerWallet: string
   parsedTx: ParsedTransactionWithMeta
+  /** Ignored for amount checks — kept for call-site compatibility / display only. */
   solUsdPriceUsed?: number
 }): Promise<
   | { ok: true; buyerWallet: string; quantity: number; breakdown: Gen2PriceBreakdown }
@@ -250,15 +260,9 @@ export async function resolveGen2PresaleQuantityFromParsedTx(params: {
     return { ok: false, code: 'invalid_wallet', message: 'Invalid buyer wallet' }
   }
 
-  let solUsdOverride: number | undefined
-  const raw = params.solUsdPriceUsed
-  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
-    solUsdOverride = raw
-  }
-
   let cfg
   try {
-    cfg = await getGen2PresaleServerConfig(solUsdOverride != null ? { solUsdPrice: solUsdOverride } : undefined)
+    cfg = await getGen2PresaleServerConfig()
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Server configuration error'
     return { ok: false, code: 'config', message: msg }
@@ -292,7 +296,7 @@ export async function resolveGen2PresaleQuantityFromParsedTx(params: {
     }
   }
 
-  const bounds = computeGen2PresaleQuantityBoundsFromTotal(split.total)
+  const bounds = computeGen2PresaleQuantityBoundsFromTotal(split.total, cfg)
   if (!bounds) {
     return {
       ok: false,
@@ -336,6 +340,7 @@ export async function executeGen2PresaleConfirm(params: {
   buyerWallet: string
   quantity: number
   txSignature: string
+  /** Ignored for amount checks — kept for call-site compatibility / display only. */
   solUsdPriceUsed?: number
   /** When provided, skips re-fetching the transaction (backfill / quantity search). */
   parsedTx?: ParsedTransactionWithMeta | null
@@ -370,15 +375,9 @@ export async function executeGen2PresaleConfirm(params: {
     }
   }
 
-  let solUsdOverride: number | undefined
-  const raw = params.solUsdPriceUsed
-  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
-    solUsdOverride = raw
-  }
-
   let cfg
   try {
-    cfg = await getGen2PresaleServerConfig(solUsdOverride != null ? { solUsdPrice: solUsdOverride } : undefined)
+    cfg = await getGen2PresaleServerConfig()
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Server configuration error'
     return { ok: false, httpStatus: 500, message: msg }
@@ -598,7 +597,7 @@ export async function executeGen2PresaleConfirmWithQuantitySearch(params: {
     }
   }
 
-  const boundsRaw = computeGen2PresaleQuantityBoundsFromTotal(split.total)
+  const boundsRaw = computeGen2PresaleQuantityBoundsFromTotal(split.total, cfg)
   if (!boundsRaw) {
     return {
       ok: false,

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { authorizeCronBearer } from '@/lib/cron-auth'
 import { getRaffleById, listRaffleIdsPendingEscrowDepositVerification } from '@/lib/db/raffles'
 import { verifyPrizeDepositInternal } from '@/lib/raffles/verify-prize-deposit-internal'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
@@ -11,16 +12,8 @@ export const maxDuration = 60
  * Activates NFT / partner SPL raffles after `register-deposit-tx` when immediate verify missed RPC lag.
  */
 export async function GET(request: NextRequest) {
-  const secret = process.env.CRON_SECRET
-  if (!secret) {
-    console.error('CRON_SECRET is not set')
-    return NextResponse.json({ error: 'server error' }, { status: 500 })
-  }
-
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: 'server error' }, { status: 401 })
-  }
+  const cronAuth = authorizeCronBearer(request)
+  if (cronAuth) return cronAuth
 
   try {
     const ids = await listRaffleIdsPendingEscrowDepositVerification(45)

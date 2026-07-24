@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getEntryByTransactionSignature, updateEntryStatus, saveTransactionSignature, getEntryById, createEntry, markEntryAsRestored } from '@/lib/db/entries'
 import { getRaffleById, getEntriesByRaffleId, getRaffles, getRaffleBySlug } from '@/lib/db/raffles'
 import type { Entry, Raffle } from '@/lib/types'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import { normalizeDepositTxSignatureInput } from '@/lib/raffles/verify-prize-deposit-client'
 import { getPaymentTransactionDetails } from '@/lib/raffles/payment-transaction-details'
 
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Full admin session required (for security and to record adminWallet on restore)
-    const session = await requireFullAdminSession(request)
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
     const adminWallet = session.wallet
 

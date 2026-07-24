@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
-  consumeNonce,
+  consumeNonceOnce,
+  messageMatchesIssuedSignIn,
   parseNonceFromSignInMessage,
   verifySignIn,
   setSessionCookieInResponse,
@@ -49,9 +50,9 @@ export async function POST(request: NextRequest) {
     }
 
     const nonce = parseNonceFromSignInMessage(messageStr)
-    if (!nonce || !consumeNonce(nonce, walletStr)) {
+    if (!nonce || !messageMatchesIssuedSignIn(walletStr, messageStr, nonce)) {
       return NextResponse.json(
-        { error: 'Invalid or expired nonce' },
+        { error: 'Invalid sign-in message' },
         { status: 400 }
       )
     }
@@ -60,6 +61,14 @@ export async function POST(request: NextRequest) {
     if (!result.valid) {
       return NextResponse.json(
         { error: result.error || 'Invalid signature' },
+        { status: 400 }
+      )
+    }
+
+    // Consume after signature check so a bad signature does not burn the nonce.
+    if (!(await consumeNonceOnce(nonce, walletStr))) {
+      return NextResponse.json(
+        { error: 'Invalid or expired nonce' },
         { status: 400 }
       )
     }

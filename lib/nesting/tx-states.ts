@@ -22,12 +22,12 @@ export type StakingExecutionMeta = {
 
 const PHASE_LABEL: Record<NestingTxPhase, string> = {
   idle: '',
-  preparing: 'Getting your nest ready…',
-  awaiting_wallet_signature: 'Approve nest lock and platform fee in your wallet…',
-  submitting: 'Confirming your nest…',
-  confirming: 'Almost nested…',
-  syncing: 'Finalizing your nest…',
-  failed: 'That did not work—give it another try',
+  preparing: 'Setting up your nest — hang tight…',
+  awaiting_wallet_signature: 'Approve once in your wallet (nest lock + fee together)…',
+  submitting: 'Working on your nest…',
+  confirming: 'Almost done…',
+  syncing: 'Confirming your nest on Owltopia…',
+  failed: 'That did not work — give it another try',
 }
 
 const CLAIM_PHASE_LABEL: Record<NestingTxPhase, string> = {

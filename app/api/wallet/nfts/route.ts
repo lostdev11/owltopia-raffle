@@ -131,6 +131,40 @@ async function getNftsViaRpcFallback(rpcUrl: string, wallet: string): Promise<Wa
   }
 }
 
+/** Per Helius request; DAS occasionally hangs, which used to stall the route until the platform killed it. */
+const HELIUS_FETCH_TIMEOUT_MS = 12_000
+const HELIUS_RETRY_DELAY_MS = 700
+
+/**
+ * One DAS page fetch with a timeout and a single retry on 429/5xx/network errors. Transient
+ * Helius failures were surfacing as empty pickers ("NFTs missing until reload") on mobile.
+ */
+async function fetchHeliusWithRetry(rpcUrl: string, body: string): Promise<Response | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), HELIUS_FETCH_TIMEOUT_MS)
+    try {
+      const res = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        cache: 'no-store',
+        signal: ctrl.signal,
+      })
+      if (res.ok || attempt > 0 || (res.status !== 429 && res.status < 500)) {
+        return res
+      }
+      await res.body?.cancel().catch(() => {})
+    } catch {
+      if (attempt > 0) return null
+    } finally {
+      clearTimeout(timer)
+    }
+    await new Promise((r) => setTimeout(r, HELIUS_RETRY_DELAY_MS))
+  }
+  return null
+}
+
 /**
  * GET /api/wallet/nfts?wallet=<address>
  * Returns NFTs owned by the wallet using Helius DAS getAssetsByOwner when HELIUS_API_KEY is set.
@@ -165,10 +199,9 @@ export async function GET(request: NextRequest) {
     const maxPages = 10
     const allItems: HeliusAsset[] = []
     for (let page = 1; page <= maxPages; page++) {
-      const res = await fetch(heliusRpcUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const res = await fetchHeliusWithRetry(
+        heliusRpcUrl,
+        JSON.stringify({
           jsonrpc: '2.0',
           id: `wallet-nfts-${page}`,
           method: 'getAssetsByOwner',
@@ -184,12 +217,11 @@ export async function GET(request: NextRequest) {
               showGrandTotal: false,
             },
           },
-        }),
-        cache: 'no-store',
-      })
+        })
+      )
 
-      if (!res.ok) {
-        console.error('Helius getAssetsByOwner non-OK', res.status)
+      if (!res || !res.ok) {
+        console.error('Helius getAssetsByOwner non-OK', res?.status ?? 'network/timeout')
         return NextResponse.json(
           { error: 'Failed to fetch NFTs' },
           { status: 502 }

@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   Bird,
+  Gavel,
   Gift,
   HeartHandshake,
   Landmark,
@@ -73,6 +74,12 @@ export const RAFFLES_NAV_GROUP: SiteNavGroup = {
       description: 'Host dashboard after partner onboarding',
       icon: HeartHandshake,
     },
+    {
+      href: '/auctions',
+      label: 'Partner auctions',
+      description: 'Beta — partners & admins only (NFT / SOL / USDC)',
+      icon: Gavel,
+    },
   ],
 }
 
@@ -128,13 +135,18 @@ export const OWLS_NAV_GROUP: SiteNavGroup = {
       description: 'Buy presale spots before mint',
       icon: Sparkles,
     },
-    {
-      href: '/nesting',
-      label: 'Nesting',
-      description: 'Stake owls and NFTs to earn OWL',
-      icon: Bird,
-    },
   ],
+}
+
+/**
+ * Top-level header link so holders don't have to hunt through the Owls dropdown.
+ * (Was previously the third item inside OWLS_NAV_GROUP.)
+ */
+export const NESTING_NAV_ITEM: SiteNavItem = {
+  href: '/nesting',
+  label: 'Nesting',
+  description: 'Stake owls and NFTs to earn OWL',
+  icon: Bird,
 }
 
 export const DASHBOARD_NAV_ITEM: SiteNavItem = {
@@ -182,6 +194,12 @@ export function isPathInNavGroup(pathname: string, group: SiteNavGroup): boolean
 }
 
 /** Admin menu items are admin-only. Create Raffle is no longer here (see CREATE_RAFFLE_NAV_ITEM). */
-export function filterAdminNavItems(options: { showOwlVision: boolean }): SiteNavItem[] {
-  return options.showOwlVision ? [...ADMIN_NAV_GROUP.items] : []
+export function filterAdminNavItems(options: {
+  showOwlVision: boolean
+  adminRole?: 'full' | 'mod' | null
+}): SiteNavItem[] {
+  if (!options.showOwlVision) return []
+  return options.adminRole === 'mod'
+    ? [ADMIN_NAV_GROUP.items[0]]
+    : [...ADMIN_NAV_GROUP.items]
 }

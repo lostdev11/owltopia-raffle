@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { authorizeCronBearer } from '@/lib/cron-auth'
 import { processEndedCommunityGiveawaysForAutoDraw } from '@/lib/community-giveaways/auto-draw'
 import { processEndedRafflesWithoutWinners } from '@/lib/draw-ended-raffles'
 
@@ -11,16 +12,8 @@ export const maxDuration = 60
  * Secured by CRON_SECRET (Bearer token in Authorization header).
  */
 export async function GET(request: NextRequest) {
-  const secret = process.env.CRON_SECRET
-  if (!secret) {
-    console.error('CRON_SECRET is not set')
-    return NextResponse.json({ error: 'server error' }, { status: 500 })
-  }
-
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: 'server error' }, { status: 401 })
-  }
+  const cronAuth = authorizeCronBearer(request)
+  if (cronAuth) return cronAuth
 
   try {
     const [raffleResults, communityResults] = await Promise.all([

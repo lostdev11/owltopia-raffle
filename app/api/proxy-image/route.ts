@@ -33,6 +33,51 @@ const MAX_INLINE_BYTES = (() => {
 /** Per upstream URL try; multi-gateway races run in parallel so wall time stays ~one timeout. */
 const FETCH_TIMEOUT_MS = 14_000
 
+/**
+ * `?w=` thumbnail resizing. NFT art is often a 5–8MB PNG rendered as a ~100px square on
+ * mobile listings; downscaling server-side keeps card thumbs to a few KB. Sources larger
+ * than this cap still redirect to the upstream original (same as the non-resize path).
+ */
+const RESIZE_MAX_SOURCE_BYTES = 16 * 1024 * 1024
+const RESIZE_MAX_WIDTH = 1024
+const RESIZE_MIN_WIDTH = 16
+
+/** Raster formats sharp can downscale; GIF is excluded to preserve animation, SVG scales for free. */
+const RESIZABLE_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/avif',
+])
+
+function parseResizeWidth(searchParams: URLSearchParams): number | null {
+  const raw = searchParams.get('w')?.trim()
+  if (!raw) return null
+  const n = parseInt(raw, 10)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return Math.min(Math.max(n, RESIZE_MIN_WIDTH), RESIZE_MAX_WIDTH)
+}
+
+async function resizeImageBuffer(
+  buffer: ArrayBuffer,
+  width: number
+): Promise<ArrayBuffer | null> {
+  try {
+    const { default: sharp } = await import('sharp')
+    const out = await sharp(Buffer.from(buffer))
+      .rotate()
+      .resize({ width, withoutEnlargement: true })
+      .webp({ quality: 78 })
+      .toBuffer()
+    const copy = new ArrayBuffer(out.byteLength)
+    new Uint8Array(copy).set(out)
+    return copy
+  } catch {
+    return null
+  }
+}
+
 /** Abort when any of the signals abort (no dependency on AbortSignal.any). */
 function abortWhenAny(signals: AbortSignal[]): AbortController {
   const out = new AbortController()
@@ -278,7 +323,11 @@ function expandArweaveProxyUrls(normalizedUrl: string): string[] {
 /**
  * Single upstream attempt. Throws ProxyAttemptError on failure; returns NextResponse on success or redirect.
  */
-async function tryProxyOneUrl(tryUrl: string, raceAbort: AbortSignal): Promise<NextResponse> {
+async function tryProxyOneUrl(
+  tryUrl: string,
+  raceAbort: AbortSignal,
+  resizeWidth: number | null
+): Promise<NextResponse> {
   const timeoutCtrl = new AbortController()
   const timeoutId = setTimeout(() => timeoutCtrl.abort(), FETCH_TIMEOUT_MS)
   const combined = abortWhenAny([timeoutCtrl.signal, raceAbort])
@@ -310,14 +359,18 @@ async function tryProxyOneUrl(tryUrl: string, raceAbort: AbortSignal): Promise<N
       throw new ProxyAttemptError(res.status >= 500 ? 502 : 404)
     }
 
+    // Resize requests buffer more than the inline cap: the downscaled output stays tiny even
+    // when the source is a multi-MB original that would otherwise 307 to the CDN.
+    const maxSourceBytes = resizeWidth ? RESIZE_MAX_SOURCE_BYTES : MAX_INLINE_BYTES
+
     const contentLength = res.headers.get('content-length')
     const declaredLen = contentLength ? parseInt(contentLength, 10) : NaN
-    if (Number.isFinite(declaredLen) && declaredLen > MAX_INLINE_BYTES) {
+    if (Number.isFinite(declaredLen) && declaredLen > maxSourceBytes) {
       await res.body?.cancel().catch(() => {})
       return NextResponse.redirect(tryUrl, 307)
     }
 
-    const buffer = await readBodyUpTo(res, MAX_INLINE_BYTES)
+    const buffer = await readBodyUpTo(res, maxSourceBytes)
     if (buffer === 'too_large') {
       return NextResponse.redirect(tryUrl, 307)
     }
@@ -326,6 +379,24 @@ async function tryProxyOneUrl(tryUrl: string, raceAbort: AbortSignal): Promise<N
     const contentType = effectiveImageContentType(headerCt, buffer)
     if (!contentType) {
       throw new ProxyAttemptError(400)
+    }
+
+    if (resizeWidth && RESIZABLE_IMAGE_TYPES.has(contentType)) {
+      const resized = await resizeImageBuffer(buffer, resizeWidth)
+      if (resized) {
+        return new NextResponse(resized, {
+          status: 200,
+          headers: {
+            'Content-Type': 'image/webp',
+            'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+          },
+        })
+      }
+    }
+
+    // Resize skipped or failed: fall back to the plain proxy contract (inline small, 307 large).
+    if (buffer.byteLength > MAX_INLINE_BYTES) {
+      return NextResponse.redirect(tryUrl, 307)
     }
 
     return new NextResponse(buffer, {
@@ -386,13 +457,15 @@ function proxyFetchCandidateUrls(targetStr: string, gatewaySeed: string): string
 }
 
 /**
- * GET /api/proxy-image?url=<encoded-image-url>
+ * GET /api/proxy-image?url=<encoded-image-url>[&w=<thumb-width>]
  *
  * Proxies external image URLs (e.g. IPFS) so the browser loads images from our domain.
  * This avoids Safe Web / antivirus flagging IPFS gateway URLs when loading NFT thumbnails.
  *
  * - Only allows http/https (or ipfs:// converted to HTTPS).
  * - Returns only image/* content types.
+ * - `w` (16–1024) downscales raster art server-side to WebP for listing/picker thumbnails,
+ *   so mobile clients stop downloading multi-MB originals for ~100px squares.
  * - Bodies larger than ~4MB (see IMAGE_PROXY_MAX_INLINE_BYTES) return 307 to the upstream URL
  *   so the browser loads directly (avoids Vercel response-size 413 and huge buffers).
  */
@@ -419,6 +492,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid url scheme' }, { status: 400 })
     }
 
+    const resizeWidth = parseResizeWidth(searchParams)
+
     const targetStr = targetUrl.toString()
     /** Prefer the caller's HTTPS URL (e.g. `{cid}.ipfs.w3s.link`) before normalized ipfs.io rewrites. */
     const gatewaySeed = /^https?:\/\//i.test(decodedInput) ? decodedInput : targetStr
@@ -433,7 +508,7 @@ export async function GET(request: NextRequest) {
     try {
       return await Promise.any(
         urlsToTry.map((tryUrl) =>
-          tryProxyOneUrl(tryUrl, cancelRace.signal).then((response) => {
+          tryProxyOneUrl(tryUrl, cancelRace.signal, resizeWidth).then((response) => {
             cancelRace.abort()
             return response
           })

@@ -2,8 +2,24 @@
 
 import type { Connection } from '@solana/web3.js'
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
-import { publicKey } from '@metaplex-foundation/umi'
+import {
+  publicKey,
+  lamports,
+  type Umi,
+  type TransactionBuilder,
+} from '@metaplex-foundation/umi'
 import { walletAdapterIdentity } from '@metaplex-foundation/umi-signer-wallet-adapters'
+import { transferSol } from '@metaplex-foundation/mpl-toolbox'
+import {
+  sendUmiBuilderViaWalletSignAndSend,
+  type WalletSendTransactionFn,
+} from '@/lib/solana/send-umi-builder-via-wallet'
+import {
+  assertPhantomUsesWalletSignAndSend,
+  createNoopUmiForPhantomSafeSend,
+} from '@/lib/solana/phantom-safe-umi-send'
+import { umiSignatureToBase58 } from '@/lib/solana/umi-signature'
+import { resolveMetaplexClientRpcUrl } from '@/lib/solana-rpc-url'
 
 interface TransferTokenMetadataNftToEscrowArgs {
   connection: Connection
@@ -12,6 +28,31 @@ interface TransferTokenMetadataNftToEscrowArgs {
   wallet: any
   mintAddress: string
   escrowAddress: string
+  solMilestoneLamports?: number
+  fundsEscrowAddress?: string
+  /** Required for Phantom — pass `useSendTransactionForWallet()`. */
+  sendTransaction?: WalletSendTransactionFn
+}
+
+function appendSolMilestoneToBuilder(
+  umi: Pick<Umi, 'identity' | 'programs'>,
+  builder: TransactionBuilder,
+  solMilestoneLamports: number | undefined,
+  fundsEscrowAddress: string | undefined
+): TransactionBuilder {
+  if (
+    !solMilestoneLamports ||
+    solMilestoneLamports <= 0 ||
+    !fundsEscrowAddress?.trim()
+  ) {
+    return builder
+  }
+  return builder.add(
+    transferSol(umi, {
+      destination: publicKey(fundsEscrowAddress.trim()),
+      amount: lamports(Math.round(solMilestoneLamports)),
+    })
+  )
 }
 
 /**
@@ -23,25 +64,33 @@ export async function transferTokenMetadataNftToEscrow({
   wallet,
   mintAddress,
   escrowAddress,
+  solMilestoneLamports,
+  fundsEscrowAddress,
+  sendTransaction,
 }: TransferTokenMetadataNftToEscrowArgs): Promise<string> {
   const walletPublicKey = wallet?.publicKey ?? wallet?.adapter?.publicKey
   if (!walletPublicKey) {
     throw new Error('Wallet adapter not ready for Token Metadata transfer')
   }
 
-  const endpoint =
-    // rpcEndpoint is available on recent web3.js; fall back to internal field if needed.
-     
-    (connection as any).rpcEndpoint || (connection as any)._rpcEndpoint
+  assertPhantomUsesWalletSignAndSend({
+    wallet,
+    sendTransaction,
+    action: 'prize escrow deposit',
+  })
 
-  // Dynamic import keeps this isolated and avoids hard coupling at module init time.
+  const endpoint = resolveMetaplexClientRpcUrl(connection)
+  const ownerBase58 =
+    typeof walletPublicKey === 'string' ? walletPublicKey : walletPublicKey.toBase58()
+
    
   const tm: any = await import('@metaplex-foundation/mpl-token-metadata')
 
+  const umiBase = sendTransaction
+    ? createNoopUmiForPhantomSafeSend(endpoint, ownerBase58)
+    : ((createUmi as any)(endpoint).use(walletAdapterIdentity(wallet as any)) as Umi)
    
-  const umi: any = (createUmi as any)(endpoint)
-    .use(walletAdapterIdentity(wallet as any))
-    .use(tm.mplTokenMetadata())
+  const umi: any = (umiBase as any).use(tm.mplTokenMetadata())
 
   const mint = publicKey(mintAddress)
   const destinationOwner = publicKey(escrowAddress)
@@ -58,14 +107,30 @@ export async function transferTokenMetadataNftToEscrow({
   for (const attempt of attempts) {
     try {
        
-      const builder: any = tm.transferV1(umi as any, {
+      let builder: TransactionBuilder = tm.transferV1(umi as any, {
         mint,
         destinationOwner,
         tokenStandard: attempt.tokenStandard,
-      } as any)
+      } as any) as TransactionBuilder
+      builder = appendSolMilestoneToBuilder(
+        umi,
+        builder,
+        solMilestoneLamports,
+        fundsEscrowAddress
+      )
+
+      if (sendTransaction) {
+        return await sendUmiBuilderViaWalletSignAndSend({
+          umi: umi as Umi,
+          builder,
+          connection,
+          sendTransaction,
+        })
+      }
+
        
       const result: any = await builder.sendAndConfirm(umi as any)
-      return String(result.signature ?? result)
+      return umiSignatureToBase58(result)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       lastError = `${attempt.name}: ${msg}`
@@ -78,4 +143,3 @@ export async function transferTokenMetadataNftToEscrow({
       : 'Token Metadata transfer failed.'
   )
 }
-

@@ -8,6 +8,7 @@ export type PartnerProgramApplicationRow = {
   wallet_address: string
   interested_tier: string
   details: string | null
+  logo_url: string | null
   status: 'new' | 'contacted' | 'active' | 'closed' | string
   created_at: string
   updated_at: string
@@ -20,6 +21,7 @@ export async function insertPartnerProgramApplication(input: {
   wallet_address: string
   interested_tier: string
   details?: string | null
+  logo_url?: string | null
 }): Promise<PartnerProgramApplicationRow> {
   const sb = getSupabaseAdmin()
   const { data, error } = await sb
@@ -31,6 +33,7 @@ export async function insertPartnerProgramApplication(input: {
       wallet_address: input.wallet_address.trim(),
       interested_tier: input.interested_tier.trim(),
       details: input.details?.trim() || null,
+      logo_url: input.logo_url?.trim() || null,
       status: 'new',
     })
     .select('*')

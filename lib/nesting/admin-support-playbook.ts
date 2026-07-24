@@ -171,7 +171,37 @@ export function buildAdminSupportPlaybook(params: {
       severity: 'caution',
       code: 'cross_wallet',
       title: `${crossWalletCount} cross-wallet blocker(s)`,
-      detail: 'NFTs are in this wallet but open nest rows exist on another address. Full heal clears those stale rows.',
+      detail:
+        'NFTs (Owltopia coins, Gen 1 owls, and/or Gen 2 owls) are in this wallet but open nest rows exist on another address. Full heal clears those stale rows.',
+    })
+  }
+
+  const families = diag.nest_families ?? []
+  const familySummary = families
+    .filter((f) => f.active > 0 || f.pending > 0 || f.wallet_mint_count > 0)
+    .map(
+      (f) =>
+        `${f.label}: ${f.active} active / ${f.pending} pending / ${f.wallet_mint_count} in wallet`
+    )
+    .join('; ')
+
+  if (familySummary) {
+    warnings.push({
+      severity: 'info',
+      code: 'nest_families_scanned',
+      title: 'Nest families scanned',
+      detail: `${familySummary}. Covers owl-nest-365 + Gen 1 (90d/180d) + Gen 2 (90d/180d).`,
+    })
+  }
+
+  const genActive =
+    (families.find((f) => f.family === 'gen1-owl')?.active ?? 0) +
+    (families.find((f) => f.family === 'gen2-owl')?.active ?? 0)
+  if (genActive > 0) {
+    recommendations.push({
+      action: 'Gen 1 / Gen 2: confirm perch + rev share',
+      detail:
+        'Daily OWL claims use Claim all / per-nest claim. Month-end SOL/USDC rev share is separate (Gen Owl rev share panel). Do not use OWL catch-up for rev-share payouts.',
     })
   }
 
@@ -184,18 +214,52 @@ export function buildAdminSupportPlaybook(params: {
   }
 
   if (activeUnderWallet === 0 && diag.wallet_nest_mint_count > 0) {
+    const notNested = (diag.wallet_nest_assets ?? []).filter((a) => a.nest_status === 'not_nested').length
     warnings.push({
       severity: 'info',
       code: 'no_db_rows',
       title: 'No nests under this wallet in DB',
-      detail: 'User may be on a new wallet after transfer, or never completed nest open. Run diagnostics then heal if cross-wallet rows appear.',
+      detail:
+        notNested > 0
+          ? `${notNested} of ${diag.wallet_nest_mint_count} nest NFT(s) in wallet are not nested. User may be on a new wallet after transfer, or never completed nest open (coin / Gen 1 / Gen 2). Run diagnostics then heal if cross-wallet rows appear.`
+          : 'User may be on a new wallet after transfer, or never completed nest open (coin / Gen 1 / Gen 2). Run diagnostics then heal if cross-wallet rows appear.',
+    })
+    recommendations.push({
+      action: 'Ask: Ledger via Phantom/Solflare?',
+      detail:
+        'Four Ledger pain points: (1) Nest "Say hi" — Phantom/Solflare often never deliver off-chain Sign Message to Ledger. Use the My nest button “Sign with Ledger transaction” (memo tx, not broadcast). Unlock device, Solana app open, Ledger Live closed; USB > Bluetooth. (2) Orange nesting safeguards — same Sign Message gap (Phantom “Sign message rejected” / error Code 1). Use “Sign safeguards with Ledger” in the orange box (memo tx, not broadcast); auto-falls back after Sign Message failure. (3) Nest lock "Unexpected instruction" / Phantom-Lighthouse string — Solflare/Phantom inject Lighthouse guards Ledger cannot clear-sign; Gainz-style stakes can still work — nest from a hot wallet or transfer then nest. (4) Nest lock never prompts — complex Metaplex Core versioned txs; nest one NFT at a time or from a hot wallet.',
+    })
+  }
+
+  const notNestedCount = (diag.wallet_nest_assets ?? []).filter((a) => a.nest_status === 'not_nested').length
+  if (notNestedCount > 0 && activeUnderWallet > 0) {
+    recommendations.push({
+      action: 'Not nested yet in wallet',
+      detail: `${notNestedCount} of ${diag.wallet_nest_mint_count} nest NFT(s) in this wallet are not nested — see Wallet nest assets in diagnostics.`,
+    })
+  }
+
+  if (orphanedPendingCount > 0) {
+    recommendations.push({
+      action: 'User: Finish opening / refresh with heal',
+      detail:
+        `${orphanedPendingCount} pending nest(s). If they already paid the platform fee and see "Platform fee was already recorded", refresh nesting (heal) or tap Finish opening — do not ask them to pay again. Admin heal-wallet also promotes when the on-chain freeze is present.`,
+    })
+  }
+
+  if (orphanedActiveCount > 0) {
+    recommendations.push({
+      action: 'Admin: heal orphaned active (or user refresh)',
+      detail:
+        `${orphanedActiveCount} active nest(s) looked unlocked on a flaky RPC read and were cleared. If the NFT is still locked on-chain, refresh My nest / heal-wallet restores orphaned_active_cleared — do not ask them to re-pay the platform fee.`,
     })
   }
 
   if (warnings.length === 0 && !significantUnpaid && !(audit?.risk_flags.length)) {
     recommendations.push({
       action: 'No high-risk pattern',
-      detail: 'If the user still has issues, get the exact error text and one NFT mint address.',
+      detail:
+        'If the user still has issues, get the exact error text, which perch (coins / Gen 1 / Gen 2), and one NFT mint address.',
     })
   }
 

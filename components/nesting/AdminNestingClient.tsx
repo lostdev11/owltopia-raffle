@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useWallet } from '@solana/wallet-adapter-react'
+import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { ArrowLeft, ChevronDown, Globe, Loader2, PauseCircle, Plus, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,6 +20,10 @@ import type {
 import { getCachedAdmin, setCachedAdmin, type AdminRole } from '@/lib/admin-check-cache'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import { StakingPoolCard } from '@/components/nesting/StakingPoolCard'
+import { AdminGenOwlNestRosterSection } from '@/components/nesting/AdminGenOwlNestRosterSection'
+import { SupportNestFamilyBreakdown } from '@/components/nesting/SupportNestFamilyBreakdown'
+import { AdminWalletNestAssetsPanel } from '@/components/nesting/AdminWalletNestAssetsPanel'
+import type { NestingWalletNestAsset } from '@/lib/nesting/admin-wallet-diagnostics'
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { PoolOnChainSettingsForm } from '@/components/nesting/PoolOnChainSettingsForm'
 import { NESTING_RECONCILE_MAX_BATCH } from '@/lib/nesting/rpc-policy'
@@ -54,12 +58,13 @@ const emptyForm = () => ({
 })
 
 export function AdminNestingClient() {
-  const { publicKey, connected, signMessage } = useWallet()
+  const { publicKey, connected, signMessage, signTransaction, wallet } = useWallet()
+  const { connection } = useConnection()
   const visibilityTick = useVisibilityTick()
-  const wallet = publicKey?.toBase58() ?? ''
+  const walletAddr = publicKey?.toBase58() ?? ''
 
   const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
-    typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) : null
+    typeof window !== 'undefined' && walletAddr ? getCachedAdmin(walletAddr) : null
   )
   const [loadingAdmin, setLoadingAdmin] = useState(true)
   const [sessionReady, setSessionReady] = useState<boolean | null>(null)
@@ -109,6 +114,14 @@ export function AdminNestingClient() {
   const [walletDiagReport, setWalletDiagReport] = useState<{
     wallet: string
     wallet_nest_mint_count: number
+    nest_families?: Array<{
+      family: string
+      label: string
+      wallet_mint_count: number
+      active: number
+      pending: number
+    }>
+    wallet_nest_assets?: NestingWalletNestAsset[]
     positions_under_wallet: { active: number; pending: number; unstaked: number; ghost_active?: number }
     cross_wallet_rows: Array<{
       position_id: string
@@ -149,6 +162,14 @@ export function AdminNestingClient() {
     } | null
     nest_diagnostics: {
       wallet_nest_mint_count: number
+      pool_slugs?: string[]
+      nest_families?: Array<{
+        family: string
+        label: string
+        wallet_mint_count: number
+        active: number
+        pending: number
+      }>
       positions_under_wallet: { active: number; pending: number; unstaked: number; ghost_active?: number }
       cross_wallet_rows: unknown[]
     }
@@ -336,50 +357,40 @@ export function AdminNestingClient() {
     }
   }, [])
 
-  const handleSignIn = useCallback(async () => {
-    if (!publicKey || !signMessage) {
-      setSignInError('Your wallet does not support message signing.')
-      return
-    }
-    setSignInError(null)
-    setSigningIn(true)
-    try {
-      const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(publicKey.toBase58())}`, {
-        credentials: 'include',
-      })
-      if (!nonceRes.ok) {
-        const data = await nonceRes.json().catch(() => ({}))
-        throw new Error(data?.error || 'Failed to get nonce')
+  const handleSignIn = useCallback(
+    async (opts?: { preferTx?: boolean; preferMessage?: boolean }) => {
+      if (!publicKey || (!signMessage && !signTransaction)) {
+        setSignInError('Your wallet does not support signing.')
+        return
       }
-      const { message } = await nonceRes.json()
-      const messageBytes = new TextEncoder().encode(message)
-      const signature = await signMessage(messageBytes)
-      const signatureBase64 =
-        typeof signature === 'string'
-          ? btoa(signature)
-          : btoa(String.fromCharCode(...new Uint8Array(signature)))
-      const verifyRes = await fetch('/api/auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
+      setSignInError(null)
+      setSigningIn(true)
+      try {
+        const { performSiwsSignIn } = await import('@/lib/client/siws-sign-in')
+        const useTx =
+          opts?.preferTx === true ||
+          (opts?.preferMessage !== true && Boolean(signTransaction))
+        await performSiwsSignIn({
           wallet: publicKey.toBase58(),
-          message,
-          signature: signatureBase64,
-        }),
-      })
-      if (!verifyRes.ok) {
-        const data = await verifyRes.json().catch(() => ({}))
-        throw new Error(data?.error || 'Verification failed')
+          signMessage,
+          signTransaction,
+          preferTx: useTx,
+          walletName: wallet?.adapter?.name,
+          getBlockhash: async () => {
+            const latest = await connection.getLatestBlockhash('confirmed')
+            return latest.blockhash
+          },
+        })
+        setSessionReady(true)
+        await fetchPools()
+      } catch (e) {
+        setSignInError(e instanceof Error ? e.message : 'Sign-in failed')
+      } finally {
+        setSigningIn(false)
       }
-      setSessionReady(true)
-      await fetchPools()
-    } catch (e) {
-      setSignInError(e instanceof Error ? e.message : 'Sign-in failed')
-    } finally {
-      setSigningIn(false)
-    }
-  }, [publicKey, signMessage, fetchPools])
+    },
+    [publicKey, signMessage, signTransaction, wallet?.adapter?.name, connection, fetchPools]
+  )
 
   const createQuickPool = async () => {
     const name = quickName.trim()
@@ -903,11 +914,26 @@ export function AdminNestingClient() {
         </Button>
         <h1 className="text-2xl font-semibold">Owl Nesting admin</h1>
         <p className="text-muted-foreground text-sm">Sign in to create and edit staking pools.</p>
-        {signInError && <p className="text-destructive text-sm">{signInError}</p>}
-        <Button onClick={() => void handleSignIn()} disabled={signingIn || !signMessage}>
-          {signingIn ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-          Sign in with wallet
-        </Button>
+        {signInError && <p className="text-destructive text-sm whitespace-pre-wrap">{signInError}</p>}
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button
+            onClick={() => void handleSignIn(signTransaction ? { preferTx: true } : undefined)}
+            disabled={signingIn || (!signMessage && !signTransaction)}
+          >
+            {signingIn ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            {signTransaction ? 'Sign with Ledger / wallet' : 'Sign in with wallet'}
+          </Button>
+          {signTransaction && signMessage ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleSignIn({ preferMessage: true })}
+              disabled={signingIn}
+            >
+              Try message sign-in instead
+            </Button>
+          ) : null}
+        </div>
       </div>
     )
   }
@@ -942,7 +968,7 @@ export function AdminNestingClient() {
       <section className="space-y-4">
         <SectionHeader
           title="Public staking page"
-          description="Turn on the /nesting landing page when you are ready for all visitors. The site header shows Nesting for everyone while this is on. To pause actual nesting (claims, new nests, leaving), use Live nesting actions below or NESTING_DISABLED in deployment env."
+          description="Turn on the /nesting landing page when you are ready for all visitors. The site header always shows a Nesting link; while this is off, non-admins who tap it land on their dashboard nest instead of the public page. To pause actual nesting (claims, new nests, leaving), use Live nesting actions below or NESTING_DISABLED in deployment env."
         />
         <Card className="rounded-xl border-green-500/20">
           <CardHeader>
@@ -1348,13 +1374,19 @@ export function AdminNestingClient() {
         </Card>
       </section>
 
+      <AdminGenOwlNestRosterSection />
+
       <section className="space-y-4">
         <SectionHeader
           title="Support playbook (start here)"
-          description="Runs claim-ledger audit + nest diagnostics together and shows when catch-up or wallet heal would harm unpaid rewards. Always run this before catch-up or full heal."
+          description="Runs claim-ledger audit + nest diagnostics for Owltopia coins, Gen 1 owls, and Gen 2 owls. Shows when catch-up or wallet heal would harm unpaid OWL. Always run this before catch-up or full heal."
         />
         <Card className="rounded-xl border-primary/40 bg-primary/5">
           <CardContent className="pt-6 space-y-4">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Covers all public NFT nest perches: coin locks, Gen 1 (90d / 180d), and Gen 2 (90d / 180d). Use this
+              before any catch-up or full heal.
+            </p>
             <div className="space-y-2">
               <Label htmlFor="playbook-wallet">Holder wallet</Label>
               <Input
@@ -1372,7 +1404,7 @@ export function AdminNestingClient() {
             </div>
             <Button
               type="button"
-              className="min-h-[44px] touch-manipulation"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
               disabled={
                 supportPlaybookRunning ||
                 walletDiagRunning ||
@@ -1399,20 +1431,27 @@ export function AdminNestingClient() {
               </p>
             ) : null}
             {supportPlaybook ? (
-              <div className="space-y-3 text-sm">
+              <div className="space-y-4 text-sm">
                 <p className="text-xs text-muted-foreground">
                   {supportPlaybook.wallet.slice(0, 4)}…{supportPlaybook.wallet.slice(-4)} ·{' '}
                   {new Date(supportPlaybook.generated_at).toLocaleString()}
                 </p>
                 {supportPlaybook.claim_audit ? (
-                  <p className="text-muted-foreground">
-                    <span className="font-medium text-foreground tabular-nums">
-                      {supportPlaybook.claim_audit.estimated_claimable_owl.toFixed(4)}
-                    </span>{' '}
-                    OWL claimable · {supportPlaybook.claim_audit.active_nest_count} active nests · 24h on-chain
-                    claims {supportPlaybook.claim_audit.onchain_claim_owl_24h.toFixed(4)} OWL (
-                    {supportPlaybook.claim_audit.onchain_claim_tx_count_24h} tx)
-                  </p>
+                  <div className="rounded-lg border border-border/50 bg-background/40 p-3 space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">OWL claim ledger</p>
+                    <p className="text-muted-foreground">
+                      <span className="font-medium text-foreground tabular-nums">
+                        {supportPlaybook.claim_audit.estimated_claimable_owl.toFixed(4)}
+                      </span>{' '}
+                      OWL claimable · {supportPlaybook.claim_audit.active_nest_count} active nests · 24h on-chain
+                      claims {supportPlaybook.claim_audit.onchain_claim_owl_24h.toFixed(4)} OWL (
+                      {supportPlaybook.claim_audit.onchain_claim_tx_count_24h} tx)
+                    </p>
+                  </div>
+                ) : null}
+                {supportPlaybook.nest_diagnostics.nest_families &&
+                supportPlaybook.nest_diagnostics.nest_families.length > 0 ? (
+                  <SupportNestFamilyBreakdown families={supportPlaybook.nest_diagnostics.nest_families} />
                 ) : null}
                 <ul className="space-y-2">
                   {supportPlaybook.warnings.length === 0 ? (
@@ -1457,7 +1496,7 @@ export function AdminNestingClient() {
                       onCheckedChange={setOverrideCatchUpBlock}
                     />
                     <Label htmlFor="support-override-catch-up" className="text-xs leading-relaxed text-muted-foreground">
-                      Override: allow catch-up anyway (only if OWL was already sent on-chain)
+                      Override: allow catch-up anyway (only if OWL was already sent on-chain — not for Gen rev-share)
                     </Label>
                   </div>
                 ) : null}
@@ -1470,16 +1509,16 @@ export function AdminNestingClient() {
                       onCheckedChange={setOverrideWalletHealBlock}
                     />
                     <Label htmlFor="support-override-wallet-heal" className="text-xs leading-relaxed text-muted-foreground">
-                      Override: allow full wallet heal anyway (will close active nests in DB)
+                      Override: allow full wallet heal anyway (will close active nests in DB for coins / Gen 1 / Gen 2)
                     </Label>
                   </div>
                 ) : null}
                 {ghostActiveCount > 0 ? (
-                  <div className="flex flex-wrap items-center gap-3 pt-1">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center pt-1">
                     <Button
                       type="button"
                       variant="outline"
-                      className="min-h-[44px] touch-manipulation border-primary/40"
+                      className="min-h-[44px] touch-manipulation border-primary/40 w-full sm:w-auto"
                       disabled={ghostClearRunning || !supportWallet.trim()}
                       onClick={() => void runClearGhostActives()}
                     >
@@ -1501,7 +1540,7 @@ export function AdminNestingClient() {
       <section className="space-y-4">
         <SectionHeader
           title="Claim ledger audit (incident)"
-          description="Find wallets with repeat Claim-all on-chain payouts while the UI still shows high claimable. Catch-up syncs claimed_rewards to accrued (no extra SPL) after you confirm they were already paid."
+          description="Find wallets with repeat Claim-all on-chain OWL payouts (coins / Gen 1 / Gen 2) while the UI still shows high claimable. Catch-up syncs claimed_rewards to accrued (no extra SPL) after you confirm they were already paid. Does not fix Gen rev-share SOL/USDC."
         />
         <Card className="rounded-xl border-amber-500/30 bg-amber-500/5">
           <CardContent className="pt-6 space-y-4">
@@ -1614,10 +1653,14 @@ export function AdminNestingClient() {
       <section className="space-y-4">
         <SectionHeader
           title="Support: wallet nest diagnostics & heal"
-          description="Run diagnostics on the holder wallet (current address in Phantom). Detects ledger/on-chain mismatch, orphaned rows, and nests still open under a prior wallet after NFT transfer. Heal clears DB rows only — no on-chain thaw."
+          description="Run diagnostics on the holder wallet (current address in Phantom). Covers Owltopia coins, Gen 1 owls, and Gen 2 owls — ledger/on-chain mismatch, orphaned rows, and nests still open under a prior wallet after NFT transfer. Heal clears DB rows only — no on-chain thaw."
         />
         <Card className="rounded-xl border-border/60">
           <CardContent className="pt-6 space-y-4">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Same nest families as the playbook. Prefer the playbook first; use this section for a diagnostics-only
+              re-run or heal after you already reviewed guards.
+            </p>
             <div className="space-y-2">
               <Label htmlFor="support-wallet">Holder wallet</Label>
               <Input
@@ -1630,11 +1673,11 @@ export function AdminNestingClient() {
                 className="font-mono text-xs min-h-[44px] touch-manipulation"
               />
             </div>
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <Button
                 type="button"
                 variant="outline"
-                className="min-h-[44px] touch-manipulation"
+                className="min-h-[44px] touch-manipulation w-full sm:w-auto"
                 disabled={
                   walletDiagRunning || walletHealRunning || ghostClearRunning || !supportWallet.trim()
                 }
@@ -1646,7 +1689,7 @@ export function AdminNestingClient() {
               <Button
                 type="button"
                 variant="outline"
-                className="min-h-[44px] touch-manipulation border-primary/40"
+                className="min-h-[44px] touch-manipulation border-primary/40 w-full sm:w-auto"
                 disabled={
                   ghostClearRunning ||
                   walletDiagRunning ||
@@ -1662,7 +1705,7 @@ export function AdminNestingClient() {
               <Button
                 type="button"
                 variant="secondary"
-                className="min-h-[44px] touch-manipulation"
+                className="min-h-[44px] touch-manipulation w-full sm:w-auto"
                 disabled={
                   walletHealRunning ||
                   walletDiagRunning ||
@@ -1684,7 +1727,7 @@ export function AdminNestingClient() {
             {walletDiagReport ? (
               <div className="rounded-lg border border-border/60 bg-muted/20 p-4 space-y-3 text-sm">
                 <p>
-                  <span className="text-muted-foreground">Owl Nest coins in wallet:</span>{' '}
+                  <span className="text-muted-foreground">Nest NFTs in wallet (coins + Gen 1 + Gen 2):</span>{' '}
                   <span className="font-medium tabular-nums">{walletDiagReport.wallet_nest_mint_count}</span>
                   {' · '}
                   <span className="text-muted-foreground">DB rows:</span>{' '}
@@ -1699,6 +1742,13 @@ export function AdminNestingClient() {
                     </>
                   ) : null}
                 </p>
+                {walletDiagReport.nest_families && walletDiagReport.nest_families.length > 0 ? (
+                  <SupportNestFamilyBreakdown families={walletDiagReport.nest_families} />
+                ) : null}
+                {walletDiagReport.wallet_nest_assets &&
+                walletDiagReport.wallet_nest_assets.length > 0 ? (
+                  <AdminWalletNestAssetsPanel assets={walletDiagReport.wallet_nest_assets} />
+                ) : null}
                 {walletDiagReport.cross_wallet_rows.length > 0 ? (
                   <div>
                     <p className="text-amber-200/95 font-medium mb-1">

@@ -50,5 +50,5 @@ export default async function EditRafflePage({
   }
 
   // Non-draft: show admin actions (return NFT, cancel, refund list, delete)
-  return <AdminRaffleActions raffle={raffle} entries={entries} />
+  return <AdminRaffleActions raffle={raffle} entries={entries} adminRole={role} />
 }

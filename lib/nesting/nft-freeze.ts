@@ -315,6 +315,8 @@ export async function assertWalletNftFrozenForNesting(params: {
   ownerWallet: string
   assetId: string
   collectionMint?: string | null
+  /** Holder-facing label, e.g. "Gen 1 owl" / "Owltopia coin". */
+  assetSingular?: string
 }): Promise<{ tokenAccount: string }> {
   await assertAssetOwnedByWalletInCollection(params)
 
@@ -325,6 +327,7 @@ export async function assertWalletNftFrozenForNesting(params: {
     throw new StakingUserError('Invalid wallet or NFT asset address.', 400)
   }
 
+  const assetLabel = (params.assetSingular ?? 'NFT').trim() || 'NFT'
   const { umi, signer } = await createCoreAuthorityUmi()
   const { asset, collection } = await fetchCoreAssetAndCollection(umi, params.assetId.trim(), params.collectionMint)
   const delegateAddress = signer.publicKey.toString()
@@ -342,7 +345,7 @@ export async function assertWalletNftFrozenForNesting(params: {
     })
   ) {
     throw new StakingUserError(
-      'This Owl Nest coin must be re-locked from your wallet before nesting or claiming. On the nesting dashboard, approve the wallet lock when prompted (or open the nest again for that coin).',
+      `This ${assetLabel} must be re-locked from your wallet before nesting or claiming. On the nesting dashboard, approve the wallet lock when prompted (or open the nest again for that ${assetLabel}).`,
       400,
       { code: 'nest_relock_required', asset_id: params.assetId.trim() }
     )
@@ -352,8 +355,8 @@ export async function assertWalletNftFrozenForNesting(params: {
     const fd = readMplCoreFreezeDelegate(asset)
     throw new StakingUserError(
       fd
-        ? 'This Owl Nest coin has an incompatible on-chain freeze lock. Contact Owltopia support with the coin mint address.'
-        : 'This Owl Nest coin is missing a nest lock on-chain. Finish opening the nest in your wallet first.',
+        ? `This ${assetLabel} has an incompatible on-chain freeze lock. Contact Owltopia support with the mint address.`
+        : `This ${assetLabel} is missing a nest lock on-chain. Finish opening the nest in your wallet first.`,
       400,
       { code: 'nest_lock_incompatible', asset_id: params.assetId.trim() }
     )
@@ -423,14 +426,14 @@ export async function thawWalletNftForNesting(params: {
 
   if (fd.authorityType === 'Owner') {
     throw new StakingUserError(
-      'This nest uses a wallet-controlled freeze lock. Close the nest from your wallet so it can thaw the coin.',
+      'This nest uses a wallet-controlled freeze lock. Close the nest from your wallet so it can thaw the NFT.',
       400
     )
   }
 
   if (fd.authorityType !== 'Address' || fd.authorityAddress !== delegateAddress) {
     throw new StakingUserError(
-      'This Owl Nest coin has a freeze lock that Owltopia cannot thaw automatically. Contact support.',
+      'This NFT has a freeze lock that Owltopia cannot thaw automatically. Contact support.',
       503
     )
   }

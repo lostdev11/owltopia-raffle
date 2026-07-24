@@ -13,6 +13,7 @@ type Props = {
   required?: boolean
 }
 
+/** Segmented 90 / 180 day toggle (swap-style, one tap). */
 export function NestingLockTierPicker({
   tiers,
   selectedSlug,
@@ -23,13 +24,9 @@ export function NestingLockTierPicker({
   if (tiers.length === 0) return null
 
   return (
-    <div className={cn('space-y-2', className)}>
-      <p className="text-sm font-medium text-foreground">Choose lock period</p>
-      <p className="text-xs text-muted-foreground leading-relaxed">
-        Same {tiers[0]?.slug?.startsWith('gen2-') ? 'Gen 2' : 'Gen 1'} owl—pick 90 or 180 days before you confirm.
-      </p>
+    <div className={cn('space-y-1.5', className)}>
       <div
-        className="grid gap-2 sm:grid-cols-2"
+        className="grid grid-cols-2 gap-1 rounded-xl border border-white/[0.08] bg-black/25 p-1"
         role="radiogroup"
         aria-label="Lock period"
         aria-required={required}
@@ -43,18 +40,20 @@ export function NestingLockTierPicker({
               role="radio"
               aria-checked={selected}
               className={cn(
-                'flex min-h-[52px] w-full touch-manipulation flex-col items-start justify-center gap-0.5 rounded-xl border px-3 py-3 text-left transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-prime/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                'flex min-h-[52px] w-full touch-manipulation flex-col items-center justify-center gap-0.5 rounded-lg px-2 py-2 text-center transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-prime/50',
                 selected
-                  ? 'border-emerald-500/50 bg-emerald-500/10 text-foreground'
-                  : 'border-white/[0.08] bg-[#1c2620]/80 text-foreground hover:border-emerald-500/30 hover:bg-[#243328]'
+                  ? 'bg-emerald-500/15 text-foreground ring-1 ring-emerald-500/45'
+                  : 'text-muted-foreground hover:bg-white/[0.05] hover:text-foreground'
               )}
               onClick={() => onSelect(tier.slug)}
             >
-              <span className="text-base font-semibold">{tier.lock_period_days}-day lock</span>
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {tier.reward_token ? `${tier.reward_token} · ` : ''}
+              <span className={cn('text-sm font-semibold', selected && 'text-theme-prime')}>
+                {tier.lock_period_days} days
+              </span>
+              <span className="text-[11px] tabular-nums">
                 {formatRewardRate(Number(tier.reward_rate), tier.reward_rate_unit)}
+                {tier.reward_token ? ` ${tier.reward_token}` : ''}
               </span>
             </button>
           )

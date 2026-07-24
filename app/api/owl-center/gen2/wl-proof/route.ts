@@ -4,7 +4,9 @@ import { getMerkleProof, getMerkleRoot } from '@metaplex-foundation/mpl-candy-ma
 
 import { listGen1MerkleWallets } from '@/lib/db/gen2-gen1-snapshot'
 import { listWlMerkleWallets } from '@/lib/db/owl-center-wl-allocations'
+import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 import { listGen2PresaleMerkleWallets } from '@/lib/gen2-presale/db'
+import { getGen2TeamBackstopMerkleWallets } from '@/lib/owl-center/gen2-team-backstop-guards'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -20,19 +22,21 @@ export const dynamic = 'force-dynamic'
  *                                      plus gen2_presale_overage_allocations (Presale+13)
  * - phase=AIRDROP                    → gen2_gen1_airdrop_snapshot (admin-taken Gen1 holder
  *                                      snapshot; /api/admin/owl-center/gen2/gen1-snapshot)
+ * - phase=TEAM_BACKSTOP              → freeze_progress.backstop_team_wallets (admin leftover mint)
  *
  * Operators: call without `wallet` to get the canonical `merkle_root` (base58) for
  * `sugar guard` / candy guard config. Minters: the client calls with `wallet` to build
  * the allowList `route` (proof) instruction in the same transaction as `mintV2`.
  */
 
-type AllowlistSource = 'WHITELIST' | 'PRESALE' | 'AIRDROP'
+type AllowlistSource = 'WHITELIST' | 'PRESALE' | 'AIRDROP' | 'TEAM_BACKSTOP'
 
 function sourceForPhase(phaseRaw: string | null): AllowlistSource | null {
   const phase = phaseRaw?.trim().toUpperCase()
   if (phase === 'WHITELIST') return 'WHITELIST'
   if (phase === 'PRESALE' || phase === 'PRESALE_OVERAGE') return 'PRESALE'
   if (phase === 'AIRDROP') return 'AIRDROP'
+  if (phase === 'TEAM_BACKSTOP') return 'TEAM_BACKSTOP'
   return null
 }
 
@@ -43,12 +47,17 @@ const cache = new Map<AllowlistSource, { wallets: string[]; at: number }>()
 async function getAllowlist(source: AllowlistSource): Promise<string[]> {
   const hit = cache.get(source)
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.wallets
-  const wallets =
-    source === 'WHITELIST'
-      ? await listWlMerkleWallets()
-      : source === 'AIRDROP'
-        ? await listGen1MerkleWallets()
-        : await listGen2PresaleMerkleWallets()
+  let wallets: string[]
+  if (source === 'WHITELIST') {
+    wallets = await listWlMerkleWallets()
+  } else if (source === 'AIRDROP') {
+    wallets = await listGen1MerkleWallets()
+  } else if (source === 'TEAM_BACKSTOP') {
+    const launch = await getOwlCenterLaunchBySlugAdmin('gen2')
+    wallets = getGen2TeamBackstopMerkleWallets(launch?.freeze_progress.backstop_team_wallets)
+  } else {
+    wallets = await listGen2PresaleMerkleWallets()
+  }
   cache.set(source, { wallets, at: Date.now() })
   return wallets
 }
@@ -63,7 +72,10 @@ export async function GET(request: NextRequest) {
   const source = sourceForPhase(request.nextUrl.searchParams.get('phase'))
   if (!source) {
     return NextResponse.json(
-      { error: 'Unsupported phase — allowlist proofs exist for AIRDROP, PRESALE, PRESALE_OVERAGE and WHITELIST.' },
+      {
+        error:
+          'Unsupported phase — allowlist proofs exist for AIRDROP, PRESALE, PRESALE_OVERAGE, WHITELIST, and TEAM_BACKSTOP.',
+      },
       { status: 422 }
     )
   }
@@ -75,7 +87,9 @@ export async function GET(request: NextRequest) {
         error:
           source === 'AIRDROP'
             ? 'Gen1 snapshot is empty — take one via /api/admin/owl-center/gen2/gen1-snapshot first.'
-            : 'Allowlist is empty — not configured yet',
+            : source === 'TEAM_BACKSTOP'
+              ? 'Team backstop wallets empty — enable backstop mint in Gen2 admin first.'
+              : 'Allowlist is empty — not configured yet',
       },
       { status: 404 }
     )
@@ -99,7 +113,9 @@ export async function GET(request: NextRequest) {
         error:
           source === 'AIRDROP'
             ? 'Wallet not in the Gen1 holder snapshot. The snapshot is final — wallets that acquired Gen1 after it do not qualify for the holder mint.'
-            : 'Wallet not on allowlist for this phase',
+            : source === 'TEAM_BACKSTOP'
+              ? 'Wallet not on the team backstop allowlist'
+              : 'Wallet not on allowlist for this phase',
       },
       { status: 404 }
     )

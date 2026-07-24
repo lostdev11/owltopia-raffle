@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-owltopia_governance = "FwEAjseYTP6vTp9g6SpBTgySWzm4yxCtBc3Ti7Rvcfyz"
+owltopia_governance = "CJD7H2URWfCqUBqntRgaEe6yzB2f1MmHofoXDi7BuYQR"
 
 [programs.devnet]
-owltopia_governance = "FwEAjseYTP6vTp9g6SpBTgySWzm4yxCtBc3Ti7Rvcfyz"
+owltopia_governance = "CJD7H2URWfCqUBqntRgaEe6yzB2f1MmHofoXDi7BuYQR"
 
 [registry]
 url = "https://api.apr.dev"

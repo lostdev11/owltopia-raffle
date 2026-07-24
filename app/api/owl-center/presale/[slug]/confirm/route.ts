@@ -36,7 +36,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Presale not found' }, { status: 404 })
     }
 
-    let body: { buyerWallet?: string; quantity?: number; txSignature?: string; solUsdPriceUsed?: number | string }
+    let body: { buyerWallet?: string; quantity?: number; txSignature?: string }
     try {
       body = (await request.json()) as typeof body
     } catch {
@@ -64,21 +64,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Invalid transaction signature' }, { status: 400 })
     }
 
-    const rawSolUsd = body.solUsdPriceUsed
-    let solUsdOverride: number | undefined
-    if (typeof rawSolUsd === 'number' && Number.isFinite(rawSolUsd) && rawSolUsd > 0) {
-      solUsdOverride = rawSolUsd
-    } else if (typeof rawSolUsd === 'string' && rawSolUsd.trim()) {
-      const n = Number(rawSolUsd.trim())
-      if (Number.isFinite(n) && n > 0) solUsdOverride = n
-    }
-
     const result = await executeOwlCenterPresaleConfirm({
       tenant,
       buyerWallet: buyerNorm,
       quantity: qty,
       txSignature,
-      solUsdPriceUsed: solUsdOverride,
     })
 
     if (!result.ok) {

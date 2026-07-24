@@ -1,5 +1,5 @@
 /**
- * Support: diagnose / heal Owl Nest ledger for a holder wallet.
+ * Support: diagnose / heal nest ledger for a holder wallet (coins + Gen 1 + Gen 2).
  * Usage:
  *   npx --yes tsx scripts/nesting-wallet-diagnostics.ts <wallet>
  *   npx --yes tsx scripts/nesting-wallet-diagnostics.ts <wallet> --heal

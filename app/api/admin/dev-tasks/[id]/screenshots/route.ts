@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireAdminSession } from '@/lib/auth-server'
 import {
   appendDevTaskScreenshotPaths,
   DEV_TASK_MAX_SCREENSHOTS_TOTAL,
@@ -20,7 +20,7 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await requireFullAdminSession(request)
+    const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
     const { id } = await context.params
     if (!id || typeof id !== 'string') {

@@ -58,6 +58,7 @@ import {
   buildRaffleImageAttemptChain,
   getRaffleDisplayImageUrl,
   isDirectRaffleImageHost,
+  proxyThumbImageUrl,
 } from '@/lib/raffle-display-image-url'
 import { useCart } from '@/components/cart/CartProvider'
 import { isRaffleCreatorWallet } from '@/lib/cart/validate-raffle-checkout'
@@ -157,6 +158,23 @@ export function RaffleCard({
     return buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url).filter(Boolean)
   }, [raffle.image_url, raffle.image_fallback_url, raffle.prize_type, raffle.prize_currency])
   const imageAttemptChainKey = imageAttemptChain.join('\0')
+  /**
+   * Card thumbs render at ~96–400px, but NFT art is often a 5–8MB original. Prepend
+   * server-downscaled (`&w=`) proxy candidates so mobile listings load a few-KB WebP instead;
+   * on any resize failure the chain falls through to the exact URLs used before.
+   * Full-resolution `imageAttemptChain` still drives the zoom modal and promo PNG export.
+   */
+  const listThumbResizeWidth = size === 'small' ? 320 : 640
+  const listThumbAttemptChain = useMemo(() => {
+    const resized: string[] = []
+    for (const candidate of imageAttemptChain) {
+      const r = proxyThumbImageUrl(candidate, listThumbResizeWidth)
+      if (r && !resized.includes(r)) resized.push(r)
+      if (resized.length >= 2) break
+    }
+    if (resized.length === 0) return imageAttemptChain
+    return [...resized, ...imageAttemptChain]
+  }, [imageAttemptChain, listThumbResizeWidth])
   const [thumbIdx, setThumbIdx] = useState(0)
   const [thumbLoaded, setThumbLoaded] = useState(false)
   const [modalImgIdx, setModalImgIdx] = useState(0)
@@ -211,7 +229,7 @@ export function RaffleCard({
 
   useEffect(() => {
     if (!imageLoadActive) return
-    if (thumbIdx < imageAttemptChain.length) return
+    if (thumbIdx < listThumbAttemptChain.length) return
     if (!canListMintThumb || listMintThumbSrc || listMintThumbLoading) return
     const mint = raffle.nft_mint_address?.trim()
     if (!mint) return
@@ -226,7 +244,9 @@ export function RaffleCard({
           return
         }
         setThumbLoaded(false)
-        setListMintThumbSrc(getRaffleDisplayImageUrl(raw) ?? raw)
+        setListMintThumbSrc(
+          proxyThumbImageUrl(raw, listThumbResizeWidth) ?? getRaffleDisplayImageUrl(raw) ?? raw
+        )
         setListMintThumbLoading(false)
       })
       .catch(() => {
@@ -237,7 +257,8 @@ export function RaffleCard({
     }
   }, [
     thumbIdx,
-    imageAttemptChain.length,
+    listThumbAttemptChain.length,
+    listThumbResizeWidth,
     imageAttemptChainKey,
     canListMintThumb,
     raffle.nft_mint_address,
@@ -253,7 +274,7 @@ export function RaffleCard({
 
   const handleThumbLoadOrError = useCallback(
     (e: React.SyntheticEvent<HTMLImageElement>) => {
-      if (thumbIdx < imageAttemptChain.length) {
+      if (thumbIdx < listThumbAttemptChain.length) {
         if (e.type === 'error') {
           tryNextThumb()
           return
@@ -277,26 +298,26 @@ export function RaffleCard({
       }
       setThumbLoaded(true)
     },
-    [thumbIdx, imageAttemptChain.length, tryNextThumb, listMintThumbSrc]
+    [thumbIdx, listThumbAttemptChain.length, tryNextThumb, listMintThumbSrc]
   )
 
   const onThumbTimeout = useCallback(() => {
-    if (thumbIdx < imageAttemptChain.length) {
+    if (thumbIdx < listThumbAttemptChain.length) {
       tryNextThumb()
     } else if (listMintThumbSrc) {
       setThumbLoaded(false)
       setListMintThumbSrc(null)
     }
-  }, [thumbIdx, imageAttemptChain.length, tryNextThumb, listMintThumbSrc])
+  }, [thumbIdx, listThumbAttemptChain.length, tryNextThumb, listMintThumbSrc])
 
   const listThumbSrc =
-    thumbIdx < imageAttemptChain.length
-      ? imageAttemptChain[thumbIdx]
+    thumbIdx < listThumbAttemptChain.length
+      ? listThumbAttemptChain[thumbIdx]
       : (listMintThumbSrc ?? '')
   const listThumbUseContain =
     listThumbSrc === '/solana-mark.svg' || listThumbSrc === '/usdc.png'
   const listThumbMintLoading =
-    thumbIdx >= imageAttemptChain.length && listMintThumbLoading && !listMintThumbSrc
+    thumbIdx >= listThumbAttemptChain.length && listMintThumbLoading && !listMintThumbSrc
   const listThumbDead = imageLoadActive && !listThumbSrc && !listThumbMintLoading
 
   const promoPngImageAttemptUrls = useMemo(() => {
@@ -325,7 +346,6 @@ export function RaffleCard({
     : refNow !== null && endTime > refNow && raffle.is_active && !(refNow !== null && startTime > refNow)
   const isPendingDraft =
     raffle.status === 'draft' &&
-    !raffle.prize_deposited_at &&
     !raffle.is_active &&
     ((raffle.prize_type === 'nft' && !!(raffle.nft_mint_address && raffle.nft_mint_address.trim())) ||
       isPartnerSplPrizeRaffle(raffle))

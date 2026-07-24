@@ -132,13 +132,13 @@ export function NestSwapFlowShell({
 }) {
   return (
     <div className="rounded-[1.35rem] border border-emerald-500/20 bg-[#0c100e]/90 p-1.5 sm:p-2 shadow-[0_8px_40px_rgba(0,0,0,0.45),0_0_60px_rgba(0,255,136,0.06)]">
-      <NestSwapPanel label="You pay" footer={payFooter}>
+      <NestSwapPanel label="You nest" footer={payFooter}>
         {payPanel}
       </NestSwapPanel>
 
       <NestSwapDirectionControl className="-my-4" />
 
-      <NestSwapPanel label="You receive" footer={receiveFooter}>
+      <NestSwapPanel label="You earn" footer={receiveFooter}>
         {receivePanel}
       </NestSwapPanel>
 

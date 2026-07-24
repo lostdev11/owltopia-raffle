@@ -4,9 +4,11 @@ import { useCallback, useState } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 
 import { normalizeSolanaWalletAddress, walletsEqualSolana } from '@/lib/solana/normalize-wallet'
+import { formatSignMessageError } from '@/lib/solana/sign-message-error'
+import { signMessageSignatureToBase64 } from '@/lib/solana/sign-message-signature'
 
 export function useWalletLink() {
-  const { publicKey, signMessage } = useWallet()
+  const { publicKey, signMessage, wallet } = useWallet()
   const [linking, setLinking] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -48,11 +50,26 @@ export function useWalletLink() {
         }
 
         const messageBytes = new TextEncoder().encode(challenge.message)
-        const signature = await signMessage(messageBytes)
-        const signatureBase64 =
-          typeof signature === 'string'
-            ? btoa(signature)
-            : btoa(String.fromCharCode(...new Uint8Array(signature)))
+        let signature: Uint8Array
+        try {
+          signature = await Promise.race([
+            signMessage(messageBytes),
+            new Promise<never>((_, reject) =>
+              setTimeout(
+                () =>
+                  reject(
+                    new Error(
+                      'Timed out waiting for a wallet signature. Approve Sign Message on your Ledger if prompted, or reconnect and try again.'
+                    )
+                  ),
+                180_000
+              )
+            ),
+          ])
+        } catch (e) {
+          throw new Error(formatSignMessageError(e, { walletName: wallet?.adapter?.name, context: 'generic' }))
+        }
+        const signatureBase64 = signMessageSignatureToBase64(signature)
 
         const res = await fetch('/api/me/wallet-links', {
           method: 'POST',
@@ -76,7 +93,7 @@ export function useWalletLink() {
         setLinking(false)
       }
     },
-    [publicKey, signMessage]
+    [publicKey, signMessage, wallet?.adapter?.name]
   )
 
   return { linkConnectedWallet, linking, error, clearError: () => setError(null) }

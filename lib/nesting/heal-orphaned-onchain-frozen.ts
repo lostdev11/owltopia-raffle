@@ -1,6 +1,9 @@
 /**
- * Re-activates nests that were cleared as orphaned while the on-chain Owner freeze lock
- * is still in place (wallet locked the coin but the DB row was closed before `active`).
+ * Re-activates nests that were cleared as orphaned while the on-chain nest lock
+ * is still in place (wallet locked the NFT but the DB row was closed).
+ *
+ * Covers both `orphaned_pending_cleared` and `orphaned_active_cleared` — the latter
+ * can happen when a transient RPC miss makes clear-orphaned-active think the lock is gone.
  */
 
 import { getStakingPoolById } from '@/lib/db/staking-pools'
@@ -21,12 +24,14 @@ export type HealOrphanedOnChainFrozenResult = {
   error?: string
 }
 
-function isOrphanedPendingClearedRow(
+const ORPHANED_CLEARED_REFS = new Set(['orphaned_pending_cleared', 'orphaned_active_cleared'])
+
+function isOrphanedClearedRow(
   position: Pick<StakingPositionRow, 'status' | 'external_reference'>
 ): boolean {
   return (
     position.status === 'unstaked' &&
-    (position.external_reference ?? '').trim() === 'orphaned_pending_cleared'
+    ORPHANED_CLEARED_REFS.has((position.external_reference ?? '').trim())
   )
 }
 
@@ -38,7 +43,7 @@ export async function healOrphanedOnChainFrozenNestsForWallet(wallet: string): P
   const byAsset = new Map<string, StakingPositionRow>()
 
   for (const position of positions) {
-    if (!isOrphanedPendingClearedRow(position)) continue
+    if (!isOrphanedClearedRow(position)) continue
     const assetId = position.asset_identifier?.trim()
     if (!assetId) continue
     const prev = byAsset.get(assetId)

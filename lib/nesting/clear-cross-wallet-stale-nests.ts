@@ -4,10 +4,8 @@ import {
   markPositionUnstaked,
 } from '@/lib/db/staking-positions'
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
-import { getStakingPoolBySlug } from '@/lib/db/staking-pools'
-import { fetchWalletNftsInCollectionDas } from '@/lib/helius/fetch-wallet-nfts-in-collection'
 import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
-import { resolveWalletOwlNestCollectionCandidates } from '@/lib/nesting/owl-nest-collection'
+import { listSupportNestMintAddressesInWallet } from '@/lib/nesting/support-nest-pools'
 
 const CROSS_WALLET_CLEARED_REF = 'support_prior_wallet_holder_cleared'
 
@@ -67,26 +65,13 @@ export async function clearCrossWalletStaleNestsForHolder(
   return { results, cleared_count: clearedCount }
 }
 
-/** Owl Nest coin mints currently held by `wallet` (Helius DAS; empty when indexer unavailable). */
+/**
+ * Nest NFT mints currently held by `wallet` across Owltopia coins + Gen 1 + Gen 2
+ * (Helius DAS; empty when indexer unavailable).
+ */
 export async function listOwlNestMintAddressesInWallet(wallet: string): Promise<string[]> {
-  const holder = wallet.trim()
-  if (!holder) return []
-
-  const heliusRpcUrl = getHeliusMainnetRpcUrl()
-  if (!heliusRpcUrl) return []
-
-  const pool = await getStakingPoolBySlug('owl-nest-365')
-  if (!pool) return []
-
-  const itemsByMint = new Map<string, true>()
-  for (const candidate of resolveWalletOwlNestCollectionCandidates(pool)) {
-    const batch = await fetchWalletNftsInCollectionDas(heliusRpcUrl, holder, candidate)
-    for (const item of batch) {
-      const id = item.id?.trim()
-      if (id && item.burnt !== true) itemsByMint.set(id, true)
-    }
-  }
-  return [...itemsByMint.keys()]
+  const scanned = await listSupportNestMintAddressesInWallet(wallet)
+  return scanned.mints
 }
 
 export type ClearCrossWalletStaleNestsForWalletResult = {
@@ -111,17 +96,15 @@ export async function clearCrossWalletStaleNestsForWallet(
     return { results: [], cleared_count: 0, skipped_reason: 'helius_unconfigured' }
   }
 
-  const pool = await getStakingPoolBySlug('owl-nest-365')
-  if (!pool) {
+  const scanned = await listSupportNestMintAddressesInWallet(holder)
+  if (scanned.skipped_reason === 'no_pools') {
     return { results: [], cleared_count: 0, skipped_reason: 'pool_not_found' }
   }
-
-  const mints = await listOwlNestMintAddressesInWallet(holder)
-  if (mints.length === 0) {
+  if (scanned.mints.length === 0) {
     return { results: [], cleared_count: 0, skipped_reason: 'no_mints_in_wallet' }
   }
 
-  return clearCrossWalletStaleNestsForHolder(holder, mints)
+  return clearCrossWalletStaleNestsForHolder(holder, scanned.mints)
 }
 
 async function readAssetOwnerFromHelius(heliusUrl: string, assetId: string): Promise<string | null> {

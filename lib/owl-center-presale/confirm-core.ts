@@ -5,7 +5,11 @@ import {
   feePayerMatchesBuyer,
   fetchParsedTransactionConfirmed,
 } from '@/lib/gen2-presale/verify-payment'
-import { verifyOwlCenterTreasuryPayment } from '@/lib/owl-center-presale/verify-payment'
+import { SOL_USD_PRICE_TOLERANCE } from '@/lib/gen2-presale/sol-usd-bounds'
+import {
+  sumOwlCenterTreasuryTransferFromBuyer,
+  verifyOwlCenterTreasuryPayment,
+} from '@/lib/owl-center-presale/verify-payment'
 import { gen2PresaleExplorerTxUrl } from '@/lib/gen2-presale/explorer'
 import { bigintToRpcParam } from '@/lib/gen2-presale/rpc-bigint'
 import type { OwlCenterPresaleTenantAdmin } from '@/lib/owl-center-presale/types'
@@ -60,15 +64,6 @@ export type OwlCenterConfirmFail = {
 
 export type OwlCenterConfirmResult = OwlCenterConfirmOkInserted | OwlCenterConfirmOkDuplicate | OwlCenterConfirmFail
 
-function verifyTreasuryPayment(params: {
-  parsed: ParsedTransactionWithMeta
-  buyerWallet: string
-  treasuryWallet: string
-  expectLamports: bigint
-}): boolean {
-  return verifyOwlCenterTreasuryPayment(params)
-}
-
 function getVerifiedBreakdownForQuantity(
   cfg: OwlCenterPresaleCampaignConfig,
   buyerNorm: string,
@@ -76,27 +71,39 @@ function getVerifiedBreakdownForQuantity(
   qty: number
 ): OwlCenterPriceBreakdown | null {
   const breakdown = computeOwlCenterPurchaseLamports(cfg, qty)
-  const ok = verifyTreasuryPayment({
+  const exactOk = verifyOwlCenterTreasuryPayment({
     parsed,
     buyerWallet: buyerNorm,
     treasuryWallet: cfg.treasuryWallet.toBase58(),
     expectLamports: breakdown.treasuryLamports,
   })
-  if (ok) return breakdown
+  if (exactOk) return breakdown
 
-  const total = breakdown.totalLamports
-  const impliedSolUsd = (cfg.priceUsdc * qty) / (Number(total) / LAMPORTS_PER_SOL)
+  // Allow create→confirm SOL/USD drift within the oracle band; never accept material underpayment.
+  const buyer = normalizeSolanaWalletAddress(buyerNorm)
+  const treasury = normalizeSolanaWalletAddress(cfg.treasuryWallet.toBase58())
+  if (!buyer || !treasury || parsed.meta?.err) return null
+  const got = sumOwlCenterTreasuryTransferFromBuyer(parsed, buyer, treasury)
+  if (got <= 0n) return null
+
+  const expected = breakdown.totalLamports
+  const tol = SOL_USD_PRICE_TOLERANCE
+  const minAccept = BigInt(Math.max(1, Math.ceil(Number(expected) * (1 - tol))))
+  const maxAccept = BigInt(Math.floor(Number(expected) * (1 + tol)))
+  if (got < minAccept || got > maxAccept) return null
+
+  const unitSol = Number(got) / qty / LAMPORTS_PER_SOL
+  if (!Number.isFinite(unitSol) || unitSol <= 0) return null
+  const impliedSolUsd = cfg.priceUsdc / unitSol
   if (!Number.isFinite(impliedSolUsd) || impliedSolUsd <= 0) return null
-  const altCfg = { ...cfg, solUsdPrice: impliedSolUsd }
-  const altBreakdown = computeOwlCenterPurchaseLamports(altCfg, qty)
-  const altOk = verifyTreasuryPayment({
-    parsed,
-    buyerWallet: buyerNorm,
-    treasuryWallet: cfg.treasuryWallet.toBase58(),
-    expectLamports: altBreakdown.treasuryLamports,
-  })
-  if (altOk) return altBreakdown
-  return null
+
+  return {
+    unitPriceUsdc: cfg.priceUsdc,
+    solUsdPrice: impliedSolUsd,
+    unitLamports: got / BigInt(qty),
+    totalLamports: got,
+    treasuryLamports: got,
+  }
 }
 
 export async function executeOwlCenterPresaleConfirm(params: {
@@ -104,6 +111,7 @@ export async function executeOwlCenterPresaleConfirm(params: {
   buyerWallet: string
   quantity: number
   txSignature: string
+  /** Ignored for amount checks — kept for call-site compatibility / display only. */
   solUsdPriceUsed?: number
   parsedTx?: ParsedTransactionWithMeta | null
 }): Promise<OwlCenterConfirmResult> {
@@ -143,10 +151,7 @@ export async function executeOwlCenterPresaleConfirm(params: {
 
   let cfg: OwlCenterPresaleCampaignConfig
   try {
-    cfg = await getOwlCenterPresaleServerConfig(
-      params.tenant,
-      params.solUsdPriceUsed != null && params.solUsdPriceUsed > 0 ? params.solUsdPriceUsed : undefined
-    )
+    cfg = await getOwlCenterPresaleServerConfig(params.tenant)
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Server configuration error'
     return { ok: false, httpStatus: 500, message: msg }

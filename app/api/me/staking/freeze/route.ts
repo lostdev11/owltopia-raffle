@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
-import { getStakingPositionForWallet, patchStakingPosition } from '@/lib/db/staking-positions'
+import {
+  getStakingPositionForWallet,
+  isStakeSignatureUniqueViolation,
+  patchStakingPosition,
+  resolveUniqueStakeSignatureForPosition,
+} from '@/lib/db/staking-positions'
+import { stakingPositionHasPlatformFeeLinked } from '@/lib/db/staking-platform-fee-payments'
 import { assertWalletNftFrozenForPool } from '@/lib/nesting/nft-lock-service'
 import { requireStakingPlatformFeeLinked } from '@/lib/nesting/link-staking-platform-fee'
 import { StakingUserError, isStakingUserError } from '@/lib/nesting/errors'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
+import { isStakingPlatformFeeEnabled } from '@/lib/nesting/staking-platform-fee'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,6 +50,21 @@ export async function POST(request: NextRequest) {
       throw new StakingUserError('NFT asset id is missing for this nest.', 400)
     }
 
+    // Already confirmed — return success so client retries / "Finish opening" do not
+    // re-charge or hit stale fee errors after a lost first response.
+    if (
+      position.status === 'active' &&
+      (position.external_reference ?? '').startsWith('nft_freeze_confirmed:')
+    ) {
+      return NextResponse.json({
+        position,
+        execution: {
+          path: 'onchain_nft_freeze' as const,
+          signature: signature ?? position.stake_signature,
+        },
+      })
+    }
+
     const pool = await getStakingPoolById(position.pool_id)
     if (!pool || pool.asset_type !== 'nft' || pool.adapter_mode !== 'onchain_enabled') {
       throw new StakingUserError('This nest is not configured for NFT freeze locks.', 400)
@@ -55,21 +77,57 @@ export async function POST(request: NextRequest) {
       collectionMint: pool.collection_key,
     })
 
-    await requireStakingPlatformFeeLinked({
-      wallet: session.wallet,
-      action: 'stake',
-      feeSignature: body?.platform_fee_signature,
-      positionIds: [position.id],
+    // Fee already linked (retry / Finish opening after a paid lock) — do not require a new signature.
+    const feeAlreadyLinked =
+      isStakingPlatformFeeEnabled() &&
+      (await stakingPositionHasPlatformFeeLinked(position.id, 'stake'))
+
+    if (!feeAlreadyLinked) {
+      await requireStakingPlatformFeeLinked({
+        wallet: session.wallet,
+        action: 'stake',
+        feeSignature: body?.platform_fee_signature,
+        positionIds: [position.id],
+      })
+    }
+
+    // Batch NFT locks share one wallet signature across many nests. The unique index on
+    // stake_signature (token-stake idempotency) only allows one row to store it.
+    const stakeSignature = await resolveUniqueStakeSignatureForPosition({
+      positionId: position.id,
+      requestedSignature: signature,
+      existingSignature: position.stake_signature,
     })
 
-    const updated = await patchStakingPosition(position.id, {
-      status: 'active',
-      stake_signature: signature ?? position.stake_signature ?? null,
-      sync_status: 'confirmed',
+    const activatePatch = {
+      status: 'active' as const,
+      stake_signature: stakeSignature,
+      sync_status: 'confirmed' as const,
       last_synced_at: new Date().toISOString(),
       last_transaction_error: null,
       external_reference: `nft_freeze_confirmed:${frozen.tokenAccount}`,
-    })
+    }
+
+    let updated
+    try {
+      updated = await patchStakingPosition(position.id, activatePatch)
+    } catch (e) {
+      // Race: another nest in the same batch claimed the signature between lookup and update.
+      if (!isStakeSignatureUniqueViolation(e)) throw e
+      try {
+        updated = await patchStakingPosition(position.id, {
+          ...activatePatch,
+          stake_signature: position.stake_signature ?? null,
+        })
+      } catch (e2) {
+        if (!isStakeSignatureUniqueViolation(e2)) throw e2
+        // Existing sig also collided (shared batch) — activate without storing the shared tx id.
+        updated = await patchStakingPosition(position.id, {
+          ...activatePatch,
+          stake_signature: null,
+        })
+      }
+    }
 
     return NextResponse.json({
       position: updated,

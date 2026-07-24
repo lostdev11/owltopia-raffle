@@ -25,10 +25,14 @@ export type NftStakeEligibility =
   | { eligible: true }
   | { eligible: false; reason: string; code: NftStakeEligibilityCode }
 
+/** Wallet inventory status for nestable NFT / Owltopia coin mints. */
+export type WalletNestMintNestStatus = 'not_nested' | 'nested' | 'opening' | 'blocked'
+
 export type WalletNestMintRow = {
   mint: string
   name: string | null
   image: string | null
+  nest_status?: WalletNestMintNestStatus
   stake_blocked?: boolean
   stake_block_reason?: string | null
   stake_block_code?: NftStakeEligibilityCode | null
@@ -73,7 +77,7 @@ export function readNftStakeFreezeEligibilityFromAsset(params: {
     return {
       eligible: false,
       reason:
-        'This NFT is already locked for an Owltopia nest. Finish or leave that nest before opening another.',
+        'This NFT is already locked for an Owltopia nest. Refresh My nest (or Finish opening) so the ledger can catch up — if it still blocks, contact support with this mint.',
       code: 'owltopia_lock_held',
     }
   }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { authorizeCronBearer } from '@/lib/cron-auth'
 
 import { runGen2WalletSafeMetadataFix } from '@/lib/owl-center/wallet-safe-onchain-metadata'
 
@@ -18,16 +19,8 @@ export const maxDuration = 60
  * Secured by CRON_SECRET (Bearer). Manual controls (admin testing): `?dry=1`, `?max=N`.
  */
 export async function GET(request: NextRequest) {
-  const secret = process.env.CRON_SECRET
-  if (!secret) {
-    console.error('CRON_SECRET is not set')
-    return NextResponse.json({ error: 'server error' }, { status: 500 })
-  }
-
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: 'server error' }, { status: 401 })
-  }
+  const cronAuth = authorizeCronBearer(request)
+  if (cronAuth) return cronAuth
 
   const { searchParams } = new URL(request.url)
   const dryRun = searchParams.get('dry') === '1' || searchParams.get('dry') === 'true'

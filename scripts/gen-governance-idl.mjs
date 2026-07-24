@@ -12,7 +12,7 @@ const proposalSeed = [...Buffer.from('proposal')]
 const voteSeed = [...Buffer.from('vote')]
 
 const idl = {
-  address: 'FwEAjseYTP6vTp9g6SpBTgySWzm4yxCtBc3Ti7Rvcfyz',
+  address: 'CJD7H2URWfCqUBqntRgaEe6yzB2f1MmHofoXDi7BuYQR',
   metadata: {
     name: 'owltopia_governance',
     version: '0.1.0',

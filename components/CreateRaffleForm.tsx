@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { Fragment, useState, useEffect, useMemo, useRef, useCallback, type Dispatch, type SetStateAction } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
@@ -22,6 +22,7 @@ import {
   isMplCoreNoApprovalsError,
   mplCoreNoApprovalsEscrowMessage,
 } from '@/lib/solana/mpl-core-transfer-errors'
+import { formatPhantomBlockedEscrowMessage } from '@/lib/solana/phantom-safe-umi-send'
 import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
@@ -33,7 +34,10 @@ import {
   logEscrowDepositStart,
   logEscrowDepositVerify,
 } from '@/lib/solana/escrow-deposit-log'
-import { isEscrowSplPrizeFrozenVerifyError } from '@/lib/raffles/verify-prize-deposit-client'
+import { isEscrowSplPrizeFrozenVerifyError, VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS } from '@/lib/raffles/verify-prize-deposit-client'
+import { registerDepositTxAndVerifyWithRetries, type RegisterAndVerifyPrizeDepositResult } from '@/lib/raffles/register-and-verify-prize-deposit-client'
+import { assertWalletReadyForSigning } from '@/lib/solana/assert-wallet-ready-for-signing'
+import { sendTransactionWithTimeout } from '@/lib/solana/send-transaction-with-timeout'
 import { walletNftLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
 import { nftPrizeRaffleTitleFromWalletSelection } from '@/lib/raffles/nft-prize-raffle-title'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
@@ -41,7 +45,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { EscrowDepositProgressDialog } from '@/components/EscrowDepositProgressDialog'
+import { EscrowDepositProgressDialog, type EscrowDepositProgressStep } from '@/components/EscrowDepositProgressDialog'
 import type { ThemeAccent } from '@/lib/types'
 import {
   getThemeAccentBorderStyle,
@@ -92,6 +96,7 @@ import {
 import { buildMilestoneBonusRulesCopy, MILESTONE_BETA_NOTICE } from '@/lib/raffles/milestones/copy'
 import { MILESTONE_MAX_PER_RAFFLE, MILESTONE_MAX_PRIZE_SOL, milestoneMaxPrizeUsdc } from '@/lib/raffles/milestones/constants'
 import type { Raffle, RaffleMilestone, RaffleMilestoneWinnerMode, RaffleMilestoneTriggerType } from '@/lib/types'
+import { fetchWalletNftsWithRetry } from '@/lib/solana/fetch-wallet-nfts-api'
 import {
   fetchFundsEscrowAddress,
   milestoneDepositTotalForPrizeCurrency,
@@ -131,9 +136,107 @@ type CreateEscrowProgressState = {
   title: string
   description: string
   phase: 'loading' | 'result'
+  step?: EscrowDepositProgressStep
+  verifyAttempt?: { current: number; max: number }
   /** When true, `finally` leaves the dialog open until the user taps `primaryAction`. */
   persistUntilDismiss: boolean
   primaryAction?: { label: string; onClick: () => void }
+  secondaryAction?: { label: string; onClick: () => void }
+  onCancel?: () => void
+}
+
+function handleCreateEscrowVerifyOutcome(
+  reg: RegisterAndVerifyPrizeDepositResult,
+  raffleSlug: string,
+  setEscrowProgress: Dispatch<SetStateAction<CreateEscrowProgressState>>,
+  router: ReturnType<typeof useRouter>
+): 'verified' | 'stop' {
+  if (!reg.ok) {
+    if (reg.status === 401) {
+      setEscrowProgress({
+        open: true,
+        title: 'Sign in required',
+        description:
+          'Your session expired. Sign in from your dashboard. Your raffle is saved — after signing in, open your raffle to finish.',
+        phase: 'result',
+        persistUntilDismiss: true,
+        primaryAction: {
+          label: 'Go to dashboard',
+          onClick: () => {
+            setEscrowProgress(CREATE_ESCROW_IDLE)
+            router.push('/dashboard')
+          },
+        },
+      })
+      return 'stop'
+    }
+    const errMsg = reg.error?.trim() || 'Could not save your deposit signature.'
+    setEscrowProgress({
+      open: true,
+      title: 'Could not finish setup',
+      description: errMsg,
+      phase: 'result',
+      persistUntilDismiss: true,
+      primaryAction: {
+        label: 'Open raffle',
+        onClick: () => {
+          setEscrowProgress(CREATE_ESCROW_IDLE)
+          router.push(`/raffles/${raffleSlug}`)
+        },
+      },
+    })
+    return 'stop'
+  }
+
+  if (
+    reg.verified === false &&
+    isEscrowSplPrizeFrozenVerifyError(reg.pendingReason || reg.error || '')
+  ) {
+    const q = /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
+    const acct = reg.frozenEscrowDiagnostics?.escrowTokenAccount
+    const links = acct
+      ? `\n\nEscrow token account (must be thawed on-chain):\nhttps://solscan.io/account/${encodeURIComponent(acct)}${q}`
+      : ''
+    setEscrowProgress({
+      open: true,
+      title: 'Deposit blocked',
+      description: (reg.pendingReason || reg.error || 'Frozen token account in escrow.') + links,
+      phase: 'result',
+      persistUntilDismiss: true,
+      primaryAction: {
+        label: 'Open raffle',
+        onClick: () => {
+          setEscrowProgress(CREATE_ESCROW_IDLE)
+          router.push(`/raffles/${raffleSlug}`)
+        },
+      },
+    })
+    return 'stop'
+  }
+
+  if (reg.verified === false) {
+    const pr = (reg.pendingReason || reg.error || '').trim()
+    if (pr) {
+      setEscrowProgress({
+        open: true,
+        title: 'Verification pending',
+        description: pr,
+        phase: 'result',
+        persistUntilDismiss: true,
+        primaryAction: {
+          label: 'Open raffle',
+          onClick: () => {
+            setEscrowProgress(CREATE_ESCROW_IDLE)
+            router.push(`/raffles/${raffleSlug}?deposit=1`)
+          },
+        },
+      })
+      return 'stop'
+    }
+  }
+
+  if (reg.verified) return 'verified'
+  return 'stop'
 }
 
 const CREATE_ESCROW_IDLE: CreateEscrowProgressState = {
@@ -233,6 +336,13 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   }, [selectedNft, nftMintInput, walletNfts])
   const [loadingWalletAssets, setLoadingWalletAssets] = useState(false)
   const [walletAssetsError, setWalletAssetsError] = useState<string | null>(null)
+  const connectedWalletAddr = publicKey?.toBase58() ?? null
+  useEffect(() => {
+    // Wallet switched (or disconnected): the previous wallet's inventory must not stay selectable.
+    setWalletNfts(null)
+    setSelectedNft(null)
+    setWalletAssetsError(null)
+  }, [connectedWalletAddr])
   /** Inline message for POST /api/raffles failures — avoids a blocking alert that can feel like a brief “flash” on mobile. */
   const [submissionError, setSubmissionError] = useState<string | null>(null)
   const [floorPrice, setFloorPrice] = useState('')
@@ -583,17 +693,13 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     const walletAddr = publicKey.toBase58()
     try {
       // Prefer API first: faster (batch from Helius) and returns more NFTs (paginated).
-      const [apiRes, escrowRes] = await Promise.all([
-        fetch(`/api/wallet/nfts?wallet=${encodeURIComponent(walletAddr)}`, { credentials: 'include' }),
+      const [apiResult, escrowRes] = await Promise.all([
+        fetchWalletNftsWithRetry(walletAddr),
         fetch(`/api/wallet/escrowed-nft-mints?wallet=${encodeURIComponent(walletAddr)}`, { credentials: 'include' }),
       ])
-      let nfts: WalletNft[] = []
-      if (apiRes.ok) {
-        const data = await apiRes.json()
-        nfts = Array.isArray(data) ? data : []
-      }
+      let nfts: WalletNft[] = apiResult.nfts
       // Fallback to client RPC when API is unavailable (e.g. no HELIUS_API_KEY) or fails
-      if (nfts.length === 0 || apiRes.status === 503) {
+      if (nfts.length === 0 || apiResult.res?.status === 503) {
         const { getWalletNfts } = await import('@/lib/solana/wallet-tokens')
         try {
           nfts = await getWalletNfts(connection, publicKey)
@@ -998,7 +1104,14 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               description:
                 'Your raffle was saved. Loading escrow settings — your wallet will open next to send the prize NFT.',
               phase: 'loading',
+              step: 'wallet',
               persistUntilDismiss: false,
+            })
+            await assertWalletReadyForSigning({
+              connected,
+              publicKey,
+              walletAdapter: wallet?.adapter ?? null,
+              connection,
             })
             const mintPk = new PublicKey(raffle.nft_mint_address)
             const walletAdapter = wallet?.adapter ?? null
@@ -1022,9 +1135,10 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             setEscrowProgress((p) => ({
               ...p,
               phase: 'loading',
+              step: 'wallet',
               persistUntilDismiss: false,
               description:
-                'Checking on-chain that your NFT is in this wallet. On mobile or Wi‑Fi this can take 15–45 seconds — please wait.',
+                'Checking on-chain that your NFT is in this wallet. On mobile or slow Wi‑Fi this can take up to about a minute — please wait.',
             }))
 
             const depositLogCtx = {
@@ -1103,35 +1217,71 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             let bundledSolWithNft = 0
 
             const nftMilestoneSol = milestoneDepositTotalForPrizeCurrency(createdMilestones, 'SOL')
+            const fundsEscrowForNftBundle =
+              nftMilestoneSol > 0 ? await fetchFundsEscrowAddress() : null
+            const solMilestoneLamports =
+              fundsEscrowForNftBundle && nftMilestoneSol > 0
+                ? Math.round(nftMilestoneSol * 1e9)
+                : undefined
+            const umiSolBundleArgs =
+              solMilestoneLamports && fundsEscrowForNftBundle
+                ? {
+                    solMilestoneLamports,
+                    fundsEscrowAddress: fundsEscrowForNftBundle,
+                    sendTransaction,
+                  }
+                : { sendTransaction }
+            const markBundledSolIfConfigured = () => {
+              if (solMilestoneLamports && fundsEscrowForNftBundle) {
+                bundledSolWithNft = nftMilestoneSol
+              }
+            }
             const nftWalletHint =
-              nftMilestoneSol > 0
+              nftMilestoneSol > 0 && fundsEscrowForNftBundle
                 ? `approve sending the prize NFT and ${nftMilestoneSol} SOL bonus to escrow in one transaction.`
-                : 'approve the transaction to send the prize NFT to escrow.'
+                : nftMilestoneSol > 0
+                  ? 'approve sending the prize NFT to escrow (bonus SOL deposits in a follow-up step).'
+                  : 'approve the transaction to send the prize NFT to escrow.'
 
             setEscrowProgress((p) => ({
               ...p,
               phase: 'loading',
+              step: 'wallet',
               persistUntilDismiss: false,
               description: `When your wallet opens, ${nftWalletHint}`,
+              secondaryAction: {
+                label: "Wallet didn't open",
+                onClick: () => {
+                  setEscrowProgress(CREATE_ESCROW_IDLE)
+                  router.push(`/raffles/${raffle.slug}?deposit=1`)
+                },
+              },
+              onCancel: () => setEscrowProgress(CREATE_ESCROW_IDLE),
             }))
 
             if (resolvedHolder) {
               const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
               if (walletAdapter && tokenProgram.equals(TOKEN_PROGRAM_ID)) {
                 try {
-                  logEscrowDepositPath(depositLogCtx, 'token_metadata')
+                  logEscrowDepositPath(depositLogCtx, 'token_metadata', {
+                    bundledSolMilestone:
+                      solMilestoneLamports && fundsEscrowForNftBundle ? nftMilestoneSol : undefined,
+                  })
                   depositSig = await transferTokenMetadataNftToEscrow({
                     connection,
                     wallet: walletAdapter,
                     mintAddress: raffle.nft_mint_address,
                     escrowAddress,
+                    ...umiSolBundleArgs,
                   })
+                  markBundledSolIfConfigured()
                   logEscrowDepositSigned(depositLogCtx, 'token_metadata', depositSig)
                 } catch (tmErr) {
                   logEscrowDepositAbort(depositLogCtx, 'token_metadata_failed_trying_spl', {
                     detail: tmErr instanceof Error ? tmErr.message : String(tmErr),
                   })
                   depositSig = null
+                  bundledSolWithNft = 0
                 }
               }
               if (!depositSig) {
@@ -1187,37 +1337,57 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   escrowAta: escrowAta.toBase58(),
                   bundledSolMilestone: bundledSolWithNft > 0 ? bundledSolWithNft : undefined,
                 })
-                depositSig = await sendTransaction(tx, connection)
+                setEscrowProgress((p) => ({ ...p, step: 'wallet' }))
+                depositSig = await sendTransactionWithTimeout(sendTransaction, tx, connection)
+                setEscrowProgress((p) => ({ ...p, step: 'chain', secondaryAction: undefined, onCancel: undefined }))
                 await confirmSignatureSuccessOnChain(connection, depositSig)
                 logEscrowDepositSigned(depositLogCtx, 'spl_transfer', depositSig)
               }
             } else if (walletAdapter) {
+              if (!connected) {
+                logEscrowDepositAbort(depositLogCtx, 'not_connected_for_core_compressed')
+                alert(
+                  'Connect your wallet to deposit this NFT. Phantom users need an active connection so Blowfish can validate the transfer.'
+                )
+                router.push(`/raffles/${raffle.slug}?deposit=1`)
+                return
+              }
               try {
                 logEscrowDepositPath(depositLogCtx, 'fallback_compressed', {
                   note: 'No SPL holder resolved; trying compressed',
+                  bundledSolMilestone:
+                    solMilestoneLamports && fundsEscrowForNftBundle ? nftMilestoneSol : undefined,
                 })
                 depositSig = await transferCompressedNftToEscrow({
                   connection,
                   wallet: walletAdapter,
                   assetId: prizeNft.mint,
                   escrowAddress,
+                  ...umiSolBundleArgs,
                 })
+                markBundledSolIfConfigured()
                 logEscrowDepositSigned(depositLogCtx, 'fallback_compressed', depositSig)
               } catch (cErr) {
                 logEscrowDepositAbort(depositLogCtx, 'fallback_compressed_failed', {
                   detail: cErr instanceof Error ? cErr.message : String(cErr),
                 })
                 depositSig = null
+                bundledSolWithNft = 0
               }
               if (!depositSig) {
                 try {
-                  logEscrowDepositPath(depositLogCtx, 'fallback_mpl_core')
+                  logEscrowDepositPath(depositLogCtx, 'fallback_mpl_core', {
+                    bundledSolMilestone:
+                      solMilestoneLamports && fundsEscrowForNftBundle ? nftMilestoneSol : undefined,
+                  })
                   depositSig = await transferMplCoreToEscrow({
                     connection,
                     wallet: walletAdapter,
                     assetId: prizeNft.mint,
                     escrowAddress,
+                    ...umiSolBundleArgs,
                   })
+                  markBundledSolIfConfigured()
                   logEscrowDepositSigned(depositLogCtx, 'fallback_mpl_core', depositSig)
                 } catch (coreErr) {
                   const coreMsg = coreErr instanceof Error ? coreErr.message : String(coreErr)
@@ -1226,6 +1396,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     detail: coreMsg,
                   })
                   depositSig = null
+                  bundledSolWithNft = 0
                 }
               }
               if (!depositSig) {
@@ -1265,115 +1436,35 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             setEscrowProgress((p) => ({
               ...p,
               phase: 'loading',
+              step: 'verify',
+              verifyAttempt: { current: 0, max: VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS },
               persistUntilDismiss: false,
+              secondaryAction: undefined,
+              onCancel: undefined,
               description:
-                'Saving your deposit and opening your raffle. If our servers are slow to confirm on mobile, your raffle page will update automatically — no need to tap Verify.',
+                'Confirming your deposit with Owltopia. We retry automatically if the network is slow.',
             }))
-            const regRes = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({ deposit_tx: depositSig }),
+            const regOutcome = await registerDepositTxAndVerifyWithRetries(raffle.id, depositSig, {
+              onVerifyAttempt: (current, max) => {
+                setEscrowProgress((p) => ({
+                  ...p,
+                  step: 'verify',
+                  verifyAttempt: { current, max },
+                }))
+              },
             })
-            const regData = (await regRes.json().catch(() => ({}))) as {
-              error?: string
-              verified?: boolean
-              pendingReason?: string
-              frozenEscrowDiagnostics?: { escrowTokenAccount?: string; mint?: string }
-            }
             logEscrowDepositVerify(
               depositLogCtx,
-              regRes.ok && regData.verified === true,
-              regRes.ok && regData.verified !== true
-                ? regData.pendingReason || regData.error
-                : undefined
+              regOutcome.verified === true,
+              regOutcome.verified ? undefined : regOutcome.pendingReason || regOutcome.error
             )
-            if (!regRes.ok) {
-              if (regRes.status === 401) {
-                setEscrowProgress({
-                  open: true,
-                  title: 'Sign in required',
-                  description:
-                    'Your session expired. Sign in from your dashboard. Your raffle is saved — after signing in, open your raffle to finish.',
-                  phase: 'result',
-                  persistUntilDismiss: true,
-                  primaryAction: {
-                    label: 'Go to dashboard',
-                    onClick: () => {
-                      setEscrowProgress(CREATE_ESCROW_IDLE)
-                      router.push('/dashboard')
-                    },
-                  },
-                })
-                return
-              }
-              const errMsg =
-                typeof regData.error === 'string' && regData.error.trim()
-                  ? regData.error.trim()
-                  : 'Could not save your deposit signature.'
-              setEscrowProgress({
-                open: true,
-                title: 'Could not finish setup',
-                description: errMsg,
-                phase: 'result',
-                persistUntilDismiss: true,
-                primaryAction: {
-                  label: 'Open raffle',
-                  onClick: () => {
-                    setEscrowProgress(CREATE_ESCROW_IDLE)
-                    router.push(`/raffles/${raffle.slug}`)
-                  },
-                },
-              })
-              return
-            }
-            if (
-              regData.verified === false &&
-              isEscrowSplPrizeFrozenVerifyError(regData.pendingReason || '')
-            ) {
-              const q = /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
-              const d = regData.frozenEscrowDiagnostics
-              const acct = d?.escrowTokenAccount
-              const links = acct
-                ? `\n\nEscrow token account (must be thawed on-chain):\nhttps://solscan.io/account/${encodeURIComponent(acct)}${q}`
-                : ''
-              setEscrowProgress({
-                open: true,
-                title: 'Deposit blocked',
-                description: (regData.pendingReason || 'Frozen token account in escrow.') + links,
-                phase: 'result',
-                persistUntilDismiss: true,
-                primaryAction: {
-                  label: 'Open raffle',
-                  onClick: () => {
-                    setEscrowProgress(CREATE_ESCROW_IDLE)
-                    router.push(`/raffles/${raffle.slug}`)
-                  },
-                },
-              })
-              return
-            }
-            if (regData.verified === false) {
-              const pr =
-                typeof regData.pendingReason === 'string' ? regData.pendingReason.trim() : ''
-              if (pr) {
-                setEscrowProgress({
-                  open: true,
-                  title: 'Verification pending',
-                  description: pr,
-                  phase: 'result',
-                  persistUntilDismiss: true,
-                  primaryAction: {
-                    label: 'Open raffle',
-                    onClick: () => {
-                      setEscrowProgress(CREATE_ESCROW_IDLE)
-                      router.push(`/raffles/${raffle.slug}?deposit=1`)
-                    },
-                  },
-                })
-                return
-              }
-            }
+            const verifyStatus = handleCreateEscrowVerifyOutcome(
+              regOutcome,
+              raffle.slug,
+              setEscrowProgress,
+              router
+            )
+            if (verifyStatus !== 'verified') return
             try {
               if (bundledSolWithNft > 0 && depositSig) {
                 const v = await verifyCreateMilestoneDepositsFromClient({
@@ -1426,8 +1517,11 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               transferErr
             )
             console.error('NFT transfer to escrow failed:', transferErr)
+            const transferMsg =
+              transferErr instanceof Error ? transferErr.message : 'Transfer to escrow failed.'
             alert(
-              transferErr instanceof Error ? transferErr.message : 'Transfer to escrow failed. You can complete it on the raffle page.'
+              formatPhantomBlockedEscrowMessage(transferMsg) ??
+                `${transferMsg} You can complete it on the raffle page.`
             )
             router.push(`/raffles/${raffle.slug}?deposit=1`)
           }
@@ -1445,7 +1539,14 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 description:
                   `Your raffle was saved. Loading escrow settings — your wallet will open next to send the ${prizeCur} prize.`,
                 phase: 'loading',
+                step: 'wallet',
                 persistUntilDismiss: false,
+              })
+              await assertWalletReadyForSigning({
+                connected,
+                publicKey,
+                walletAdapter: wallet?.adapter ?? null,
+                connection,
               })
               const rawNeed = humanPartnerPrizeToRawUnits(prizeCur, raffle.prize_amount)
               if (rawNeed == null) {
@@ -1493,8 +1594,17 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 setEscrowProgress((p) => ({
                   ...p,
                   phase: 'loading',
+                  step: 'wallet',
                   persistUntilDismiss: false,
                   description: `When your wallet opens, ${walletCopy}`,
+                  secondaryAction: {
+                    label: "Wallet didn't open",
+                    onClick: () => {
+                      setEscrowProgress(CREATE_ESCROW_IDLE)
+                      router.push(`/raffles/${raffle.slug}?deposit=1`)
+                    },
+                  },
+                  onCancel: () => setEscrowProgress(CREATE_ESCROW_IDLE),
                 }))
                 const tx = new Transaction().add(
                   SystemProgram.transfer({
@@ -1512,7 +1622,8 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     })
                   )
                 }
-                depositSig = await sendTransaction(tx, connection)
+                depositSig = await sendTransactionWithTimeout(sendTransaction, tx, connection)
+                setEscrowProgress((p) => ({ ...p, step: 'chain', secondaryAction: undefined, onCancel: undefined }))
                 await confirmSignatureSuccessOnChain(connection, depositSig)
               } else {
                 const mintPk = new PublicKey(prizeMint)
@@ -1634,116 +1745,49 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 setEscrowProgress((p) => ({
                   ...p,
                   phase: 'loading',
+                  step: 'wallet',
                   persistUntilDismiss: false,
                   description: `When your wallet opens, ${walletCopy}`,
+                  secondaryAction: {
+                    label: "Wallet didn't open",
+                    onClick: () => {
+                      setEscrowProgress(CREATE_ESCROW_IDLE)
+                      router.push(`/raffles/${raffle.slug}?deposit=1`)
+                    },
+                  },
+                  onCancel: () => setEscrowProgress(CREATE_ESCROW_IDLE),
                 }))
-                depositSig = await sendTransaction(tx, connection)
+                depositSig = await sendTransactionWithTimeout(sendTransaction, tx, connection)
+                setEscrowProgress((p) => ({ ...p, step: 'chain', secondaryAction: undefined, onCancel: undefined }))
                 await confirmSignatureSuccessOnChain(connection, depositSig)
               }
               setEscrowProgress((p) => ({
                 ...p,
                 phase: 'loading',
+                step: 'verify',
+                verifyAttempt: { current: 0, max: VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS },
                 persistUntilDismiss: false,
+                secondaryAction: undefined,
+                onCancel: undefined,
                 description:
-                  'Saving your deposit and opening your raffle. If our servers are slow to confirm on mobile, your raffle page will update automatically.',
+                  'Confirming your deposit with Owltopia. We retry automatically if the network is slow.',
               }))
-              const regRes = await fetch(`/api/raffles/${raffle.id}/register-deposit-tx`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ deposit_tx: depositSig }),
+              const regOutcome = await registerDepositTxAndVerifyWithRetries(raffle.id, depositSig, {
+                onVerifyAttempt: (current, max) => {
+                  setEscrowProgress((p) => ({
+                    ...p,
+                    step: 'verify',
+                    verifyAttempt: { current, max },
+                  }))
+                },
               })
-              const regData = (await regRes.json().catch(() => ({}))) as {
-                error?: string
-                verified?: boolean
-                pendingReason?: string
-                frozenEscrowDiagnostics?: { escrowTokenAccount?: string }
-              }
-              if (!regRes.ok) {
-                if (regRes.status === 401) {
-                  setEscrowProgress({
-                    open: true,
-                    title: 'Sign in required',
-                    description:
-                      'Your session expired. Sign in from your dashboard. Your raffle is saved — after signing in, open your raffle to finish.',
-                    phase: 'result',
-                    persistUntilDismiss: true,
-                    primaryAction: {
-                      label: 'Go to dashboard',
-                      onClick: () => {
-                        setEscrowProgress(CREATE_ESCROW_IDLE)
-                        router.push('/dashboard')
-                      },
-                    },
-                  })
-                  return
-                }
-                const errMsg =
-                  typeof regData.error === 'string' && regData.error.trim()
-                    ? regData.error.trim()
-                    : 'Could not save your deposit signature.'
-                setEscrowProgress({
-                  open: true,
-                  title: 'Could not finish setup',
-                  description: errMsg,
-                  phase: 'result',
-                  persistUntilDismiss: true,
-                  primaryAction: {
-                    label: 'Open raffle',
-                    onClick: () => {
-                      setEscrowProgress(CREATE_ESCROW_IDLE)
-                      router.push(`/raffles/${raffle.slug}`)
-                    },
-                  },
-                })
-                return
-              }
-              if (
-                regData.verified === false &&
-                isEscrowSplPrizeFrozenVerifyError(regData.pendingReason || '')
-              ) {
-                const q = /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
-                const acct = regData.frozenEscrowDiagnostics?.escrowTokenAccount
-                const links = acct
-                  ? `\n\nEscrow token account:\nhttps://solscan.io/account/${encodeURIComponent(acct)}${q}`
-                  : ''
-                setEscrowProgress({
-                  open: true,
-                  title: 'Deposit blocked',
-                  description: (regData.pendingReason || 'Verify failed') + links,
-                  phase: 'result',
-                  persistUntilDismiss: true,
-                  primaryAction: {
-                    label: 'Open raffle',
-                    onClick: () => {
-                      setEscrowProgress(CREATE_ESCROW_IDLE)
-                      router.push(`/raffles/${raffle.slug}`)
-                    },
-                  },
-                })
-                return
-              }
-              if (regData.verified === false) {
-                const pr =
-                  typeof regData.pendingReason === 'string' ? regData.pendingReason.trim() : ''
-                if (pr) {
-                  setEscrowProgress({
-                    open: true,
-                    title: 'Verification pending',
-                    description: pr,
-                    phase: 'result',
-                    persistUntilDismiss: true,
-                    primaryAction: {
-                      label: 'Open raffle',
-                      onClick: () => {
-                        setEscrowProgress(CREATE_ESCROW_IDLE)
-                        router.push(`/raffles/${raffle.slug}?deposit=1`)
-                      },
-                    },
-                  })
-                  return
-                }
-              }
+              const verifyStatus = handleCreateEscrowVerifyOutcome(
+                regOutcome,
+                raffle.slug,
+                setEscrowProgress,
+                router
+              )
+              if (verifyStatus !== 'verified') return
               try {
                 await depositFollowUpMilestonesAfterPrize({
                   raffle,
@@ -1873,7 +1917,11 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
         title={escrowProgress.title}
         description={escrowProgress.description}
         phase={escrowProgress.phase}
+        step={escrowProgress.step}
+        verifyAttempt={escrowProgress.verifyAttempt}
         primaryAction={escrowProgress.primaryAction}
+        secondaryAction={escrowProgress.secondaryAction}
+        onCancel={escrowProgress.onCancel}
       />
       <Card className={getThemeAccentClasses(themeAccent)} style={borderStyle}>
       <CardHeader>

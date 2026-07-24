@@ -3,26 +3,39 @@ import { isVersionedTransaction } from '@solana/wallet-adapter-base'
 import type { Connection, TransactionSignature } from '@solana/web3.js'
 import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js'
 import bs58 from 'bs58'
+import {
+  assertTransactionSimulatesClean,
+  isPhantomPresimulateError,
+} from '@/lib/solana/phantom-presimulate'
+
+type PhantomSendOptions = {
+  skipPreflight?: boolean
+  preflightCommitment?: 'processed' | 'confirmed' | 'finalized'
+  maxRetries?: number
+  minContextSlot?: number
+}
 
 type PhantomSolanaLike = {
   isPhantom?: boolean
   publicKey?: PublicKey | { toBase58(): string } | null
   signAndSendTransaction?: (
     transaction: Transaction | VersionedTransaction,
-    options?: {
-      skipPreflight?: boolean
-      preflightCommitment?: 'processed' | 'confirmed' | 'finalized'
-      maxRetries?: number
-      minContextSlot?: number
-    }
+    options?: PhantomSendOptions
   ) => Promise<{ signature: TransactionSignature | Uint8Array }>
+  signAndSendAllTransactions?: (
+    transactions: (Transaction | VersionedTransaction)[],
+    options?: PhantomSendOptions
+  ) => Promise<{
+    signatures: Array<TransactionSignature | Uint8Array>
+    publicKey?: PublicKey | { toBase58(): string }
+  }>
 }
 
 function toBase58(pk: PublicKey | { toBase58(): string }): string {
   return pk instanceof PublicKey ? pk.toBase58() : pk.toBase58()
 }
 
-function getPhantomInjectedProviderForPublicKey(expected: PublicKey): PhantomSolanaLike | null {
+export function getPhantomInjectedProviderForPublicKey(expected: PublicKey): PhantomSolanaLike | null {
   if (typeof window === 'undefined') return null
   const want = expected.toBase58()
   const candidates: unknown[] = [(window as unknown as { phantom?: { solana?: unknown } }).phantom?.solana]
@@ -108,6 +121,8 @@ export async function sendTransactionPreferPhantomSignAndSend(
             options
           )
         }
+        // Phantom docs: pre-sim with sigVerify:false so doomed txs do not look "malicious".
+        await assertTransactionSimulatesClean(connection, tx)
         const preflight = options?.preflightCommitment as
           | 'processed'
           | 'confirmed'
@@ -121,6 +136,8 @@ export async function sendTransactionPreferPhantomSignAndSend(
         })
         return normalizeSignature(signature)
       } catch (err) {
+        // Doomed txs must not fall through to another wallet prompt (still looks "malicious").
+        if (isPhantomPresimulateError(err)) throw err
         if (process.env.NODE_ENV === 'development') {
           console.warn(
             '[sendTransactionPreferPhantomSignAndSend] Phantom signAndSendTransaction failed; using adapter.',
@@ -131,4 +148,100 @@ export async function sendTransactionPreferPhantomSignAndSend(
     }
   }
   return fallbackSendTransaction(transaction, connection, options)
+}
+
+export type SendAllTransactionsPreferPhantomParams = {
+  transactions: Array<Transaction | VersionedTransaction>
+  connection: Connection
+  options?: SendTransactionOptions
+  adapter: WalletAdapter
+  publicKey: PublicKey | null
+  /** Per-tx fallback when Phantom signAndSendAll is unavailable. */
+  fallbackSendTransaction: (
+    transaction: Transaction | VersionedTransaction,
+    connection: Connection,
+    options?: SendTransactionOptions
+  ) => Promise<TransactionSignature>
+}
+
+/**
+ * Prefer Phantom `signAndSendAllTransactions` (Blowfish Lighthouse path) for a batch.
+ * Falls back to sequential `sendTransactionPreferPhantomSignAndSend` when unavailable.
+ */
+export async function sendAllTransactionsPreferPhantomSignAndSend(
+  params: SendAllTransactionsPreferPhantomParams
+): Promise<TransactionSignature[]> {
+  const { transactions, connection, options, adapter, publicKey, fallbackSendTransaction } = params
+  if (transactions.length === 0) return []
+
+  const signers = options?.signers
+  if (
+    publicKey &&
+    adapterIsPhantom(adapter) &&
+    (!signers || signers.length === 0)
+  ) {
+    const provider = getPhantomInjectedProviderForPublicKey(publicKey)
+    if (provider?.signAndSendAllTransactions) {
+      try {
+        const prepared: Array<Transaction | VersionedTransaction> = []
+        for (const transaction of transactions) {
+          if (!isVersionedTransaction(transaction)) {
+            prepared.push(
+              await prepareLegacyTransactionLikeAdapter(
+                transaction,
+                connection,
+                publicKey,
+                options
+              )
+            )
+          } else {
+            prepared.push(transaction)
+          }
+        }
+        for (const tx of prepared) {
+          await assertTransactionSimulatesClean(connection, tx)
+        }
+        const preflight = options?.preflightCommitment as
+          | 'processed'
+          | 'confirmed'
+          | 'finalized'
+          | undefined
+        const { signatures } = await provider.signAndSendAllTransactions(prepared, {
+          skipPreflight: options?.skipPreflight,
+          preflightCommitment: preflight,
+          maxRetries: options?.maxRetries,
+          minContextSlot: options?.minContextSlot,
+        })
+        return signatures.map(normalizeSignature)
+      } catch (err) {
+        if (isPhantomPresimulateError(err)) throw err
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(
+            '[sendAllTransactionsPreferPhantomSignAndSend] Phantom signAndSendAll failed; using per-tx send.',
+            err
+          )
+        }
+      }
+    }
+  }
+
+  const out: TransactionSignature[] = []
+  for (const transaction of transactions) {
+    out.push(
+      await sendTransactionPreferPhantomSignAndSend({
+        transaction,
+        connection,
+        options,
+        adapter,
+        publicKey,
+        fallbackSendTransaction,
+      })
+    )
+  }
+  return out
+}
+
+/** True when the connected adapter is Phantom (name check). */
+export function walletAdapterIsPhantom(adapter: WalletAdapter | null | undefined): boolean {
+  return Boolean(adapter && adapterIsPhantom(adapter))
 }

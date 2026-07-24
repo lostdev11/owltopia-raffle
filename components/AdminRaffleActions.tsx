@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send, Download, Upload } from 'lucide-react'
 import type { Raffle, Entry } from '@/lib/types'
+import type { AdminRole } from '@/lib/db/admins'
 import Link from 'next/link'
 import { getRaffleMinimum } from '@/lib/db/raffles'
 import { raffleAllowsAdminFundsEscrowRefund } from '@/lib/raffles/ticket-escrow-policy'
@@ -50,9 +51,16 @@ function listingArtworkPayloadFromUrl(url: string): {
 interface AdminRaffleActionsProps {
   raffle: Raffle
   entries?: Entry[]
+  /** Defaults to full for backward compatibility; pass `mod` for junior admins. */
+  adminRole?: AdminRole
 }
 
-export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsProps) {
+export function AdminRaffleActions({
+  raffle,
+  entries = [],
+  adminRole = 'full',
+}: AdminRaffleActionsProps) {
+  const isFullAdmin = adminRole === 'full'
   const router = useRouter()
   const { connected, publicKey } = useWallet()
   const [returnDialogOpen, setReturnDialogOpen] = useState(false)
@@ -161,16 +169,20 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   ] as const
 
   const canOverrideNftEconomics =
+    isFullAdmin &&
     raffle.prize_type === 'nft' &&
     noWinner &&
     RESTORE_ELIGIBLE_STATUSES.includes(statusLc as (typeof RESTORE_ELIGIBLE_STATUSES)[number])
 
   const canDeadlineAdminOverride =
+    isFullAdmin &&
     noWinner &&
     !prizeReturnRecorded &&
     RESTORE_ELIGIBLE_STATUSES.includes(statusLc as (typeof RESTORE_ELIGIBLE_STATUSES)[number])
   const deadlineOverrideBlockedReason = !canDeadlineAdminOverride
-    ? !noWinner
+    ? !isFullAdmin
+      ? 'Junior admins cannot restore or extend raffle deadlines — ping a full admin.'
+      : !noWinner
       ? 'Winner already selected. Use "Void winner & reopen" first if this was a bad draw and no prize transfer/claim happened.'
       : prizeReturnRecorded
         ? 'Prize was returned to the creator. Reopen only after a new verified escrow deposit.'
@@ -180,6 +192,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
   const hasWinner =
     !!(raffle.winner_wallet ?? '').trim() || !!raffle.winner_selected_at
   const canVoidWinner =
+    isFullAdmin &&
     hasWinner &&
     !prizeReturnRecorded &&
     !(raffle.nft_transfer_transaction ?? '').trim() &&
@@ -188,7 +201,9 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
 
   const voidWinnerBlockedReason =
     hasWinner && !canVoidWinner
-      ? prizeReturnRecorded
+      ? !isFullAdmin
+        ? 'Junior admins cannot void winners — ping a full admin.'
+        : prizeReturnRecorded
         ? 'Prize was returned to the creator — resolve escrow before changing draw state.'
         : (raffle.nft_transfer_transaction ?? '').trim()
           ? 'NFT transfer to the winner is already on-chain; the app cannot void this draw.'
@@ -939,6 +954,13 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
           </p>
         </div>
 
+        {!isFullAdmin && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+            Junior admin view — you can toggle public listing visibility and export entrants. Refunds,
+            cancellations, winner selection, and prize moves require a full admin.
+          </div>
+        )}
+
         <Card className="border-violet-500/30 bg-violet-500/[0.04]">
           <CardHeader className="pb-2">
             <CardTitle>Public raffles list</CardTitle>
@@ -1025,6 +1047,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
           </CardContent>
         </Card>
 
+        {isFullAdmin && (
         <AdminManualRefundRecorder
           raffleId={raffle.id}
           raffleCurrency={raffle.currency || 'SOL'}
@@ -1032,6 +1055,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
           onRecorded={() => router.refresh()}
           adminFundsEscrowRefundEnabled={raffleAllowsAdminFundsEscrowRefund(raffle)}
         />
+        )}
 
         <Card>
           <CardHeader>
@@ -1365,6 +1389,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             </CardContent>
           </Card>
 
+        {isFullAdmin && (
         <Card className="border-amber-500/30 bg-amber-500/5">
           <CardHeader>
             <CardTitle>Admin actions</CardTitle>
@@ -1903,6 +1928,7 @@ export function AdminRaffleActions({ raffle, entries = [] }: AdminRaffleActionsP
             </div>
           </CardContent>
         </Card>
+        )}
 
         <Card>
           <CardHeader>

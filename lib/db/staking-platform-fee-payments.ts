@@ -36,6 +36,27 @@ export async function getStakingPlatformFeePaymentBySignature(
   }
 }
 
+/** True when this nest id is already linked to a recorded platform fee for the action. */
+export async function stakingPositionHasPlatformFeeLinked(
+  positionId: string,
+  action: StakingPlatformFeePaymentRow['action']
+): Promise<boolean> {
+  const id = positionId.trim()
+  if (!id) return false
+  const { data, error } = await getSupabaseAdmin()
+    .from('staking_platform_fee_payments')
+    .select('tx_signature')
+    .eq('action', action)
+    .contains('position_ids', [id])
+    .limit(1)
+    .maybeSingle()
+  if (error) {
+    console.error('[staking-platform-fee-payments] hasPositionLinked:', error.message)
+    return false
+  }
+  return Boolean(data?.tx_signature)
+}
+
 export async function insertStakingPlatformFeePayment(row: {
   tx_signature: string
   wallet_address: string

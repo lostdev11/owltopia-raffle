@@ -20,7 +20,10 @@ import { AdminWalletBulkUpload } from '@/components/admin/AdminWalletBulkUpload'
 import { AdminGen1WalletSwitch } from '@/components/admin/AdminGen1WalletSwitch'
 import { AdminPresaleWalletSwitch } from '@/components/admin/AdminPresaleWalletSwitch'
 import { AdminGen1SnapshotPanel } from '@/components/admin/AdminGen1SnapshotPanel'
+import { AdminGen2FreezeThawPanel } from '@/components/admin/AdminGen2FreezeThawPanel'
+import { AdminGen2BackstopMintPanel } from '@/components/admin/AdminGen2BackstopMintPanel'
 import { PhaseScheduleEditor } from '@/components/owl-center/PhaseScheduleEditor'
+import { suggestMagicEdenCollectionUrl, suggestTensorCollectionUrl } from '@/lib/owl-center/marketplace-urls'
 import { GEN2_WL_COLLAB_COMMUNITIES, owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
 import {
   datetimeLocalToIso,
@@ -102,8 +105,13 @@ export default function AdminOwlCenterPage() {
       setCol(L.collection_mint ?? '')
       setDevnetCm(L.devnet_candy_machine_id ?? '')
       setDevnetCol(L.devnet_collection_mint ?? '')
-      setMe(L.magic_eden_url ?? '')
-      setTensor(L.tensor_url ?? '')
+      setMe(
+        L.magic_eden_url?.trim() ||
+          (L.collection_mint ? suggestMagicEdenCollectionUrl(L.collection_mint) : '')
+      )
+      setTensor(
+        L.tensor_url?.trim() || (L.collection_mint ? suggestTensorCollectionUrl(L.collection_mint) : '')
+      )
       setPhase(L.active_phase)
       setStatus(L.status)
       setPaused(L.is_paused)
@@ -413,6 +421,10 @@ export default function AdminOwlCenterPage() {
                     Per-phase progress
                   </p>
                   <PhaseSupplyBreakdown rows={state.phaseBreakdown} />
+                  <p className="mt-3 font-mono text-[10px] leading-relaxed text-[#5C6773]">
+                    Phase “left” is that phase’s allocation ledger. Gen1/presale unclaimed slots are not extra
+                    collection inventory once the shared WL+public pool is sold out — top bar is total supply.
+                  </p>
                 </div>
               ) : null}
               <p className="mt-4 font-mono text-xs text-[#5C6773]">
@@ -685,6 +697,9 @@ export default function AdminOwlCenterPage() {
                 launch={state.launch}
               />
             </CommandCard>
+
+            <AdminGen2FreezeThawPanel onChanged={() => void load()} />
+            <AdminGen2BackstopMintPanel launch={state.launch} onChanged={() => void load()} />
 
             {isDevnetMintEnabled() ? (
             <CommandCard label="gen2_devnet_test.sys">

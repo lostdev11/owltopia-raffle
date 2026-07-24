@@ -16,6 +16,7 @@ import { fetchAsset, fetchAssetV1, transferV1 } from '@metaplex-foundation/mpl-c
 import { getSolanaConnection, getSolanaReadConnection } from '@/lib/solana/connection'
 import { resolveServerSolanaRpcUrl, resolveServerSolanaReadRpcUrl } from '@/lib/solana-rpc-url'
 import { trySendSplNftViaTokenMetadataFromEscrow } from '@/lib/solana/token-metadata-prize-payout'
+import { umiSignatureToBase58 } from '@/lib/solana/umi-signature'
 import { getTokenInfo } from '@/lib/tokens'
 import {
   getDiscordMarketplaceEscrowKeypair,
@@ -169,7 +170,7 @@ async function payoutMplCoreFromMarketplaceEscrow(
       ...(maybeCollection ? { collection: maybeCollection } : {}),
     } as any)
     const result: any = await builder.sendAndConfirm(umi as any)
-    return { ok: true, signature: String(result.signature ?? result) }
+    return { ok: true, signature: umiSignatureToBase58(result) }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'MPL Core transfer failed' }
   }
