@@ -46,6 +46,9 @@ const PHASE_BY_GROUP_LABEL = new Map<string, OwlCenterPhase>()
 for (const { phase, label } of GROUP_PHASE_PAIRS) {
   if (!PHASE_BY_GROUP_LABEL.has(label)) PHASE_BY_GROUP_LABEL.set(label, phase)
 }
+// Temporary leftover-mint group records as PUBLIC (same as admin team backstop path).
+PHASE_BY_GROUP_LABEL.set('team', 'PUBLIC')
+PHASE_BY_GROUP_LABEL.set('test', 'PUBLIC')
 const CANDIDATE_GROUP_LABELS = [...PHASE_BY_GROUP_LABEL.keys()]
 
 // On-chain mintLimit guard ids (must match scripts/gen2-cm-setup.ts): gen1=1, pub=2, wl=3, pre=4.
@@ -88,8 +91,54 @@ async function recordReconciledMint(
     p_network: network,
     p_event_candy_machine_id: cmId,
   })
-  const row = data as { ok?: boolean } | null
-  return !error && row?.ok === true
+  const row = data as { ok?: boolean; error?: string } | null
+  if (!error && row?.ok === true) return true
+
+  // After mint-out the launch may already be SOLD_OUT / TRADING_ACTIVE — the confirm RPC then
+  // rejects with mint_closed even though the NFT already exists on-chain. Insert the ledger row
+  // directly (idempotent on tx_signature) and bump minted_count so the admin counter matches CM.
+  const rpcErr = typeof row?.error === 'string' ? row.error : ''
+  if (rpcErr !== 'mint_closed' && rpcErr !== 'phase_mismatch' && rpcErr !== 'gen1_window_closed') {
+    return false
+  }
+
+  const { error: insertErr } = await db.from('owl_center_mint_events').insert({
+    launch_id: launch.id,
+    wallet_address: mint.wallet,
+    quantity: mint.quantity,
+    phase,
+    tx_signature: txSignature,
+    minted_nft_mints: mint.mintedNftMints,
+    network,
+    candy_machine_id: cmId,
+  })
+  if (insertErr) {
+    // Duplicate tx is fine — already recorded.
+    if (/duplicate|unique/i.test(insertErr.message)) return false
+    console.error('[reconcile-gen2] direct insert failed', insertErr.message)
+    return false
+  }
+
+  const { data: launchRow } = await db
+    .from('owl_center_launches')
+    .select('minted_count, total_supply')
+    .eq('id', launch.id)
+    .maybeSingle()
+  const current = Number((launchRow as { minted_count?: number } | null)?.minted_count ?? 0)
+  const total = Number((launchRow as { total_supply?: number } | null)?.total_supply ?? 0)
+  const next = Math.min(total || Number.MAX_SAFE_INTEGER, current + mint.quantity)
+  await db
+    .from('owl_center_launches')
+    .update({
+      minted_count: next,
+      updated_at: new Date().toISOString(),
+      ...(total > 0 && next >= total
+        ? { active_phase: 'SOLD_OUT', status: 'SOLD_OUT' }
+        : {}),
+    })
+    .eq('id', launch.id)
+
+  return true
 }
 
 /**

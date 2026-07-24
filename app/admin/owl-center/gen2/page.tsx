@@ -421,6 +421,10 @@ export default function AdminOwlCenterPage() {
                     Per-phase progress
                   </p>
                   <PhaseSupplyBreakdown rows={state.phaseBreakdown} />
+                  <p className="mt-3 font-mono text-[10px] leading-relaxed text-[#5C6773]">
+                    Phase “left” is that phase’s allocation ledger. Gen1/presale unclaimed slots are not extra
+                    collection inventory once the shared WL+public pool is sold out — top bar is total supply.
+                  </p>
                 </div>
               ) : null}
               <p className="mt-4 font-mono text-xs text-[#5C6773]">

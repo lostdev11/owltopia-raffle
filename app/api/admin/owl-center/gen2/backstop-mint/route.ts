@@ -18,6 +18,7 @@ import {
 import { sumOwlCenterPhaseMinted } from '@/lib/owl-center/presale-mint-pool'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { getGen2CandyMachineId, isDevnetMintEnabled } from '@/lib/solana/network'
+import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -74,10 +75,20 @@ export async function POST(request: NextRequest) {
 
   if (action === 'status') {
     let onChainTeam = false
+    let on_chain_remaining: number | null = null
     try {
       onChainTeam = await gen2TeamGuardPresent(getGen2CandyMachineId(launch) || undefined)
     } catch {
       onChainTeam = false
+    }
+    try {
+      const supply = await fetchCandyMachineOnChainSupply(
+        getGen2CandyMachineId(launch) || '',
+        isDevnetMintEnabled() ? 'devnet' : 'mainnet'
+      )
+      if (supply.ok) on_chain_remaining = supply.remaining
+    } catch {
+      on_chain_remaining = null
     }
     return NextResponse.json({
       ok: true,
@@ -86,13 +97,31 @@ export async function POST(request: NextRequest) {
       team_wallets: teamWallets,
       public_pool_remaining: publicPoolRemaining,
       collection_remaining: remaining,
+      on_chain_remaining,
       minted_count: launch.minted_count,
       total_supply: launch.total_supply,
       auto_enable: true,
+      ledger_lag:
+        on_chain_remaining != null && remaining > on_chain_remaining
+          ? remaining - on_chain_remaining
+          : 0,
     })
   }
 
   if (action === 'enable') {
+    const supply = await fetchCandyMachineOnChainSupply(
+      getGen2CandyMachineId(launch) || '',
+      isDevnetMintEnabled() ? 'devnet' : 'mainnet'
+    )
+    if (supply.ok && supply.remaining <= 0) {
+      return NextResponse.json(
+        {
+          error:
+            'Candy Machine is sold out on-chain (0 left). DB remaining is ledger lag — nothing to team-mint. Refresh / wait for reconcile.',
+        },
+        { status: 400 }
+      )
+    }
     const res = await ensureGen2TeamBackstopAutoEnabled({
       launch,
       extraWallet: session.wallet,

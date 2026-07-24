@@ -19,6 +19,8 @@ type StatusPayload = {
   team_wallets: string[]
   public_pool_remaining: number
   collection_remaining: number
+  on_chain_remaining?: number | null
+  ledger_lag?: number
   minted_count: number
   total_supply: number
 }
@@ -200,6 +202,10 @@ export function AdminGen2BackstopMintPanel({
 
   const publicDone = (data?.public_pool_remaining ?? 1) <= 0
   const remaining = data?.collection_remaining ?? Math.max(0, launch.total_supply - launch.minted_count)
+  const onChainRemaining = data?.on_chain_remaining
+  const trulyMintable =
+    onChainRemaining == null ? remaining : Math.min(remaining, Math.max(0, onChainRemaining))
+  const ledgerLag = data?.ledger_lag ?? 0
 
   return (
     <CommandCard label="BACKSTOP_MINT · TEAM_LEFTOVER">
@@ -223,7 +229,13 @@ export function AdminGen2BackstopMintPanel({
               </span>
             </span>
             <span>
-              remaining: <span className="text-[#E8EEF2]">{remaining.toLocaleString()}</span>
+              db_remaining: <span className="text-[#E8EEF2]">{remaining.toLocaleString()}</span>
+            </span>
+            <span>
+              on_chain_left:{' '}
+              <span className={onChainRemaining === 0 ? 'text-[#00FF9C]' : 'text-[#E8EEF2]'}>
+                {onChainRemaining == null ? '—' : onChainRemaining.toLocaleString()}
+              </span>
             </span>
             <span>
               enabled:{' '}
@@ -232,6 +244,13 @@ export function AdminGen2BackstopMintPanel({
               </span>
             </span>
           </div>
+
+          {ledgerLag > 0 && onChainRemaining === 0 ? (
+            <p className="border border-[#FFD769]/35 bg-[#FFD769]/10 px-3 py-2 text-xs text-[#FFD769]">
+              Candy Machine is sold out on-chain. DB still shows {ledgerLag} unconfirmed mint
+              {ledgerLag === 1 ? '' : 's'} — nothing left to team-mint. Refresh after reconcile / wait for cron.
+            </p>
+          ) : null}
 
           {!publicDone ? (
             <p className="border border-[#FFD769]/35 bg-[#FFD769]/10 px-3 py-2 text-xs text-[#FFD769]">
@@ -248,7 +267,7 @@ export function AdminGen2BackstopMintPanel({
           <div className="flex flex-wrap gap-3">
             <DeployButton
               type="button"
-              disabled={busy || !publicDone || remaining <= 0 || Boolean(data?.enabled)}
+              disabled={busy || !publicDone || trulyMintable <= 0 || Boolean(data?.enabled)}
               onClick={() => void runAction('enable')}
               className="min-h-[44px] touch-manipulation"
             >
@@ -264,14 +283,14 @@ export function AdminGen2BackstopMintPanel({
             </DeployButton>
           </div>
 
-          {data?.enabled && remaining > 0 ? (
+          {data?.enabled && trulyMintable > 0 ? (
             <div className="flex flex-wrap items-end gap-3 border-t border-[#1A222B] pt-4">
               <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
                 Quantity (max 25)
                 <input
                   type="number"
                   min={1}
-                  max={Math.min(25, remaining)}
+                  max={Math.min(25, trulyMintable)}
                   value={qty}
                   onChange={(e) => setQty(Number(e.target.value) || 1)}
                   className="w-24 border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm text-[#E8EEF2]"

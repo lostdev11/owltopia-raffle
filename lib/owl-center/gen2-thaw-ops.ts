@@ -44,10 +44,9 @@ export async function enqueueGen2ThawIfSoldOut(
   const cur = launch ?? (await getOwlCenterLaunchBySlugAdmin('gen2'))
   if (!cur) return { enqueued: false, launch: null }
 
-  const soldOut =
-    cur.active_phase === 'SOLD_OUT' ||
-    cur.status === 'SOLD_OUT' ||
-    cur.minted_count >= cur.total_supply
+  // Full collection sellout only — do not enqueue thaw from a premature SOLD_OUT phase while
+  // minted_count still lags the Candy Machine.
+  const soldOut = cur.minted_count >= cur.total_supply
 
   if (!soldOut) return { enqueued: false, launch: cur }
 

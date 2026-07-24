@@ -133,6 +133,9 @@ export async function GET(request: NextRequest) {
   const wlSync = await maybeSyncGen2WlSupplyOnClose(launch, phaseMintedByPhase.WHITELIST ?? 0)
   if (wlSync.synced) launch.wl_supply = wlSync.wl_supply
 
+  const collectionRemaining = remaining
+  const collectionSoldOut = collectionRemaining <= 0 || launch.active_phase === 'SOLD_OUT' || launch.active_phase === 'TRADING_ACTIVE'
+
   const phase_breakdown = OWL_CENTER_MINTABLE_PHASES.map((phase) => {
     const phaseMinted = phaseMintedByPhase[phase] ?? 0
     if (phase === 'PUBLIC') {
@@ -141,22 +144,41 @@ export async function GET(request: NextRequest) {
         publicMinted: phaseMinted,
         wlMinted: phaseMintedByPhase.WHITELIST ?? 0,
       })
+      // Shared WL+public pool view — cap can exceed the design pool if public overshot into
+      // reserved Gen1/presale inventory. Still report honestly with a hint.
       return {
         phase,
         minted: view.minted,
         cap: view.cap,
         remaining: view.remaining,
+        hint: '(WL+public shared)',
       }
     }
     const cap =
       phase === 'WHITELIST'
         ? gen2EffectiveWlSupply(launch, phaseMinted)
         : gen2PhasePoolCap(launch, phase)
+    const phaseRemaining = Math.max(0, cap - phaseMinted)
+    // Gen1/presale “left” is allocation ledger, not collection inventory. Once the collection
+    // (or public shared pool) is done, unused phase slots are unclaimed — not mintable leftovers.
+    if (
+      (phase === 'AIRDROP' || phase === 'PRESALE' || phase === 'PRESALE_OVERAGE') &&
+      phaseRemaining > 0 &&
+      (collectionSoldOut || collectionRemaining < phaseRemaining)
+    ) {
+      return {
+        phase,
+        minted: phaseMinted,
+        cap,
+        remaining: 0,
+        unclaimed: phaseRemaining,
+      }
+    }
     return {
       phase,
       minted: phaseMinted,
       cap,
-      remaining: Math.max(0, cap - phaseMinted),
+      remaining: phaseRemaining,
     }
   })
 
