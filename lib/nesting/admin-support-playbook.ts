@@ -227,7 +227,7 @@ export function buildAdminSupportPlaybook(params: {
     recommendations.push({
       action: 'Ask: Ledger via Phantom/Solflare?',
       detail:
-        'Three Ledger pain points: (1) Nest "Say hi" — Phantom/Solflare often never deliver off-chain Sign Message to Ledger. Use the My nest button “Sign with Ledger transaction” (memo tx, not broadcast). Unlock device, Solana app open, Ledger Live closed; USB > Bluetooth. (2) Nest lock "Unexpected instruction" / Phantom-Lighthouse string — Solflare/Phantom inject Lighthouse guards Ledger cannot clear-sign; Gainz-style stakes can still work — nest from a hot wallet or transfer then nest. (3) Nest lock never prompts — complex Metaplex Core versioned txs; nest one NFT at a time or from a hot wallet.',
+        'Four Ledger pain points: (1) Nest "Say hi" — Phantom/Solflare often never deliver off-chain Sign Message to Ledger. Use the My nest button “Sign with Ledger transaction” (memo tx, not broadcast). Unlock device, Solana app open, Ledger Live closed; USB > Bluetooth. (2) Orange nesting safeguards — same Sign Message gap (Phantom “Sign message rejected” / error Code 1). Use “Sign safeguards with Ledger” in the orange box (memo tx, not broadcast); auto-falls back after Sign Message failure. (3) Nest lock "Unexpected instruction" / Phantom-Lighthouse string — Solflare/Phantom inject Lighthouse guards Ledger cannot clear-sign; Gainz-style stakes can still work — nest from a hot wallet or transfer then nest. (4) Nest lock never prompts — complex Metaplex Core versioned txs; nest one NFT at a time or from a hot wallet.',
     })
   }
 

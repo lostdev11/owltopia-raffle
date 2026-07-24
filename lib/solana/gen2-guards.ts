@@ -26,10 +26,14 @@ import { MINT_SOLANA_RPC_RETRY, withSolanaRpcRetry } from '@/lib/solana/rpc-retr
  * - `wl`   — Whitelist (solPayment at WL price + allowList merkle of `owl_center_wl_allocations`
  *   wallets served by `/api/owl-center/gen2/wl-proof?phase=WHITELIST`).
  * - `pub`  — Public (solPayment at public price + optional mintLimit / botTax).
+ * - `team` — Temporary admin leftover mint after public pool exhausts (free + freeze).
  *
  * Override the phase → label mapping with the `NEXT_PUBLIC_GEN2_GUARD_GROUP_*` env vars
  * (value `none` mints against the default guard set with no group).
  */
+
+/** Temporary Candy Guard group for Gen2 team backstop mint (max 6 chars). */
+export const GEN2_TEAM_GUARD_LABEL = 'team'
 
 export type Gen2MintablePhase = 'AIRDROP' | 'PRESALE' | 'PRESALE_OVERAGE' | 'WHITELIST' | 'PUBLIC'
 
@@ -129,7 +133,8 @@ function mergeGuardSets(defaults: DefaultGuardSet, group: DefaultGuardSet | null
 export async function buildGen2GuardMintPlan(
   umi: Umi,
   candyMachinePk: PublicKey,
-  phase: Gen2MintablePhase
+  phase: Gen2MintablePhase,
+  opts?: { groupLabelOverride?: string | null }
 ): Promise<Gen2GuardPlanResult> {
   const candyMachine = await fetchCandyMachine(umi, candyMachinePk)
   const candyGuard = await safeFetchCandyGuard(umi, candyMachine.mintAuthority)
@@ -142,7 +147,8 @@ export async function buildGen2GuardMintPlan(
     }
   }
 
-  let groupLabel = gen2GuardGroupLabel(phase)
+  let groupLabel =
+    opts?.groupLabelOverride !== undefined ? opts.groupLabelOverride : gen2GuardGroupLabel(phase)
   let groupGuards: DefaultGuardSet | null = null
 
   if (candyGuard.groups.length > 0) {
@@ -233,7 +239,7 @@ export type Gen2AllowListRoutePlan =
 
 async function fetchGen2WlProofResponse(
   wallet: PublicKey,
-  phase: Gen2MintablePhase
+  phase: string
 ): Promise<{ ok: true; body: WlProofResponse } | { ok: false; error: string }> {
   try {
     const res = await fetch(
@@ -277,10 +283,11 @@ export async function resolveGen2AllowListRoutePlan(
     candyGuard: PublicKey
     groupLabel: string | null
     merkleRoot: Uint8Array
-    phase: Gen2MintablePhase
+    /** Mint phase or TEAM_BACKSTOP for the temporary team guard allowList. */
+    phase: Gen2MintablePhase | 'TEAM_BACKSTOP'
   }
 ): Promise<{ ok: true; plan: Gen2AllowListRoutePlan } | { ok: false; error: string }> {
-  const { candyMachine, candyGuard, groupLabel, merkleRoot, phase } = args
+  const { candyMachine, candyGuard, merkleRoot, phase } = args
   const user = umi.identity.publicKey
 
   const [existing, proofRes] = await Promise.all([

@@ -6,6 +6,7 @@ import { publicKey } from '@metaplex-foundation/umi'
 import { fetchParsedTransactionConfirmed } from '@/lib/gen2-presale/verify-payment'
 import { parseCandyMachineMintFromTransaction } from '@/lib/owl-center/parse-candy-machine-mint-tx'
 import { detectGen2MintV2GroupLabel } from '@/lib/owl-center/verify-gen2-mint-tx'
+import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/sync-launch-sold-out'
 import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
 import { gen2GuardGroupLabel, type Gen2MintablePhase } from '@/lib/solana/gen2-guards'
 import { getLaunchSolanaRpcUrl } from '@/lib/solana/launch-cm'
@@ -45,6 +46,9 @@ const PHASE_BY_GROUP_LABEL = new Map<string, OwlCenterPhase>()
 for (const { phase, label } of GROUP_PHASE_PAIRS) {
   if (!PHASE_BY_GROUP_LABEL.has(label)) PHASE_BY_GROUP_LABEL.set(label, phase)
 }
+// Temporary leftover-mint group records as PUBLIC (same as admin team backstop path).
+PHASE_BY_GROUP_LABEL.set('team', 'PUBLIC')
+PHASE_BY_GROUP_LABEL.set('test', 'PUBLIC')
 const CANDIDATE_GROUP_LABELS = [...PHASE_BY_GROUP_LABEL.keys()]
 
 // On-chain mintLimit guard ids (must match scripts/gen2-cm-setup.ts): gen1=1, pub=2, wl=3, pre=4.
@@ -87,8 +91,54 @@ async function recordReconciledMint(
     p_network: network,
     p_event_candy_machine_id: cmId,
   })
-  const row = data as { ok?: boolean } | null
-  return !error && row?.ok === true
+  const row = data as { ok?: boolean; error?: string } | null
+  if (!error && row?.ok === true) return true
+
+  // After mint-out the launch may already be SOLD_OUT / TRADING_ACTIVE — the confirm RPC then
+  // rejects with mint_closed even though the NFT already exists on-chain. Insert the ledger row
+  // directly (idempotent on tx_signature) and bump minted_count so the admin counter matches CM.
+  const rpcErr = typeof row?.error === 'string' ? row.error : ''
+  if (rpcErr !== 'mint_closed' && rpcErr !== 'phase_mismatch' && rpcErr !== 'gen1_window_closed') {
+    return false
+  }
+
+  const { error: insertErr } = await db.from('owl_center_mint_events').insert({
+    launch_id: launch.id,
+    wallet_address: mint.wallet,
+    quantity: mint.quantity,
+    phase,
+    tx_signature: txSignature,
+    minted_nft_mints: mint.mintedNftMints,
+    network,
+    candy_machine_id: cmId,
+  })
+  if (insertErr) {
+    // Duplicate tx is fine — already recorded.
+    if (/duplicate|unique/i.test(insertErr.message)) return false
+    console.error('[reconcile-gen2] direct insert failed', insertErr.message)
+    return false
+  }
+
+  const { data: launchRow } = await db
+    .from('owl_center_launches')
+    .select('minted_count, total_supply')
+    .eq('id', launch.id)
+    .maybeSingle()
+  const current = Number((launchRow as { minted_count?: number } | null)?.minted_count ?? 0)
+  const total = Number((launchRow as { total_supply?: number } | null)?.total_supply ?? 0)
+  const next = Math.min(total || Number.MAX_SAFE_INTEGER, current + mint.quantity)
+  await db
+    .from('owl_center_launches')
+    .update({
+      minted_count: next,
+      updated_at: new Date().toISOString(),
+      ...(total > 0 && next >= total
+        ? { active_phase: 'SOLD_OUT', status: 'SOLD_OUT' }
+        : {}),
+    })
+    .eq('id', launch.id)
+
+  return true
 }
 
 /**
@@ -195,61 +245,76 @@ export async function reconcileGen2LaunchMintsFromChain(
 
   const network: OwlMintNetwork = isDevnetMintEnabled() ? 'devnet' : 'mainnet'
   const supply = await fetchCandyMachineOnChainSupply(cmId, network)
-  if (!supply.ok || supply.itemsRedeemed <= launch.minted_count) return { recorded: 0 }
-
-  const db = getSupabaseAdmin()
-  // Paginate past PostgREST's 1000-row default cap; an incomplete dedupe set would re-record
-  // already-known signatures and inflate minted_count once a launch passes 1000 mint events.
-  const knownSigs = new Set<string>()
-  {
-    const pageSize = 1000
-    let from = 0
-    for (;;) {
-      const { data: existing } = await db
-        .from('owl_center_mint_events')
-        .select('tx_signature')
-        .eq('launch_id', launch.id)
-        .eq('network', network)
-        .order('created_at', { ascending: true })
-        .range(from, from + pageSize - 1)
-      const batch = existing ?? []
-      for (const r of batch) knownSigs.add(String((r as { tx_signature: string }).tx_signature))
-      if (batch.length < pageSize) break
-      from += pageSize
-    }
-  }
-
-  const connection = new Connection(resolveOwlCenterMintVerifyRpcUrl(network), 'confirmed')
-  let sigInfos
-  try {
-    sigInfos = await connection.getSignaturesForAddress(new PublicKey(cmId), {
-      limit: Math.min(1000, Math.max(100, opts?.maxSignatures ?? 500)),
-    })
-  } catch {
-    return { recorded: 0 }
-  }
+  if (!supply.ok) return { recorded: 0 }
 
   let recorded = 0
   let mintedCount = launch.minted_count
-  for (const entry of [...sigInfos].reverse()) {
-    if (supply.itemsRedeemed <= mintedCount) break
-    if (entry.err || knownSigs.has(entry.signature)) continue
 
-    const parsed = await fetchParsedTransactionConfirmed(connection, entry.signature).catch(() => null)
-    if (!parsed) continue
-
-    const mint = parseCandyMachineMintFromTransaction(parsed, cmId)
-    if (!mint) continue
-
-    const groupLabel = detectGen2MintV2GroupLabel(parsed, CANDIDATE_GROUP_LABELS)
-    const phase = groupLabel ? PHASE_BY_GROUP_LABEL.get(groupLabel) : undefined
-    if (!phase) continue
-
-    if (await recordReconciledMint(launch, cmId, network, entry.signature, mint, phase)) {
-      recorded += mint.quantity
-      mintedCount += mint.quantity
-      knownSigs.add(entry.signature)
+  if (supply.itemsRedeemed > launch.minted_count) {
+    const db = getSupabaseAdmin()
+    // Paginate past PostgREST's 1000-row default cap; an incomplete dedupe set would re-record
+    // already-known signatures and inflate minted_count once a launch passes 1000 mint events.
+    const knownSigs = new Set<string>()
+    {
+      const pageSize = 1000
+      let from = 0
+      for (;;) {
+        const { data: existing } = await db
+          .from('owl_center_mint_events')
+          .select('tx_signature')
+          .eq('launch_id', launch.id)
+          .eq('network', network)
+          .order('created_at', { ascending: true })
+          .range(from, from + pageSize - 1)
+        const batch = existing ?? []
+        for (const r of batch) knownSigs.add(String((r as { tx_signature: string }).tx_signature))
+        if (batch.length < pageSize) break
+        from += pageSize
+      }
     }
+
+    const connection = new Connection(resolveOwlCenterMintVerifyRpcUrl(network), 'confirmed')
+    let sigInfos: Awaited<ReturnType<Connection['getSignaturesForAddress']>> = []
+    try {
+      sigInfos = await connection.getSignaturesForAddress(new PublicKey(cmId), {
+        limit: Math.min(1000, Math.max(100, opts?.maxSignatures ?? 500)),
+      })
+    } catch {
+      sigInfos = []
+    }
+
+    for (const entry of [...sigInfos].reverse()) {
+      if (supply.itemsRedeemed <= mintedCount) break
+      if (entry.err || knownSigs.has(entry.signature)) continue
+
+      const parsed = await fetchParsedTransactionConfirmed(connection, entry.signature).catch(() => null)
+      if (!parsed) continue
+
+      const mint = parseCandyMachineMintFromTransaction(parsed, cmId)
+      if (!mint) continue
+
+      const groupLabel = detectGen2MintV2GroupLabel(parsed, CANDIDATE_GROUP_LABELS)
+      const phase = groupLabel ? PHASE_BY_GROUP_LABEL.get(groupLabel) : undefined
+      if (!phase) continue
+
+      if (await recordReconciledMint(launch, cmId, network, entry.signature, mint, phase)) {
+        recorded += mint.quantity
+        mintedCount += mint.quantity
+        knownSigs.add(entry.signature)
+      }
+    }
+  }
+
+  // CM empty while DB still shows leftovers (or DB fully minted) → flip SOLD_OUT so the UI
+  // stops advertising team leftovers / "Can mint N".
+  const onChainEmpty = supply.itemsLoaded > 0 && supply.remaining <= 0
+  if (onChainEmpty || mintedCount >= launch.total_supply) {
+    await syncLaunchSoldOutPhaseIfExhausted(launch.id, {
+      force: onChainEmpty && mintedCount < launch.total_supply,
+      reason: onChainEmpty
+        ? `on-chain Candy Machine empty (DB ${mintedCount}/${launch.total_supply})`
+        : undefined,
+    })
   }
 
   return { recorded }

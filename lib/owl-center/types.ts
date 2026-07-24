@@ -62,6 +62,20 @@ export type OwlCenterFreezeProgress = {
   remaining_count?: number
   error?: string
   attempts?: number
+  /** DAS asset count when thaw started. */
+  total?: number
+  /** Next DAS list offset for batched thaw. */
+  offset?: number
+  started_at?: string
+  updated_at?: string
+  unlocked_at?: string
+  last_signature?: string
+  /** On-chain freeze escrow `frozenCount` (source of truth for unlock). */
+  frozen_count?: number
+  /** Admin team backstop mint after public pool exhausts. */
+  backstop_mint_enabled?: boolean
+  backstop_team_wallets?: string[]
+  backstop_enabled_at?: string
 }
 
 export type OwlCenterLaunchPublic = {
@@ -259,6 +273,11 @@ export type Gen2MintCheckPhasePreview = {
   phase_minted: number
   /** When set, overrides `phase_supply - phase_minted` for the progress bar (PUBLIC shared pool). */
   phase_remaining?: number
+  /**
+   * Allocations still empty in this phase’s ledger, but no longer mintable as collection
+   * inventory (e.g. Gen1/presale leftover after the Candy Machine sold out).
+   */
+  phase_unclaimed?: number
   is_active: boolean
   is_eligible: boolean
   max_mintable: number

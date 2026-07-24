@@ -348,7 +348,7 @@ export function NestingLandingClient({
             },
             {
               q: 'I use Ledger and the sign prompt never shows up',
-              a: 'This is a known Phantom/Solflare + Ledger gap for Sign Message. On My nest, tap “Sign with Ledger / wallet” instead — approve the memo on the device (not broadcast, no Owltopia fee). Keep the Solana app open, Ledger Live closed, and prefer USB on desktop. Phantom may add a Lighthouse security check to that memo — that is expected. If it still fails, sign in once from a hot wallet, then switch back for nesting.',
+              a: 'This is a known Phantom/Solflare + Ledger gap for Sign Message (error Code 1 / 0x6a81). On My nest: (1) for wallet sign-in, tap “Sign with Ledger transaction”; (2) for the orange nesting safeguards box, tap “Sign safeguards with Ledger”. Approve the memo on the device (not broadcast, no Owltopia fee). Keep the Solana app open, Ledger Live closed, and prefer USB on desktop. Phantom/Solflare may add a Lighthouse security check to that memo — that is expected. If that still fails, sign once from a hot wallet, then switch back for nesting.',
             },
           ].map(({ q, a }) => (
             <div key={q} className="px-4 py-4 sm:px-5">

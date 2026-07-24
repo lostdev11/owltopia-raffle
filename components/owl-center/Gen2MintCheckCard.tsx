@@ -39,9 +39,22 @@ function backstopSupplyRemaining(phases: Gen2MintCheckPhasePreview[]): number {
   for (const phase of ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE'] as const) {
     const row = phases.find((p) => p.phase === phase)
     if (!row) continue
+    // Prefer API stamp: after sellout, phase_remaining is 0 and leftovers live in phase_unclaimed.
+    if (typeof row.phase_remaining === 'number') {
+      remaining += Math.max(0, row.phase_remaining)
+      continue
+    }
     remaining += Math.max(0, row.phase_supply - row.phase_minted)
   }
   return remaining
+}
+
+function collectionIsSoldOut(
+  check: Gen2MintCheckResponse,
+  collectionRemaining: number | undefined
+): boolean {
+  if (collectionRemaining != null && collectionRemaining <= 0) return true
+  return check.active_phase === 'SOLD_OUT' || check.active_phase === 'TRADING_ACTIVE'
 }
 
 function phaseActiveTag(p: Gen2MintCheckPhasePreview, presaleSoldOut: boolean): string | null {
@@ -58,15 +71,19 @@ function PhaseSupplyBar({
   minted,
   total,
   remaining: remainingOverride,
+  unclaimed,
 }: {
   minted: number
   total: number
   remaining?: number
+  /** Ledger slots empty after collection sellout — not mintable inventory. */
+  unclaimed?: number
 }) {
   const safeTotal = Math.max(0, total)
   const safeMinted = Math.max(0, Math.min(minted, safeTotal || minted))
   const pct = safeTotal > 0 ? Math.min(100, (safeMinted / safeTotal) * 100) : safeMinted > 0 ? 100 : 0
   const remaining = Math.max(0, remainingOverride ?? safeTotal - safeMinted)
+  const unclaimedCount = Math.max(0, unclaimed ?? 0)
   const soldOut = safeTotal > 0 && remaining === 0
   return (
     <div className="mt-2 space-y-1">
@@ -86,7 +103,20 @@ function PhaseSupplyBar({
       </div>
       <p className="text-[10px] tabular-nums text-[#5C6773]">
         <span className={soldOut ? 'text-[#FFD769]' : 'text-[#00FF9C]'}>{safeMinted}</span>
-        {safeTotal > 0 ? ` / ${safeTotal} minted · ${remaining} left` : ' minted'}
+        {safeTotal > 0 ? (
+          <>
+            {' / '}
+            {safeTotal} minted ·{' '}
+            <span className={soldOut ? 'text-[#FFD769]' : undefined}>
+              {soldOut ? 'sold out' : `${remaining} left`}
+            </span>
+            {unclaimedCount > 0 ? (
+              <span className="text-[#5C6773]"> · {unclaimedCount} unclaimed</span>
+            ) : null}
+          </>
+        ) : (
+          ' minted'
+        )}
       </p>
     </div>
   )
@@ -177,7 +207,8 @@ export function Gen2MintCheckCard({
 
   const allPhases = check?.phases ?? []
   const allocatedPhases = allPhases.filter(phaseHasAllocation)
-  const backstopRemaining = backstopSupplyRemaining(allPhases)
+  const soldOut = check ? collectionIsSoldOut(check, collectionRemaining) : false
+  const backstopRemaining = soldOut ? 0 : backstopSupplyRemaining(allPhases)
   // Once connected, default to only the phases this wallet can mint in. Without a
   // connection (or with zero allocation) show everything so the section isn't empty.
   const showFiltered = connected && allocatedPhases.length > 0 && !showAll
@@ -318,7 +349,26 @@ export function Gen2MintCheckCard({
                   <PhaseSupplyBar
                     minted={p.phase_minted}
                     total={p.phase_supply}
-                    remaining={p.phase_remaining}
+                    remaining={
+                      typeof p.phase_remaining === 'number'
+                        ? p.phase_remaining
+                        : soldOut &&
+                            (p.phase === 'AIRDROP' ||
+                              p.phase === 'PRESALE' ||
+                              p.phase === 'PRESALE_OVERAGE')
+                          ? 0
+                          : undefined
+                    }
+                    unclaimed={
+                      typeof p.phase_unclaimed === 'number'
+                        ? p.phase_unclaimed
+                        : soldOut &&
+                            (p.phase === 'AIRDROP' ||
+                              p.phase === 'PRESALE' ||
+                              p.phase === 'PRESALE_OVERAGE')
+                          ? Math.max(0, p.phase_supply - p.phase_minted)
+                          : undefined
+                    }
                   />
 
                   {p.phase === 'PUBLIC' && (backstopRemaining > 0 || collectionRemaining != null) ? (
@@ -327,7 +377,11 @@ export function Gen2MintCheckCard({
                         ? `${backstopRemaining} presale & Gen1 spot${backstopRemaining === 1 ? '' : 's'} still reserved separately`
                         : null}
                       {backstopRemaining > 0 && collectionRemaining != null ? ' · ' : null}
-                      {collectionRemaining != null ? `${collectionRemaining} total collection remaining` : null}
+                      {collectionRemaining != null
+                        ? collectionRemaining <= 0
+                          ? 'collection sold out'
+                          : `${collectionRemaining} total collection remaining`
+                        : null}
                     </p>
                   ) : null}
 

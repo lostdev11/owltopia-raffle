@@ -13,6 +13,7 @@ import {
 } from '@/lib/gen2-presale/presale-participation'
 import { canPurchaseGen2PresaleSpots } from '@/lib/gen2-presale/purchase-availability'
 import { buildGen2PresalePublicStats } from '@/lib/gen2-presale/public-stats'
+import { resolveEffectiveCmRemaining } from '@/lib/owl-center/effective-cm-remaining'
 import { buildGen2Eligibility } from '@/lib/owl-center/gen2-eligibility'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import {
@@ -50,7 +51,7 @@ import {
 import type { Gen2MintCheckPhasePreview, Gen2MintCheckResponse, OwlCenterPhase } from '@/lib/owl-center/types'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { getLivePhases, getPhaseStartsAt, isGen1AirdropWindowOpen, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
-import { isDevnetMintEnabled } from '@/lib/solana/network'
+import { getGen2CandyMachineId, isDevnetMintEnabled } from '@/lib/solana/network'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 type WlRow = { wallet: string; allowed_mints: number; used_mints: number; community?: string | null }
@@ -598,6 +599,18 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
     })
   }
 
+  const cmRemaining = await resolveEffectiveCmRemaining({
+    totalSupply: launch.total_supply,
+    mintedCount: launch.minted_count,
+    candyMachineId: getGen2CandyMachineId(launch),
+    network,
+  })
+  const collectionRemaining = cmRemaining.remaining
+  const collectionSoldOut =
+    collectionRemaining <= 0 ||
+    launch.active_phase === 'SOLD_OUT' ||
+    launch.active_phase === 'TRADING_ACTIVE'
+
   // Stamp each phase's window close time (start + window) so the UI can show a countdown
   // (e.g. the WHITELIST 48h timer). Open-ended phases (PUBLIC) have an infinite window → null.
   for (const p of phases) {
@@ -610,6 +623,14 @@ export async function buildGen2MintCheck(walletRaw: string | null): Promise<Gen2
       p.phase_supply = view.cap
       p.phase_minted = view.minted
       p.phase_remaining = view.remaining
+    } else if (p.phase === 'AIRDROP' || p.phase === 'PRESALE' || p.phase === 'PRESALE_OVERAGE') {
+      // Gen1/presale “left” is allocation ledger, not CM inventory. Once the collection is done,
+      // unused phase slots are unclaimed — not mintable leftovers.
+      const phaseRemaining = Math.max(0, p.phase_supply - p.phase_minted)
+      if (phaseRemaining > 0 && (collectionSoldOut || collectionRemaining < phaseRemaining)) {
+        p.phase_remaining = 0
+        p.phase_unclaimed = phaseRemaining
+      }
     }
     const startMs = p.phase_starts_at ? new Date(p.phase_starts_at).getTime() : null
     const windowMs = gen2PhaseWindowMs(p.phase)

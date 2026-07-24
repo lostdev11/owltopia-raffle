@@ -6,6 +6,10 @@
     "dev": "next dev --webpack",
     "dev:webpack": "next dev --webpack",
     "check:prize-escrow": "node scripts/check-prize-escrow-api.mjs",
+    "check:production-escrow-ops": "node scripts/check-production-escrow-ops.mjs",
+    "vercel:check": "node scripts/vercel-cli-check.mjs",
+    "vercel:whoami": "vercel whoami --non-interactive",
+    "vercel:env:ls": "vercel env ls --non-interactive",
     "check:funds-escrow": "node scripts/check-funds-escrow-api.mjs",
     "check:treasury-signing": "node --env-file=.env.local scripts/check-treasury-signing.mjs",
     "send:legacy-buyout-refund": "npx --yes tsx --env-file=.env.local scripts/send-legacy-buyout-refund.mjs",
@@ -35,6 +39,7 @@
     "test:cart-checkout-restore": "npx --yes tsx scripts/test-cart-checkout-restore.ts",
     "test:gen2-gen1-delegations": "npx --yes tsx scripts/test-gen2-gen1-delegations.ts",
     "test:gen2-phase-advance": "npx --yes tsx scripts/test-gen2-phase-advance.ts",
+    "test:effective-cm-remaining": "npx --yes tsx scripts/test-effective-cm-remaining.ts",
     "test:min-threshold-second-round": "npx --yes tsx scripts/test-min-threshold-second-round.ts",
     "test:claim-all-combined": "npx --yes tsx scripts/test-claim-all-combined-threshold.ts",
     "test:siws-ledger-message": "npx --yes tsx scripts/test-siws-ledger-message-size.ts",
@@ -114,6 +119,7 @@
     "pino-pretty": "^13.1.3",
     "postcss": "^8.4.32",
     "tailwindcss": "^3.4.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vercel": "^54.21.1"
   }
 }
