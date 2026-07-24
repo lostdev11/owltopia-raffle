@@ -18,7 +18,7 @@ Phantom shows **different** warnings for domain reputation vs transaction simula
 
 **What we do:**
 
-1. Register the app in the [Phantom Developer Portal](https://docs.phantom.com/phantom-portal/edit-app-info) and complete DNS TXT verification for `owltopia.xyz`.
+1. Register the app in the [Phantom Developer Portal](https://docs.phantom.com/phantom-portal/edit-app-info) and complete DNS TXT verification. **Verify `www.owltopia.xyz`** — production serves from `www` (the apex `owltopia.xyz` 307-redirects to it) and Phantom verification is host-specific, so the `www` host users actually connect from must be verified (register the apex too for completeness). Keep this aligned with `NEXT_PUBLIC_SITE_URL` and the wallet `appIdentity.uri`.
 2. Fill branding: name Owl Raffle / Owltopia, icon `https://owltopia.xyz/icon.png`, socials, description.
 3. If the warning remains **more than a week**, contact Phantom’s domain review team (form linked from the docs page above; historically `review@phantom.com`).
 
