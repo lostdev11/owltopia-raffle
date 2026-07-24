@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 
-const TRIAGE_STATUS_OPTIONS = ['new', 'contacted', 'closed'] as const
+const TRIAGE_STATUS_OPTIONS = ['new', 'contacted'] as const
 type TriageStatus = (typeof TRIAGE_STATUS_OPTIONS)[number]
 
 type PartnerApplication = {
@@ -38,6 +38,7 @@ export default function AdminPartnerApplicationsPage() {
   const [error, setError] = useState<string | null>(null)
   const [savingId, setSavingId] = useState<number | null>(null)
   const [lastProvisioned, setLastProvisioned] = useState<{ id: number; wallet: string } | null>(null)
+  const [lastRejectedId, setLastRejectedId] = useState<number | null>(null)
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -83,7 +84,7 @@ export default function AdminPartnerApplicationsPage() {
 
   const patchApplication = async (
     id: number,
-    body: { status?: TriageStatus; approve?: boolean }
+    body: { status?: TriageStatus | 'closed'; approve?: boolean }
   ) => {
     setSavingId(id)
     setError(null)
@@ -107,6 +108,10 @@ export default function AdminPartnerApplicationsPage() {
       setRows((prev) => prev.map((row) => (row.id === id ? { ...row, ...json.application! } : row)))
       if (json.provisioned && json.creator_wallet) {
         setLastProvisioned({ id, wallet: json.creator_wallet })
+        setLastRejectedId(null)
+      } else if (json.application.status === 'closed') {
+        setLastRejectedId(id)
+        setLastProvisioned(null)
       }
     } catch {
       setError('Could not update application.')
@@ -173,6 +178,11 @@ export default function AdminPartnerApplicationsPage() {
           </Link>
         </p>
       ) : null}
+      {lastRejectedId != null ? (
+        <p className="mb-4 rounded-lg border border-border/70 bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          Application #{lastRejectedId} rejected (status set to closed). No partner wallet was added.
+        </p>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -223,13 +233,23 @@ export default function AdminPartnerApplicationsPage() {
                       type="button"
                       size="sm"
                       className="min-h-[44px] touch-manipulation"
-                      disabled={savingId === row.id}
+                      disabled={savingId === row.id || row.status === 'closed'}
                       onClick={() => void patchApplication(row.id, { approve: true })}
                     >
-                      {savingId === row.id && row.status !== 'active' ? (
+                      {savingId === row.id && row.status !== 'active' && row.status !== 'closed' ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       ) : null}
                       {row.status === 'active' ? 'Re-approve / refresh' : 'Approve'}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={row.status === 'closed' ? 'default' : 'destructive'}
+                      className="min-h-[44px] touch-manipulation"
+                      disabled={savingId === row.id || row.status === 'closed'}
+                      onClick={() => void patchApplication(row.id, { status: 'closed' })}
+                    >
+                      {row.status === 'closed' ? 'Rejected' : 'Reject'}
                     </Button>
                     {TRIAGE_STATUS_OPTIONS.map((status) => (
                       <Button
