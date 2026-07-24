@@ -271,6 +271,11 @@ export type Gen2MintCheckPhasePreview = {
   phase_minted: number
   /** When set, overrides `phase_supply - phase_minted` for the progress bar (PUBLIC shared pool). */
   phase_remaining?: number
+  /**
+   * Allocations still empty in this phase’s ledger, but no longer mintable as collection
+   * inventory (e.g. Gen1/presale leftover after the Candy Machine sold out).
+   */
+  phase_unclaimed?: number
   is_active: boolean
   is_eligible: boolean
   max_mintable: number
