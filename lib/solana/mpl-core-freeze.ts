@@ -48,7 +48,8 @@ type AddMplCoreFreezeDelegateArgs = MplCoreFreezeWalletBase & {
 
 /**
  * Max NFTs per wallet transaction.
- * Kept under the Solana size limit with headroom for Phantom Lighthouse guard ixs.
+ * Kept under the Solana size limit with headroom for Phantom Lighthouse guard ixs + nest fee.
+ * If a wallet still rejects a full chunk, the UI halves and retries before one-by-one.
  */
 export const NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX = 12
 

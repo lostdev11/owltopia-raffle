@@ -33,8 +33,12 @@ export function isNestingWalletUserRejection(err: unknown): boolean {
 }
 
 /**
- * True when a multi-NFT wallet tx likely exceeded size/compute limits — safe to retry one-by-one.
+ * True when a multi-NFT wallet tx likely exceeded size/compute limits —
+ * safe to retry with a smaller batch (halve, then one-by-one).
  * Do not use for user reject or generic failures (those should surface, not spam prompts).
+ *
+ * Phantom Blowfish may inject Lighthouse assertions that push a 12-NFT nest tx over the
+ * packet limit; wallets then report size/sim failures rather than a clean "too large".
  */
 export function isNestingBatchSizeError(err: unknown): boolean {
   if (isNestingWalletUserRejection(err)) return false
@@ -47,7 +51,15 @@ export function isNestingBatchSizeError(err: unknown): boolean {
     hay.includes('packet too large') ||
     hay.includes('versionedtransaction too large') ||
     hay.includes('exceeded max account') ||
-    (hay.includes('computational budget') && hay.includes('exceeded'))
+    hay.includes('max accounts exceeded') ||
+    hay.includes('loads too many accounts') ||
+    hay.includes('account data too large') ||
+    hay.includes('transaction version is not supported') ||
+    (hay.includes('lighthouse') && (hay.includes('size') || hay.includes('large') || hay.includes('limit'))) ||
+    (hay.includes('computational budget') && hay.includes('exceeded')) ||
+    (hay.includes('compute unit') && hay.includes('exceeded')) ||
+    (hay.includes('simulation failed') &&
+      (hay.includes('too large') || hay.includes('max') || hay.includes('limit')))
   )
 }
 
