@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
-import { Coins, Landmark } from 'lucide-react'
+import { Coins } from 'lucide-react'
 import { AnnouncementsBlock } from '@/components/AnnouncementsBlock'
 import { Logo } from '@/components/Logo'
 import { ENTER_OWLTOPIA_REVSHARE_POLL_MS } from '@/lib/dev-budget'
@@ -17,6 +17,8 @@ const fadeIn = (delay: string) => ({
 
 type NextRevShareSchedule = {
   next_date: string | null
+  gen1_next_date: string | null
+  gen2_next_date: string | null
   total_sol: number | null
   total_usdc: number | null
   gen1_total_sol: number | null
@@ -71,12 +73,16 @@ export function EnterOwlTopia() {
         .then((data): NextRevShareSchedule | null =>
           data &&
           (data.next_date != null ||
+            data.gen1_next_date != null ||
+            data.gen2_next_date != null ||
             data.total_sol != null ||
             data.total_usdc != null ||
             data.gen1_total_sol != null ||
             data.gen2_total_sol != null)
             ? {
                 next_date: data.next_date ?? null,
+                gen1_next_date: data.gen1_next_date ?? null,
+                gen2_next_date: data.gen2_next_date ?? null,
                 total_sol: data.total_sol != null ? Number(data.total_sol) : null,
                 total_usdc: data.total_usdc != null ? Number(data.total_usdc) : null,
                 gen1_total_sol: data.gen1_total_sol != null ? Number(data.gen1_total_sol) : null,
@@ -94,6 +100,8 @@ export function EnterOwlTopia() {
     return () => clearInterval(interval)
   }, [])
 
+  const gen1Date = schedule?.gen1_next_date ?? schedule?.next_date ?? null
+  const gen2Date = schedule?.gen2_next_date ?? schedule?.next_date ?? null
   const gen1Sol = schedule?.gen1_total_sol ?? schedule?.total_sol ?? null
   const gen1Usdc = schedule?.gen1_total_usdc ?? schedule?.total_usdc ?? null
   const gen2Sol = schedule?.gen2_total_sol ?? null
@@ -186,7 +194,7 @@ export function EnterOwlTopia() {
               <div>
                 <p className="mb-0.5 text-xs text-muted-foreground">Next rev share</p>
                 <p className="pool-value-glow text-xl font-bold tabular-nums text-theme-prime sm:text-2xl">
-                  {schedule?.next_date ?? '—'}
+                  {gen1Date ?? '—'}
                 </p>
               </div>
               <div>
@@ -223,7 +231,7 @@ export function EnterOwlTopia() {
               <div>
                 <p className="mb-0.5 text-xs text-muted-foreground">Next rev share</p>
                 <p className="pool-value-glow text-xl font-bold tabular-nums text-theme-prime sm:text-2xl">
-                  {schedule?.next_date ?? '—'}
+                  {gen2Date ?? '—'}
                 </p>
               </div>
               <div>
@@ -258,11 +266,11 @@ export function EnterOwlTopia() {
             Enter Raffles
           </Link>
           <Link
-            href="/council"
+            href="/nesting"
             className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-2 rounded-lg px-6 py-4 text-base font-semibold border border-green-500/40 bg-background/80 text-theme-prime hover:bg-white/5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 touch-manipulation"
           >
-            <Landmark className="h-5 w-5 shrink-0" aria-hidden />
-            Owl Council
+            <Coins className="h-5 w-5 shrink-0" aria-hidden />
+            Nesting
           </Link>
         </div>
         </div>

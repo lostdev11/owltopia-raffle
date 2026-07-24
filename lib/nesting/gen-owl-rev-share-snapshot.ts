@@ -10,6 +10,8 @@ import {
 
 export type GenOwlRevShareSnapshot = {
   next_date: string | null
+  gen1_next_date: string | null
+  gen2_next_date: string | null
   gen1: GenOwlRevSharePreview
   gen2: GenOwlRevSharePreview
 }
@@ -70,6 +72,8 @@ export async function getGenOwlRevShareSnapshot(): Promise<GenOwlRevShareSnapsho
 
   return {
     next_date: schedule.next_date,
+    gen1_next_date: schedule.gen1_next_date,
+    gen2_next_date: schedule.gen2_next_date,
     gen1,
     gen2,
   }

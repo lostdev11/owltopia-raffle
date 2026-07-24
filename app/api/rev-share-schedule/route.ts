@@ -13,6 +13,8 @@ export async function GET() {
     if (!schedule) {
       return NextResponse.json({
         next_date: null,
+        gen1_next_date: null,
+        gen2_next_date: null,
         total_sol: null,
         total_usdc: null,
         gen1_total_sol: null,
@@ -23,6 +25,8 @@ export async function GET() {
     }
     return NextResponse.json({
       next_date: schedule.next_date,
+      gen1_next_date: schedule.gen1_next_date,
+      gen2_next_date: schedule.gen2_next_date,
       total_sol: schedule.total_sol,
       total_usdc: schedule.total_usdc,
       gen1_total_sol: schedule.gen1_total_sol,

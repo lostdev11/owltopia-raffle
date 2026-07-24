@@ -17,6 +17,8 @@ import { cn } from '@/lib/utils'
 
 type Snapshot = {
   next_date: string | null
+  gen1_next_date: string | null
+  gen2_next_date: string | null
   gen1: GenOwlRevSharePreview
   gen2: GenOwlRevSharePreview
 }
@@ -44,9 +46,10 @@ export function GenOwlRevShareNotice({ groupKey, className, compact = false }: P
       .then((res) => res.json())
       .then((data: Snapshot) => {
         if (cancelled) return
-        const row = groupKey === 'gen1-owl' ? data.gen1 : data.gen2
+        const isGen1 = groupKey === 'gen1-owl'
+        const row = isGen1 ? data.gen1 : data.gen2
         setPreview(row ?? null)
-        setNextDate(data.next_date ?? null)
+        setNextDate((isGen1 ? data.gen1_next_date : data.gen2_next_date) ?? data.next_date ?? null)
       })
       .catch(() => {
         if (!cancelled) {

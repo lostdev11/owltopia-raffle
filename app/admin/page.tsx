@@ -262,6 +262,8 @@ export default function AdminDashboardPage() {
   const revenueHasDataRef = useRef(false)
   const [revShareSchedule, setRevShareSchedule] = useState<{
     next_date: string | null
+    gen1_next_date: string | null
+    gen2_next_date: string | null
     total_sol: number | null
     total_usdc: number | null
     gen1_total_sol: number | null
@@ -271,7 +273,8 @@ export default function AdminDashboardPage() {
   } | null>(null)
   const [revShareScheduleSaving, setRevShareScheduleSaving] = useState(false)
   const [revShareScheduleEdit, setRevShareScheduleEdit] = useState({
-    next_date: '',
+    gen1_next_date: '',
+    gen2_next_date: '',
     total_sol: '',
     total_usdc: '',
     gen1_total_sol: '',
@@ -1047,7 +1050,8 @@ export default function AdminDashboardPage() {
           const data = await res.json()
           setRevShareSchedule(data)
           setRevShareScheduleEdit({
-            next_date: data.next_date ?? '',
+            gen1_next_date: data.gen1_next_date ?? data.next_date ?? '',
+            gen2_next_date: data.gen2_next_date ?? data.next_date ?? '',
             total_sol: data.total_sol != null ? String(data.total_sol) : '',
             total_usdc: data.total_usdc != null ? String(data.total_usdc) : '',
             gen1_total_sol: data.gen1_total_sol != null ? String(data.gen1_total_sol) : '',
@@ -1181,7 +1185,8 @@ export default function AdminDashboardPage() {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          next_date: revShareScheduleEdit.next_date.trim() || null,
+          gen1_next_date: revShareScheduleEdit.gen1_next_date.trim() || null,
+          gen2_next_date: revShareScheduleEdit.gen2_next_date.trim() || null,
           total_sol: revShareScheduleEdit.total_sol === '' ? null : parseFloat(revShareScheduleEdit.total_sol),
           total_usdc: revShareScheduleEdit.total_usdc === '' ? null : parseFloat(revShareScheduleEdit.total_usdc),
           gen1_total_sol:
@@ -2573,23 +2578,13 @@ export default function AdminDashboardPage() {
           }
         >
           <CardDescription className="mb-4">
-            Set the date and total amounts for the next rev share (homepage holder pool). Gen 1 and Gen 2 nesting
-            pools are separate. Gen 1 uses a 90% / 10% split (all staked vs 1/1 staked); Gen 2 is an even split
-            across active nests. Not auto-calculated from revenue; enter totals when you are ready to pay out.
+            Set the dates and total amounts for the next rev share (homepage holder pools). Gen 1 and Gen 2 have
+            their own payout date and their own pool — Gen 1 uses a 90% / 10% split (all staked vs 1/1 staked);
+            Gen 2 is an even split across active nests. Not auto-calculated from revenue; enter totals when you
+            are ready to pay out.
           </CardDescription>
           <div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
-              <div>
-                <Label htmlFor="rev-next-date">Next rev share date</Label>
-                <Input
-                  id="rev-next-date"
-                  type="text"
-                  placeholder="e.g. 28 Feb"
-                  value={revShareScheduleEdit.next_date}
-                  onChange={(e) => setRevShareScheduleEdit((p) => ({ ...p, next_date: e.target.value }))}
-                  className="mt-1"
-                />
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
               <div>
                 <Label htmlFor="rev-total-sol">Total SOL to be shared</Label>
                 <Input
@@ -2622,11 +2617,24 @@ export default function AdminDashboardPage() {
               <div>
                 <h3 className="text-sm font-semibold text-foreground">Gen 1 nest rev share</h3>
                 <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                  Total SOL/USDC for Gen 1 owl stakers — 90% divided evenly across all staked Gen 1 owls; 10% divided
-                  evenly across staked Gen 1 1/1s (90d and 180d tiers combined).
+                  Date and total SOL/USDC for Gen 1 owl stakers — 90% divided evenly across all staked Gen 1 owls;
+                  10% divided evenly across staked Gen 1 1/1s (90d and 180d tiers combined).
                 </p>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
+                <div>
+                  <Label htmlFor="rev-gen1-date">Gen 1 next rev share date</Label>
+                  <Input
+                    id="rev-gen1-date"
+                    type="text"
+                    placeholder="e.g. 31 Aug"
+                    value={revShareScheduleEdit.gen1_next_date}
+                    onChange={(e) =>
+                      setRevShareScheduleEdit((p) => ({ ...p, gen1_next_date: e.target.value }))
+                    }
+                    className="mt-1"
+                  />
+                </div>
                 <div>
                   <Label htmlFor="rev-gen1-sol">Gen 1 total SOL</Label>
                   <Input
@@ -2663,10 +2671,23 @@ export default function AdminDashboardPage() {
               <div className="pt-2">
                 <h3 className="text-sm font-semibold text-foreground">Gen 2 nest rev share</h3>
                 <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                  Separate pool for Gen 2 owl stakers — same even split across active Gen 2 nests.
+                  Separate date and pool for Gen 2 owl stakers — even split across active Gen 2 nests.
                 </p>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
+                <div>
+                  <Label htmlFor="rev-gen2-date">Gen 2 next rev share date</Label>
+                  <Input
+                    id="rev-gen2-date"
+                    type="text"
+                    placeholder="e.g. 31 Aug"
+                    value={revShareScheduleEdit.gen2_next_date}
+                    onChange={(e) =>
+                      setRevShareScheduleEdit((p) => ({ ...p, gen2_next_date: e.target.value }))
+                    }
+                    className="mt-1"
+                  />
+                </div>
                 <div>
                   <Label htmlFor="rev-gen2-sol">Gen 2 total SOL</Label>
                   <Input

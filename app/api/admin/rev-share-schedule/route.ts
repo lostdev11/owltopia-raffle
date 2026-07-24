@@ -16,7 +16,15 @@ export async function GET(request: NextRequest) {
   if (session instanceof NextResponse) return session
   try {
     const schedule = await getRevShareSchedule()
-    return NextResponse.json(schedule ?? { next_date: null, total_sol: null, total_usdc: null })
+    return NextResponse.json(
+      schedule ?? {
+        next_date: null,
+        gen1_next_date: null,
+        gen2_next_date: null,
+        total_sol: null,
+        total_usdc: null,
+      }
+    )
   } catch (e) {
     console.error(e)
     return NextResponse.json({ error: safeErrorMessage(e) }, { status: 500 })
@@ -25,7 +33,7 @@ export async function GET(request: NextRequest) {
 
 /**
  * PATCH /api/admin/rev-share-schedule
- * Admin only (session required). Body: { next_date?, total_sol?, total_usdc? }
+ * Admin only (session required). Body: { next_date?, gen1_next_date?, gen2_next_date?, total_sol?, total_usdc?, gen*_total_*? }
  */
 export async function PATCH(request: NextRequest) {
   const session = await requireFullAdminSession(request)
@@ -33,8 +41,13 @@ export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}))
     const next_date = body.next_date !== undefined ? (body.next_date == null ? null : String(body.next_date)) : undefined
+    const gen1_next_date =
+      body.gen1_next_date !== undefined ? (body.gen1_next_date == null ? null : String(body.gen1_next_date)) : undefined
+    const gen2_next_date =
+      body.gen2_next_date !== undefined ? (body.gen2_next_date == null ? null : String(body.gen2_next_date)) : undefined
     const total_sol = body.total_sol !== undefined ? (body.total_sol == null ? null : Number(body.total_sol)) : undefined
-    const total_usdc = body.total_usdc !== undefined ? (body.total_usdc == null ? null : Number(body.total_usdc)) : undefined
+    const total_usdc =
+      body.total_usdc !== undefined ? (body.total_usdc == null ? null : Number(body.total_usdc)) : undefined
     const gen1_total_sol =
       body.gen1_total_sol !== undefined ? (body.gen1_total_sol == null ? null : Number(body.gen1_total_sol)) : undefined
     const gen1_total_usdc =
@@ -48,8 +61,14 @@ export async function PATCH(request: NextRequest) {
         ? body.period_month.trim()
         : formatPeriodMonthUtc(new Date())
 
+    // Keep legacy next_date in sync with Gen 1 when Gen 1 date is saved and next_date was not sent.
+    const resolvedNextDate =
+      next_date !== undefined ? next_date : gen1_next_date !== undefined ? gen1_next_date : undefined
+
     const updated = await updateRevShareSchedule({
-      next_date,
+      next_date: resolvedNextDate,
+      gen1_next_date,
+      gen2_next_date,
       total_sol,
       total_usdc,
       gen1_total_sol,
@@ -58,7 +77,13 @@ export async function PATCH(request: NextRequest) {
       gen2_total_usdc,
     })
 
-    if (updated && (gen1_total_sol !== undefined || gen1_total_usdc !== undefined || gen2_total_sol !== undefined || gen2_total_usdc !== undefined)) {
+    if (
+      updated &&
+      (gen1_total_sol !== undefined ||
+        gen1_total_usdc !== undefined ||
+        gen2_total_sol !== undefined ||
+        gen2_total_usdc !== undefined)
+    ) {
       await upsertGenOwlRevSharePeriodTotals({
         period_month,
         gen1_total_sol: updated.gen1_total_sol,
@@ -68,7 +93,16 @@ export async function PATCH(request: NextRequest) {
       })
     }
 
-    return NextResponse.json({ ...(updated ?? { next_date: null, total_sol: null, total_usdc: null }), period_month })
+    return NextResponse.json({
+      ...(updated ?? {
+        next_date: null,
+        gen1_next_date: null,
+        gen2_next_date: null,
+        total_sol: null,
+        total_usdc: null,
+      }),
+      period_month,
+    })
   } catch (e) {
     console.error(e)
     return NextResponse.json({ error: safeErrorMessage(e) }, { status: 500 })

@@ -14,6 +14,8 @@ export async function GET() {
     if (!snapshot) {
       return NextResponse.json({
         next_date: null,
+        gen1_next_date: null,
+        gen2_next_date: null,
         gen1: null,
         gen2: null,
       })
