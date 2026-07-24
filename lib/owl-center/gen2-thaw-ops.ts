@@ -176,8 +176,13 @@ export async function processGen2ThawBatch(): Promise<{
   const now = new Date().toISOString()
 
   try {
-    const assets = await fetchGen2CollectionAssets(ids.collectionMint, ids.rpcUrl)
+    const assetsRaw = await fetchGen2CollectionAssets(ids.collectionMint, ids.rpcUrl)
     const offset = launch.freeze_progress.offset ?? 0
+    // Prefer still-frozen DAS rows first so leftover frozenCount clears faster.
+    const assets =
+      offset === 0
+        ? [...assetsRaw].sort((a, b) => Number(b.ownership?.frozen === true) - Number(a.ownership?.frozen === true))
+        : assetsRaw
     const batch = await thawGen2AssetBatch({
       assets,
       offset,
@@ -186,17 +191,32 @@ export async function processGen2ThawBatch(): Promise<{
     })
 
     const newOffset = offset + batch.attempted
-    const thawed_count = (launch.freeze_progress.thawed_count ?? 0) + batch.thawed
     const walkedList = newOffset >= assets.length
 
+    // On-chain escrow is the source of truth for progress (avoid double-counting across rescans).
+    let frozen_count: number | undefined
+    try {
+      frozen_count = await fetchGen2FrozenCount(ids)
+    } catch {
+      frozen_count = launch.freeze_progress.frozen_count
+    }
+    const supplyBasis = Math.max(assets.length, launch.total_supply, launch.minted_count, 1)
+    const thawed_count =
+      typeof frozen_count === 'number'
+        ? Math.max(0, supplyBasis - frozen_count)
+        : (launch.freeze_progress.thawed_count ?? 0) + batch.thawed
+
     const progress: OwlCenterFreezeProgress = mergeFreezeProgress(launch.freeze_progress, {
-      total: assets.length,
+      total: supplyBasis,
       offset: newOffset,
       thawed_count,
-      remaining_count: Math.max(0, assets.length - newOffset),
+      remaining_count:
+        typeof frozen_count === 'number' ? frozen_count : Math.max(0, assets.length - newOffset),
+      frozen_count,
       updated_at: now,
       last_run_at: now,
       last_signature: batch.last_signature ?? launch.freeze_progress.last_signature,
+      // Don't sticky-show benign InvalidAccountData skips mid-walk — only surface hard failures.
       error: batch.last_error ?? undefined,
     })
 
@@ -211,18 +231,20 @@ export async function processGen2ThawBatch(): Promise<{
           remaining_unprocessed: batch.remaining_unprocessed,
         },
         completed: false,
+        frozen_count,
         error: batch.last_error ?? undefined,
       }
     }
 
     // Finished a full DAS pass — unlock only when on-chain frozenCount is 0.
-    const frozen_count = await fetchGen2FrozenCount(ids)
+    frozen_count = await fetchGen2FrozenCount(ids)
     progress.frozen_count = frozen_count
     progress.remaining_count = frozen_count
+    progress.thawed_count = Math.max(0, supplyBasis - frozen_count)
 
     if (frozen_count > 0) {
       progress.offset = 0
-      progress.error = `DAS pass complete but ${frozen_count} NFT(s) still frozen on-chain — restarting thaw from offset 0.`
+      progress.error = `${frozen_count} NFT(s) still frozen on-chain after a full pass — restarting from offset 0 (only frozen token accounts are thawed).`
       await updateOwlCenterLaunchAdmin('gen2', {
         freeze_status: 'thawing',
         freeze_progress: progress,

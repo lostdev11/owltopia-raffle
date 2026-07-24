@@ -23,6 +23,7 @@ import {
   type FreezeEscrow,
 } from '@metaplex-foundation/mpl-candy-machine'
 import { TokenStandard } from '@metaplex-foundation/mpl-token-metadata'
+import { findLargestTokensByMint, safeFetchToken, TokenState } from '@metaplex-foundation/mpl-toolbox'
 
 import { getGen2MintProceedsWalletAddress } from '@/lib/owl-center/gen2-mint-proceeds'
 import type { OwlCenterFreezeProgress } from '@/lib/owl-center/types'
@@ -38,7 +39,11 @@ const GEN2_DAS_PAGE_SIZE = 100
 const GEN2_DAS_PAGE_DELAY_MS = 200
 const GEN2_DAS_MAX_RETRIES = 6
 
-export type Gen2DasAsset = { id: string; ownership?: { owner?: string } }
+export type Gen2DasAsset = {
+  id: string
+  burnt?: boolean
+  ownership?: { owner?: string; frozen?: boolean }
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -220,9 +225,10 @@ export async function fetchGen2FrozenCount(ids?: Partial<Gen2FreezeIds>): Promis
 }
 
 function isBenignThawSkip(message: string): boolean {
-  // Only treat true "already thawed / not frozen" as success-skips.
-  // Owner mismatches must NOT be skipped — stale DAS ownership is a common cause of leftover frozenCount.
-  return /already thawed|not frozen|AccountNotInitialized|0xbc4\b/i.test(message)
+  // Already thawed, missing/closed accounts, or junk DAS rows (not CM-frozen) — keep walking.
+  return /already thawed|not frozen|AccountNotInitialized|0xbc4\b|InvalidAccountData|invalid account data|AccountOwnedByWrongProgram|incorrect program id/i.test(
+    message
+  )
 }
 
 function isRetryableThawFailure(message: string): boolean {
@@ -270,29 +276,27 @@ export type Gen2ThawBatchResult = {
   last_error: string | null
 }
 
-async function resolveNftOwner(
+/** Current holder + whether the SPL token account is frozen (Candy Machine freezeSolPayment). */
+async function resolveFrozenHolding(
   umi: Umi,
-  mint: string,
-  dasOwner: string | undefined
-): Promise<string | null> {
-  if (dasOwner) return dasOwner
+  mint: string
+): Promise<{ owner: string; frozen: boolean } | null> {
   try {
-    const res = await umi.rpc.call('getTokenLargestAccounts', [mint])
-    const value = (res as { value?: Array<{ address?: string; uiAmount?: number | null }> })?.value
-    const ata = value?.find((v) => (v.uiAmount ?? 0) > 0)?.address
-    if (!ata) return null
-    const acct = await umi.rpc.getAccount(publicKey(ata))
-    if (!acct.exists || acct.data.length < 64) return null
-    // SPL Token account: mint(32) + owner(32) at offset 32
-    return bs58.encode(acct.data.slice(32, 64))
+    const largest = await findLargestTokensByMint(umi, publicKey(mint))
+    const top = largest.find((t) => t.amount.basisPoints > 0n)
+    if (!top) return null
+    const token = await safeFetchToken(umi, top.publicKey)
+    if (!token || token.amount <= 0n) return null
+    const state = token.state as unknown as TokenState | number | string
+    const frozen = state === TokenState.Frozen || state === 2 || state === 'Frozen'
+    return { owner: String(token.owner), frozen: Boolean(frozen) }
   } catch {
     return null
   }
 }
 
 /**
- * Thaw up to `limit` assets that still have an owner. Caller should pass the full DAS list and
- * track progress via `offset` (skip already-processed indices from prior batches).
+ * Thaw up to `limit` assets. Only sends txs for token accounts that are still frozen on-chain.
  */
 export async function thawGen2AssetBatch(params: {
   assets: Gen2DasAsset[]
@@ -319,14 +323,19 @@ export async function thawGen2AssetBatch(params: {
   let last_error: string | null = null
 
   for (const a of slice) {
-    let owner = await resolveNftOwner(umi, a.id, a.ownership?.owner)
-    if (!owner) {
+    if (a.burnt === true) {
       skipped++
       continue
     }
 
-    const tryThaw = async (nftOwner: string) =>
-      route(umi, {
+    const holding = await resolveFrozenHolding(umi, a.id)
+    if (!holding || !holding.frozen) {
+      skipped++
+      continue
+    }
+
+    try {
+      const res = await route(umi, {
         candyMachine: publicKey(candyMachineId),
         candyGuard: guard.publicKey,
         guard: 'freezeSolPayment',
@@ -335,13 +344,10 @@ export async function thawGen2AssetBatch(params: {
           path: 'thaw',
           destination: publicKey(DEST),
           nftMint: publicKey(a.id),
-          nftOwner: publicKey(nftOwner),
+          nftOwner: publicKey(holding.owner),
           nftTokenStandard: tokenStandard,
         },
       }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
-
-    try {
-      const res = await tryThaw(owner)
       thawed++
       last_signature = bs58.encode(res.signature)
     } catch (e) {
@@ -350,37 +356,12 @@ export async function thawGen2AssetBatch(params: {
         skipped++
         continue
       }
-
-      // Stale DAS owner — refresh from token account and retry once.
-      if (/IncorrectOwner|owner does not match|invalid owner|0xbc4/i.test(msg)) {
-        const refreshed = await resolveNftOwner(umi, a.id, undefined)
-        if (refreshed && refreshed !== owner) {
-          try {
-            const res = await tryThaw(refreshed)
-            thawed++
-            last_signature = bs58.encode(res.signature)
-            continue
-          } catch (e2) {
-            const msg2 = e2 instanceof Error ? e2.message : String(e2)
-            if (isBenignThawSkip(msg2)) {
-              skipped++
-              continue
-            }
-            failed++
-            last_error = msg2
-            if (isRetryableThawFailure(msg2)) break
-            continue
-          }
-        }
-      }
-
       failed++
       last_error = msg
       if (isRetryableThawFailure(msg)) break
     }
   }
 
-  // If we broke early on rate limits, only advance past successful/skipped work in this slice.
   const advanced =
     failed > 0 && last_error && isRetryableThawFailure(last_error)
       ? offset + thawed + skipped

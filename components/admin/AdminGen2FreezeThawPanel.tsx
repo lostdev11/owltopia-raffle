@@ -84,9 +84,15 @@ export function AdminGen2FreezeThawPanel({ onChanged }: { onChanged?: () => void
   }
 
   const progress = data?.freeze_progress
-  const total = progress?.total ?? data?.minted_count ?? 0
-  const thawed = progress?.thawed_count ?? 0
   const frozenOnChain = progress?.frozen_count
+  const total =
+    typeof frozenOnChain === 'number' && frozenOnChain >= 0
+      ? Math.max(progress?.total ?? data?.minted_count ?? data?.total_supply ?? 0, data?.total_supply ?? 0)
+      : (progress?.total ?? data?.minted_count ?? 0)
+  const thawed =
+    typeof frozenOnChain === 'number' && total > 0
+      ? Math.max(0, total - frozenOnChain)
+      : (progress?.thawed_count ?? 0)
   const pct = total > 0 ? Math.min(100, Math.round((thawed / total) * 100)) : 0
   const unlocked = Boolean(progress?.unlocked_at)
   const canResumeThaw = data?.freeze_status !== 'thawed' || !unlocked
