@@ -37,6 +37,7 @@
     "test:batch-cart-invariants": "npx --yes tsx scripts/test-batch-cart-invariants.ts",
     "test:pending-verification-store": "npx --yes tsx scripts/test-pending-verification-store.ts",
     "test:cart-checkout-restore": "npx --yes tsx scripts/test-cart-checkout-restore.ts",
+    "test:purchase-window": "npx --yes tsx scripts/test-purchase-window.ts",
     "test:gen2-gen1-delegations": "npx --yes tsx scripts/test-gen2-gen1-delegations.ts",
     "test:gen2-phase-advance": "npx --yes tsx scripts/test-gen2-phase-advance.ts",
     "test:effective-cm-remaining": "npx --yes tsx scripts/test-effective-cm-remaining.ts",
