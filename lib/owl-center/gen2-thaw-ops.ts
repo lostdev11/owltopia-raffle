@@ -85,21 +85,24 @@ export async function startGen2ThawManual(): Promise<{
   }
 
   const ids = freezeIdsFromLaunch(cur)
-  let total = cur.freeze_progress.total ?? 0
-  let frozen_count: number | undefined
+  // Do not enumerate DAS here — Helius getAssetsByGroup rate-limits easily after mint-out.
+  // Cron batches load the asset list with retries; Start thaw only needs escrow frozenCount.
+  const total =
+    cur.freeze_progress.total ??
+    (cur.minted_count > 0 ? cur.minted_count : cur.total_supply) ??
+    cur.total_supply
+  let frozen_count: number
   try {
-    const assets = await fetchGen2CollectionAssets(ids.collectionMint, ids.rpcUrl)
-    total = assets.length
     frozen_count = await fetchGen2FrozenCount(ids)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    return { ok: false, error: `Could not enumerate collection for thaw: ${msg}` }
+    return { ok: false, error: `Could not read freeze escrow: ${msg}` }
   }
 
   const now = new Date().toISOString()
   const progress = mergeFreezeProgress(cur.freeze_progress, {
     total,
-    remaining_count: Math.max(0, frozen_count ?? total - (cur.freeze_progress.thawed_count ?? 0)),
+    remaining_count: Math.max(0, frozen_count),
     frozen_count,
     // Always restart from offset 0 when re-seeding so previously skipped failures are retried.
     offset: 0,

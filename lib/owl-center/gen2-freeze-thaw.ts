@@ -26,14 +26,114 @@ import { TokenStandard } from '@metaplex-foundation/mpl-token-metadata'
 
 import { getGen2MintProceedsWalletAddress } from '@/lib/owl-center/gen2-mint-proceeds'
 import type { OwlCenterFreezeProgress } from '@/lib/owl-center/types'
+import { getHeliusMainnetRpcUrl, getHeliusRpcUrl } from '@/lib/helius-rpc-url'
 import { getGen2CandyMachineId, getGen2CollectionMint } from '@/lib/solana/network'
 
 export const GEN2_FREEZE_GROUP = 'pub'
 export const GEN2_FREEZE_PERIOD_SECONDS = 30 * 24 * 60 * 60
 /** Per cron/admin batch — keeps serverless invocations under typical time limits. */
 export const GEN2_THAW_BATCH_SIZE = 30
+/** DAS page size — smaller pages + backoff avoid Helius `getAssetsByGroup` rate limits. */
+const GEN2_DAS_PAGE_SIZE = 100
+const GEN2_DAS_PAGE_DELAY_MS = 200
+const GEN2_DAS_MAX_RETRIES = 6
 
 export type Gen2DasAsset = { id: string; ownership?: { owner?: string } }
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isDasRateLimited(status: number, message?: string): boolean {
+  if (status === 429) return true
+  return /rate.?limit|too many requests|429/i.test(message ?? '')
+}
+
+function retryAfterMs(res: Response, attempt: number): number {
+  const h = res.headers.get('retry-after')
+  if (h) {
+    const sec = parseInt(h, 10)
+    if (!Number.isNaN(sec)) return Math.min(Math.max(sec, 1) * 1000, 30_000)
+    const date = Date.parse(h)
+    if (!Number.isNaN(date)) return Math.min(Math.max(date - Date.now(), 500), 30_000)
+  }
+  return Math.min(1000 * 2 ** attempt, 20_000)
+}
+
+/** Prefer dedicated Helius DAS endpoint over the general Solana RPC (fast RPCs rate-limit DAS hard). */
+export function resolveGen2DasRpcUrl(fallbackRpcUrl?: string): string {
+  return (
+    getHeliusMainnetRpcUrl() ||
+    getHeliusRpcUrl() ||
+    fallbackRpcUrl?.trim() ||
+    resolveGen2FreezeIds().rpcUrl
+  )
+}
+
+export async function fetchGen2CollectionAssets(
+  collectionMint: string,
+  rpcUrl?: string
+): Promise<Gen2DasAsset[]> {
+  const dasUrl = resolveGen2DasRpcUrl(rpcUrl)
+  const out: Gen2DasAsset[] = []
+
+  for (let page = 1; ; page++) {
+    let items: Gen2DasAsset[] | null = null
+    let lastError = 'unknown DAS error'
+
+    for (let attempt = 0; attempt < GEN2_DAS_MAX_RETRIES; attempt++) {
+      const res = await fetch(dasUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: `gen2-thaw-${page}-${attempt}`,
+          method: 'getAssetsByGroup',
+          params: {
+            groupKey: 'collection',
+            groupValue: collectionMint,
+            page,
+            limit: GEN2_DAS_PAGE_SIZE,
+          },
+        }),
+        cache: 'no-store',
+      })
+
+      if (isDasRateLimited(res.status)) {
+        lastError = `HTTP ${res.status}`
+        await sleep(retryAfterMs(res, attempt))
+        continue
+      }
+
+      const json = (await res.json().catch(() => ({}))) as {
+        result?: { items?: Gen2DasAsset[] }
+        error?: { message?: string }
+      }
+
+      if (json.error) {
+        lastError = json.error.message ?? JSON.stringify(json.error)
+        if (isDasRateLimited(res.status, lastError)) {
+          await sleep(retryAfterMs(res, attempt))
+          continue
+        }
+        throw new Error(`DAS getAssetsByGroup failed: ${lastError}`)
+      }
+
+      items = json.result?.items ?? []
+      break
+    }
+
+    if (items == null) {
+      throw new Error(`DAS getAssetsByGroup failed: rate limited (${lastError})`)
+    }
+
+    out.push(...items)
+    if (items.length < GEN2_DAS_PAGE_SIZE) break
+    await sleep(GEN2_DAS_PAGE_DELAY_MS)
+  }
+
+  return out
+}
 
 export type Gen2FreezeIds = {
   candyMachineId: string
@@ -129,34 +229,6 @@ function isRetryableThawFailure(message: string): boolean {
   return /429|rate limit|blockhash|timed out|timeout|fetch failed|ECONNRESET|503|502|too many requests/i.test(
     message
   )
-}
-
-export async function fetchGen2CollectionAssets(
-  collectionMint: string,
-  rpcUrl: string
-): Promise<Gen2DasAsset[]> {
-  const out: Gen2DasAsset[] = []
-  for (let page = 1; ; page++) {
-    const res = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'gen2-thaw',
-        method: 'getAssetsByGroup',
-        params: { groupKey: 'collection', groupValue: collectionMint, page, limit: 1000 },
-      }),
-    })
-    const json = (await res.json()) as {
-      result?: { items?: Gen2DasAsset[] }
-      error?: { message?: string }
-    }
-    if (json.error) throw new Error(`DAS getAssetsByGroup failed: ${json.error.message}`)
-    const items = json.result?.items ?? []
-    out.push(...items)
-    if (items.length < 1000) break
-  }
-  return out
 }
 
 export async function initGen2FreezeEscrow(ids?: Partial<Gen2FreezeIds>): Promise<{ signature: string | null; already: boolean }> {
