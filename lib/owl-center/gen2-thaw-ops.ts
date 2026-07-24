@@ -7,6 +7,7 @@ import {
 } from '@/lib/db/owl-center-launch'
 import {
   fetchGen2CollectionAssets,
+  fetchGen2FrozenCount,
   mergeFreezeProgress,
   resolveGen2FreezeIds,
   thawGen2AssetBatch,
@@ -78,15 +79,18 @@ export async function startGen2ThawManual(): Promise<{
   const cur = await getOwlCenterLaunchBySlugAdmin('gen2')
   if (!cur) return { ok: false, error: 'Launch not found' }
 
-  if (cur.freeze_status === 'thawed') {
-    return { ok: false, error: 'Collection already thawed' }
+  // Allow re-seed when marked thawed but escrow unlock never completed (stuck after UnlockNotEnabled).
+  if (cur.freeze_status === 'thawed' && cur.freeze_progress.unlocked_at) {
+    return { ok: false, error: 'Collection already thawed and unlocked' }
   }
 
   const ids = freezeIdsFromLaunch(cur)
   let total = cur.freeze_progress.total ?? 0
+  let frozen_count: number | undefined
   try {
     const assets = await fetchGen2CollectionAssets(ids.collectionMint, ids.rpcUrl)
     total = assets.length
+    frozen_count = await fetchGen2FrozenCount(ids)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return { ok: false, error: `Could not enumerate collection for thaw: ${msg}` }
@@ -95,8 +99,10 @@ export async function startGen2ThawManual(): Promise<{
   const now = new Date().toISOString()
   const progress = mergeFreezeProgress(cur.freeze_progress, {
     total,
-    remaining_count: Math.max(0, total - (cur.freeze_progress.thawed_count ?? 0)),
-    offset: cur.freeze_status === 'thawing' ? (cur.freeze_progress.offset ?? 0) : 0,
+    remaining_count: Math.max(0, frozen_count ?? total - (cur.freeze_progress.thawed_count ?? 0)),
+    frozen_count,
+    // Always restart from offset 0 when re-seeding so previously skipped failures are retried.
+    offset: 0,
     thawed_count: cur.freeze_status === 'thawing' ? (cur.freeze_progress.thawed_count ?? 0) : 0,
     started_at: cur.freeze_progress.started_at ?? now,
     updated_at: now,
@@ -119,11 +125,13 @@ export async function processGen2ThawBatch(): Promise<{
   batch?: {
     thawed: number
     skipped: number
+    failed: number
     remaining_unprocessed: number
   }
   completed?: boolean
   unlocked?: boolean
   trading_activated?: boolean
+  frozen_count?: number
   error?: string
 }> {
   let launch = await getOwlCenterLaunchBySlugAdmin('gen2')
@@ -137,6 +145,24 @@ export async function processGen2ThawBatch(): Promise<{
   ) {
     const enq = await enqueueGen2ThawIfSoldOut(launch)
     launch = enq.launch ?? launch
+  }
+
+  // Self-heal stuck "thawed" rows where unlock never landed (UnlockNotEnabled / partial thaw).
+  if (
+    launch.freeze_status === 'thawed' &&
+    !launch.freeze_progress.unlocked_at &&
+    (launch.minted_count >= launch.total_supply || launch.active_phase === 'SOLD_OUT' || launch.active_phase === 'TRADING_ACTIVE')
+  ) {
+    const now = new Date().toISOString()
+    const healed = await updateOwlCenterLaunchAdmin('gen2', {
+      freeze_status: 'thawing',
+      freeze_progress: mergeFreezeProgress(launch.freeze_progress, {
+        offset: 0,
+        updated_at: now,
+        error: 'Re-opened thaw: unlock never completed (likely leftover frozen NFTs).',
+      }),
+    })
+    launch = healed ?? launch
   }
 
   if (launch.freeze_status !== 'thawing') {
@@ -158,7 +184,7 @@ export async function processGen2ThawBatch(): Promise<{
 
     const newOffset = offset + batch.attempted
     const thawed_count = (launch.freeze_progress.thawed_count ?? 0) + batch.thawed
-    const done = newOffset >= assets.length
+    const walkedList = newOffset >= assets.length
 
     const progress: OwlCenterFreezeProgress = mergeFreezeProgress(launch.freeze_progress, {
       total: assets.length,
@@ -168,23 +194,50 @@ export async function processGen2ThawBatch(): Promise<{
       updated_at: now,
       last_run_at: now,
       last_signature: batch.last_signature ?? launch.freeze_progress.last_signature,
-      error: undefined,
+      error: batch.last_error ?? undefined,
     })
 
-    if (!done) {
+    if (!walkedList) {
       await updateOwlCenterLaunchAdmin('gen2', { freeze_progress: progress })
       return {
         ok: true,
         batch: {
           thawed: batch.thawed,
           skipped: batch.skipped,
+          failed: batch.failed,
           remaining_unprocessed: batch.remaining_unprocessed,
         },
         completed: false,
+        error: batch.last_error ?? undefined,
       }
     }
 
-    // Complete: mark thawed, unlock, maybe open trading.
+    // Finished a full DAS pass — unlock only when on-chain frozenCount is 0.
+    const frozen_count = await fetchGen2FrozenCount(ids)
+    progress.frozen_count = frozen_count
+    progress.remaining_count = frozen_count
+
+    if (frozen_count > 0) {
+      progress.offset = 0
+      progress.error = `DAS pass complete but ${frozen_count} NFT(s) still frozen on-chain — restarting thaw from offset 0.`
+      await updateOwlCenterLaunchAdmin('gen2', {
+        freeze_status: 'thawing',
+        freeze_progress: progress,
+      })
+      return {
+        ok: true,
+        batch: {
+          thawed: batch.thawed,
+          skipped: batch.skipped,
+          failed: batch.failed,
+          remaining_unprocessed: frozen_count,
+        },
+        completed: false,
+        frozen_count,
+        error: progress.error,
+      }
+    }
+
     let unlocked = false
     let unlockError: string | undefined
     try {
@@ -192,9 +245,28 @@ export async function processGen2ThawBatch(): Promise<{
       unlocked = true
       progress.unlocked_at = now
       progress.last_signature = unlockRes.signature
+      progress.error = undefined
     } catch (e) {
       unlockError = e instanceof Error ? e.message : String(e)
       progress.error = `Thaw complete but unlock failed: ${unlockError}`
+      progress.offset = 0
+      await updateOwlCenterLaunchAdmin('gen2', {
+        freeze_status: 'thawing',
+        freeze_progress: progress,
+      })
+      return {
+        ok: true,
+        batch: {
+          thawed: batch.thawed,
+          skipped: batch.skipped,
+          failed: batch.failed,
+          remaining_unprocessed: 0,
+        },
+        completed: false,
+        unlocked: false,
+        frozen_count: 0,
+        error: unlockError,
+      }
     }
 
     const hasMarketplace = Boolean(launch.magic_eden_url?.trim() || launch.tensor_url?.trim())
@@ -216,12 +288,13 @@ export async function processGen2ThawBatch(): Promise<{
       batch: {
         thawed: batch.thawed,
         skipped: batch.skipped,
+        failed: batch.failed,
         remaining_unprocessed: 0,
       },
       completed: true,
       unlocked,
       trading_activated,
-      error: unlockError,
+      frozen_count: 0,
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
@@ -247,12 +320,21 @@ export async function unlockGen2FreezeEscrowAdmin(): Promise<
 
   try {
     const ids = freezeIdsFromLaunch(cur)
+    const frozen_count = await fetchGen2FrozenCount(ids)
+    if (frozen_count > 0) {
+      return {
+        ok: false,
+        error: `${frozen_count} NFT(s) still frozen on-chain. Resume thaw until frozenCount is 0, then unlock.`,
+      }
+    }
+
     const res = await unlockGen2FreezeEscrow(ids)
     const now = new Date().toISOString()
     const progress = mergeFreezeProgress(cur.freeze_progress, {
       unlocked_at: now,
       updated_at: now,
       last_signature: res.signature,
+      frozen_count: 0,
       error: undefined,
     })
     const hasMarketplace = Boolean(cur.magic_eden_url?.trim() || cur.tensor_url?.trim())

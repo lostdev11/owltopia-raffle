@@ -44,7 +44,7 @@ async function doThaw(confirm: boolean) {
   if (!confirm) return console.log('(dry-run) re-run with --confirm to thaw each NFT.')
   const res = await thawGen2AllAssets(ids)
   console.log(
-    `thaw done: ${res.thawed} thawed, ${res.skipped} skipped (of ${res.total}). When all are thawed, run: unlock --confirm`
+    `thaw done: ${res.thawed} thawed, ${res.skipped} skipped, ${res.failed} failed (of ${res.total}). When frozenCount is 0, run: unlock --confirm`
   )
 }
 

@@ -87,6 +87,7 @@ function parseFreezeProgress(raw: unknown): OwlCenterFreezeProgress {
     updated_at: typeof o.updated_at === 'string' ? o.updated_at : undefined,
     unlocked_at: typeof o.unlocked_at === 'string' ? o.unlocked_at : undefined,
     last_signature: typeof o.last_signature === 'string' ? o.last_signature : undefined,
+    frozen_count: typeof o.frozen_count === 'number' ? o.frozen_count : undefined,
     backstop_mint_enabled: typeof o.backstop_mint_enabled === 'boolean' ? o.backstop_mint_enabled : undefined,
     backstop_team_wallets: teamWallets,
     backstop_enabled_at: typeof o.backstop_enabled_at === 'string' ? o.backstop_enabled_at : undefined,

@@ -86,14 +86,18 @@ export function AdminGen2FreezeThawPanel({ onChanged }: { onChanged?: () => void
   const progress = data?.freeze_progress
   const total = progress?.total ?? data?.minted_count ?? 0
   const thawed = progress?.thawed_count ?? 0
+  const frozenOnChain = progress?.frozen_count
   const pct = total > 0 ? Math.min(100, Math.round((thawed / total) * 100)) : 0
+  const unlocked = Boolean(progress?.unlocked_at)
+  const canResumeThaw = data?.freeze_status !== 'thawed' || !unlocked
 
   return (
     <CommandCard label="FREEZE_THAW · MINT_OUT">
       <p className="mb-4 text-sm text-[#9BA8B4]">
         Gen2 mints are frozen via Candy Machine <code className="text-[11px] text-[#00FF9C]">freezeSolPayment</code>.
         Start thaw at mint-out (or let auto-thaw run when supply hits{' '}
-        {data?.total_supply?.toLocaleString() ?? 'cap'}). Cron finishes batches; unlock closes the escrow.
+        {data?.total_supply?.toLocaleString() ?? 'cap'}). Cron finishes batches; unlock only works when on-chain{' '}
+        <code className="text-[11px] text-[#00FF9C]">frozenCount</code> is 0.
       </p>
 
       {loading ? (
@@ -108,6 +112,20 @@ export function AdminGen2FreezeThawPanel({ onChanged }: { onChanged?: () => void
             <span>
               phase: <span className="text-[#E8EEF2]">{data?.active_phase ?? '—'}</span>
             </span>
+            {typeof frozenOnChain === 'number' ? (
+              <span>
+                frozen_on_chain:{' '}
+                <span className={frozenOnChain > 0 ? 'text-[#FF9C9C]' : 'text-[#00FF9C]'}>
+                  {frozenOnChain.toLocaleString()}
+                </span>
+              </span>
+            ) : null}
+            {unlocked ? (
+              <span>
+                unlocked:{' '}
+                <span className="text-[#00FF9C]">{new Date(progress!.unlocked_at!).toLocaleString()}</span>
+              </span>
+            ) : null}
             {data?.freeze_thawed_at ? (
               <span>
                 thawed_at:{' '}
@@ -145,7 +163,7 @@ export function AdminGen2FreezeThawPanel({ onChanged }: { onChanged?: () => void
           <div className="flex flex-wrap gap-3">
             <DeployButton
               type="button"
-              disabled={busy || data?.freeze_status === 'thawed'}
+              disabled={busy || !canResumeThaw}
               onClick={() => void run('start')}
               className="min-h-[44px] touch-manipulation"
             >

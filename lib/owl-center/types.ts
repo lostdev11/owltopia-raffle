@@ -70,6 +70,8 @@ export type OwlCenterFreezeProgress = {
   updated_at?: string
   unlocked_at?: string
   last_signature?: string
+  /** On-chain freeze escrow `frozenCount` (source of truth for unlock). */
+  frozen_count?: number
   /** Admin team backstop mint after public pool exhausts. */
   backstop_mint_enabled?: boolean
   backstop_team_wallets?: string[]
