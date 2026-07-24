@@ -7,6 +7,7 @@ const CACHE_TTL_MS = 45_000
 export type ActivePartnerCommunityRow = {
   creator_wallet: string
   display_label: string | null
+  logo_url: string | null
 }
 
 let cache: { rows: ActivePartnerCommunityRow[]; fetchedAt: number } | null = null
@@ -57,22 +58,46 @@ export async function getActivePartnerCommunityCreatorRows(): Promise<ActivePart
   }
 
   const attempts = 3
-  let rowsRaw: { creator_wallet: string; display_label: string | null }[] | null = null
+  let rowsRaw: { creator_wallet: string; display_label: string | null; logo_url: string | null }[] | null =
+    null
   let lastMessage: string | null = null
 
   for (let i = 0; i < attempts; i++) {
     const res = await sb
       .from('partner_community_creators')
-      .select('creator_wallet, display_label')
+      .select('creator_wallet, display_label, logo_url')
       .eq('is_active', true)
       .order('sort_order', { ascending: true })
 
     if (!res.error) {
-      rowsRaw = (res.data ?? []) as { creator_wallet: string; display_label: string | null }[]
+      rowsRaw = (res.data ?? []) as {
+        creator_wallet: string
+        display_label: string | null
+        logo_url: string | null
+      }[]
       break
     }
 
     lastMessage = res.error.message
+    // Older DBs without logo_url: fall back to wallet + label only.
+    if (
+      (res.error.message ?? '').toLowerCase().includes('logo_url') ||
+      (res.error.message ?? '').includes('42703')
+    ) {
+      const fallback = await sb
+        .from('partner_community_creators')
+        .select('creator_wallet, display_label')
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true })
+      if (!fallback.error) {
+        rowsRaw = (fallback.data ?? []).map((r) => ({
+          creator_wallet: String((r as { creator_wallet?: string }).creator_wallet ?? ''),
+          display_label: (r as { display_label?: string | null }).display_label ?? null,
+          logo_url: null,
+        }))
+        break
+      }
+    }
     const retry = i < attempts - 1 && isTransientFetchFailure(res.error.message)
     if (retry) {
       await sleep(350 * (i + 1))
@@ -95,6 +120,7 @@ export async function getActivePartnerCommunityCreatorRows(): Promise<ActivePart
     .map((r) => ({
       creator_wallet: String(r.creator_wallet ?? '').trim(),
       display_label: r.display_label != null && String(r.display_label).trim() ? String(r.display_label).trim() : null,
+      logo_url: r.logo_url != null && String(r.logo_url).trim() ? String(r.logo_url).trim() : null,
     }))
     .filter((r) => r.creator_wallet)
 

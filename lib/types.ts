@@ -323,6 +323,11 @@ export interface Raffle {
    */
   creator_partner_table_label?: string | null
   /**
+   * Enriched at list time: `partner_community_creators.logo_url` when set (approved application / admin).
+   * Preferred over static name-matching for Partner Spotlight.
+   */
+  creator_partner_logo_url?: string | null
+  /**
    * Enriched server-side: when true, description may render https URLs as clickable links.
    * Only set for raffles whose creator is in the admins table — reduces phishing from non-admin listings.
    */

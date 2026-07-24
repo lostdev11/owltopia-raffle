@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
-import { updatePartnerProgramApplicationStatus } from '@/lib/db/partner-program-applications'
+import {
+  approvePartnerProgramApplication,
+  updatePartnerProgramApplicationStatus,
+} from '@/lib/db/partner-program-applications'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,8 +21,19 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       return NextResponse.json({ error: 'Invalid application id' }, { status: 400 })
     }
 
-    const body = (await request.json().catch(() => ({}))) as { status?: string }
+    const body = (await request.json().catch(() => ({}))) as { status?: string; approve?: boolean }
+    const approve = body.approve === true
     const status = typeof body.status === 'string' ? body.status.trim() : ''
+
+    if (approve || status === 'active') {
+      const result = await approvePartnerProgramApplication(id)
+      return NextResponse.json({
+        application: result.application,
+        creator_wallet: result.creator_wallet,
+        provisioned: true,
+      })
+    }
+
     if (!VALID_STATUSES.has(status)) {
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
     }
@@ -28,9 +42,16 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       id,
       status as 'new' | 'contacted' | 'active' | 'closed'
     )
-    return NextResponse.json({ application: updated })
+    return NextResponse.json({ application: updated, provisioned: false })
   } catch (error) {
     console.error('[PATCH /api/admin/partner-applications/:id]', error)
-    return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 })
+    const msg = safeErrorMessage(error)
+    if (msg.toLowerCase().includes('not found')) {
+      return NextResponse.json({ error: msg }, { status: 404 })
+    }
+    if (msg.toLowerCase().includes('valid solana')) {
+      return NextResponse.json({ error: msg }, { status: 400 })
+    }
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

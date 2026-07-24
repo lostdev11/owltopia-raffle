@@ -3,14 +3,14 @@
 import { useEffect, useState } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
 import Link from 'next/link'
-import { ArrowLeft, Inbox, Loader2 } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Inbox, Loader2 } from 'lucide-react'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 
-const STATUS_OPTIONS = ['new', 'contacted', 'active', 'closed'] as const
-type ApplicationStatus = (typeof STATUS_OPTIONS)[number]
+const TRIAGE_STATUS_OPTIONS = ['new', 'contacted', 'closed'] as const
+type TriageStatus = (typeof TRIAGE_STATUS_OPTIONS)[number]
 
 type PartnerApplication = {
   id: number
@@ -21,7 +21,9 @@ type PartnerApplication = {
   interested_tier: string
   details: string | null
   logo_url: string | null
-  status: ApplicationStatus | string
+  status: string
+  approved_at: string | null
+  approved_creator_wallet: string | null
   created_at: string
 }
 
@@ -35,6 +37,7 @@ export default function AdminPartnerApplicationsPage() {
   const [rows, setRows] = useState<PartnerApplication[]>([])
   const [error, setError] = useState<string | null>(null)
   const [savingId, setSavingId] = useState<number | null>(null)
+  const [lastProvisioned, setLastProvisioned] = useState<{ id: number; wallet: string } | null>(null)
 
   useEffect(() => {
     if (!connected || !publicKey) {
@@ -78,7 +81,10 @@ export default function AdminPartnerApplicationsPage() {
       .finally(() => setLoadingList(false))
   }, [isAdmin])
 
-  const updateStatus = async (id: number, status: ApplicationStatus) => {
+  const patchApplication = async (
+    id: number,
+    body: { status?: TriageStatus; approve?: boolean }
+  ) => {
     setSavingId(id)
     setError(null)
     try {
@@ -86,19 +92,24 @@ export default function AdminPartnerApplicationsPage() {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(body),
       })
       const json = (await res.json().catch(() => ({}))) as {
         error?: string
         application?: PartnerApplication
+        creator_wallet?: string
+        provisioned?: boolean
       }
       if (!res.ok || !json.application) {
-        setError(typeof json.error === 'string' ? json.error : 'Could not update status.')
+        setError(typeof json.error === 'string' ? json.error : 'Could not update application.')
         return
       }
-      setRows((prev) => prev.map((row) => (row.id === id ? { ...row, status: json.application!.status } : row)))
+      setRows((prev) => prev.map((row) => (row.id === id ? { ...row, ...json.application! } : row)))
+      if (json.provisioned && json.creator_wallet) {
+        setLastProvisioned({ id, wallet: json.creator_wallet })
+      }
     } catch {
-      setError('Could not update status.')
+      setError('Could not update application.')
     } finally {
       setSavingId(null)
     }
@@ -146,12 +157,22 @@ export default function AdminPartnerApplicationsPage() {
         Partner applications
       </h1>
       <p className="mb-6 text-sm text-muted-foreground">
-        New applications submitted from the public partner page. Add approved wallets in{' '}
+        Approve to allowlist the wallet as a partner (tier + logo from their answers). Link Discord later in{' '}
         <Link href="/admin/partner-creators" className="text-primary underline-offset-4 hover:underline">
           Partner program creators
         </Link>
         .
       </p>
+
+      {lastProvisioned ? (
+        <p className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+          <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+          Application #{lastProvisioned.id} approved — wallet added to partners.{' '}
+          <Link href="/admin/partner-creators" className="font-medium underline-offset-4 hover:underline">
+            View partner creators
+          </Link>
+        </p>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -173,6 +194,9 @@ export default function AdminPartnerApplicationsPage() {
                 <li key={row.id} className="space-y-2 pt-5 first:pt-0">
                   <p className="text-sm text-muted-foreground">
                     #{row.id} · {new Date(row.created_at).toLocaleString()} · status: {row.status}
+                    {row.approved_at
+                      ? ` · approved ${new Date(row.approved_at).toLocaleString()}`
+                      : ''}
                   </p>
                   <div className="flex items-center gap-3">
                     {row.logo_url ? (
@@ -195,7 +219,19 @@ export default function AdminPartnerApplicationsPage() {
                   <p className="break-all font-mono text-xs text-muted-foreground">{row.wallet_address}</p>
                   <p className="text-sm">Tier: {row.interested_tier}</p>
                   <div className="flex flex-wrap gap-2">
-                    {STATUS_OPTIONS.map((status) => (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="min-h-[44px] touch-manipulation"
+                      disabled={savingId === row.id}
+                      onClick={() => void patchApplication(row.id, { approve: true })}
+                    >
+                      {savingId === row.id && row.status !== 'active' ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : null}
+                      {row.status === 'active' ? 'Re-approve / refresh' : 'Approve'}
+                    </Button>
+                    {TRIAGE_STATUS_OPTIONS.map((status) => (
                       <Button
                         key={status}
                         type="button"
@@ -203,14 +239,14 @@ export default function AdminPartnerApplicationsPage() {
                         variant={row.status === status ? 'default' : 'outline'}
                         className="min-h-[40px] touch-manipulation"
                         disabled={savingId === row.id}
-                        onClick={() => void updateStatus(row.id, status)}
+                        onClick={() => void patchApplication(row.id, { status })}
                       >
                         {status}
                       </Button>
                     ))}
                     {row.status === 'active' ? (
-                      <Button asChild size="sm" className="min-h-[40px] touch-manipulation">
-                        <Link href="/admin/partner-creators">Allowlist wallet</Link>
+                      <Button asChild size="sm" variant="outline" className="min-h-[40px] touch-manipulation">
+                        <Link href="/admin/partner-creators">Partner creators</Link>
                       </Button>
                     ) : null}
                   </div>

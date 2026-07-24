@@ -84,10 +84,19 @@ function matchPartnerLabelToLogo(label: string | null | undefined): PartnerLogo 
 
 /**
  * Logo to show in the Partner Spotlight strip (not the raffle prize/NFT image).
- * Uses wallet overrides, then admin `display_label` (brand name), then profile display name — patterns
- * often match the table label even when the wallet profile is a generic handle.
+ * Prefers stored `creator_partner_logo_url`, then wallet overrides, then admin `display_label`
+ * / profile display name regex matches.
  */
 export function getPartnerSpotlightLogo(raffle: Raffle): PartnerLogo | null {
+  const stored = raffle.creator_partner_logo_url?.trim()
+  if (stored) {
+    const label =
+      raffle.creator_partner_table_label?.trim() ||
+      raffle.creator_partner_display_name?.trim() ||
+      'Partner'
+    return { src: stored, alt: `${label} partner logo` }
+  }
+
   const wallet = (raffle.creator_wallet ?? '').trim()
   if (wallet && PARTNER_SPOTLIGHT_LOGO_BY_WALLET[wallet]) {
     return PARTNER_SPOTLIGHT_LOGO_BY_WALLET[wallet]
@@ -96,6 +105,32 @@ export function getPartnerSpotlightLogo(raffle: Raffle): PartnerLogo | null {
   const fromTable = matchPartnerLabelToLogo(raffle.creator_partner_table_label)
   if (fromTable) return fromTable
   return matchPartnerLabelToLogo(raffle.creator_partner_display_name)
+}
+
+/** Build a PartnerLogo from an allowlisted creator row with a logo_url. */
+export function partnerLogoFromCommunityRow(row: {
+  display_label: string | null
+  logo_url: string | null
+}): PartnerLogo | null {
+  const src = row.logo_url?.trim()
+  if (!src) return null
+  const label = row.display_label?.trim() || 'Partner'
+  return { src, alt: `${label} partner logo` }
+}
+
+/**
+ * Static brand strip plus dynamic logos from approved partner creators (deduped by src).
+ */
+export function mergePartnerSpotlightBrands(extra: PartnerLogo[]): PartnerLogo[] {
+  const seen = new Set(PARTNER_SPOTLIGHT_BRANDS.map((l) => l.src))
+  const out = [...PARTNER_SPOTLIGHT_BRANDS]
+  for (const logo of extra) {
+    const src = logo.src.trim()
+    if (!src || seen.has(src)) continue
+    seen.add(src)
+    out.push({ src, alt: logo.alt || 'Partner logo' })
+  }
+  return out
 }
 
 const PLACEHOLDER_SRC = '/partners/partner-slot-placeholder.svg'

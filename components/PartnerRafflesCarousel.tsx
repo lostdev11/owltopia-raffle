@@ -13,6 +13,7 @@ import {
 import { fetchEntriesByRaffleIdsClient } from '@/lib/raffles/fetch-entries-bulk-client'
 import {
   getPartnerSpotlightLogo,
+  mergePartnerSpotlightBrands,
   PARTNER_SPOTLIGHT_BRANDS,
   partnerSpotlightImageCandidates,
   type PartnerLogo,
@@ -105,10 +106,30 @@ export function PartnerRafflesCarousel({
   const spotlightDirRef = useRef(1)
   const spotlightRafRef = useRef(0)
   const [spotlightShouldMarquee, setSpotlightShouldMarquee] = useState(false)
+  const [spotlightBrands, setSpotlightBrands] = useState<PartnerLogo[]>(PARTNER_SPOTLIGHT_BRANDS)
 
   useEffect(() => {
     itemsRef.current = items
   }, [items])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/partners/spotlight-logos')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (cancelled || !json || !Array.isArray(json.logos)) return
+        const logos = (json.logos as PartnerLogo[]).filter(
+          (l) => l && typeof l.src === 'string' && l.src.trim()
+        )
+        if (logos.length > 0) setSpotlightBrands(logos)
+      })
+      .catch(() => {
+        /* keep static brands */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const itemsKey = useMemo(
     () =>
@@ -229,7 +250,17 @@ export function PartnerRafflesCarousel({
   const spotlightHrefPool = useMemo(() => dedupeSpotlightStripItems(displayItems), [displayItems])
 
   const spotlightMarqueeRows = useMemo(() => {
-    return PARTNER_SPOTLIGHT_BRANDS.map((logo) => {
+    const fromLiveRaffles = spotlightHrefPool
+      .map((item) => getPartnerSpotlightLogo(item.raffle))
+      .filter((l): l is PartnerLogo => l != null)
+    // API returns static + DB logos; also fold in any live-raffle stored logos.
+    const dynamicExtras = [
+      ...spotlightBrands.filter((l) => !PARTNER_SPOTLIGHT_BRANDS.some((b) => b.src === l.src)),
+      ...fromLiveRaffles,
+    ]
+    const strip = mergePartnerSpotlightBrands(dynamicExtras)
+
+    return strip.map((logo) => {
       const match = spotlightHrefPool.find((item) => {
         const resolved = getPartnerSpotlightLogo(item.raffle)
         return resolved?.src === logo.src
@@ -242,7 +273,7 @@ export function PartnerRafflesCarousel({
         : `${logo.alt} - Partner program`
       return { logo, href, title }
     })
-  }, [spotlightHrefPool])
+  }, [spotlightHrefPool, spotlightBrands])
 
   const spotlightStripKey = useMemo(
     () =>

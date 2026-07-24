@@ -19,12 +19,26 @@ type NextRevShareSchedule = {
   next_date: string | null
   total_sol: number | null
   total_usdc: number | null
+  gen1_total_sol: number | null
+  gen1_total_usdc: number | null
+  gen2_total_sol: number | null
+  gen2_total_usdc: number | null
+}
+
+function formatSol(amount: number | null | undefined): string {
+  if (amount == null || !Number.isFinite(amount)) return '—'
+  return amount.toFixed(4)
+}
+
+function formatUsdc(amount: number | null | undefined): string {
+  if (amount == null || !Number.isFinite(amount) || amount <= 0) return ''
+  return amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 /**
  * Entry page with entrance animation.
  * Warms the backend (GET /api/raffles) on mount so /raffles is more likely to load quickly.
- * Rev Share card shows founder-set "next rev share" date and total SOL/USDC (editable in admin).
+ * Gen1 / Gen2 Rev Share cards show founder-set next date and pool totals (editable in admin).
  */
 export function EnterOwlTopia() {
   const [schedule, setSchedule] = useState<NextRevShareSchedule | null>(null)
@@ -55,11 +69,20 @@ export function EnterOwlTopia() {
       fetch('/api/rev-share-schedule', { cache: 'no-store' })
         .then((res) => (res.ok ? res.json() : null))
         .then((data): NextRevShareSchedule | null =>
-          data && (data.next_date != null || data.total_sol != null || data.total_usdc != null)
+          data &&
+          (data.next_date != null ||
+            data.total_sol != null ||
+            data.total_usdc != null ||
+            data.gen1_total_sol != null ||
+            data.gen2_total_sol != null)
             ? {
                 next_date: data.next_date ?? null,
                 total_sol: data.total_sol != null ? Number(data.total_sol) : null,
                 total_usdc: data.total_usdc != null ? Number(data.total_usdc) : null,
+                gen1_total_sol: data.gen1_total_sol != null ? Number(data.gen1_total_sol) : null,
+                gen1_total_usdc: data.gen1_total_usdc != null ? Number(data.gen1_total_usdc) : null,
+                gen2_total_sol: data.gen2_total_sol != null ? Number(data.gen2_total_sol) : null,
+                gen2_total_usdc: data.gen2_total_usdc != null ? Number(data.gen2_total_usdc) : null,
               }
             : null
         )
@@ -70,6 +93,13 @@ export function EnterOwlTopia() {
     const interval = setInterval(fetchSchedule, ENTER_OWLTOPIA_REVSHARE_POLL_MS)
     return () => clearInterval(interval)
   }, [])
+
+  const gen1Sol = schedule?.gen1_total_sol ?? schedule?.total_sol ?? null
+  const gen1Usdc = schedule?.gen1_total_usdc ?? schedule?.total_usdc ?? null
+  const gen2Sol = schedule?.gen2_total_sol ?? null
+  const gen2Usdc = schedule?.gen2_total_usdc ?? null
+  const gen1UsdcLabel = formatUsdc(gen1Usdc)
+  const gen2UsdcLabel = formatUsdc(gen2Usdc)
 
   return (
     <div
@@ -117,13 +147,13 @@ export function EnterOwlTopia() {
         className="relative z-10 w-full flex flex-col items-center transition-transform duration-300 ease-out shrink-0 sm:min-h-screen"
         style={{ transform: `translateY(${scrollProgress * -8}px)` }}
       >
-        <div className="flex flex-col items-center gap-6 sm:gap-8 max-w-sm w-full py-6 sm:py-8">
+        <div className="flex flex-col items-center gap-6 sm:gap-8 max-w-sm w-full py-6 sm:py-8 sm:max-w-3xl">
         {/* In-flow brand: logo.gif is authored for the dark header — on the light home background the wordmark
             washes out, so we sit it on a dark panel (same read as the nav bar). */}
         <div className="w-full flex justify-center animate-enter-fade-in" style={fadeIn('0.05s')}>
           <Link
             href="/"
-            className="block w-full touch-manipulation min-h-[44px] flex items-center justify-center rounded-2xl border border-zinc-800/70 bg-zinc-950 px-3 py-2.5 sm:px-4 sm:py-3 shadow-lg shadow-black/25 ring-1 ring-white/10"
+            className="block w-full max-w-sm touch-manipulation min-h-[44px] flex items-center justify-center rounded-2xl border border-zinc-800/70 bg-zinc-950 px-3 py-2.5 sm:px-4 sm:py-3 shadow-lg shadow-black/25 ring-1 ring-white/10"
             aria-label="Owltopia home"
           >
             <Logo className="w-full max-w-full h-auto" width={600} height={150} />
@@ -133,42 +163,85 @@ export function EnterOwlTopia() {
           <AnnouncementsBlock placement="hero" variant="hero" />
         </div>
 
-        {/* Rev Share card — founder-set next rev share (date + total SOL/USDC) */}
+        {/* Gen1 / Gen2 Rev Share — founder-set next date + pool totals */}
         <div
-          className="rev-share-pool-card w-full max-w-[360px] rounded-xl p-4 sm:p-5 animate-enter-fade-in"
+          className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 animate-enter-fade-in"
           style={fadeIn('0.35s')}
         >
-          <div className="flex items-center gap-2 mb-2">
-            <Coins className="h-5 w-5 text-theme-prime drop-shadow-[0_0_6px_rgba(0,255,136,0.5)]" aria-hidden />
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-theme-prime drop-shadow-[0_0_8px_rgba(0,255,136,0.4)]">
-              Rev Share
-            </h2>
-          </div>
-          <p className="text-xs text-muted-foreground mb-3">
-            Site revenue comes from ticket fees (6% non-holder creators, 3% holder creators, 2% verified partner program creators). 50% of that site revenue goes to holders.
-          </p>
-          <div className="space-y-3">
-            <div>
-              <p className="text-xs text-muted-foreground mb-0.5">Next rev share</p>
-              <p className="pool-value-glow text-xl sm:text-2xl font-bold text-theme-prime tabular-nums">
-                {schedule?.next_date ?? '—'}
-              </p>
+          <section className="rev-share-pool-card rounded-xl p-4 sm:p-5" aria-labelledby="rev-share-gen1-heading">
+            <div className="mb-2 flex items-center gap-2">
+              <Coins className="h-5 w-5 text-theme-prime drop-shadow-[0_0_6px_rgba(0,255,136,0.5)]" aria-hidden />
+              <h2
+                id="rev-share-gen1-heading"
+                className="text-sm font-semibold uppercase tracking-wider text-theme-prime drop-shadow-[0_0_8px_rgba(0,255,136,0.4)]"
+              >
+                Gen1 Rev Share
+              </h2>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground mb-0.5">Total SOL to be shared</p>
-              <p className="pool-value-glow text-2xl sm:text-3xl font-bold text-theme-prime tabular-nums">
-                {schedule?.total_sol != null ? schedule.total_sol.toFixed(4) : '—'} <span className="text-xl sm:text-2xl">SOL</span>
-              </p>
-            </div>
-            {(schedule?.total_usdc != null && schedule.total_usdc > 0) && (
+            <p className="mb-3 text-xs text-muted-foreground">
+              Site revenue comes from ticket fees (6% non-holder creators, 3% holder creators, 2% verified partner
+              program creators) and 100% of secondary sales. 50% of that site revenue goes to holders.
+            </p>
+            <div className="space-y-3">
               <div>
-                <p className="text-xs text-muted-foreground mb-0.5">Total USDC to be shared</p>
-                <p className="pool-value-glow text-2xl sm:text-3xl font-bold text-theme-prime tabular-nums">
-                  {schedule.total_usdc.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-xl sm:text-2xl">USDC</span>
+                <p className="mb-0.5 text-xs text-muted-foreground">Next rev share</p>
+                <p className="pool-value-glow text-xl font-bold tabular-nums text-theme-prime sm:text-2xl">
+                  {schedule?.next_date ?? '—'}
                 </p>
               </div>
-            )}
-          </div>
+              <div>
+                <p className="mb-0.5 text-xs text-muted-foreground">Total SOL to be shared</p>
+                <p className="pool-value-glow text-2xl font-bold tabular-nums text-theme-prime sm:text-3xl">
+                  {formatSol(gen1Sol)} <span className="text-xl sm:text-2xl">SOL</span>
+                </p>
+              </div>
+              {gen1UsdcLabel ? (
+                <div>
+                  <p className="mb-0.5 text-xs text-muted-foreground">Total USDC to be shared</p>
+                  <p className="pool-value-glow text-2xl font-bold tabular-nums text-theme-prime sm:text-3xl">
+                    {gen1UsdcLabel} <span className="text-xl sm:text-2xl">USDC</span>
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="rev-share-pool-card rounded-xl p-4 sm:p-5" aria-labelledby="rev-share-gen2-heading">
+            <div className="mb-2 flex items-center gap-2">
+              <Coins className="h-5 w-5 text-theme-prime drop-shadow-[0_0_6px_rgba(0,255,136,0.5)]" aria-hidden />
+              <h2
+                id="rev-share-gen2-heading"
+                className="text-sm font-semibold uppercase tracking-wider text-theme-prime drop-shadow-[0_0_8px_rgba(0,255,136,0.4)]"
+              >
+                Gen2 Rev Share
+              </h2>
+            </div>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Rev share comes from 100% of secondary sales, 20% of launchpad revenue, and 20% of staking revenue.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <p className="mb-0.5 text-xs text-muted-foreground">Next rev share</p>
+                <p className="pool-value-glow text-xl font-bold tabular-nums text-theme-prime sm:text-2xl">
+                  {schedule?.next_date ?? '—'}
+                </p>
+              </div>
+              <div>
+                <p className="mb-0.5 text-xs text-muted-foreground">Total SOL to be shared</p>
+                <p className="pool-value-glow text-2xl font-bold tabular-nums text-theme-prime sm:text-3xl">
+                  {formatSol(gen2Sol)} <span className="text-xl sm:text-2xl">SOL</span>
+                </p>
+              </div>
+              {gen2UsdcLabel ? (
+                <div>
+                  <p className="mb-0.5 text-xs text-muted-foreground">Total USDC to be shared</p>
+                  <p className="pool-value-glow text-2xl font-bold tabular-nums text-theme-prime sm:text-3xl">
+                    {gen2UsdcLabel} <span className="text-xl sm:text-2xl">USDC</span>
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </section>
         </div>
 
         <p

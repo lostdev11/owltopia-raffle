@@ -56,6 +56,7 @@ export async function enrichRafflesWithCreatorHolder(
     creator_is_partner: boolean
     creator_partner_display_name: string | null
     creator_partner_table_label: string | null
+    creator_partner_logo_url: string | null
     description_urls_clickable: boolean
   })[]
 > {
@@ -71,6 +72,11 @@ export async function enrichRafflesWithCreatorHolder(
   const partnerWallets = new Set(partnerRows.map((r) => r.creator_wallet))
   const partnerTableLabelByWallet = new Map(
     partnerRows.map((r) => [r.creator_wallet, r.display_label] as const)
+  )
+  const partnerLogoByWallet = new Map(
+    partnerRows
+      .filter((r) => r.logo_url)
+      .map((r) => [r.creator_wallet, r.logo_url!] as const)
   )
   const partnerProfileNames =
     partnerRows.length > 0
@@ -114,12 +120,15 @@ export async function enrichRafflesWithCreatorHolder(
     }
     const creator_partner_table_label =
       isPartner && tableLabel?.trim() ? tableLabel.trim() : null
+    const creator_partner_logo_url =
+      isPartner && w && partnerLogoByWallet.get(w) ? partnerLogoByWallet.get(w)! : null
     return {
       ...r,
       creator_is_holder: holderByWallet.get(w) ?? false,
       creator_is_partner: isPartner,
       creator_partner_display_name,
       creator_partner_table_label,
+      creator_partner_logo_url,
       description_urls_clickable: w ? adminWallets.has(w) : false,
     }
   })

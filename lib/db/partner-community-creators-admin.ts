@@ -6,6 +6,8 @@ export type PartnerCommunityCreatorRow = {
   partner_tier: '$0_partner' | 'partner_pro' | 'white_label' | string
   sort_order: number
   is_active: boolean
+  /** Public HTTPS logo URL for Partner Spotlight (from approved applications or admin). */
+  logo_url: string | null
   /** When set, new raffles from this wallet use that partner tenant for Discord raffle webhooks. */
   discord_partner_tenant_id: string | null
   /**
@@ -35,7 +37,7 @@ export async function listPartnerCommunityCreatorsAdmin(): Promise<PartnerCommun
   const { data, error } = await sb
     .from('partner_community_creators')
     .select(
-      'creator_wallet, display_label, partner_tier, sort_order, is_active, discord_partner_tenant_id, partner_pro_monthly_quote_usdc, created_at, updated_at'
+      'creator_wallet, display_label, partner_tier, sort_order, is_active, logo_url, discord_partner_tenant_id, partner_pro_monthly_quote_usdc, created_at, updated_at'
     )
     .order('sort_order', { ascending: true })
     .order('creator_wallet', { ascending: true })
@@ -50,6 +52,7 @@ export async function insertPartnerCommunityCreator(input: {
   partner_tier?: '$0_partner' | 'partner_pro' | 'white_label'
   sort_order?: number
   is_active?: boolean
+  logo_url?: string | null
   discord_partner_tenant_id?: string | null
   partner_pro_monthly_quote_usdc?: number | null
 }): Promise<PartnerCommunityCreatorRow> {
@@ -60,6 +63,10 @@ export async function insertPartnerCommunityCreator(input: {
     partner_tier: input.partner_tier ?? '$0_partner',
     sort_order: input.sort_order ?? 0,
     is_active: input.is_active !== false,
+  }
+  if (input.logo_url !== undefined) {
+    const u = input.logo_url?.trim()
+    row.logo_url = u || null
   }
   if (input.discord_partner_tenant_id !== undefined) {
     const t = input.discord_partner_tenant_id?.trim()
@@ -74,6 +81,66 @@ export async function insertPartnerCommunityCreator(input: {
   return data as PartnerCommunityCreatorRow
 }
 
+/**
+ * Insert or update an allowlisted partner creator (idempotent approve path).
+ * Does not clear discord_partner_tenant_id / monthly quote.
+ * Only sets logo_url when the application provided one (keeps an existing admin logo otherwise).
+ */
+export async function upsertPartnerCommunityCreatorFromApplication(input: {
+  creator_wallet: string
+  display_label: string | null
+  partner_tier: '$0_partner' | 'partner_pro' | 'white_label'
+  logo_url?: string | null
+}): Promise<PartnerCommunityCreatorRow> {
+  const sb = getSupabaseAdmin()
+  const logo = input.logo_url?.trim() || null
+  const display_label = input.display_label?.trim() || null
+
+  const { data: existing, error: existingError } = await sb
+    .from('partner_community_creators')
+    .select(
+      'creator_wallet, display_label, partner_tier, sort_order, is_active, logo_url, discord_partner_tenant_id, partner_pro_monthly_quote_usdc, created_at, updated_at'
+    )
+    .eq('creator_wallet', input.creator_wallet)
+    .maybeSingle()
+
+  if (existingError) throw new Error(existingError.message)
+
+  if (existing) {
+    const patch: Record<string, unknown> = {
+      display_label,
+      partner_tier: input.partner_tier,
+      is_active: true,
+      updated_at: new Date().toISOString(),
+    }
+    if (logo) patch.logo_url = logo
+    const { data, error } = await sb
+      .from('partner_community_creators')
+      .update(patch)
+      .eq('creator_wallet', input.creator_wallet)
+      .select()
+      .single()
+    if (error) throw new Error(error.message)
+    return data as PartnerCommunityCreatorRow
+  }
+
+  const { data, error } = await sb
+    .from('partner_community_creators')
+    .insert({
+      creator_wallet: input.creator_wallet,
+      display_label,
+      partner_tier: input.partner_tier,
+      logo_url: logo,
+      is_active: true,
+      sort_order: 0,
+    })
+    .select()
+    .single()
+
+  if (error) throw new Error(error.message)
+  return data as PartnerCommunityCreatorRow
+}
+
 export async function updatePartnerCommunityCreator(
   creator_wallet: string,
   patch: {
@@ -81,6 +148,7 @@ export async function updatePartnerCommunityCreator(
     partner_tier?: '$0_partner' | 'partner_pro' | 'white_label'
     sort_order?: number
     is_active?: boolean
+    logo_url?: string | null
     discord_partner_tenant_id?: string | null
     partner_pro_monthly_quote_usdc?: number | null
   }
@@ -96,6 +164,12 @@ export async function updatePartnerCommunityCreator(
   if (patch.sort_order !== undefined) updates.sort_order = patch.sort_order
   if (patch.partner_tier !== undefined) updates.partner_tier = patch.partner_tier
   if (patch.is_active !== undefined) updates.is_active = patch.is_active
+  if (patch.logo_url !== undefined) {
+    updates.logo_url =
+      patch.logo_url === null || String(patch.logo_url).trim() === ''
+        ? null
+        : String(patch.logo_url).trim()
+  }
   if (patch.discord_partner_tenant_id !== undefined) {
     const t = patch.discord_partner_tenant_id?.trim()
     updates.discord_partner_tenant_id = t || null
