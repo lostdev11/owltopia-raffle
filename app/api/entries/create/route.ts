@@ -25,6 +25,7 @@ import {
   isReferralGrowthProgramActive,
 } from '@/lib/referrals/config'
 import { raffleSupportsReferralProgram } from '@/lib/referrals/program'
+import { raffleHasEnded, raffleHasStarted } from '@/lib/raffles/purchase-window'
 
 // Force dynamic rendering since we use request body
 export const dynamic = 'force-dynamic'
@@ -136,7 +137,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
 
-    if (new Date(raffle.end_time) <= new Date()) {
+    // Match raffle detail UI: block buys before scheduled start (cart / direct API bypass).
+    if (!raffleHasStarted(raffle) || raffleHasEnded(raffle)) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
 

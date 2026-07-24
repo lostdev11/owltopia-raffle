@@ -1,4 +1,5 @@
 import { BAMBOO_TICKET_CURRENCY } from '@/lib/raffles/bamboo-ticket-currency'
+import { raffleHasEnded, raffleHasStarted } from '@/lib/raffles/purchase-window'
 
 const EXCLUDED_TICKET_CURRENCIES = new Set(['OWL', BAMBOO_TICKET_CURRENCY])
 
@@ -21,13 +22,13 @@ export function raffleSupportsReferralProgram(raffle: {
 export function raffleEligibleForReferralFreeEntry(raffle: {
   currency?: string | null
   is_active?: boolean | null
+  start_time?: string
   end_time?: string
   purchases_blocked_at?: string | null
 }): boolean {
   if (!raffleSupportsReferralProgram(raffle)) return false
   if (raffle.is_active === false) return false
   if (raffle.purchases_blocked_at) return false
-  const endMs = raffle.end_time ? new Date(raffle.end_time).getTime() : NaN
-  if (!Number.isFinite(endMs) || endMs <= Date.now()) return false
+  if (!raffleHasStarted(raffle) || raffleHasEnded(raffle)) return false
   return true
 }
