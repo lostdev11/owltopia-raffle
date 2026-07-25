@@ -27,7 +27,7 @@
 
 - **Solana Mobile / Seeker**: `WalletProvider` registers `SolanaMobileWalletAdapter` on all mobile UAs. On Seeker, users should pick **Solana Mobile** in the wallet list when the built-in wallet does not appear; Phantom/Solflare are valid fallbacks (same wallet address).
 - **Nesting dashboard**: After returning from the wallet app, wait ~450ms before API calls; refresh positions after tab visibility with a short delay. Do not rely on relative `/api/...` URLs in wallet WebViews — use `nestingClientApiUrl()` from `lib/nesting/fetch-json.ts`.
-- **QA matrix**: Desktop Chrome; iOS Safari + Phantom in-app; Android Chrome + Phantom/Solflare; Seeker Chrome/Brave with Solana Mobile and with Phantom-only.
+- **QA matrix**: Desktop Chrome; iOS Safari + Phantom in-app; Android Chrome + Phantom/Solflare; Jupiter Mobile globe browser (no browse UL — open owltopia.xyz inside Jupiter); Seeker Chrome/Brave with Solana Mobile and with Phantom-only.
 
 ## Key files
 

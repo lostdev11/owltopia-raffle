@@ -162,7 +162,7 @@ export function isAndroidOrSolanaMobileClient(): boolean {
 
 /** Shown in connect UI — same guidance on iOS Safari and Android Chrome. */
 export function mobileWalletInAppBrowserHint(): string {
-  return 'For the smoothest experience, open this site in your wallet\'s browser. Everything stays in the app—no switching back and forth.'
+  return 'For the smoothest experience, open this site in your wallet\'s browser. Everything stays in the app—no switching back and forth. Jupiter: tap the globe icon in Jupiter Mobile, then open owltopia.xyz.'
 }
 
 /**
@@ -197,12 +197,33 @@ export function isBackpackBrowser(): boolean {
   return userAgent.toLowerCase().includes('backpack')
 }
 
-/** Phantom, Solflare, Backpack, or Solana Mobile in-app / Web Shell — wallet is injectable. */
+/**
+ * Detects if user is in Jupiter Mobile's dApp browser.
+ * Jupiter has no public browse Universal Link like Phantom/Solflare — users open the globe browser
+ * inside the app. UA often includes "jupiter"; some WebViews also inject an isJupiter provider flag.
+ */
+export function isJupiterBrowser(): boolean {
+  if (typeof window === 'undefined') return false
+
+  const userAgent = navigator.userAgent || ''
+  if (userAgent.toLowerCase().includes('jupiter')) return true
+
+  if (!isMobileDevice()) return false
+  const w = window as Window & {
+    jupiter?: { isJupiter?: boolean }
+    Jupiter?: { isJupiter?: boolean }
+    solana?: { isJupiter?: boolean }
+  }
+  return Boolean(w.jupiter?.isJupiter || w.Jupiter?.isJupiter || w.solana?.isJupiter)
+}
+
+/** Phantom, Solflare, Backpack, Jupiter, or Solana Mobile in-app / Web Shell — wallet is injectable. */
 export function isMobileWalletInjectedContext(): boolean {
   return (
     isPhantomBrowser() ||
     isSolflareBrowser() ||
     isBackpackBrowser() ||
+    isJupiterBrowser() ||
     isSolanaMobileEnvironment()
   )
 }

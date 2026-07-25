@@ -20,6 +20,7 @@ import {
   isSolflareBrowser,
   isPhantomBrowser,
   isBackpackBrowser,
+  isJupiterBrowser,
   isWalletBrowseRedirectPending,
   clearWalletBrowseRedirectPending,
   mobileWalletInAppBrowserHint,
@@ -82,6 +83,8 @@ export function WalletConnectButton() {
   const cancelButtonTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const connectAttemptedRef = useRef(false)
   const autoSelectedInWalletBrowserRef = useRef(false)
+  /** Open adapter modal only after the mobile chooser Dialog has fully closed (avoids invisible modal). */
+  const pendingOpenWalletModalRef = useRef(false)
 
   // Opening the wallet-adapter modal while a Radix Dialog is still closing leaves the page
   // unscrollable: the wallet modal captures `body`'s computed `overflow` on mount and restores
@@ -99,14 +102,35 @@ export function WalletConnectButton() {
       const stillLocked =
         body.hasAttribute('data-scroll-locked') ||
         window.getComputedStyle(body).overflow === 'hidden'
-      if (!stillLocked || Date.now() - start > 600) {
+      if (!stillLocked || Date.now() - start > 900) {
+        if (stillLocked) {
+          try {
+            body.removeAttribute('data-scroll-locked')
+            body.style.removeProperty('overflow')
+            body.style.removeProperty('padding-right')
+          } catch {
+            /* ignore */
+          }
+        }
         setVisible(true)
+        // Wallet adapter adds `.wallet-adapter-modal-fade-in` on open; if it missed a beat, nudge once.
+        window.setTimeout(() => {
+          const modal = document.querySelector('.wallet-adapter-modal')
+          if (modal && !modal.classList.contains('wallet-adapter-modal-fade-in')) {
+            setVisible(true)
+          }
+        }, 120)
         return
       }
       window.setTimeout(tryOpen, 50)
     }
     window.setTimeout(tryOpen, 50)
   }, [setVisible])
+
+  const requestOpenWalletModalAfterDialogClose = useCallback(() => {
+    pendingOpenWalletModalRef.current = true
+    setShowMobileInAppDialog(false)
+  }, [])
 
   const clearWalletSelectionStorage = useCallback(() => {
     try {
@@ -234,9 +258,10 @@ export function WalletConnectButton() {
     if (isSolflareBrowser()) targetName = 'Solflare'
     else if (isPhantomBrowser()) targetName = 'Phantom'
     else if (isBackpackBrowser()) targetName = 'Backpack'
+    else if (isJupiterBrowser()) targetName = 'Jupiter'
     if (!targetName) return
 
-    // Phantom/Backpack appear via Wallet Standard injection; effect re-runs as `wallets` populates.
+    // Phantom/Backpack/Jupiter appear via Wallet Standard injection; effect re-runs as `wallets` populates.
     const match = wallets.find(
       (w) => w.adapter.name.toLowerCase() === targetName!.toLowerCase()
     )
@@ -759,6 +784,13 @@ export function WalletConnectButton() {
       setVisible(true)
       return
     }
+    // Already inside Jupiter's dApp browser — skip the Phantom/Solflare chooser and open the list
+    // (Jupiter Standard Wallet should be injected; auto-select also runs).
+    if (isJupiterBrowser()) {
+      setShowMobileInAppDialog(false)
+      setVisible(true)
+      return
+    }
     if (isMobileWebBrowser()) {
       // Keep adapter modal closed while the in-app chooser is open (Safari dual-modal bug).
       setVisible(false)
@@ -889,7 +921,17 @@ export function WalletConnectButton() {
         onOpenChange={(open) => {
           setShowMobileInAppDialog(open)
           // Never let the adapter modal sit underneath this dialog.
-          if (open) setVisible(false)
+          if (open) {
+            setVisible(false)
+            pendingOpenWalletModalRef.current = false
+            return
+          }
+          // "Continue in this browser" — open the wallet list only after this dialog has closed,
+          // otherwise the adapter modal can mount behind Radix and look like a no-op.
+          if (pendingOpenWalletModalRef.current) {
+            pendingOpenWalletModalRef.current = false
+            openWalletModalAfterScrollUnlock()
+          }
         }}
       >
         <DialogContent className="sm:max-w-[500px]" style={{ zIndex: 10000 }}>
@@ -931,13 +973,17 @@ export function WalletConnectButton() {
             <Button
               variant="outline"
               onClick={() => {
-                setShowMobileInAppDialog(false)
-                openWalletModalAfterScrollUnlock()
+                requestOpenWalletModalAfterDialogClose()
               }}
-              className="w-full"
+              className="w-full min-h-[44px] touch-manipulation"
             >
               Continue in this browser
             </Button>
+            <p className="text-xs text-muted-foreground leading-relaxed px-0.5">
+              Using Jupiter? Open the <span className="font-medium text-foreground/90">globe</span> browser inside
+              Jupiter Mobile, go to owltopia.xyz, then Connect and choose Jupiter. There is no “Open in Jupiter”
+              deep link like Phantom/Solflare.
+            </p>
           </div>
         </DialogContent>
       </Dialog>
@@ -978,6 +1024,10 @@ export function WalletConnectButton() {
             >
               Open in Backpack
             </Button>
+            <p className="text-xs text-muted-foreground leading-relaxed px-0.5">
+              Using Jupiter? Open the globe browser inside Jupiter Mobile → owltopia.xyz, then Connect and choose
+              Jupiter.
+            </p>
           </div>
         </DialogContent>
       </Dialog>
