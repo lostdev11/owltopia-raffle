@@ -205,7 +205,7 @@ export function DashboardNestingClient() {
     hint?: string
     title?: string
     placement: 'modal'
-    tone?: 'success' | 'error'
+    tone?: 'success' | 'error' | 'info'
   } | null>(null)
   const [claimLedgerNotice, setClaimLedgerNotice] = useState<string | null>(null)
   const [claimLedgerHealBusy, setClaimLedgerHealBusy] = useState(false)
@@ -2241,6 +2241,31 @@ export function DashboardNestingClient() {
             return lockChunk(preps, platformFee)
           }
 
+          const notifyCloseSafeAfterWallet = async () => {
+            setStakeCloseSafe(true)
+            setStakeTxPhase('syncing')
+            setNftStakeBatchHint(
+              'Confirming on Owltopia — you can close this window while nesting finishes…'
+            )
+            setSuccessNotice({
+              placement: 'modal',
+              tone: 'info',
+              title: 'You can close this window',
+              message:
+                'Wallet approval received. Nesting will finish in the background — no more wallet prompts.',
+              hint: `If your ${nftAssetLabels.singular} still shows Opening… when you come back, pull to refresh and tap Finish opening.`,
+            })
+            // Paint the dialog before confirm starts — fast confirms were skipping the popup.
+            await new Promise<void>((resolve) => {
+              if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+              } else {
+                resolve()
+              }
+            })
+            await new Promise((r) => setTimeout(r, 400))
+          }
+
           const runNftBatchStake = async (assetIds: string[]) => {
             const totalNests = assetIds.length
             const prepared: PreparedNftNest[] = []
@@ -2310,8 +2335,14 @@ export function DashboardNestingClient() {
                 }
                 let platformFeeSig: string | null = null
                 if (platformFeeActive) {
+                  setStakeCloseSafe(false)
                   setStakeTxPhase('awaiting_wallet_signature')
                   platformFeeSig = await sendStakingPlatformFee(1)
+                }
+                // Last server-freeze nest and no wallet-lock nests remaining — fee (if any)
+                // is signed; confirm is background-only from here.
+                if (i === serverFreezePreps.length - 1 && freezePreps.length === 0) {
+                  await notifyCloseSafeAfterWallet()
                 }
                 await completeNftNestWithWalletSig(prep, null, platformFeeSig)
                 completed += 1
@@ -2364,12 +2395,16 @@ export function DashboardNestingClient() {
                 platformFee
               )
               const feeSig = platformFee && walletSig ? walletSig : null
+              const isLastWalletChunk = chunkIdx === assetIdChunks.length - 1
 
               if (!confirmedInFallback) {
-                setStakeTxPhase('syncing')
-                // Last chunk's wallet approval (lock + fee) is signed — from here on the
-                // holder can close the page; confirm keeps running server-side + heal.
-                if (chunkIdx === assetIdChunks.length - 1) setStakeCloseSafe(true)
+                // Last wallet approval (lock + fee) is signed — show the close-safe popup
+                // before confirm so holders actually see it after returning from the wallet app.
+                if (isLastWalletChunk) {
+                  await notifyCloseSafeAfterWallet()
+                } else {
+                  setStakeTxPhase('syncing')
+                }
                 for (const prep of chunkPreps) {
                   throwIfNestingAborted(signal)
                   try {
@@ -2383,6 +2418,10 @@ export function DashboardNestingClient() {
                     throw confirmErr
                   }
                 }
+              } else if (isLastWalletChunk) {
+                // Fallback path already confirmed nests during one-by-one lock — still flash
+                // close-safe briefly is wrong; success modal comes next from afterSuccess.
+                setStakeCloseSafe(true)
               }
               completed += chunkPreps.length
               await refreshNestingUiAfterChange({ heal: false })
