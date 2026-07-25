@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { Handshake, Shield, Sparkles } from 'lucide-react'
+import { HeartHandshake, Shield, Sparkles } from 'lucide-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import {
@@ -28,7 +28,7 @@ const MODES: Array<{
   {
     id: 'partner',
     label: 'Partner',
-    icon: Handshake,
+    icon: HeartHandshake,
     activeClass: 'bg-[#FFD769]/15 text-[#E8FDF4]',
   },
   {

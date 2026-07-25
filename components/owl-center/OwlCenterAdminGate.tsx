@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react'
 import Link from 'next/link'
-import { Handshake, Shield } from 'lucide-react'
+import { HeartHandshake, Shield } from 'lucide-react'
 
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
@@ -123,7 +123,7 @@ export function OwlCenterAdminGate({ children, title, subtitle, allowPartners = 
         <div className="flex flex-wrap gap-3">
           {allowPartners ? (
             <DeployButton className="gap-2" onClick={() => setViewMode('partner')}>
-              <Handshake className="h-4 w-4" aria-hidden />
+              <HeartHandshake className="h-4 w-4" aria-hidden />
               Partner preview
             </DeployButton>
           ) : null}

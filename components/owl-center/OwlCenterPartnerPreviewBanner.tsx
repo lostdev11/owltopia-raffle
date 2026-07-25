@@ -1,6 +1,6 @@
 'use client'
 
-import { Handshake, Shield, X } from 'lucide-react'
+import { HeartHandshake, Shield, X } from 'lucide-react'
 
 import { useOwlCenterView } from '@/components/owl-center/OwlCenterViewProvider'
 
@@ -17,7 +17,7 @@ export function OwlCenterPartnerPreviewBanner() {
     >
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2">
         <p className="inline-flex min-h-[44px] items-center gap-2 text-sm text-[#E8FDF4]">
-          <Handshake className="h-4 w-4 shrink-0 text-[#FFD769]" aria-hidden />
+          <HeartHandshake className="h-4 w-4 shrink-0 text-[#FFD769]" aria-hidden />
           <span>
             <span className="font-bold text-[#FFD769]">Partner preview</span>
             <span className="text-[#C5D0D8]"> — launch tools + plain copy. Switch to Admin for operator chrome.</span>
