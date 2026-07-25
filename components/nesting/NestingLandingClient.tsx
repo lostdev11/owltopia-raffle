@@ -343,6 +343,10 @@ export function NestingLandingClient({
               a: 'Opening a nest freezes each NFT in your wallet and confirms it on Owltopia. One or two owls often finish in about 30–60 seconds — keep the page open until you approve the wallet prompt; after that, nesting finishes in the background even if you close the page. On mobile, return to Owltopia after the wallet app closes.',
             },
             {
+              q: 'What am I approving when I nest?',
+              a: 'A lock on each selected owl so it stays in your wallet but cannot transfer for the nest period. Phantom often lists this as “Approve to transfer” plus a small SOL fee when fees are enabled — the NFT is not leaving your wallet. On My nest, expand “What you are approving” for a short walkthrough. If you are not on owltopia.xyz, cancel.',
+            },
+            {
               q: 'Why do you ask me to sign a message on the dashboard?',
               a: 'So we never mix up nests between wallets—it is just a quick hey-it-is-you check, same vibe as signing in elsewhere in Owltopia. Ledger users: unlock, open the Solana app, enable Blind signing, then approve the short Sign Message prompt (USB on desktop is usually smoother than Bluetooth).',
             },

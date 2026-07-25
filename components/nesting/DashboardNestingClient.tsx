@@ -91,6 +91,7 @@ import { NestingOwlCoinWalletProgressPanel } from '@/components/nesting/NestingO
 import { NestingGomtMigrationNotice } from '@/components/nesting/NestingGomtMigrationNotice'
 import { NestingPlatformFeeNotice } from '@/components/nesting/NestingPlatformFeeNotice'
 import { NestingSecurityNotice } from '@/components/nesting/NestingSecurityNotice'
+import { NestWalletNotice } from '@/components/nesting/NestWalletNotice'
 import { NestingEasyModeSteps } from '@/components/nesting/NestingEasyModeSteps'
 import { NestingClaimLedger } from '@/components/nesting/NestingClaimLedger'
 import { NestingClaimAllPanel } from '@/components/nesting/NestingClaimAllPanel'
@@ -4226,6 +4227,9 @@ export function DashboardNestingClient() {
                 {platformFeePerNestLabel ? ` · includes ${platformFeePerNestLabel} fee` : ''} · keep this page open
                 until you approve in your wallet — after that, nesting finishes in the background.
               </p>
+            ) : null}
+            {nftMintRequired && stakeTxPhase === 'idle' ? (
+              <NestWalletNotice className="rounded-xl" delegateAddress={nestingNftFreezeDelegate} />
             ) : null}
             <Button
               type="button"
