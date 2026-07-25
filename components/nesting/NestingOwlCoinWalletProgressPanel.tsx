@@ -6,7 +6,6 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import {
   NestingOwlCoinWalletProgress,
-  type NestingNotNestedAsset,
   type NestingWalletLockTierOption,
 } from '@/components/nesting/NestingOwlCoinWalletProgress'
 import {
@@ -206,11 +205,9 @@ export function NestingOwlCoinWalletProgressPanel({
     void loadWalletMints()
   }, [positionsLoaded, needsSignIn, poolId, mintScan.status, loadWalletMints])
 
-  const notNestedAssets = useMemo((): NestingNotNestedAsset[] => {
-    if (mintScan.status !== 'done' || !mintScan.configured) return []
-    return mintScan.mints
-      .filter((m) => m.nest_status === 'not_nested')
-      .map((m) => ({ mint: m.mint, name: m.name, image: m.image }))
+  const notNestedCount = useMemo(() => {
+    if (mintScan.status !== 'done' || !mintScan.configured) return 0
+    return mintScan.mints.filter((m) => m.nest_status === 'not_nested').length
   }, [mintScan.status, mintScan.configured, mintScan.mints])
 
   const stats = useMemo(() => {
@@ -256,7 +253,7 @@ export function NestingOwlCoinWalletProgressPanel({
       nestedCount={stats.nestedCount}
       totalCount={stats.totalCount}
       assetLabels={assetLabels}
-      notNestedAssets={notNestedAssets}
+      notNestedCount={notNestedCount}
       onNestThese={onNestThese}
       lockTiers={lockTiers}
       selectedLockTierSlug={selectedLockTierSlug}
