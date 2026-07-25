@@ -1,15 +1,13 @@
 import type { Metadata } from 'next'
 import {
   PLATFORM_NAME,
-  OG_ALT,
-  DEFAULT_OG_IMAGE_DIMS,
-  DEFAULT_OG_IMAGE_TYPE,
   getSiteBaseUrl,
-  getDefaultOgImageAbsoluteUrl,
 } from '@/lib/site-config'
 
 const SITE_URL = getSiteBaseUrl()
-const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
+const OG_IMAGE = `${SITE_URL}/leaderboard-og.png`
+const OG_IMAGE_DIMS = { width: 1024, height: 682 }
+const OG_ALT = 'Owltopia Leaderboard'
 
 export const metadata: Metadata = {
   title: `Leaderboard | ${PLATFORM_NAME}`,
@@ -21,13 +19,13 @@ export const metadata: Metadata = {
     siteName: PLATFORM_NAME,
     title: `Leaderboard | ${PLATFORM_NAME}`,
     description: 'Top 10 platform users by raffles entered, raffles created, and tickets sold.',
-    images: [{ url: OG_IMAGE, ...DEFAULT_OG_IMAGE_DIMS, alt: OG_ALT, type: DEFAULT_OG_IMAGE_TYPE }],
+    images: [{ url: OG_IMAGE, ...OG_IMAGE_DIMS, alt: OG_ALT, type: 'image/png' }],
   },
   twitter: {
     card: 'summary_large_image',
     title: `Leaderboard | ${PLATFORM_NAME}`,
     description: 'Top 10 platform users by raffles entered, raffles created, and tickets sold.',
-    images: [{ url: OG_IMAGE, alt: OG_ALT, ...DEFAULT_OG_IMAGE_DIMS }],
+    images: [{ url: OG_IMAGE, alt: OG_ALT, ...OG_IMAGE_DIMS }],
   },
 }
 
