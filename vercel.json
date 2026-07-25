@@ -28,14 +28,6 @@
       "schedule": "*/15 * * * *"
     },
     {
-      "path": "/api/cron/gen2-phase-advance",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/gen2-reprice-guard",
-      "schedule": "*/15 * * * *"
-    },
-    {
       "path": "/api/cron/gen2-treasury-split",
       "schedule": "*/5 * * * *"
     },

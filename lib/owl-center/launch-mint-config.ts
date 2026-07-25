@@ -37,6 +37,10 @@ export type MintDetailsFormValues = {
   royalty_percent: string
   royalty_splits: WalletSplitFormRow[]
   mint_fund_splits: WalletSplitFormRow[]
+  /** Default Core for new partner launches; `token_metadata` is legacy escape hatch. */
+  mint_standard: 'core' | 'token_metadata'
+  freeze_enabled: boolean
+  unfreeze_date: string
 }
 
 export type ParsedMintDetailsConfig = {
@@ -255,6 +259,9 @@ export function mintDetailsFormFromLaunch(launch: OwlCenterLaunchPublic): MintDe
     royalty_percent: String(basisPointsToPercent(launchSellerFeeBasisPoints(launch))),
     royalty_splits: splitForms.royalty_splits,
     mint_fund_splits: splitForms.mint_fund_splits,
+    mint_standard: launch.mint_standard === 'token_metadata' ? 'token_metadata' : 'core',
+    freeze_enabled: Boolean(launch.freeze_enabled),
+    unfreeze_date: launch.unfreeze_date ? isoToDatetimeLocalShort(launch.unfreeze_date) : '',
   }
 }
 
@@ -308,6 +315,9 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
     mint_fund_splits: 'error' in mintFundSplits ? values.mint_fund_splits : mintFundSplits,
     treasury_wallet:
       'error' in mintFundSplits ? undefined : primaryWalletFromSplits(mintFundSplits),
+    mint_standard: values.mint_standard,
+    freeze_enabled: values.freeze_enabled,
+    unfreeze_date: values.freeze_enabled ? values.unfreeze_date : '',
   }
 }
 
@@ -333,6 +343,9 @@ export function defaultMintDetailsFormValues(partial?: Partial<MintDetailsFormVa
     royalty_percent: '5',
     royalty_splits: defaultWalletSplitFormRows(creator),
     mint_fund_splits: defaultWalletSplitFormRows(treasury),
+    mint_standard: 'core',
+    freeze_enabled: false,
+    unfreeze_date: '',
     ...partial,
   }
 }

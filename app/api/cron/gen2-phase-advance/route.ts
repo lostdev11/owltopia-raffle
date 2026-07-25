@@ -6,20 +6,27 @@ import { flushPendingGen2MintDiscordFeed } from '@/lib/owl-center/gen2-mint-disc
 import { ensureGen2TeamBackstopAutoEnabled } from '@/lib/owl-center/gen2-backstop-ops'
 import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 import { reconcileGen2LaunchMintsFromChain } from '@/lib/owl-center/reconcile-gen2-wallet-mints'
+import { isGen2PublicMintRetired } from '@/lib/owl-center/mint-policy'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 /**
  * GET /api/cron/gen2-phase-advance
- * Vercel Cron: advances Owltopia Gen2 `active_phase` when the current phase is done
- * (sells out, or its window elapses — Gen1 25m, Presale 25m, +13 10m, WL 1h) AND the
- * next phase's open floor is reached (WL +1h/17:00 UTC, Public +2h/18:00 UTC).
- * Holds while the mint is paused/not operational. Secured by CRON_SECRET (Bearer token).
+ * Soft-retired while Gen2 mint is sold out (see isGen2PublicMintRetired).
+ * Route kept for manual/ops use if GEN2_PUBLIC_MINT_ENABLED=true.
  */
 export async function GET(request: NextRequest) {
   const cronAuth = authorizeCronBearer(request)
   if (cronAuth) return cronAuth
+
+  if (isGen2PublicMintRetired()) {
+    return NextResponse.json({
+      ok: true,
+      status: 'skipped',
+      reason: 'gen2_mint_retired',
+    })
+  }
 
   try {
     const result = await advanceGen2PhaseIfScheduled()

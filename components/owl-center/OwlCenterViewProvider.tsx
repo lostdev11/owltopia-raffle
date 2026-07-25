@@ -16,7 +16,9 @@ import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import {
   isOwlCenterAdminOnlyPath,
   OWL_CENTER_HOLDER_HOME,
+  OWL_CENTER_VIEW_MODE_EVENT,
   OWL_CENTER_VIEW_MODE_STORAGE_KEY,
+  parseOwlCenterViewMode,
   readStoredOwlCenterViewModeOrNull,
   writeStoredOwlCenterViewMode,
   type OwlCenterViewMode,
@@ -30,16 +32,23 @@ type OwlCenterViewContextValue = {
   isOwlCenterAdmin: boolean
   /** Connected wallet or SIWS session is an approved launchpad partner (non-admin). */
   isLaunchpadPartner: boolean
-  /** Public (default) vs admin launchpad tools. Non-admins are always public. */
+  /** Admin is previewing partner UX (launch tools + plain copy). */
+  isPartnerPreview: boolean
+  /** Effective view for admins; non-admins are always public. */
   viewMode: OwlCenterViewMode
-  /** Admin + admin view — show generator, submit, etc. */
+  /** Admin + admin view — operator chrome / jargon. */
   showAdminFeatures: boolean
-  /** Generator + launch submit visible — admins in admin view, or approved partners. */
+  /** Generator + launch submit visible — admin, partner preview, or approved partners. */
   showLaunchTools: boolean
   setViewMode: (mode: OwlCenterViewMode) => void
 }
 
 const OwlCenterViewContext = createContext<OwlCenterViewContextValue | null>(null)
+
+function normalizeAdminViewMode(mode: OwlCenterViewMode): OwlCenterViewMode {
+  if (mode === 'admin' || mode === 'partner' || mode === 'public') return mode
+  return 'public'
+}
 
 export function OwlCenterViewProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
@@ -66,11 +75,20 @@ export function OwlCenterViewProvider({ children }: { children: ReactNode }) {
     if (typeof window === 'undefined') return
     const onStorage = (event: StorageEvent) => {
       if (event.key !== OWL_CENTER_VIEW_MODE_STORAGE_KEY) return
-      const next = event.newValue === 'admin' ? 'admin' : event.newValue === 'public' ? 'public' : null
+      const next = parseOwlCenterViewMode(event.newValue)
+      if (next) setViewModeState(next)
+    }
+    const onLocal = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail
+      const next = parseOwlCenterViewMode(detail)
       if (next) setViewModeState(next)
     }
     window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
+    window.addEventListener(OWL_CENTER_VIEW_MODE_EVENT, onLocal)
+    return () => {
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener(OWL_CENTER_VIEW_MODE_EVENT, onLocal)
+    }
   }, [])
 
   useEffect(() => {
@@ -141,7 +159,7 @@ export function OwlCenterViewProvider({ children }: { children: ReactNode }) {
     adminSessionActive === null ||
     partnerAccess === null
 
-  // Verified admins default to admin view until they explicitly choose public preview.
+  // Verified admins default to admin view until they explicitly choose a preference.
   useEffect(() => {
     if (!hydrated || adminLoading || !isOwlCenterAdmin) return
     if (readStoredOwlCenterViewModeOrNull() !== null) return
@@ -149,15 +167,18 @@ export function OwlCenterViewProvider({ children }: { children: ReactNode }) {
     writeStoredOwlCenterViewMode('admin')
   }, [hydrated, adminLoading, isOwlCenterAdmin])
 
-  const effectiveViewMode: OwlCenterViewMode =
-    isOwlCenterAdmin && viewMode === 'admin' ? 'admin' : 'public'
+  const effectiveViewMode: OwlCenterViewMode = isOwlCenterAdmin
+    ? normalizeAdminViewMode(viewMode)
+    : 'public'
+  const isPartnerPreview = isOwlCenterAdmin && effectiveViewMode === 'partner'
   const showAdminFeatures = isOwlCenterAdmin && effectiveViewMode === 'admin'
-  const showLaunchTools = showAdminFeatures || isLaunchpadPartner
+  const showLaunchTools =
+    showAdminFeatures || isPartnerPreview || isLaunchpadPartner
 
   const setViewMode = useCallback(
     (mode: OwlCenterViewMode) => {
       if (!isOwlCenterAdmin) return
-      const next = mode === 'admin' ? 'admin' : 'public'
+      const next = normalizeAdminViewMode(mode)
       setViewModeState(next)
       writeStoredOwlCenterViewMode(next)
       if (next === 'public' && isOwlCenterAdminOnlyPath(pathname)) {
@@ -180,6 +201,7 @@ export function OwlCenterViewProvider({ children }: { children: ReactNode }) {
       adminLoading,
       isOwlCenterAdmin,
       isLaunchpadPartner,
+      isPartnerPreview,
       viewMode: effectiveViewMode,
       showAdminFeatures,
       showLaunchTools,
@@ -189,6 +211,7 @@ export function OwlCenterViewProvider({ children }: { children: ReactNode }) {
       adminLoading,
       isOwlCenterAdmin,
       isLaunchpadPartner,
+      isPartnerPreview,
       effectiveViewMode,
       showAdminFeatures,
       showLaunchTools,

@@ -187,6 +187,13 @@ export async function verifyGen2MintTransaction(params: {
    * actually minted so concurrent phases can't be cross-recorded. Null/undefined skips the check.
    */
   expectedGuardGroupLabel?: string | null
+  /**
+   * `core` = Metaplex Core Candy Machine mint (no SPL token balance). Pass planned asset addresses
+   * via `coreAssetAddresses` so we can confirm they appear in the tx.
+   */
+  mintStandard?: 'token_metadata' | 'core'
+  /** Core asset pubkeys the client planned to mint (must appear in tx account keys). */
+  coreAssetAddresses?: string[]
 }): Promise<VerifyGen2MintTxResult> {
   const net = params.network ?? 'mainnet'
   const rpcUrl = resolveOwlCenterMintVerifyRpcUrl(net)
@@ -228,11 +235,30 @@ export async function verifyGen2MintTransaction(params: {
   }
 
   // A bot-tax tx references the Candy Machine and "succeeds" (no meta.err) but mints no NFT — the
-  // candy guard charges the bot tax instead of failing. Require a real NFT to land on the wallet so
-  // these can never be recorded as mints (which would inflate supply with phantom owls).
+  // candy guard charges the bot tax instead of failing. Require a real NFT / Core asset to land.
   const minMinted = Math.max(1, Math.floor(params.minMintedNfts ?? 1))
   const walletNorm = normalizeSolanaWalletAddress(params.wallet) ?? params.wallet
-  if (countNftsMintedToWallet(parsed, walletNorm) < minMinted) {
+  if (params.mintStandard === 'core') {
+    const flat = collectParsedTransactionAccountKeys(parsed)
+    const assets = (params.coreAssetAddresses ?? [])
+      .map((a) => normalizeSolanaWalletAddress(a.trim()) ?? a.trim())
+      .filter(Boolean)
+    if (assets.length < minMinted) {
+      return { ok: false, reason: 'no_nft_minted' }
+    }
+    let matched = 0
+    for (const asset of assets) {
+      try {
+        const pk = new PublicKey(asset)
+        if (flat.some((k) => k.equals(pk))) matched++
+      } catch {
+        /* skip invalid */
+      }
+    }
+    if (matched < minMinted) {
+      return { ok: false, reason: 'no_nft_minted' }
+    }
+  } else if (countNftsMintedToWallet(parsed, walletNorm) < minMinted) {
     return { ok: false, reason: 'no_nft_minted' }
   }
 

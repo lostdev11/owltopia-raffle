@@ -33,6 +33,7 @@ import {
 } from '@/lib/owl-center/mint-time-budget'
 import { isMintInProgress, type MintProgressSnapshot, type MintUiStep } from '@/lib/owl-center/mint-ui-steps'
 import { preloadConfetti } from '@/lib/confetti'
+import { isGen2PublicMintRetired } from '@/lib/owl-center/mint-policy'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { Gen2MintCheckPhasePreview, OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 import { mintGen2FromCandyMachine, warmGen2MintPrep } from '@/lib/solana/gen2-mint'
@@ -350,7 +351,8 @@ export function Gen2MintPanel({
   }, [connected, adapter, elig?.is_eligible, elig?.active_phase, cmConfigured, launch])
 
   const trading = launch.active_phase === 'TRADING_ACTIVE'
-  const soldOut = launch.active_phase === 'SOLD_OUT' || remaining <= 0
+  const soldOut =
+    isGen2PublicMintRetired() || launch.active_phase === 'SOLD_OUT' || remaining <= 0
   const publicPoolSoldOut =
     launch.active_phase === 'PUBLIC' &&
     publicPoolRemaining != null &&

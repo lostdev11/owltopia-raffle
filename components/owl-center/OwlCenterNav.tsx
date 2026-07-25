@@ -24,7 +24,9 @@ export function OwlCenterNav() {
             {items.map((item) => {
               const active = isOwlCenterNavActive(pathname, item)
               const Icon = item.icon
-              const disabled = item.adminOnly && (adminLoading || (!isOwlCenterAdmin && !isLaunchpadPartner))
+              const disabled =
+                item.adminOnly &&
+                (adminLoading || (!isOwlCenterAdmin && !isLaunchpadPartner && !showLaunchTools))
 
               if (disabled) {
                 return (

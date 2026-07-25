@@ -9,6 +9,7 @@ import type { OwlCenterPhase } from '@/lib/owl-center/types'
 import { gen2GuardGroupLabel, type Gen2MintablePhase } from '@/lib/solana/gen2-guards'
 import { createGen2CosignerSigner, isGen2CosignerConfigured } from '@/lib/solana/gen2-cosigner'
 import { getLivePhases } from '@/lib/owl-center/phase-schedule'
+import { gen2MintRetiredResponseBody, isGen2PublicMintRetired } from '@/lib/owl-center/mint-policy'
 import { getGen2CandyMachineId, getSolanaRpcUrl, isDevnetMintEnabled } from '@/lib/solana/network'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
@@ -110,6 +111,9 @@ function verifyMintTx(
 }
 
 export async function POST(request: NextRequest) {
+  if (isGen2PublicMintRetired()) {
+    return NextResponse.json(gen2MintRetiredResponseBody(), { status: 410 })
+  }
   const ip = getClientIp(request)
   const rl = rateLimit(`owl-gen2-cosign:${ip}`, 30, 60_000)
   if (!rl.allowed) {

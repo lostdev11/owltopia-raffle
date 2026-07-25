@@ -33,7 +33,7 @@ import {
 } from '@/lib/owl-center/phase-schedule'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import type { MintTerminalLine, OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
-import { isOwlCenterMintEnvKillSwitchEnabled } from '@/lib/owl-center/mint-policy'
+import { isOwlCenterMintEnvKillSwitchEnabled, isGen2PublicMintRetired } from '@/lib/owl-center/mint-policy'
 import { isDevnetMintEnabled } from '@/lib/solana/network'
 
 type StatePayload = {
@@ -42,6 +42,8 @@ type StatePayload = {
   phaseBreakdown: PhaseSupplyRow[]
   terminal: MintTerminalLine[]
 }
+
+const GEN2_MINT_OPS_RETIRED = isGen2PublicMintRetired()
 
 export default function AdminOwlCenterPage() {
   const { connected } = useWallet()
@@ -342,12 +344,24 @@ export default function AdminOwlCenterPage() {
 
         <AdminOwlCenterViewModePanel />
 
+        {GEN2_MINT_OPS_RETIRED ? (
+          <CommandCard label="mint_ops.retired">
+            <p className="text-sm text-[#FFD769]">
+              Gen2 public mint is sold out — mint tools (backstop, phase schedule, cosign, gift credits, pause/resume)
+              are retired. Thaw, ledger, marketplaces, nesting, and milestones remain available.
+            </p>
+            <p className="mt-2 font-mono text-[10px] text-[#5C6773]">
+              Emergency re-open only: set <code className="text-[#00FF9C]">GEN2_PUBLIC_MINT_ENABLED=true</code>
+            </p>
+          </CommandCard>
+        ) : null}
+
         <div className="flex flex-wrap gap-3">
           <DeployButton type="button" onClick={() => void load()} disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Reload telemetry
           </DeployButton>
-          {state ? (
+          {state && !GEN2_MINT_OPS_RETIRED ? (
             <button
               type="button"
               onClick={() => void togglePauseMint()}
@@ -592,6 +606,13 @@ export default function AdminOwlCenterPage() {
                 </label>
               </div>
               <div className="mt-6 border-t border-[#1A222B] pt-6">
+                {GEN2_MINT_OPS_RETIRED ? (
+                  <p className="font-mono text-xs text-[#5C6773]">
+                    Mint schedule / concurrent live phases editor retired (Gen2 sold out). Active phase and status
+                    fields above remain for ops corrections.
+                  </p>
+                ) : (
+                  <>
                 <p className="mb-4 font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
                   Mint schedule
                 </p>
@@ -678,6 +699,8 @@ export default function AdminOwlCenterPage() {
                     </p>
                   ) : null}
                 </div>
+                  </>
+                )}
               </div>
               <DeployButton type="button" className="mt-6" onClick={() => void savePatch()} disabled={!connected}>
                 Save Gen2 launch
@@ -699,9 +722,11 @@ export default function AdminOwlCenterPage() {
             </CommandCard>
 
             <AdminGen2FreezeThawPanel onChanged={() => void load()} />
-            <AdminGen2BackstopMintPanel launch={state.launch} onChanged={() => void load()} />
+            {!GEN2_MINT_OPS_RETIRED ? (
+              <AdminGen2BackstopMintPanel launch={state.launch} onChanged={() => void load()} />
+            ) : null}
 
-            {isDevnetMintEnabled() ? (
+            {!GEN2_MINT_OPS_RETIRED && isDevnetMintEnabled() ? (
             <CommandCard label="gen2_devnet_test.sys">
               <p className="mb-4 text-sm text-[#9BA8B4]">
                 Isolated devnet CM proof — uses{' '}
@@ -822,37 +847,41 @@ export default function AdminOwlCenterPage() {
             </CommandCard>
             ) : null}
 
-            {isDevnetMintEnabled() ? <Gen2DevnetMintChecklist launch={state.launch} /> : null}
+            {!GEN2_MINT_OPS_RETIRED && isDevnetMintEnabled() ? (
+              <Gen2DevnetMintChecklist launch={state.launch} />
+            ) : null}
 
-            <CommandCard label="gift_presale.sys">
-              <p className="mb-3 text-xs text-[#9BA8B4]">Uses audited gift RPC (actor wallet recorded).</p>
-              <div className="flex flex-wrap gap-3">
-                <input
-                  placeholder="Recipient wallet"
-                  value={giftWallet}
-                  onChange={(e) => setGiftWallet(e.target.value)}
-                  className="min-w-[200px] flex-1 border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm"
-                />
-                <input
-                  type="number"
-                  min={1}
-                  max={500}
-                  value={giftQty}
-                  onChange={(e) => setGiftQty(Number(e.target.value))}
-                  className="w-24 border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm"
-                />
-                <DeployButton type="button" onClick={() => void giftPresale()} disabled={!connected}>
-                  Gift credits
-                </DeployButton>
-              </div>
-              {giftMsg ? (
-                <p
-                  className={`mt-2 font-mono text-xs ${giftMsg === 'Gift applied' ? 'text-[#00FF9C]' : 'text-[#FF9C9C]'}`}
-                >
-                  {giftMsg}
-                </p>
-              ) : null}
-            </CommandCard>
+            {!GEN2_MINT_OPS_RETIRED ? (
+              <CommandCard label="gift_presale.sys">
+                <p className="mb-3 text-xs text-[#9BA8B4]">Uses audited gift RPC (actor wallet recorded).</p>
+                <div className="flex flex-wrap gap-3">
+                  <input
+                    placeholder="Recipient wallet"
+                    value={giftWallet}
+                    onChange={(e) => setGiftWallet(e.target.value)}
+                    className="min-w-[200px] flex-1 border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm"
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={giftQty}
+                    onChange={(e) => setGiftQty(Number(e.target.value))}
+                    className="w-24 border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm"
+                  />
+                  <DeployButton type="button" onClick={() => void giftPresale()} disabled={!connected}>
+                    Gift credits
+                  </DeployButton>
+                </div>
+                {giftMsg ? (
+                  <p
+                    className={`mt-2 font-mono text-xs ${giftMsg === 'Gift applied' ? 'text-[#00FF9C]' : 'text-[#FF9C9C]'}`}
+                  >
+                    {giftMsg}
+                  </p>
+                ) : null}
+              </CommandCard>
+            ) : null}
 
             <CommandCard label="mint_events.sys">
               <ActivityLog lines={state.terminal} />

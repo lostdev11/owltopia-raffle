@@ -10,6 +10,7 @@ import {
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import { parseStandardFreezeConfig } from '@/lib/owl-center/freeze-config'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,6 +64,9 @@ export async function POST(request: NextRequest) {
     body.mint_network === 'devnet' || body.mint_network === 'mainnet' ? body.mint_network : 'mainnet'
 
   const walletLimit = Number(body.wallet_mint_limit)
+  const standardFreeze = parseStandardFreezeConfig(body)
+  if ('error' in standardFreeze) return jsonError(standardFreeze.error, 400)
+
   const launch = await insertOwlCenterLaunchAdmin({
     slug,
     name,
@@ -79,6 +83,10 @@ export async function POST(request: NextRequest) {
     public_price_usdc: body.public_price_usdc != null ? Number(body.public_price_usdc) : null,
     mint_mode: 'public_simple',
     mint_network: mintNetwork,
+    mint_standard: standardFreeze.mint_standard,
+    freeze_enabled: standardFreeze.freeze_enabled,
+    unfreeze_date: standardFreeze.unfreeze_date,
+    freeze_status: standardFreeze.freeze_enabled ? 'pending' : 'disabled',
     active_phase: 'PUBLIC',
     status: 'PUBLIC',
     candy_machine_id: typeof body.candy_machine_id === 'string' ? body.candy_machine_id.trim() : null,

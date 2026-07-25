@@ -8,7 +8,9 @@ export type ParsedStandardFreeze = {
 }
 
 export function parseMintStandard(raw: unknown): OwlCenterMintStandard {
-  return raw === 'core' ? 'core' : 'token_metadata'
+  // Explicit legacy escape hatch; default new launches to Metaplex Core.
+  if (raw === 'token_metadata') return 'token_metadata'
+  return 'core'
 }
 
 function parseUnfreezeDate(raw: unknown): string | null {

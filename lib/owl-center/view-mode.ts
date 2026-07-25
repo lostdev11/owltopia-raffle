@@ -1,6 +1,9 @@
-export type OwlCenterViewMode = 'public' | 'admin'
+export type OwlCenterViewMode = 'public' | 'partner' | 'admin'
 
 export const OWL_CENTER_VIEW_MODE_STORAGE_KEY = 'owl-center-view-mode'
+
+/** Same-tab sync when admin toggles view mode outside Owl Center chrome. */
+export const OWL_CENTER_VIEW_MODE_EVENT = 'owl-center-view-mode'
 
 /** Default Owl Center landing for visitors and non-admin redirects. */
 export const OWL_CENTER_HOLDER_HOME = '/owl-center'
@@ -16,6 +19,11 @@ export function isOwlCenterAdminOnlyPath(pathname: string): boolean {
   )
 }
 
+export function parseOwlCenterViewMode(raw: string | null | undefined): OwlCenterViewMode | null {
+  if (raw === 'admin' || raw === 'public' || raw === 'partner') return raw
+  return null
+}
+
 export function readStoredOwlCenterViewMode(): OwlCenterViewMode {
   return readStoredOwlCenterViewModeOrNull() ?? 'public'
 }
@@ -24,9 +32,7 @@ export function readStoredOwlCenterViewMode(): OwlCenterViewMode {
 export function readStoredOwlCenterViewModeOrNull(): OwlCenterViewMode | null {
   if (typeof window === 'undefined') return null
   try {
-    const stored = localStorage.getItem(OWL_CENTER_VIEW_MODE_STORAGE_KEY)
-    if (stored === 'admin' || stored === 'public') return stored
-    return null
+    return parseOwlCenterViewMode(localStorage.getItem(OWL_CENTER_VIEW_MODE_STORAGE_KEY))
   } catch {
     return null
   }
@@ -38,5 +44,10 @@ export function writeStoredOwlCenterViewMode(mode: OwlCenterViewMode): void {
     localStorage.setItem(OWL_CENTER_VIEW_MODE_STORAGE_KEY, mode)
   } catch {
     /* ignore quota / private mode */
+  }
+  try {
+    window.dispatchEvent(new CustomEvent(OWL_CENTER_VIEW_MODE_EVENT, { detail: mode }))
+  } catch {
+    /* ignore */
   }
 }

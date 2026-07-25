@@ -130,6 +130,10 @@ export async function repriceGen2GuardIfDrifted(): Promise<Gen2GuardRepriceResul
   if (process.env.GEN2_GUARD_REPRICE_ENABLED === 'false') {
     return { ok: true, status: 'skipped', reason: 'reprice disabled (GEN2_GUARD_REPRICE_ENABLED=false)' }
   }
+  // Soft-retire when Gen2 mint tools are off (sold out).
+  if (process.env.GEN2_PUBLIC_MINT_ENABLED !== 'true' && process.env.GEN2_PUBLIC_MINT_ENABLED !== '1') {
+    return { ok: true, status: 'skipped', reason: 'gen2_mint_retired' }
+  }
 
   const launch = await loadGen2RepriceLaunch()
   if (!launch) return { ok: true, status: 'skipped', reason: 'gen2 launch not found' }

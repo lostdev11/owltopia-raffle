@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { requireGen2PresaleAdminSession } from '@/lib/gen2-presale/admin-auth'
 import { advanceGen2PhaseIfScheduled } from '@/lib/owl-center/gen2-phase-advance'
+import { gen2MintRetiredResponseBody, isGen2PublicMintRetired } from '@/lib/owl-center/mint-policy'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
 /** POST — manually run Gen2 scheduled phase advance (same logic as cron). */
 export async function POST(request: NextRequest) {
+  if (isGen2PublicMintRetired()) {
+    return NextResponse.json(gen2MintRetiredResponseBody(), { status: 410 })
+  }
   const session = await requireGen2PresaleAdminSession(request)
   if (session instanceof NextResponse) return session
 

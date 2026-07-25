@@ -108,7 +108,7 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
     devnet_candy_machine_id:
       data.devnet_candy_machine_id != null ? String(data.devnet_candy_machine_id) : null,
     devnet_collection_mint: data.devnet_collection_mint != null ? String(data.devnet_collection_mint) : null,
-    mint_standard: String(data.mint_standard ?? 'token_metadata'),
+    mint_standard: String(data.mint_standard ?? 'core'),
     total_supply: Number(data.total_supply ?? 0),
     minted_count: Number(data.minted_count ?? 0),
     active_phase: String(data.active_phase) as OwlCenterPhase,
@@ -329,6 +329,11 @@ export async function updateOwlCenterLaunchByIdAdmin(
     reveal_payment_tx_signature: string | null
     placeholder_metadata_uri: string | null
     reveal_progress: OwlCenterRevealProgress
+    freeze_status: OwlCenterFreezeStatus
+    freeze_thawed_at: string | null
+    freeze_progress: OwlCenterFreezeProgress
+    freeze_enabled: boolean
+    unfreeze_date: string | null
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()
@@ -366,6 +371,10 @@ export type InsertOwlCenterLaunchInput = {
   devnet_candy_machine_id?: string | null
   devnet_collection_mint?: string | null
   is_featured?: boolean
+  mint_standard?: 'token_metadata' | 'core'
+  freeze_enabled?: boolean
+  unfreeze_date?: string | null
+  freeze_status?: OwlCenterFreezeStatus
 }
 
 /** Admin create — inserts launch row for public_simple demo/partner collections. */
@@ -391,6 +400,10 @@ export async function insertOwlCenterLaunchAdmin(input: InsertOwlCenterLaunchInp
       public_price_usdc: input.public_price_usdc ?? null,
       mint_mode: input.mint_mode ?? 'public_simple',
       mint_network: input.mint_network ?? null,
+      mint_standard: input.mint_standard ?? 'core',
+      freeze_enabled: input.freeze_enabled ?? false,
+      unfreeze_date: input.unfreeze_date ?? null,
+      freeze_status: input.freeze_status ?? (input.freeze_enabled ? 'pending' : 'disabled'),
       active_phase: input.active_phase ?? 'PUBLIC',
       status: input.status ?? 'PUBLIC',
       candy_machine_id: input.candy_machine_id ?? null,

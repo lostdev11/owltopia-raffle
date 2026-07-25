@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { buildGen2Eligibility } from '@/lib/owl-center/gen2-eligibility'
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
+import { gen2MintRetiredResponseBody, isGen2PublicMintRetired } from '@/lib/owl-center/mint-policy'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -22,6 +23,9 @@ function walletFromRequest(request: NextRequest): string | null {
 }
 
 export async function GET(request: NextRequest) {
+  if (isGen2PublicMintRetired()) {
+    return NextResponse.json(gen2MintRetiredResponseBody(), { status: 410 })
+  }
   const ip = getClientIp(request)
   const rl = rateLimit(`owl-gen2-elig:${ip}`, 90, 60_000)
   if (!rl.allowed) {
@@ -38,6 +42,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  if (isGen2PublicMintRetired()) {
+    return NextResponse.json(gen2MintRetiredResponseBody(), { status: 410 })
+  }
   const ip = getClientIp(request)
   const rl = rateLimit(`owl-gen2-elig:${ip}`, 90, 60_000)
   if (!rl.allowed) {

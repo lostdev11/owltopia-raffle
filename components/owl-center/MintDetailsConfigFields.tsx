@@ -46,6 +46,60 @@ export function MintDetailsConfigFields({
 
   return (
     <div className="grid gap-4">
+      <div className="grid gap-3 border border-[#1A222B] bg-[#0F1419]/60 p-4">
+        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
+          On-chain standard
+        </p>
+        <p className="text-xs leading-relaxed text-[#9BA8B4]">
+          New launches mint as Metaplex Core assets (lighter wallets, Freeze Collection support). Legacy Token
+          Metadata is only for special cases.
+        </p>
+        <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+          Mint standard
+          <select
+            value={values.mint_standard}
+            onChange={(e) => {
+              const next = e.target.value === 'token_metadata' ? 'token_metadata' : 'core'
+              onChange({
+                ...values,
+                mint_standard: next,
+                freeze_enabled: next === 'core' ? values.freeze_enabled : false,
+              })
+            }}
+            className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+          >
+            <option value="core">Metaplex Core (recommended)</option>
+            <option value="token_metadata">Token Metadata (legacy)</option>
+          </select>
+        </label>
+        <label className="flex items-start gap-3 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+          <input
+            type="checkbox"
+            checked={values.freeze_enabled}
+            disabled={values.mint_standard !== 'core'}
+            onChange={(e) => set('freeze_enabled', e.target.checked)}
+            className="mt-1 h-4 w-4 shrink-0 touch-manipulation accent-[#00FF9C] disabled:opacity-50"
+          />
+          <span>
+            Freeze Collection
+            <span className="mt-1 block normal-case tracking-normal text-[#9BA8B4]">
+              Locks transfers until you thaw (Core PermanentFreezeDelegate). Requires Metaplex Core.
+            </span>
+          </span>
+        </label>
+        {values.freeze_enabled ? (
+          <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+            Planned unfreeze (optional)
+            <input
+              type="datetime-local"
+              value={values.unfreeze_date}
+              onChange={(e) => set('unfreeze_date', e.target.value)}
+              className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+            />
+          </label>
+        ) : null}
+      </div>
+
       {!compact ? (
         <p className="font-mono text-xs leading-relaxed text-[#9BA8B4]">
           These fields populate the <span className="text-[#E8EEF2]">Mint details</span> block on your collection card

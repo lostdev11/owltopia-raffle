@@ -14,6 +14,7 @@ import { creatorMetadataRefreshApiPath } from '@/lib/owl-center/creator-api-path
 import { friendlyLaunchStatus } from '@/lib/owl-center/launch-status-display'
 import { isLaunchMarketplaceListingUnlocked } from '@/lib/owl-center/launch-marketplace-eligibility'
 import { useSiwsSession } from '@/hooks/use-siws-session'
+import { useOwlCenterView } from '@/components/owl-center/OwlCenterViewProvider'
 
 type LaunchRow = {
   id: string
@@ -33,26 +34,34 @@ type LaunchRow = {
 export function CreatorLaunchesClient() {
   const { connected } = useWallet()
   const { signedIn, checking, checkSession } = useSiwsSession()
+  const { isPartnerPreview } = useOwlCenterView()
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [isPartner, setIsPartner] = useState(false)
+  const [previewPartner, setPreviewPartner] = useState(false)
   const [launches, setLaunches] = useState<LaunchRow[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
     setErr(null)
     try {
-      const res = await fetch('/api/owl-center/my-launches', { credentials: 'include', cache: 'no-store' })
+      const qs = isPartnerPreview ? '?scope=creator' : ''
+      const res = await fetch(`/api/owl-center/my-launches${qs}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      })
       const j = (await res.json()) as {
         error?: string
         launches?: LaunchRow[]
         isAdmin?: boolean
         isPartner?: boolean
+        previewPartner?: boolean
       }
       if (!res.ok) throw new Error(j.error || 'load_failed')
       setIsAdmin(Boolean(j.isAdmin))
       setIsPartner(Boolean(j.isPartner))
+      setPreviewPartner(Boolean(j.previewPartner))
       setLaunches(j.launches ?? [])
     } catch (e) {
       setLaunches([])
@@ -60,7 +69,7 @@ export function CreatorLaunchesClient() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [isPartnerPreview])
 
   useEffect(() => {
     if (signedIn) void load()
@@ -68,9 +77,13 @@ export function CreatorLaunchesClient() {
 
   return (
     <OwlCenterShell
-      eyebrow="OWL_CENTER // CREATOR"
+      eyebrow={previewPartner || isPartnerPreview ? 'OWL_CENTER // PARTNER PREVIEW' : 'OWL_CENTER // CREATOR'}
       title="My launches"
-      subtitle="Edit mint details and metadata while your drop is live. Magic Eden / Tensor listing unlocks automatically after sell-out."
+      subtitle={
+        previewPartner || isPartnerPreview
+          ? 'Partner preview — only launches owned by your connected wallet (same as approved partners).'
+          : 'Edit mint details and metadata while your drop is live. Magic Eden / Tensor listing unlocks automatically after sell-out.'
+      }
     >
       {!connected ? (
         <p className="font-mono text-sm text-[#9BA8B4]">
@@ -90,7 +103,7 @@ export function CreatorLaunchesClient() {
         />
       ) : (
         <div className="grid max-w-2xl gap-6">
-          {isAdmin ? (
+          {isAdmin && !previewPartner && !isPartnerPreview ? (
             <p className="font-mono text-xs text-[#5C6773]">
               Admin view — showing all creator launches (not only rows where you are{' '}
               <span className="text-[#9BA8B4]">creator_wallet</span>).
@@ -104,7 +117,7 @@ export function CreatorLaunchesClient() {
                 No collections found for this wallet. If you submitted under a different address, sign in with that
                 wallet instead.
               </p>
-              {isPartner ? (
+              {isPartner || previewPartner || isPartnerPreview ? (
                 <Link
                   href="/owl-center/launch"
                   className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#00FF9C]/40 bg-[#00FF9C]/10 px-5 text-sm font-bold uppercase tracking-wide text-[#E8FDF4] hover:bg-[#00FF9C]/18"
@@ -124,16 +137,17 @@ export function CreatorLaunchesClient() {
           {launches.map((l) => {
             const listingUnlocked = isLaunchMarketplaceListingUnlocked(l)
             const friendly = friendlyLaunchStatus(l.status, l.active_phase)
+            const adminLabels = isAdmin && !previewPartner && !isPartnerPreview
             return (
-            <CommandCard key={l.id} label={isAdmin ? `${l.status} · ${l.active_phase}` : friendly.label}>
+            <CommandCard key={l.id} label={adminLabels ? `${l.status} · ${l.active_phase}` : friendly.label}>
               <div className="flex flex-col gap-4">
                 <div>
                   <p className="font-display text-xl text-[#F4FBF8]">{l.name}</p>
                   <p className="mt-1 font-mono text-xs leading-relaxed text-[#5C6773]">
                     {l.symbol ?? '—'} · {l.minted_count}/{l.total_supply} minted · {l.wallet_mint_limit}/wallet/phase
-                    {isAdmin ? <> · slug {l.slug.slice(0, 12)}…</> : null}
+                    {adminLabels ? <> · slug {l.slug.slice(0, 12)}…</> : null}
                   </p>
-                  {!isAdmin && friendly.hint ? (
+                  {!adminLabels && friendly.hint ? (
                     <p className="mt-2 text-xs leading-relaxed text-[#9BA8B4]">{friendly.hint}</p>
                   ) : null}
                 </div>

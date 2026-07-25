@@ -53,10 +53,11 @@ function randomUploadProjectId(): string {
 export function LaunchSubmissionWizard() {
   const searchParams = useSearchParams()
   const fromGenerator = searchParams.get('from') === 'generator'
-  const { isLaunchpadPartner, showAdminFeatures } = useOwlCenterView()
+  const { isLaunchpadPartner, isPartnerPreview, showAdminFeatures } = useOwlCenterView()
   const { sessionWallet } = useSiwsSession()
-  // Partners get plain-language copy; admins keep the operator view.
+  // Partners + admin partner preview get plain-language copy; Admin view keeps operator chrome.
   const plainMode = !showAdminFeatures
+  const treatAsPartnerWallet = isLaunchpadPartner || isPartnerPreview
 
   const [generatorPrefill, setGeneratorPrefill] = useState(false)
   const [generatorProjectId, setGeneratorProjectId] = useState<string | null>(null)
@@ -77,13 +78,13 @@ export function LaunchSubmissionWizard() {
 
   const stagedPrefill = useStagedAssetsPrefill(generatorProjectId, assets, setAssets)
 
-  // Partners always submit with their signed-in wallet.
+  // Partners / partner preview always submit with their signed-in wallet.
   useEffect(() => {
     if (!sessionWallet) return
-    if (isLaunchpadPartner || !creatorWallet.trim()) {
+    if (treatAsPartnerWallet || !creatorWallet.trim()) {
       setCreatorWallet(sessionWallet)
     }
-  }, [sessionWallet, isLaunchpadPartner]) // eslint-disable-line react-hooks/exhaustive-deps -- prefill only when session appears
+  }, [sessionWallet, treatAsPartnerWallet]) // eslint-disable-line react-hooks/exhaustive-deps -- prefill only when session appears
 
   useEffect(() => {
     if (!fromGenerator) {
@@ -330,14 +331,14 @@ export function LaunchSubmissionWizard() {
                   value={creatorWallet}
                   onChange={(e) => setCreatorWallet(e.target.value)}
                   required
-                  readOnly={isLaunchpadPartner && !!sessionWallet}
+                  readOnly={treatAsPartnerWallet && !!sessionWallet}
                   className={`border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm text-[#F4FBF8] ${
-                    isLaunchpadPartner && sessionWallet ? 'opacity-70' : ''
+                    treatAsPartnerWallet && sessionWallet ? 'opacity-70' : ''
                   }`}
                 />
               </label>
               <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
-                {isLaunchpadPartner && sessionWallet
+                {treatAsPartnerWallet && sessionWallet
                   ? 'This is the wallet you signed in with — your collection is tied to it.'
                   : 'Royalty and mint fund splits are configured in the next step. Default is 100% to this wallet.'}
               </p>
@@ -429,6 +430,11 @@ export function LaunchSubmissionWizard() {
               <li>
                 <span className="text-[#5C6773]">Mint funds split</span>{' '}
                 {formatWalletSplitsSummary(walletSplitPayloadFromForm(mintDetails.mint_fund_splits) ?? null)}
+              </li>
+              <li>
+                <span className="text-[#5C6773]">On-chain</span>{' '}
+                {mintDetails.mint_standard === 'core' ? 'Metaplex Core' : 'Token Metadata (legacy)'}
+                {mintDetails.freeze_enabled ? ' · Freeze Collection on' : ''}
               </li>
               <li>
                 <span className="text-[#5C6773]">Creator</span> {creatorWallet || '—'}

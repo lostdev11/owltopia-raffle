@@ -89,6 +89,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     requirePlatformMintFee: shouldRequireOwlCenterPlatformMintFeeServer(),
     mintQuantity: qty,
     minMintedNfts: qty,
+    mintStandard: launch.mint_standard === 'core' ? 'core' : 'token_metadata',
+    coreAssetAddresses: Array.isArray(body.mintedNftMints) ? body.mintedNftMints : undefined,
   })
   if (!verified.ok) {
     const map: Record<string, string> = {

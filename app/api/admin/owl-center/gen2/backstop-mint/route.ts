@@ -19,6 +19,7 @@ import { sumOwlCenterPhaseMinted } from '@/lib/owl-center/presale-mint-pool'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { getGen2CandyMachineId, isDevnetMintEnabled } from '@/lib/solana/network'
 import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
+import { gen2MintRetiredResponseBody, isGen2PublicMintRetired } from '@/lib/owl-center/mint-policy'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -47,6 +48,9 @@ async function publicPoolRemainingForLaunch(
  * Team mint also auto-enables when the public pool hits 0 (confirm-mint + phase-advance cron).
  */
 export async function POST(request: NextRequest) {
+  if (isGen2PublicMintRetired()) {
+    return NextResponse.json(gen2MintRetiredResponseBody(), { status: 410 })
+  }
   const session = await requireGen2PresaleAdminSession(request)
   if (session instanceof NextResponse) return session
 

@@ -26,15 +26,19 @@ export async function GET(request: NextRequest) {
 
   const isAdmin = await isOwlVisionAdmin(wallet)
   const isPartner = isAdmin ? false : await isApprovedOwlCenterPartner(wallet)
-  const rows = isAdmin
-    ? (await listOwlCenterLaunchesAdmin()).filter((l) => l.slug !== 'gen2')
-    : await listOwlCenterLaunchesByCreatorWallet(wallet)
+  const scopeCreator =
+    request.nextUrl.searchParams.get('scope')?.trim().toLowerCase() === 'creator'
+  const rows =
+    isAdmin && !scopeCreator
+      ? (await listOwlCenterLaunchesAdmin()).filter((l) => l.slug !== 'gen2')
+      : await listOwlCenterLaunchesByCreatorWallet(wallet)
 
   return NextResponse.json({
     ok: true,
     wallet,
     isAdmin,
     isPartner,
+    previewPartner: Boolean(isAdmin && scopeCreator),
     launches: rows.map((l) => {
       const deleteEligibility = assessCreatorLaunchDeleteEligibility(l)
       return {

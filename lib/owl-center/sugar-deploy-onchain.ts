@@ -44,7 +44,16 @@ export const OWL_CENTER_SERVER_CM_DEPLOY_MAX_SUPPLY = 250
 export type OnchainSugarDeployInput = {
   launch: Pick<
     OwlCenterLaunchPublic,
-    'name' | 'symbol' | 'total_supply' | 'creator_wallet' | 'royalty_splits' | 'mint_mode' | 'mint_network' | 'seller_fee_basis_points'
+    | 'name'
+    | 'symbol'
+    | 'total_supply'
+    | 'creator_wallet'
+    | 'royalty_splits'
+    | 'mint_mode'
+    | 'mint_network'
+    | 'seller_fee_basis_points'
+    | 'mint_standard'
+    | 'freeze_enabled'
   >
   configLines: SugarDeployConfigLine[]
   collectionMetadataUri: string
@@ -68,6 +77,11 @@ function parseIrysDeployerSecretKey(): Uint8Array {
   } catch {
     return Uint8Array.from(JSON.parse(raw) as number[])
   }
+}
+
+/** Shared by Core CM deploy — same Irys deployer key. */
+export function parseIrysDeployerSecretKeyForCore(): Uint8Array {
+  return parseIrysDeployerSecretKey()
 }
 
 export function isOwlCenterOnchainCmDeployEnabled(): boolean {
@@ -102,6 +116,13 @@ function maxNameLength(lines: SugarDeployConfigLine[]): number {
 export async function deployPublicSimpleCandyMachineOnchain(
   input: OnchainSugarDeployInput
 ): Promise<OnchainSugarDeployResult> {
+  if (input.launch.mint_standard === 'core') {
+    const { deployPublicSimpleCoreCandyMachineOnchain } = await import(
+      '@/lib/owl-center/core-cm-deploy-onchain'
+    )
+    return deployPublicSimpleCoreCandyMachineOnchain(input)
+  }
+
   const { launch, configLines, collectionMetadataUri, collectionName } = input
   if (configLines.length === 0) {
     return { ok: false, error: 'No token metadata URIs in upload job — complete Arweave push first.' }

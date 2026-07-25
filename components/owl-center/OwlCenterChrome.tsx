@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react'
 
 import { OwlCenterNav } from '@/components/owl-center/OwlCenterNav'
+import { OwlCenterPartnerPreviewBanner } from '@/components/owl-center/OwlCenterPartnerPreviewBanner'
 import { OwlCenterViewProvider } from '@/components/owl-center/OwlCenterViewProvider'
 
 function OwlCenterChromeInner({ children }: { children: ReactNode }) {
@@ -12,12 +13,13 @@ function OwlCenterChromeInner({ children }: { children: ReactNode }) {
       className="min-h-[100dvh] w-full min-w-0 max-w-[100dvw] overflow-x-clip bg-[#0F1419] text-[#E8EEF2]"
     >
       <OwlCenterNav />
+      <OwlCenterPartnerPreviewBanner />
       {children}
     </div>
   )
 }
 
-/** Shared Owl Center chrome: public nav for everyone; admins see extra items in Admin view. */
+/** Shared Owl Center chrome: public nav for everyone; admins see extra items in Admin / Partner view. */
 export function OwlCenterChrome({ children }: { children: ReactNode }) {
   return (
     <OwlCenterViewProvider>

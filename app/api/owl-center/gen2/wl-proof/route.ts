@@ -7,6 +7,7 @@ import { listWlMerkleWallets } from '@/lib/db/owl-center-wl-allocations'
 import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 import { listGen2PresaleMerkleWallets } from '@/lib/gen2-presale/db'
 import { getGen2TeamBackstopMerkleWallets } from '@/lib/owl-center/gen2-team-backstop-guards'
+import { gen2MintRetiredResponseBody, isGen2PublicMintRetired } from '@/lib/owl-center/mint-policy'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -63,6 +64,9 @@ async function getAllowlist(source: AllowlistSource): Promise<string[]> {
 }
 
 export async function GET(request: NextRequest) {
+  if (isGen2PublicMintRetired()) {
+    return NextResponse.json(gen2MintRetiredResponseBody(), { status: 410 })
+  }
   const ip = getClientIp(request)
   const rl = rateLimit(`owl-gen2-wl-proof:${ip}`, 60, 60_000)
   if (!rl.allowed) {

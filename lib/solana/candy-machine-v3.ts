@@ -12,7 +12,8 @@
  * candy guard groups per phase (`gen1` / `pre` / `wl` / `pub`) are resolved at mint time by
  * `lib/solana/gen2-guards.ts` (allowList merkle, solPayment destination, mintLimit).
  *
- * TODO: MPL Core Candy Machine is out of scope for Gen2 V1 — keep imports here TM-only.
+ * TODO: Gen2 V1 used Token Metadata CM only. New partner launches use Core CM
+ * (`lib/solana/core-candy-machine.ts`). Keep this module TM-only.
  */
 export { mplCandyMachine, mintV2 } from '@metaplex-foundation/mpl-candy-machine'
 export type { MintV2InstructionAccounts } from '@metaplex-foundation/mpl-candy-machine'

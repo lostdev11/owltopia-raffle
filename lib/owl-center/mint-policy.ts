@@ -29,6 +29,26 @@ export function isOwlCenterMintEnvKillSwitchEnabled(): boolean {
   return readBoolean(owlCenterMintDisabledEnvRaw(), false)
 }
 
+/**
+ * Gen2 public mint is sold out — mint ops (cosign, backstop, phase advance, reprice, mint CTAs)
+ * are soft-retired. Post-mint tools (thaw, ledger, nesting, marketplace) stay active.
+ *
+ * Emergency re-open only: set `GEN2_PUBLIC_MINT_ENABLED=true` in the deployment env.
+ */
+export function isGen2PublicMintRetired(): boolean {
+  if (typeof process === 'undefined') return true
+  return !readBoolean(process.env.GEN2_PUBLIC_MINT_ENABLED, false)
+}
+
+/** JSON body for Gen2 mint endpoints that must no longer accept new mints. */
+export function gen2MintRetiredResponseBody() {
+  return {
+    error: 'gen2_mint_retired',
+    message: 'Owltopia Gen2 mint is sold out. Mint tools are retired.',
+    sold_out: true,
+  } as const
+}
+
 export type OwlCenterMintControls = {
   /** True when mint must not proceed (env kill switch or admin pause). */
   disabled: boolean

@@ -33,6 +33,7 @@ import {
 } from '@/lib/solana/launch-cm'
 import { attemptOwlCenterMintRecovery, isLikelyWalletMintDisconnectError } from '@/lib/owl-center/mint-recovery-client'
 import { mintGen2FromCandyMachine, warmGen2MintPrep } from '@/lib/solana/gen2-mint'
+import { mintCoreFromCandyMachine } from '@/lib/solana/core-cm-mint'
 import type { RecoveredCandyMachineMint } from '@/lib/solana/recover-candy-machine-mint'
 import { preloadConfetti } from '@/lib/confetti'
 import { owlCenterSolanaExplorerTxUrl } from '@/lib/solana/network'
@@ -238,29 +239,52 @@ export function CollectionMintPanel({
       setMintProgress({ current: 0, total: n, phase: 'chain' })
       const minted = await raceMintSessionBudget(
         outerDeadline,
-        mintGen2FromCandyMachine({
-          walletAdapter: adapter,
-          candyMachineId: getLaunchCandyMachineId(launch, mintNetwork),
-          collectionMint: getLaunchCollectionMint(launch, mintNetwork),
-          quantity: n,
-          phase: 'PUBLIC',
-          launch,
-          mintNetwork,
-          sessionDeadline,
-          collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
-          platformFeeLamports:
-            elig?.platform_mint_fee_lamports_estimate != null
-              ? BigInt(elig.platform_mint_fee_lamports_estimate)
-              : undefined,
-          prefetchedWalletBalanceLamports:
-            elig?.wallet_sol_balance_lamports != null
-              ? BigInt(elig.wallet_sol_balance_lamports)
-              : undefined,
-          onMintProgress: (_current, total) => {
-            setStep('awaiting_signature')
-            setMintProgress({ current: 0, total, phase: 'chain' })
-          },
-        }),
+        launch.mint_standard === 'core'
+          ? mintCoreFromCandyMachine({
+              walletAdapter: adapter,
+              candyMachineId: getLaunchCandyMachineId(launch, mintNetwork),
+              collectionMint: getLaunchCollectionMint(launch, mintNetwork),
+              quantity: n,
+              launch,
+              mintNetwork,
+              sessionDeadline,
+              collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
+              platformFeeLamports:
+                elig?.platform_mint_fee_lamports_estimate != null
+                  ? BigInt(elig.platform_mint_fee_lamports_estimate)
+                  : undefined,
+              prefetchedWalletBalanceLamports:
+                elig?.wallet_sol_balance_lamports != null
+                  ? BigInt(elig.wallet_sol_balance_lamports)
+                  : undefined,
+              onMintProgress: (_current, total) => {
+                setStep('awaiting_signature')
+                setMintProgress({ current: 0, total, phase: 'chain' })
+              },
+            })
+          : mintGen2FromCandyMachine({
+              walletAdapter: adapter,
+              candyMachineId: getLaunchCandyMachineId(launch, mintNetwork),
+              collectionMint: getLaunchCollectionMint(launch, mintNetwork),
+              quantity: n,
+              phase: 'PUBLIC',
+              launch,
+              mintNetwork,
+              sessionDeadline,
+              collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
+              platformFeeLamports:
+                elig?.platform_mint_fee_lamports_estimate != null
+                  ? BigInt(elig.platform_mint_fee_lamports_estimate)
+                  : undefined,
+              prefetchedWalletBalanceLamports:
+                elig?.wallet_sol_balance_lamports != null
+                  ? BigInt(elig.wallet_sol_balance_lamports)
+                  : undefined,
+              onMintProgress: (_current, total) => {
+                setStep('awaiting_signature')
+                setMintProgress({ current: 0, total, phase: 'chain' })
+              },
+            }),
         'Mint timed out — check Collectibles in your wallet, then refresh.'
       )
 

@@ -23,9 +23,9 @@ export const OWL_CENTER_PUBLIC_NAV_ITEMS: OwlCenterNavItem[] = [
   },
   {
     href: '/owl-center/collection/gen2',
-    label: 'Gen2 Mint',
-    shortLabel: 'Mint',
-    description: 'Check allocation and mint Owltopia Gen2',
+    label: 'Gen2',
+    shortLabel: 'Gen2',
+    description: 'Owltopia Gen2 collection — sold out; view mints and trading',
     icon: Rocket,
     matchPrefix: '/owl-center/collection/gen2',
   },

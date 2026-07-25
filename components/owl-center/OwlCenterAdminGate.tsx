@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react'
 import Link from 'next/link'
-import { Shield } from 'lucide-react'
+import { Handshake, Shield } from 'lucide-react'
 
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
@@ -18,8 +18,15 @@ type OwlCenterAdminGateProps = {
 }
 
 export function OwlCenterAdminGate({ children, title, subtitle, allowPartners = false }: OwlCenterAdminGateProps) {
-  const { adminLoading, isOwlCenterAdmin, isLaunchpadPartner, showAdminFeatures, setViewMode } =
-    useOwlCenterView()
+  const {
+    adminLoading,
+    isOwlCenterAdmin,
+    isLaunchpadPartner,
+    isPartnerPreview,
+    showAdminFeatures,
+    showLaunchTools,
+    setViewMode,
+  } = useOwlCenterView()
 
   if (adminLoading) {
     return (
@@ -40,7 +47,7 @@ export function OwlCenterAdminGate({ children, title, subtitle, allowPartners = 
         <p className="max-w-lg text-sm text-[#9BA8B4]">
           {allowPartners
             ? 'Launchpad tools are for approved partners and Owl Vision admins. Want to launch a collection with us? Apply to the partner program and we will set up your wallet.'
-            : 'Launchpad tools are for Owl Vision admins only. Gen2 mint and presale stay on the holder console.'}
+            : 'Launchpad tools are for Owl Vision admins only. Gen2 mint and collection pages stay on the holder console.'}
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           {allowPartners ? (
@@ -59,28 +66,34 @@ export function OwlCenterAdminGate({ children, title, subtitle, allowPartners = 
                 : 'border border-[#00FF9C]/35 bg-[#00FF9C]/10 text-[#E8FDF4] hover:bg-[#00FF9C]/16'
             }`}
           >
-            Go to Gen2 mint
+            Back to Owl Center
           </Link>
         </div>
       </OwlCenterShell>
     )
   }
 
-  if (!showAdminFeatures) {
+  // Partner preview + Admin both get launch tools when allowPartners (generator / submit).
+  if (allowPartners && showLaunchTools) {
+    return <>{children}</>
+  }
+
+  // Admin-only routes (no partner access): require full admin view.
+  if (!allowPartners && showAdminFeatures) {
+    return <>{children}</>
+  }
+
+  if (isPartnerPreview && !allowPartners) {
     return (
       <OwlCenterShell
-        eyebrow="OWL_CENTER // ADMIN"
+        eyebrow="OWL_CENTER // PARTNER PREVIEW"
         title={title}
-        subtitle="Launchpad tools are hidden while you preview the holder experience."
+        subtitle="This page is admin-only — switch to Admin view."
       >
         <div className="max-w-lg space-y-4 text-sm text-[#9BA8B4]">
           <p>
-            You are previewing what holders see — Gen2 mint without launchpad nav or admin tools. Switch to{' '}
-            <strong className="font-normal text-[#E8EEF2]">Admin</strong> in{' '}
-            <Link href="/admin/owl-center" className="text-[#00C97A] hover:underline">
-              Owl Vision → Owl Center admin
-            </Link>{' '}
-            to open the hub, generator, and collection submit flow.
+            Partner preview shows what approved partners can open. This tool is admin-only — switch to{' '}
+            <strong className="font-normal text-[#E8EEF2]">Admin</strong> to continue.
           </p>
           <DeployButton className="gap-2" onClick={() => setViewMode('admin')}>
             <Shield className="h-4 w-4" aria-hidden />
@@ -91,5 +104,35 @@ export function OwlCenterAdminGate({ children, title, subtitle, allowPartners = 
     )
   }
 
-  return <>{children}</>
+  return (
+    <OwlCenterShell
+      eyebrow="OWL_CENTER // ADMIN"
+      title={title}
+      subtitle="Launchpad tools are hidden while you preview the holder experience."
+    >
+      <div className="max-w-lg space-y-4 text-sm text-[#9BA8B4]">
+        <p>
+          You are previewing what holders see — mint and drops without launchpad nav. Switch to{' '}
+          <strong className="font-normal text-[#E8EEF2]">Partner</strong> (partner UX) or{' '}
+          <strong className="font-normal text-[#E8EEF2]">Admin</strong> (operator tools) in{' '}
+          <Link href="/admin/owl-center" className="text-[#00C97A] hover:underline">
+            Owl Vision → Owl Center admin
+          </Link>
+          .
+        </p>
+        <div className="flex flex-wrap gap-3">
+          {allowPartners ? (
+            <DeployButton className="gap-2" onClick={() => setViewMode('partner')}>
+              <Handshake className="h-4 w-4" aria-hidden />
+              Partner preview
+            </DeployButton>
+          ) : null}
+          <DeployButton className="gap-2" onClick={() => setViewMode('admin')}>
+            <Shield className="h-4 w-4" aria-hidden />
+            Switch to Admin view
+          </DeployButton>
+        </div>
+      </div>
+    </OwlCenterShell>
+  )
 }

@@ -20,7 +20,9 @@ export function OwlCenterHubQuickLinks() {
         {items.map((item) => {
           const Icon = item.icon
           const primary = item.href.includes('collection/gen2')
-          const disabled = item.adminOnly && (adminLoading || (!isOwlCenterAdmin && !isLaunchpadPartner))
+          const disabled =
+            item.adminOnly &&
+            (adminLoading || (!isOwlCenterAdmin && !isLaunchpadPartner && !showLaunchTools))
 
           if (disabled) {
             return (
