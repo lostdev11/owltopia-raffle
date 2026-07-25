@@ -4,6 +4,8 @@ import {
   getAccount,
   getAssociatedTokenAddressSync,
   getMint,
+  unpackAccount,
+  unpackMint,
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
 import { Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js'
@@ -90,6 +92,105 @@ export async function readSplTokenNestAccountState(params: {
     nestingIsTokenDelegate,
     heldByNestingLock,
   }
+}
+
+/** Solana getMultipleAccounts caps at 100 keys per request. */
+const MULTIPLE_ACCOUNTS_CHUNK = 100
+
+async function getMultipleAccountsInfoChunked(
+  connection: Connection,
+  keys: PublicKey[]
+): Promise<(Awaited<ReturnType<Connection['getAccountInfo']>> | null)[]> {
+  const out: (Awaited<ReturnType<Connection['getAccountInfo']>> | null)[] = []
+  for (let i = 0; i < keys.length; i += MULTIPLE_ACCOUNTS_CHUNK) {
+    const chunk = keys.slice(i, i + MULTIPLE_ACCOUNTS_CHUNK)
+    out.push(...(await connection.getMultipleAccountsInfo(chunk)))
+  }
+  return out
+}
+
+/**
+ * Batched `readSplTokenNestAccountState` for wallet-picker enrichment: all mint accounts and
+ * ATAs in a few getMultipleAccounts calls instead of 2 RPC round-trips per mint.
+ * Mints whose accounts are missing or fail to decode are omitted — callers should fall back
+ * to the per-mint read for those.
+ */
+export async function readSplTokenNestAccountStatesBatch(params: {
+  mints: string[]
+  ownerWallet: string
+  connection?: Connection
+}): Promise<Map<string, SplTokenNestAccountState>> {
+  const out = new Map<string, SplTokenNestAccountState>()
+  const ownerPk = new PublicKey(params.ownerWallet.trim())
+  const nestingPk = nestingAuthorityPublicKey()
+  const connection =
+    params.connection ?? new Connection(resolveServerSolanaRpcUrl(), { commitment: 'confirmed' })
+
+  const entries: Array<{ mint: string; mintPk: PublicKey; ata: PublicKey }> = []
+  const seen = new Set<string>()
+  for (const raw of params.mints) {
+    const mint = raw.trim()
+    if (!mint || seen.has(mint)) continue
+    seen.add(mint)
+    try {
+      const mintPk = new PublicKey(mint)
+      entries.push({ mint: mintPk.toBase58(), mintPk, ata: resolveSplTokenNestAta(mint, params.ownerWallet) })
+    } catch {
+      // Invalid pubkey — leave for the per-mint fallback to surface.
+    }
+  }
+  if (entries.length === 0) return out
+
+  const infos = await getMultipleAccountsInfoChunked(connection, [
+    ...entries.map((e) => e.mintPk),
+    ...entries.map((e) => e.ata),
+  ])
+
+  for (let i = 0; i < entries.length; i++) {
+    const { mint, mintPk, ata } = entries[i]!
+    const mintInfo = infos[i]
+    const ataInfo = infos[entries.length + i]
+    if (!mintInfo) continue
+
+    try {
+      const mintData = unpackMint(mintPk, mintInfo, TOKEN_PROGRAM_ID)
+      const mintFreezeAuthority = mintData.freezeAuthority?.toBase58() ?? null
+      const nestingAuthorityCanFreeze =
+        nestingPk != null && mintData.freezeAuthority?.equals(nestingPk) === true
+
+      let isFrozen = false
+      let delegate: string | null = null
+      if (ataInfo) {
+        try {
+          const acct = unpackAccount(ata, ataInfo, TOKEN_PROGRAM_ID)
+          isFrozen = acct.isFrozen
+          delegate = acct.delegate?.toBase58() ?? null
+        } catch {
+          // Undecodable ATA — same as missing: not frozen / not held.
+        }
+      }
+
+      const nestingIsTokenDelegate =
+        nestingPk != null && delegate != null && new PublicKey(delegate).equals(nestingPk)
+      const heldByNestingLock = isFrozen && (nestingAuthorityCanFreeze || nestingIsTokenDelegate)
+
+      out.set(mint, {
+        mint,
+        ownerWallet: ownerPk.toBase58(),
+        tokenAccount: ata.toBase58(),
+        isFrozen,
+        mintFreezeAuthority,
+        delegate,
+        nestingAuthorityCanFreeze,
+        nestingIsTokenDelegate,
+        heldByNestingLock,
+      })
+    } catch {
+      // Non-SPL / decode failure — leave for the per-mint fallback.
+    }
+  }
+
+  return out
 }
 
 export async function freezeSplTokenNestAccount(params: {

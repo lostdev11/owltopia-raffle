@@ -1,5 +1,7 @@
+import { Connection } from '@solana/web3.js'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { StakingUserError } from '@/lib/nesting/errors'
+import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { nestingNftAssetLabels } from '@/lib/nesting/gen1-staking-pools'
 import { detectResolvedNftLockStandardFromAsset } from '@/lib/nesting/nft-lock/detect-asset-standard'
 import {
@@ -28,11 +30,14 @@ import {
   freezeSplTokenNestAccount,
   readSplTokenNestAccountState,
   thawSplTokenNestAccount,
+  type SplTokenNestAccountState,
 } from '@/lib/solana/spl-token-nest-lock'
 import {
   detectSplNestFreezePath,
+  detectSplNestFreezePathsBatch,
   freezeTokenMetadataNestAccount,
   thawTokenMetadataNestAccount,
+  type SplNestFreezePath,
 } from '@/lib/solana/token-metadata-nest-lock'
 
 export type { NestStakeExecutionPath, NftLockStandard, ResolvedNftLockStandard }
@@ -102,42 +107,50 @@ function splIncompatibleFreezeMessage(): string {
   )
 }
 
+function splStakeEligibilityFromPathState(entry: {
+  path: SplNestFreezePath | null
+  state: SplTokenNestAccountState
+}): NftStakeEligibility {
+  if (entry.state.heldByNestingLock) {
+    return {
+      eligible: false,
+      reason:
+        'This NFT is already locked for an Owltopia nest. Refresh My nest (or Finish opening) so the ledger can catch up — if it still blocks, contact support with this mint.',
+      code: 'owltopia_lock_held',
+    }
+  }
+
+  if (entry.state.isFrozen && !entry.state.heldByNestingLock) {
+    return {
+      eligible: false,
+      reason: mintCollectionFrozenMessage(),
+      code: 'mint_collection_frozen',
+    }
+  }
+
+  if (!entry.path) {
+    return {
+      eligible: false,
+      reason: splIncompatibleFreezeMessage(),
+      code: 'incompatible_freeze_delegate',
+    }
+  }
+
+  return { eligible: true }
+}
+
 async function readSplStakeEligibility(params: {
   assetId: string
   ownerWallet: string
+  connection?: Connection
 }): Promise<NftStakeEligibility> {
   try {
-    const { path, state } = await detectSplNestFreezePath({
+    const entry = await detectSplNestFreezePath({
       mint: params.assetId,
       ownerWallet: params.ownerWallet,
+      connection: params.connection,
     })
-
-    if (state.heldByNestingLock) {
-      return {
-        eligible: false,
-        reason:
-          'This NFT is already locked for an Owltopia nest. Refresh My nest (or Finish opening) so the ledger can catch up — if it still blocks, contact support with this mint.',
-        code: 'owltopia_lock_held',
-      }
-    }
-
-    if (state.isFrozen && !state.heldByNestingLock) {
-      return {
-        eligible: false,
-        reason: mintCollectionFrozenMessage(),
-        code: 'mint_collection_frozen',
-      }
-    }
-
-    if (!path) {
-      return {
-        eligible: false,
-        reason: splIncompatibleFreezeMessage(),
-        code: 'incompatible_freeze_delegate',
-      }
-    }
-
-    return { eligible: true }
+    return splStakeEligibilityFromPathState(entry)
   } catch {
     return { eligible: true }
   }
@@ -148,6 +161,7 @@ export async function readNftStakeEligibilityForPool(params: {
   assetId: string
   ownerWallet: string
   nestingDelegateAddress?: string | null
+  connection?: Connection
 }): Promise<NftStakeEligibility & { resolved_standard: ResolvedNftLockStandard }> {
   const resolved = await resolveEffectiveNftLockStandard(params.pool, params.assetId)
   if (resolved === 'database_only') {
@@ -157,6 +171,7 @@ export async function readNftStakeEligibilityForPool(params: {
     const result = await readSplStakeEligibility({
       assetId: params.assetId,
       ownerWallet: params.ownerWallet,
+      connection: params.connection,
     })
     return { ...result, resolved_standard: resolved }
   }
@@ -188,6 +203,44 @@ export async function assertNftEligibleForPoolStake(params: {
   return result.resolved_standard
 }
 
+/** Max concurrent per-mint eligibility reads. Each mint costs 2–3 Solana RPC calls, so keep the
+ * indexer/RPC fan-out bounded while still populating large wallets (e.g. Gen 2) far faster than serial. */
+const WALLET_NEST_ENRICH_CONCURRENCY = 8
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return []
+  const results = new Array<R>(items.length)
+  let next = 0
+  const worker = async () => {
+    while (next < items.length) {
+      const idx = next++
+      results[idx] = await fn(items[idx]!, idx)
+    }
+  }
+  const workers = Math.min(Math.max(1, concurrency), items.length)
+  await Promise.all(Array.from({ length: workers }, () => worker()))
+  return results
+}
+
+function walletNestRowFromEligibility(
+  row: { mint: string; name: string | null; image: string | null },
+  result: NftStakeEligibility
+): WalletNestMintRow {
+  if (result.eligible) {
+    return { ...row, stake_blocked: false, stake_block_reason: null, stake_block_code: null }
+  }
+  return {
+    ...row,
+    stake_blocked: true,
+    stake_block_reason: result.reason,
+    stake_block_code: result.code ?? null,
+  }
+}
+
 export async function enrichWalletNestMintsForPool(
   pool: Pick<StakingPoolRow, 'nft_lock_standard' | 'asset_type'>,
   mints: Array<{ mint: string; name: string | null; image: string | null }>,
@@ -196,26 +249,42 @@ export async function enrichWalletNestMintsForPool(
   if (mints.length === 0) return []
   const delegate = getNestingNftFreezeDelegateAddress()
 
-  const out: WalletNestMintRow[] = []
-  for (const row of mints) {
+  // Share one RPC connection across the batch so concurrent per-mint reads reuse keep-alive
+  // sockets instead of each mint spinning up (and tearing down) its own Connection.
+  const connection = new Connection(resolveServerSolanaRpcUrl(), { commitment: 'confirmed' })
+
+  // Gen 2 / partner SPL perches: read the whole wallet in a few getMultipleAccounts calls
+  // instead of 2–3 RPC round-trips per mint. Mints the batch could not read fall back below.
+  const batched = new Map<string, WalletNestMintRow>()
+  if (poolConfiguredNftLockStandard(pool) === 'spl_token_account_freeze') {
+    try {
+      const entries = await detectSplNestFreezePathsBatch({
+        mints: mints.map((m) => m.mint),
+        ownerWallet,
+        connection,
+      })
+      for (const row of mints) {
+        const entry = entries.get(row.mint.trim())
+        if (!entry) continue
+        batched.set(row.mint, walletNestRowFromEligibility(row, splStakeEligibilityFromPathState(entry)))
+      }
+    } catch {
+      // Batch read failed entirely — per-mint fallback below covers every row.
+    }
+  }
+
+  return mapWithConcurrency(mints, WALLET_NEST_ENRICH_CONCURRENCY, async (row) => {
+    const fromBatch = batched.get(row.mint)
+    if (fromBatch) return fromBatch
     const result = await readNftStakeEligibilityForPool({
       pool,
       assetId: row.mint,
       ownerWallet,
       nestingDelegateAddress: delegate,
+      connection,
     })
-    if (result.eligible) {
-      out.push({ ...row, stake_blocked: false, stake_block_reason: null, stake_block_code: null })
-    } else {
-      out.push({
-        ...row,
-        stake_blocked: true,
-        stake_block_reason: result.reason,
-        stake_block_code: result.code ?? null,
-      })
-    }
-  }
-  return out
+    return walletNestRowFromEligibility(row, result)
+  })
 }
 
 export async function assertWalletNftFrozenForPool(params: {

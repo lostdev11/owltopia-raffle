@@ -340,7 +340,7 @@ export function NestingLandingClient({
             },
             {
               q: 'Why does nesting take so long?',
-              a: 'Opening a nest freezes each NFT in your wallet and confirms it on Owltopia. One or two owls often finish in about 30–60 seconds — keep the page open, approve the wallet prompt, and wait for the success state. On mobile, return to Owltopia after the wallet app closes.',
+              a: 'Opening a nest freezes each NFT in your wallet and confirms it on Owltopia. One or two owls often finish in about 30–60 seconds — keep the page open until you approve the wallet prompt; after that, nesting finishes in the background even if you close the page. On mobile, return to Owltopia after the wallet app closes.',
             },
             {
               q: 'Why do you ask me to sign a message on the dashboard?',

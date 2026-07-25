@@ -25,6 +25,7 @@ import { getNestingNftFreezeAuthorityKeypair } from '@/lib/nesting/freeze-author
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import {
   readSplTokenNestAccountState,
+  readSplTokenNestAccountStatesBatch,
   type SplTokenNestAccountState,
 } from '@/lib/solana/spl-token-nest-lock'
 
@@ -67,6 +68,73 @@ export async function detectSplNestFreezePath(params: {
   }
 
   return { path: null, state }
+}
+
+/**
+ * Batched `detectSplNestFreezePath` for wallet-picker enrichment (Gen 2 / partner SPL perches):
+ * token-account states via getMultipleAccounts, then one more batched read for the distinct
+ * mint freeze authorities (Master Edition detection). Mints that could not be read are omitted —
+ * callers should fall back to the per-mint path for those.
+ */
+export async function detectSplNestFreezePathsBatch(params: {
+  mints: string[]
+  ownerWallet: string
+  connection?: Connection
+}): Promise<Map<string, { path: SplNestFreezePath | null; state: SplTokenNestAccountState }>> {
+  const connection =
+    params.connection ?? new Connection(resolveServerSolanaRpcUrl(), { commitment: 'confirmed' })
+  const out = new Map<string, { path: SplNestFreezePath | null; state: SplTokenNestAccountState }>()
+
+  const states = await readSplTokenNestAccountStatesBatch({
+    mints: params.mints,
+    ownerWallet: params.ownerWallet,
+    connection,
+  })
+  if (states.size === 0) return out
+
+  // Resolve remaining paths from each mint's freeze authority (unique set, batched).
+  const pendingFreezeAuthorities = new Map<string, PublicKey>()
+  for (const [mint, state] of states) {
+    if (state.nestingAuthorityCanFreeze) {
+      out.set(mint, { path: 'mint_freeze_authority', state })
+      continue
+    }
+    const fa = state.mintFreezeAuthority?.trim()
+    if (!fa) {
+      out.set(mint, { path: null, state })
+      continue
+    }
+    if (!pendingFreezeAuthorities.has(fa)) pendingFreezeAuthorities.set(fa, new PublicKey(fa))
+  }
+
+  const tokenMetadataOwned = new Set<string>()
+  const faReadFailed = new Set<string>()
+  const faEntries = [...pendingFreezeAuthorities.entries()]
+  const chunkSize = 100
+  for (let i = 0; i < faEntries.length; i += chunkSize) {
+    const chunk = faEntries.slice(i, i + chunkSize)
+    try {
+      const infos = await connection.getMultipleAccountsInfo(chunk.map(([, pk]) => pk))
+      chunk.forEach(([fa], idx) => {
+        if (infos[idx]?.owner.equals(TOKEN_METADATA_PROGRAM_ID)) tokenMetadataOwned.add(fa)
+      })
+    } catch {
+      // Transient RPC failure — omit these mints so the per-mint fallback can retry them.
+      for (const [fa] of chunk) faReadFailed.add(fa)
+    }
+  }
+
+  for (const [mint, state] of states) {
+    if (out.has(mint)) continue
+    const fa = state.mintFreezeAuthority!.trim()
+    if (faReadFailed.has(fa)) continue
+    out.set(mint, {
+      path: tokenMetadataOwned.has(fa) ? 'freeze_delegated_account' : null,
+      state,
+    })
+  }
+
+  return out
 }
 
 function nestingKeypairOrThrow(): Keypair {

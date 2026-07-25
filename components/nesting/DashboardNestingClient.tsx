@@ -215,6 +215,9 @@ export function DashboardNestingClient() {
   /** Jupiter-style owl selector sheet on the "You nest" panel. */
   const [owlPickerOpen, setOwlPickerOpen] = useState(false)
   const [stakeTxPhase, setStakeTxPhase] = useState<NestingTxPhase>('idle')
+  /** True once every wallet approval (lock + fee) in the current nest run is signed —
+   * only the server confirm remains, so the progress card can say "safe to close". */
+  const [stakeCloseSafe, setStakeCloseSafe] = useState(false)
   const [claimAllTxPhase, setClaimAllTxPhase] = useState<NestingTxPhase>('idle')
   /** Multi NFT confirm: show which coin the wallet is locking so the flow does not look frozen. */
   const [nftStakeBatchHint, setNftStakeBatchHint] = useState<string | null>(null)
@@ -2008,6 +2011,9 @@ export function DashboardNestingClient() {
                       ? { platform_fee_signature: platformFeeSignature.trim() }
                       : {}),
                   }),
+                  // Survives tab close mid-confirm ("you can close this window"): the request
+                  // still reaches the server so the fee signature gets linked and the nest confirms.
+                  keepalive: true,
                   signal,
                 })
                 const freezeJson = (await freezeRes.json().catch(() => ({}))) as {
@@ -2241,6 +2247,7 @@ export function DashboardNestingClient() {
             let alreadyConfirmedCount = 0
 
             setStakeTxPhase('preparing')
+            setStakeCloseSafe(false)
             setNftStakeBatchHint(
               totalNests > 1
                 ? `Setting up ${totalNests} nests — wallet approval comes next…`
@@ -2332,6 +2339,7 @@ export function DashboardNestingClient() {
               throwIfNestingAborted(signal)
 
               const chunkFeeLabel = formatStakingPlatformFeeTotalLabel(chunkPreps.length)
+              setStakeCloseSafe(false)
               setStakeTxPhase('awaiting_wallet_signature')
               if (totalNests > 1) {
                 setNftStakeBatchHint(
@@ -2359,6 +2367,9 @@ export function DashboardNestingClient() {
 
               if (!confirmedInFallback) {
                 setStakeTxPhase('syncing')
+                // Last chunk's wallet approval (lock + fee) is signed — from here on the
+                // holder can close the page; confirm keeps running server-side + heal.
+                if (chunkIdx === assetIdChunks.length - 1) setStakeCloseSafe(true)
                 for (const prep of chunkPreps) {
                   throwIfNestingAborted(signal)
                   try {
@@ -3412,7 +3423,7 @@ export function DashboardNestingClient() {
             <p className="text-muted-foreground leading-relaxed text-xs sm:text-sm">
               The wallet lock step did not finish. Tap below to continue — we will resume automatically and ask for{' '}
               <span className="font-medium text-foreground/90">one wallet approval</span> when possible (lock + fee
-              together). Stay on this page until you see success.
+              together). After you approve, nesting finishes in the background.
             </p>
           </div>
           <Button
@@ -4166,14 +4177,15 @@ export function DashboardNestingClient() {
               assetSingular={nftAssetLabels.singular}
               assetPlural={nftAssetLabels.plural}
               feeIncluded={platformFeeActive}
+              closeSafe={stakeCloseSafe}
             />
             {nftMintRequired && stakeTxPhase === 'idle' ? (
               <p className="text-xs text-center text-muted-foreground leading-relaxed px-1" role="note">
                 {chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length > 1
                   ? `${chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length} wallet approvals (up to ${NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} ${nftAssetLabels.plural} each)`
                   : 'One wallet approval'}
-                {platformFeePerNestLabel ? ` · includes ${platformFeePerNestLabel} fee` : ''} · stay on this page until
-                you see success.
+                {platformFeePerNestLabel ? ` · includes ${platformFeePerNestLabel} fee` : ''} · keep this page open
+                until you approve in your wallet — after that, nesting finishes in the background.
               </p>
             ) : null}
             <Button

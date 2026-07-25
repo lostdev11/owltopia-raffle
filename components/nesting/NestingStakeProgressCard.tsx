@@ -15,6 +15,11 @@ type Props = {
   assetSingular?: string
   assetPlural?: string
   feeIncluded?: boolean
+  /**
+   * True once every wallet approval in this run (lock + fee) is signed and only the
+   * server confirm remains — safe to tell holders they can close the page.
+   */
+  closeSafe?: boolean
   className?: string
 }
 
@@ -38,11 +43,13 @@ export function NestingStakeProgressCard({
   assetSingular = 'NFT',
   assetPlural = 'NFTs',
   feeIncluded = false,
+  closeSafe = false,
   className,
 }: Props) {
   if (!isNestingTxPhaseInFlight(phase) && phase !== 'failed') return null
 
   const step = activeStep(phase)
+  const showCloseSafe = closeSafe && step === 'confirming'
   const plural = nestCount > 1
   const assetWord = plural ? assetPlural : assetSingular
   const steps: Array<{ id: StepId; title: string; detail: string }> = [
@@ -61,7 +68,9 @@ export function NestingStakeProgressCard({
     {
       id: 'confirming',
       title: 'Confirming on Owltopia',
-      detail: 'Finishing up — stay on this page until you see success.',
+      detail: showCloseSafe
+        ? 'Finishing up in the background — you can close this window.'
+        : 'Finishing up — stay on this page until you see success.',
     },
   ]
 
@@ -82,15 +91,27 @@ export function NestingStakeProgressCard({
         <div className="min-w-0 flex-1 space-y-2.5">
           <div>
             <p className="font-semibold text-foreground leading-snug">
-              {phase === 'failed' ? 'Nesting paused — try again' : 'Nesting in progress'}
+              {phase === 'failed'
+                ? 'Nesting paused — try again'
+                : showCloseSafe
+                  ? 'Nesting finishing — safe to close this window'
+                  : 'Nesting in progress'}
             </p>
-            <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">
-              Keep this page open
-              {plural
-                ? ` — locking ${nestCount} ${assetPlural} often takes 30–60 seconds`
-                : ' — this usually finishes within about a minute'}
-              . On mobile, return here after your wallet closes.
-            </p>
+            {showCloseSafe ? (
+              <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">
+                Wallet approval received — you can close this window and nesting will finish in the
+                background. If {plural ? 'a nest' : 'your nest'} still shows Opening… when you come
+                back, pull to refresh and tap Finish opening.
+              </p>
+            ) : (
+              <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">
+                Keep this page open
+                {plural
+                  ? ` — locking ${nestCount} ${assetPlural} often takes 30–60 seconds`
+                  : ' — this usually finishes within about a minute'}
+                . On mobile, return here after your wallet closes.
+              </p>
+            )}
           </div>
           <ol className="space-y-2">
             {steps.map((s, idx) => {
