@@ -31,14 +31,20 @@ const IRYS_KEY = process.env.IRYS_PRIVATE_KEY?.trim()
 const PROXY_MARKER = '/api/proxy-image'
 
 function parseArgs(argv) {
-  const o = { execute: false, max: Infinity, concurrency: 3 }
+  const o = { execute: false, max: Infinity, concurrency: 1, offset: 0 }
   for (const a of argv) {
     if (a === '--execute') o.execute = true
     else if (a.startsWith('--max=')) o.max = Math.max(1, parseInt(a.slice(6), 10) || 0)
-    else if (a.startsWith('--concurrency=')) o.concurrency = Math.max(1, Math.min(8, parseInt(a.slice(14), 10) || 3))
+    else if (a.startsWith('--offset=')) o.offset = Math.max(0, parseInt(a.slice(9), 10) || 0)
+    else if (a.startsWith('--concurrency=')) o.concurrency = Math.max(1, Math.min(8, parseInt(a.slice(14), 10) || 1))
   }
   return o
 }
+
+// Umi/web3.js can emit unhandled 429s from side-channel account fetches; keep the batch alive.
+process.on('unhandledRejection', (err) => {
+  console.error(`unhandledRejection (continuing): ${String(err?.message || err)}`)
+})
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -112,17 +118,51 @@ function buildWalletSafeJson(json) {
 
 async function fetchJsonFromUri(uri) {
   const id = arweaveTxId(uri)
-  const candidates = [...new Set([uri, id ? `https://arweave.net/${id}` : null, id ? `https://gateway.irys.xyz/${id}` : null].filter(Boolean))]
+  const candidates = [
+    ...new Set(
+      [
+        uri,
+        id ? `https://arweave.net/${id}` : null,
+        id ? `https://gateway.irys.xyz/${id}` : null,
+        id ? `https://ar-io.net/${id}` : null,
+      ].filter(Boolean)
+    ),
+  ]
   for (const url of candidates) {
-    try {
-      const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(20000) })
-      if (!res.ok) continue
-      return await res.json()
-    } catch {
-      /* try next */
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch(url, {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(20000),
+        })
+        if (!res.ok) {
+          await sleep(400 * (attempt + 1))
+          continue
+        }
+        const ct = (res.headers.get('content-type') || '').toLowerCase()
+        const text = await res.text()
+        // Gateways sometimes return an HTML shell when the tx is not ready.
+        if (ct.includes('text/html') || text.trimStart().startsWith('<!')) {
+          await sleep(600 * (attempt + 1))
+          continue
+        }
+        return JSON.parse(text)
+      } catch {
+        await sleep(500 * (attempt + 1))
+      }
     }
   }
   return null
+}
+
+async function dasAssetIsWalletSafe(mint) {
+  try {
+    const r = await rpcCall('getAsset', { id: mint })
+    const image = r?.content?.links?.image ?? r?.content?.files?.[0]?.uri
+    return typeof image === 'string' && image.includes(PROXY_MARKER)
+  } catch {
+    return false
+  }
 }
 
 async function listCollectionMints() {
@@ -182,9 +222,16 @@ async function main() {
   console.log('Listing collection mints via DAS...')
 
   const listed = await listCollectionMints()
-  const candidates = [COLLECTION, ...listed.filter((x) => !x.indexedSafe).map((x) => x.mint)]
-  const uniqueCandidates = [...new Set(candidates)].slice(0, args.max === Infinity ? undefined : args.max)
-  console.log(`Total in collection: ${listed.length}; indexed-unsafe: ${listed.filter((x) => !x.indexedSafe).length}; processing: ${uniqueCandidates.length} (incl. collection)\n`)
+  // Prefer DAS-unsafe mints. After a successful fix Helius usually flips to the proxy image;
+  // that lets re-runs skip already-fixed tokens even when gateway.irys.xyz is unreachable locally.
+  const unsafeMints = listed.filter((x) => !x.indexedSafe).map((x) => x.mint)
+  const allMints = [...new Set([COLLECTION, ...unsafeMints])]
+  const end = args.max === Infinity ? allMints.length : Math.min(allMints.length, args.offset + args.max)
+  const uniqueCandidates = allMints.slice(args.offset, end)
+  console.log(
+    `Total in collection: ${listed.length}; das-indexed-unsafe: ${unsafeMints.length}; ` +
+      `offset=${args.offset} processing: ${uniqueCandidates.length} (of ${allMints.length} candidates)\n`
+  )
 
   let fixed = 0, alreadySafe = 0, skipped = 0, failed = 0
 
@@ -199,8 +246,25 @@ async function main() {
       const currentUri = md.uri?.trim()
       if (!currentUri) { failed++; console.log(`SKIP  ${mint}  missing_uri`); return }
 
+      // If DAS already shows the proxy image, treat as done (avoids Irys gateway fetch failures).
+      const listedHit = listed.find((x) => x.mint === mint)
+      if (listedHit?.indexedSafe) {
+        alreadySafe++
+        console.log(`SAFE  ${mint}  das_indexed_proxy`)
+        return
+      }
+
       const json = await fetchJsonFromUri(currentUri)
-      if (!json) { failed++; console.log(`FAIL  ${mint}  could_not_fetch_json`); return }
+      if (!json) {
+        if (await dasAssetIsWalletSafe(mint)) {
+          alreadySafe++
+          console.log(`SAFE  ${mint}  das_getAsset_proxy`)
+          return
+        }
+        failed++
+        console.log(`FAIL  ${mint}  could_not_fetch_json`)
+        return
+      }
 
       if (isJsonWalletSafe(json)) { alreadySafe++; console.log(`SAFE  ${mint}  already wallet-safe`); return }
 
@@ -219,7 +283,7 @@ async function main() {
       const newUri = `https://gateway.irys.xyz/${String(receipt.id)}`
 
       let lastErr
-      for (let attempt = 0; attempt < 2; attempt++) {
+      for (let attempt = 0; attempt < 4; attempt++) {
         try {
           const res = await updateV1(umi, {
             mint: publicKey(mint),
@@ -240,13 +304,19 @@ async function main() {
           break
         } catch (e) {
           lastErr = e
-          await sleep(1500)
+          const msg = String(e?.message || e)
+          const backoff = /429|Too Many Requests|rate/i.test(msg) ? 4000 * (attempt + 1) : 1500
+          await sleep(backoff)
         }
       }
       if (lastErr) { failed++; console.log(`FAIL  ${mint}  ${String(lastErr?.message || lastErr)}`) }
+      // Pace RPC / Irys so long backfills don't trip provider 429s mid-batch.
+      await sleep(750)
     } catch (e) {
       failed++
       console.log(`FAIL  ${mint}  ${String(e?.message || e)}`)
+      const msg = String(e?.message || e)
+      if (/429|Too Many Requests|rate/i.test(msg)) await sleep(5000)
     }
   })
 
