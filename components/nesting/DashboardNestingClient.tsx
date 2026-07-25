@@ -310,9 +310,11 @@ export function DashboardNestingClient() {
 
   const loadPools = useCallback(async () => {
     try {
-      const res = await fetch(nestingClientApiUrl('/api/staking/pools'), { cache: 'no-store' })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) return
+      const result = await fetchNestingJson<Record<string, unknown>>('/api/staking/pools', {
+        cache: 'no-store',
+      })
+      if (!result.ok) return
+      const json = result.json ?? {}
       setPools(Array.isArray(json.pools) ? json.pools : [])
       if (json.viewer_is_admin === true) setViewerIsAdmin(true)
       setNestingDisabled(json.nesting_disabled === true)
@@ -437,27 +439,36 @@ export function DashboardNestingClient() {
     }
     setLoading(true)
     setError(null)
-    await loadPools()
-    let ok = await loadPositions({ heal: false })
-    if (
-      !ok &&
-      typeof window !== 'undefined' &&
-      isMobileDevice() &&
-      document.visibilityState === 'visible'
-    ) {
-      await new Promise((r) => setTimeout(r, MOBILE_401_RETRY_MS))
-      ok = await loadPositions({ heal: false, silent: true })
+    let ok = false
+    try {
+      const [, positionsLoaded] = await Promise.all([
+        loadPools(),
+        loadPositions({ heal: false }),
+      ])
+      ok = positionsLoaded
+      if (
+        !ok &&
+        typeof window !== 'undefined' &&
+        isMobileDevice() &&
+        document.visibilityState === 'visible'
+      ) {
+        await new Promise((r) => setTimeout(r, MOBILE_401_RETRY_MS))
+        ok = await loadPositions({ heal: false, silent: true })
+      }
+      if (
+        !ok &&
+        typeof window !== 'undefined' &&
+        isMobileDevice() &&
+        document.visibilityState === 'visible'
+      ) {
+        await new Promise((r) => setTimeout(r, MOBILE_NETWORK_RETRY_MS))
+        ok = await loadPositions({ heal: false, silent: true })
+      }
+    } catch (e) {
+      setError(formatNestingApiFetchError(e, 'positions'))
+    } finally {
+      setLoading(false)
     }
-    if (
-      !ok &&
-      typeof window !== 'undefined' &&
-      isMobileDevice() &&
-      document.visibilityState === 'visible'
-    ) {
-      await new Promise((r) => setTimeout(r, MOBILE_NETWORK_RETRY_MS))
-      ok = await loadPositions({ heal: false, silent: true })
-    }
-    setLoading(false)
     if (ok) {
       void loadPositions({ heal: true, silent: true })
     }
