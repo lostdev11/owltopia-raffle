@@ -240,6 +240,7 @@ export function DashboardNestingClient() {
       nest_status?: WalletNestMintNestStatus
       stake_blocked?: boolean
       stake_block_reason?: string | null
+      stake_block_code?: string | null
     }[]
     configured: boolean
     hint?: string
@@ -970,6 +971,7 @@ export function DashboardNestingClient() {
             nest_status?: unknown
             stake_blocked?: unknown
             stake_block_reason?: unknown
+            stake_block_code?: unknown
           }) => {
             const nest_status: WalletNestMintNestStatus =
               row.nest_status === 'nested' ||
@@ -988,6 +990,8 @@ export function DashboardNestingClient() {
               stake_blocked: nest_status === 'blocked' || row.stake_blocked === true,
               stake_block_reason:
                 typeof row.stake_block_reason === 'string' ? row.stake_block_reason : null,
+              stake_block_code:
+                typeof row.stake_block_code === 'string' ? row.stake_block_code : null,
             }
           }
         )
@@ -1360,6 +1364,8 @@ export function DashboardNestingClient() {
       const externallyBlocked = nestStatus === 'blocked'
       const alreadyNestedHere = nestStatus === 'nested'
       const resumeFreezeOnly = nestStatus === 'opening'
+      const ledgerCatchUp =
+        externallyBlocked && m.stake_block_code === 'owltopia_lock_held'
       return {
         mint: m.mint,
         name: m.name,
@@ -1367,13 +1373,15 @@ export function DashboardNestingClient() {
         checked: stakeAssetIds.includes(m.mint),
         disabled: nestStatus !== 'not_nested',
         nestStatus,
-        statusLabel: externallyBlocked
-          ? 'Frozen elsewhere — unstake there first'
-          : alreadyNestedHere
-            ? 'Already nested'
-            : resumeFreezeOnly
-              ? 'Open nest — finish lock on confirm'
-              : null,
+        statusLabel: ledgerCatchUp
+          ? 'Already locked — refresh My nest'
+          : externallyBlocked
+            ? 'Frozen elsewhere — unstake there first'
+            : alreadyNestedHere
+              ? 'Already nested'
+              : resumeFreezeOnly
+                ? 'Open nest — finish lock on confirm'
+                : null,
         statusTone: externallyBlocked || alreadyNestedHere ? ('warn' as const) : ('muted' as const),
       }
     })

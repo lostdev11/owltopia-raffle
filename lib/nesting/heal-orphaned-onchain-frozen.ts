@@ -13,7 +13,7 @@ import {
   patchStakingPosition,
   type StakingPositionRow,
 } from '@/lib/db/staking-positions'
-import { isWalletNftFrozenForNestingDelegate } from '@/lib/nesting/nft-freeze'
+import { isWalletNftFrozenForPool } from '@/lib/nesting/nft-lock-service'
 
 const HEAL_MAX_PER_PASS = 12
 
@@ -73,7 +73,9 @@ export async function healOrphanedOnChainFrozenNestsForWallet(wallet: string): P
     }
 
     try {
-      const frozen = await isWalletNftFrozenForNestingDelegate({
+      // Pool-aware: Gen 2 uses SPL FreezeDelegatedAccount; MPL Core check alone misses those locks.
+      const frozen = await isWalletNftFrozenForPool({
+        pool,
         assetId,
         collectionMint: pool.collection_key,
         ownerWallet: wallet,
