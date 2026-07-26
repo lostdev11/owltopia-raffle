@@ -8,6 +8,7 @@ import {
   Group,
   MathUtils,
   Mesh,
+  MeshStandardMaterial,
   Quaternion,
   Vector3,
 } from 'three'
@@ -15,7 +16,7 @@ import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { useRaceGameStore, type RaceMotionState } from '@/lib/race/store'
 
 const MODEL_URL = '/models/owltopia-owl-rigged.glb'
-const MODEL_BASE_Y = -0.9
+const MODEL_BASE_Y = -1.15
 
 const X_AXIS = new Vector3(1, 0, 0)
 const Z_AXIS = new Vector3(0, 0, 1)
@@ -71,6 +72,27 @@ export function RiggedOwl() {
         object.castShadow = true
         object.receiveShadow = true
         object.frustumCulled = false
+
+        const sourceMaterials = Array.isArray(object.material)
+          ? object.material
+          : [object.material]
+        const materials = sourceMaterials.map((sourceMaterial) => {
+          const material = sourceMaterial.clone()
+          if (material instanceof MeshStandardMaterial) {
+            // Meshy's full-strength emissive map washes the owl out under the
+            // course lights. Keep the base color and PBR detail, but make the
+            // feathers non-emissive and mostly non-metallic.
+            material.emissive.set(0x000000)
+            material.emissiveMap = null
+            material.metalness = 0.04
+            material.roughness = 0.82
+            material.needsUpdate = true
+          }
+          return material
+        })
+        object.material = Array.isArray(object.material)
+          ? materials
+          : materials[0]
       }
 
       if (
@@ -139,7 +161,7 @@ export function RiggedOwl() {
       ref={root}
       position={[0, MODEL_BASE_Y, 0]}
       rotation={[0, Math.PI, 0]}
-      scale={1.05}
+      scale={1.35}
     >
       <primitive object={rig.scene} />
     </group>
