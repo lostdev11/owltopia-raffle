@@ -227,7 +227,7 @@ export function RaceController() {
       friction={0}
       linearDamping={0.16}
     >
-      <CapsuleCollider args={[0.48, 0.42]} position={[0, -0.02, 0]} />
+      <CapsuleCollider args={[0.64, 0.52]} position={[0, 0, 0]} />
       <group ref={visual}>
         <RiggedOwl />
       </group>
