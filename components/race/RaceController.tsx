@@ -7,7 +7,7 @@ import {
   RigidBody,
   type RapierRigidBody,
 } from '@react-three/rapier'
-import { Group, MathUtils, Quaternion, Vector3 } from 'three'
+import { Group, MathUtils, Vector3 } from 'three'
 import { PlaceholderOwl } from '@/components/race/PlaceholderOwl'
 import { useRaceGameStore, type RaceMotionState } from '@/lib/race/store'
 
@@ -25,8 +25,6 @@ const STAMINA_REGEN = 14
 const CAMERA_HEIGHT = 2.6
 const CAMERA_DISTANCE = 7.5
 const CAMERA_LOOK_AHEAD = 4
-const FORWARD = new Vector3(0, 0, -1)
-const Y_AXIS = new Vector3(0, 1, 0)
 
 function resolveMotion(options: {
   moving: boolean
@@ -44,11 +42,10 @@ function resolveMotion(options: {
 export function RaceController() {
   const body = useRef<RapierRigidBody>(null)
   const visual = useRef<Group>(null)
+  const yaw = useRef(0)
   const facing = useRef(new Vector3(0, 0, -1))
-  const moveDirection = useRef(new Vector3())
   const desiredCamera = useRef(new Vector3())
   const desiredLook = useRef(new Vector3())
-  const targetRotation = useRef(new Quaternion())
   const { camera } = useThree()
 
   const resetOwl = useCallback(() => {
@@ -57,9 +54,13 @@ export function RaceController() {
     rigidBody.setTranslation(SPAWN, true)
     rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true)
     rigidBody.setAngvel({ x: 0, y: 0, z: 0 }, true)
+    yaw.current = 0
     facing.current.set(0, 0, -1)
-    useRaceGameStore.getState().setStamina(100)
-    useRaceGameStore.getState().setGrounded(false)
+    if (visual.current) visual.current.rotation.set(0, 0, 0)
+    const state = useRaceGameStore.getState()
+    state.resetInput()
+    state.setStamina(100)
+    state.setGrounded(false)
   }, [])
 
   useEffect(() => {
@@ -83,32 +84,33 @@ export function RaceController() {
     }
 
     const steer = Number(state.input.left) - Number(state.input.right)
-    if (steer !== 0) {
-      facing.current
-        .applyAxisAngle(Y_AXIS, steer * TURN_SPEED * delta)
-        .normalize()
-    }
+    yaw.current += steer * TURN_SPEED * delta
 
-    const throttle =
-      Number(state.input.forward) - Number(state.input.backward)
-    const moving = throttle !== 0
+    // The owl model faces local -Z. Only A/D can change this heading.
+    facing.current.set(
+      -Math.sin(yaw.current),
+      0,
+      -Math.cos(yaw.current)
+    )
+
+    const wantsForward = state.input.forward && !state.input.backward
+    const wantsBackward = state.input.backward && !state.input.forward
+    const moving = wantsForward || wantsBackward
     const boosting =
-      throttle > 0 && state.input.sprint && state.stamina > 0.5
+      wantsForward && state.input.sprint && state.stamina > 0.5
     const climbing = state.input.climb
     const diving = state.input.dive
 
-    const speed =
-      throttle > 0
-        ? boosting
-          ? BOOST_SPEED
-          : CRUISE_SPEED
-        : throttle < 0
-          ? REVERSE_SPEED
-          : 0
+    const forwardSpeed = wantsForward
+      ? boosting
+        ? BOOST_SPEED
+        : CRUISE_SPEED
+      : wantsBackward
+        ? -REVERSE_SPEED
+        : 0
 
-    moveDirection.current
-      .copy(facing.current)
-      .multiplyScalar(speed * Math.sign(throttle))
+    const targetX = facing.current.x * forwardSpeed
+    const targetZ = facing.current.z * forwardSpeed
 
     let targetY = 0
     if (climbing && !diving) targetY = CLIMB_SPEED
@@ -120,18 +122,15 @@ export function RaceController() {
 
     rigidBody.setLinvel(
       {
-        x: MathUtils.lerp(velocity.x, moveDirection.current.x, horizontalControl),
+        x: MathUtils.lerp(velocity.x, targetX, horizontalControl),
         y: MathUtils.lerp(velocity.y, targetY, verticalControl),
-        z: MathUtils.lerp(velocity.z, moveDirection.current.z, horizontalControl),
+        z: MathUtils.lerp(velocity.z, targetZ, horizontalControl),
       },
       true
     )
 
-    targetRotation.current.setFromUnitVectors(FORWARD, facing.current)
-    owlVisual.quaternion.slerp(
-      targetRotation.current,
-      1 - Math.exp(-delta * 12)
-    )
+    // Setting yaw directly avoids quaternion feedback and endless rotation.
+    owlVisual.rotation.y = yaw.current
 
     const staminaDelta = boosting
       ? -STAMINA_BOOST_DRAIN * delta
