@@ -6,8 +6,9 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
+  ChevronsDown,
+  ChevronsUp,
   RotateCcw,
-  Wind,
   Zap,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -24,7 +25,8 @@ const KEY_BINDINGS = {
   ArrowRight: 'right',
   ShiftLeft: 'sprint',
   ShiftRight: 'sprint',
-  KeyE: 'glide',
+  Space: 'climb',
+  KeyE: 'dive',
 } as const
 
 type InputKey = (typeof KEY_BINDINGS)[keyof typeof KEY_BINDINGS]
@@ -33,10 +35,12 @@ function ControlButton({
   label,
   input,
   children,
+  className = 'h-12 w-12 rounded-xl',
 }: {
   label: string
   input: InputKey
   children: React.ReactNode
+  className?: string
 }) {
   const setInput = useRaceGameStore((state) => state.setInput)
 
@@ -49,7 +53,7 @@ function ControlButton({
     <button
       type="button"
       aria-label={label}
-      className="flex h-12 w-12 touch-none select-none items-center justify-center rounded-xl border border-white/20 bg-black/65 text-white shadow-lg backdrop-blur active:scale-95 active:bg-emerald-500/35"
+      className={`flex ${className} touch-none select-none items-center justify-center border border-white/20 bg-black/65 text-white shadow-lg backdrop-blur active:scale-95 active:bg-emerald-500/35`}
       onPointerDown={(event) => {
         event.preventDefault()
         event.currentTarget.setPointerCapture(event.pointerId)
@@ -67,7 +71,6 @@ function ControlButton({
 export function RaceControls() {
   const resetInput = useRaceGameStore((state) => state.resetInput)
   const setInput = useRaceGameStore((state) => state.setInput)
-  const queueJump = useRaceGameStore((state) => state.queueJump)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -75,12 +78,6 @@ export function RaceControls() {
         event.target instanceof HTMLInputElement ||
         event.target instanceof HTMLTextAreaElement
       ) {
-        return
-      }
-
-      if (event.code === 'Space') {
-        event.preventDefault()
-        if (!event.repeat) queueJump()
         return
       }
 
@@ -93,7 +90,10 @@ export function RaceControls() {
 
     const onKeyUp = (event: KeyboardEvent) => {
       const input = KEY_BINDINGS[event.code as keyof typeof KEY_BINDINGS]
-      if (input) setInput(input, false)
+      if (input) {
+        event.preventDefault()
+        setInput(input, false)
+      }
     }
 
     const onBlur = () => resetInput()
@@ -107,45 +107,41 @@ export function RaceControls() {
       window.removeEventListener('blur', onBlur)
       resetInput()
     }
-  }, [queueJump, resetInput, setInput])
+  }, [resetInput, setInput])
 
   return (
     <>
       <div className="pointer-events-auto absolute bottom-4 left-4 grid grid-cols-3 gap-1 md:hidden">
         <span />
-        <ControlButton label="Move forward" input="forward">
+        <ControlButton label="Fly forward" input="forward">
           <ArrowUp className="h-5 w-5" />
         </ControlButton>
         <span />
-        <ControlButton label="Move left" input="left">
+        <ControlButton label="Steer left" input="left">
           <ArrowLeft className="h-5 w-5" />
         </ControlButton>
-        <ControlButton label="Move backward" input="backward">
+        <ControlButton label="Slow down" input="backward">
           <ArrowDown className="h-5 w-5" />
         </ControlButton>
-        <ControlButton label="Move right" input="right">
+        <ControlButton label="Steer right" input="right">
           <ArrowRight className="h-5 w-5" />
         </ControlButton>
       </div>
 
       <div className="pointer-events-auto absolute bottom-4 right-4 flex items-end gap-2 md:hidden">
-        <ControlButton label="Sprint" input="sprint">
+        <ControlButton label="Boost" input="sprint">
           <Zap className="h-5 w-5" />
         </ControlButton>
-        <ControlButton label="Glide" input="glide">
-          <Wind className="h-5 w-5" />
+        <ControlButton label="Dive" input="dive">
+          <ChevronsDown className="h-5 w-5" />
         </ControlButton>
-        <button
-          type="button"
-          aria-label="Jump"
-          className="flex h-14 w-14 touch-none select-none items-center justify-center rounded-full border border-emerald-300/40 bg-emerald-500/35 text-sm font-bold text-white shadow-lg backdrop-blur active:scale-95"
-          onPointerDown={(event) => {
-            event.preventDefault()
-            queueJump()
-          }}
+        <ControlButton
+          label="Climb"
+          input="climb"
+          className="h-14 w-14 rounded-full bg-emerald-500/35"
         >
-          Jump
-        </button>
+          <ChevronsUp className="h-6 w-6" />
+        </ControlButton>
       </div>
 
       <Button
