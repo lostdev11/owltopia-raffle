@@ -199,7 +199,6 @@ export function NestingLandingClient({
           </p>
         </div>
       ) : null}
-      <NestingHero />
 
       <div className="space-y-4">
         <NestingGlobalOwlNestProgress initialStats={initialOwlNest365Stats} />
@@ -212,10 +211,43 @@ export function NestingLandingClient({
         ))}
       </div>
 
-      <section className="space-y-4" aria-labelledby="nesting-easy-mode-heading">
+      <NestingHero />
+
+      <section id="perches" className="scroll-mt-24">
+        <SectionHeader
+          title="Open perches"
+          description="Each card is a perch you can land on—locks, rates, and nest type are spelled out up front."
+        />
+        {initialPools.length === 0 ? (
+          <EmptyState
+            title="No perches live yet"
+            body="Check back soon—new spots hatch here when admins flip them on."
+          />
+        ) : (
+          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {displayPerches.map((item) =>
+              item.kind === 'gen_owl_group' ? (
+                <li key={item.groupKey}>
+                  <ConsolidatedGenOwlStakingCard
+                    groupKey={item.groupKey}
+                    tiers={item.tiers}
+                    nestingPaused={nestingDisabled}
+                  />
+                </li>
+              ) : (
+                <li key={item.pool.id}>
+                  <StakingPoolCard pool={item.pool} nestingPaused={nestingDisabled} />
+                </li>
+              )
+            )}
+          </ul>
+        )}
+      </section>
+
+      <section className="space-y-4" aria-labelledby="nesting-steps-heading">
         <div>
-          <h2 id="nesting-easy-mode-heading" className="text-xl font-semibold tracking-tight text-foreground">
-            Easy mode — nest in 3 steps
+          <h2 id="nesting-steps-heading" className="text-xl font-semibold tracking-tight text-foreground">
+            Nest in 3 steps
           </h2>
           <p className="mt-1 text-sm text-muted-foreground leading-relaxed max-w-2xl">
             Connect, sign nesting notes once per session, then pick your owls and confirm. Stay on the page while the wallet
@@ -289,37 +321,6 @@ export function NestingLandingClient({
           </CardHeader>
         </Card>
       )}
-
-      <section id="perches" className="scroll-mt-24">
-        <SectionHeader
-          title="Open perches"
-          description="Each card is a perch you can land on—locks, rates, and nest type are spelled out up front."
-        />
-        {initialPools.length === 0 ? (
-          <EmptyState
-            title="No perches live yet"
-            body="Check back soon—new spots hatch here when admins flip them on."
-          />
-        ) : (
-          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {displayPerches.map((item) =>
-              item.kind === 'gen_owl_group' ? (
-                <li key={item.groupKey}>
-                  <ConsolidatedGenOwlStakingCard
-                    groupKey={item.groupKey}
-                    tiers={item.tiers}
-                    nestingPaused={nestingDisabled}
-                  />
-                </li>
-              ) : (
-                <li key={item.pool.id}>
-                  <StakingPoolCard pool={item.pool} nestingPaused={nestingDisabled} />
-                </li>
-              )
-            )}
-          </ul>
-        )}
-      </section>
 
       <section>
         <SectionHeader title="FAQ" />

@@ -30,7 +30,7 @@ function stepIndex(id: NestingEasyModeStepId): number {
 }
 
 /**
- * Compact 1–2–3 strip so first-time nesting feels like easy mode, not a scavenger hunt.
+ * Compact 1–2–3 strip so first-time nesting feels guided, not a scavenger hunt.
  */
 export function NestingEasyModeSteps({ current, className, onSafeguardsClick }: Props) {
   const activeIdx = stepIndex(current)
