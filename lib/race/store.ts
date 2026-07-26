@@ -1,12 +1,11 @@
 import { create } from 'zustand'
 
 export type RaceMotionState =
-  | 'idle'
-  | 'run'
-  | 'sprint'
-  | 'jump'
-  | 'fall'
-  | 'glide'
+  | 'hover'
+  | 'fly'
+  | 'boost'
+  | 'climb'
+  | 'dive'
 
 type RaceInputState = {
   forward: boolean
@@ -14,18 +13,16 @@ type RaceInputState = {
   left: boolean
   right: boolean
   sprint: boolean
-  glide: boolean
+  climb: boolean
+  dive: boolean
 }
 
 type RaceGameState = {
   input: RaceInputState
-  jumpQueued: boolean
   grounded: boolean
   stamina: number
   motion: RaceMotionState
   setInput: (key: keyof RaceInputState, pressed: boolean) => void
-  queueJump: () => void
-  consumeJump: () => boolean
   setGrounded: (grounded: boolean) => void
   setStamina: (stamina: number) => void
   setMotion: (motion: RaceMotionState) => void
@@ -38,15 +35,15 @@ const EMPTY_INPUT: RaceInputState = {
   left: false,
   right: false,
   sprint: false,
-  glide: false,
+  climb: false,
+  dive: false,
 }
 
 export const useRaceGameStore = create<RaceGameState>((set, get) => ({
   input: { ...EMPTY_INPUT },
-  jumpQueued: false,
   grounded: false,
   stamina: 100,
-  motion: 'idle',
+  motion: 'hover',
   setInput: (key, pressed) =>
     set((state) => ({
       input: {
@@ -54,12 +51,6 @@ export const useRaceGameStore = create<RaceGameState>((set, get) => ({
         [key]: pressed,
       },
     })),
-  queueJump: () => set({ jumpQueued: true }),
-  consumeJump: () => {
-    if (!get().jumpQueued) return false
-    set({ jumpQueued: false })
-    return true
-  },
   setGrounded: (grounded) => set({ grounded }),
   setStamina: (stamina) =>
     set({ stamina: Math.max(0, Math.min(100, stamina)) }),
@@ -69,6 +60,5 @@ export const useRaceGameStore = create<RaceGameState>((set, get) => ({
   resetInput: () =>
     set({
       input: { ...EMPTY_INPUT },
-      jumpQueued: false,
     }),
 }))
