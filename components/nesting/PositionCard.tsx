@@ -24,6 +24,7 @@ import {
   type NestingTxPhase,
 } from '@/lib/nesting/tx-states'
 import { nestingClaimAccruingButtonClass, nestingClaimReadyButtonClass } from '@/lib/nesting/ui-classes'
+import { formatDailyOwlPerNest, rewardRateToDaily } from '@/lib/nesting/format'
 import { cn } from '@/lib/utils'
 
 function nestStatusPhrase(
@@ -147,6 +148,20 @@ export function PositionNestRow({
 
   const claimAmountInput = claimable
   const claimAmountLabel = claimable.toLocaleString(undefined, { maximumFractionDigits: 6 })
+  const rewardToken = (position.reward_token_snapshot ?? 'OWL').trim() || 'OWL'
+  const dailyPerUnit = rewardRateToDaily(
+    Number(position.reward_rate_snapshot),
+    position.reward_rate_unit_snapshot as string
+  )
+  const dailyForNest = dailyPerUnit * Number(position.amount)
+  const dailyOwlLabel =
+    dailyForNest > 0
+      ? formatDailyOwlPerNest(
+          Number(position.reward_rate_snapshot) * Number(position.amount),
+          position.reward_rate_unit_snapshot as string,
+          rewardToken.toUpperCase()
+        )
+      : '—'
 
   const anyTxInFlight = isNestingTxPhaseInFlight(claimPhase) || isNestingTxPhaseInFlight(unstakePhase)
   const showLinePhase: NestingTxPhase = isNestingTxPhaseInFlight(claimPhase)
@@ -245,14 +260,25 @@ export function PositionNestRow({
           <dd className="font-mono tabular-nums">{Number(position.amount).toLocaleString()}</dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Ready to claim</dt>
+          <dt className="text-muted-foreground">Balance</dt>
           <dd
             className={cn(
               'font-mono tabular-nums',
               isOpening ? 'text-muted-foreground' : 'text-theme-prime'
             )}
           >
-            {isOpening ? 'After opening' : claimAmountLabel}
+            {isOpening ? 'After opening' : `${claimAmountLabel} ${rewardToken.toUpperCase()}`}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Daily OWL</dt>
+          <dd
+            className={cn(
+              'font-mono tabular-nums',
+              position.status === 'active' ? 'text-theme-prime' : 'text-muted-foreground'
+            )}
+          >
+            {position.status === 'unstaked' ? '—' : dailyOwlLabel}
           </dd>
         </div>
         <div>

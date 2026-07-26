@@ -26,6 +26,53 @@ export function formatRewardRate(rate: number, unit: string): string {
   return `${r}${label}`
 }
 
+/** Convert a pool rate into OWL (or reward token) per day. */
+export function rewardRateToDaily(rate: number, unit: string): number {
+  const r = Number(rate)
+  if (!Number.isFinite(r) || r < 0) return 0
+  if (unit === 'hourly') return r * 24
+  if (unit === 'weekly') return r / 7
+  return r
+}
+
+/** Total reward accrued over a full lock for one nest unit (1 NFT or 1 token unit). */
+export function nestLockPeriodTotalReward(
+  rate: number,
+  unit: string,
+  lockPeriodDays: number
+): number {
+  const days = Number(lockPeriodDays)
+  if (!Number.isFinite(days) || days <= 0) return 0
+  return rewardRateToDaily(rate, unit) * days
+}
+
+function formatOwlAmount(n: number): string {
+  if (!Number.isFinite(n)) return '—'
+  if (Number.isInteger(n)) return String(n)
+  if (n >= 10) return n.toFixed(1).replace(/\.0$/, '')
+  return n.toFixed(2).replace(/\.?0+$/, '')
+}
+
+/** e.g. "0.2 OWL / day" */
+export function formatDailyOwlPerNest(rate: number, unit: string, token = 'OWL'): string {
+  const daily = rewardRateToDaily(rate, unit)
+  if (daily <= 0) return '—'
+  return `${formatOwlAmount(daily)} ${token} / day`
+}
+
+/** e.g. "~18 OWL over 90 days" — the balance one nest earns if held through unlock. */
+export function formatNestLockBalance(
+  rate: number,
+  unit: string,
+  lockPeriodDays: number,
+  token = 'OWL'
+): string {
+  const total = nestLockPeriodTotalReward(rate, unit, lockPeriodDays)
+  if (total <= 0) return '—'
+  const days = Math.round(Number(lockPeriodDays))
+  return `~${formatOwlAmount(total)} ${token} over ${days} days`
+}
+
 export function shortenAddress(addr: string, chars = 4): string {
   const a = addr.trim()
   if (a.length <= chars * 2 + 1) return a

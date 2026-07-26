@@ -66,7 +66,18 @@ export function NftPerchGroupedNestCard({
   const claimSummary = useMemo(() => {
     let totalClaimable = 0
     let claimableCount = 0
+    let dailyOwl = 0
     for (const pos of positions) {
+      if (pos.status === 'active') {
+        const unit = pos.reward_rate_unit_snapshot as RewardRateUnit
+        const rate = Number(pos.reward_rate_snapshot)
+        const amount = Number(pos.amount)
+        if (Number.isFinite(rate) && Number.isFinite(amount) && rate > 0 && amount > 0) {
+          if (unit === 'hourly') dailyOwl += amount * rate * 24
+          else if (unit === 'weekly') dailyOwl += (amount * rate) / 7
+          else dailyOwl += amount * rate
+        }
+      }
       if (pos.status !== 'active') continue
       if ((pos.reward_token_snapshot ?? '').trim().toUpperCase() !== 'OWL') continue
       const claimable = estimateClaimableRewards({
@@ -82,7 +93,7 @@ export function NftPerchGroupedNestCard({
         claimableCount += 1
       }
     }
-    return { totalClaimable, claimableCount }
+    return { totalClaimable, claimableCount, dailyOwl }
   }, [positions, nowMs])
 
   const [expanded, setExpanded] = useState(() => needsAttention)
@@ -106,9 +117,14 @@ export function NftPerchGroupedNestCard({
   const collapsedSummaryParts: string[] = [
     `${positions.length} ${positions.length === 1 ? assetLabels.singular : assetLabels.plural}`,
   ]
+  if (claimSummary.dailyOwl > 0) {
+    collapsedSummaryParts.push(
+      `${claimSummary.dailyOwl.toLocaleString(undefined, { maximumFractionDigits: 2 })} OWL / day`
+    )
+  }
   if (claimSummary.claimableCount > 0) {
     collapsedSummaryParts.push(
-      `${claimSummary.totalClaimable.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL ready`
+      `${claimSummary.totalClaimable.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL balance`
     )
   }
   if (needsWalletLock > 0) {

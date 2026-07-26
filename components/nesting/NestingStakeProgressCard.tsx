@@ -51,7 +51,6 @@ export function NestingStakeProgressCard({
   const step = activeStep(phase)
   const showCloseSafe = closeSafe && step === 'confirming'
   const plural = nestCount > 1
-  const assetWord = plural ? assetPlural : assetSingular
   const steps: Array<{ id: StepId; title: string; detail: string }> = [
     {
       id: 'preparing',
@@ -62,8 +61,8 @@ export function NestingStakeProgressCard({
       id: 'wallet',
       title: 'Approve in your wallet',
       detail: feeIncluded
-        ? `One approval locks your ${assetWord} and pays the small SOL fee together.`
-        : `One approval locks your ${assetWord} in your wallet (it stays yours).`,
+        ? `Each ${assetSingular} is frozen for the nest (not transferred), and the SOL nest fee is paid in the same approval.`
+        : `Each ${assetSingular} is frozen for the nest — not transferred. They stay in your wallet.`,
     },
     {
       id: 'confirming',

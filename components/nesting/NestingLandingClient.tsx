@@ -344,7 +344,7 @@ export function NestingLandingClient({
             },
             {
               q: 'What am I approving when I nest?',
-              a: 'A lock on each selected owl so it stays in your wallet but cannot transfer for the nest period. Phantom often lists this as “Approve to transfer” — that is the freeze, not sending the NFT away. Jupiter can look a lot scarier for the same step; Phantom and Solflare usually show clearer wording. On My nest, expand “What you are approving” for a short walkthrough. If you are not on owltopia.xyz, cancel.',
+              a: 'A freeze on each selected owl so it stays in your wallet but cannot trade for the nest period. Owls are not transferred. Phantom often still lists this as “Approve to transfer” — that is their label for the freeze step, not sending the NFT away. Jupiter can look scarier for the same step. On My nest, expand “What you are approving” for a short walkthrough. If you are not on owltopia.xyz, cancel.',
             },
             {
               q: 'Why do you ask me to sign a message on the dashboard?',

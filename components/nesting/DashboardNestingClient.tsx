@@ -92,6 +92,7 @@ import { NestingOwlCoinWalletProgressPanel } from '@/components/nesting/NestingO
 import { NestingGomtMigrationNotice } from '@/components/nesting/NestingGomtMigrationNotice'
 import { NestingPlatformFeeNotice } from '@/components/nesting/NestingPlatformFeeNotice'
 import { NestingSecurityNotice } from '@/components/nesting/NestingSecurityNotice'
+import { NestCostSummary } from '@/components/nesting/NestCostSummary'
 import { NestWalletNotice } from '@/components/nesting/NestWalletNotice'
 import { NestingEasyModeSteps } from '@/components/nesting/NestingEasyModeSteps'
 import { NestingClaimLedger } from '@/components/nesting/NestingClaimLedger'
@@ -129,7 +130,6 @@ import {
   batchRelockMplCoreNestAssetsInWallet,
   capNftStakeAssetIds,
   chunkNftFreezeAssetIds,
-  NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX,
   NESTING_NFT_STAKE_MAX_PER_RUN,
 } from '@/lib/solana/mpl-core-freeze'
 import {
@@ -3719,8 +3719,15 @@ export function DashboardNestingClient() {
                         type="button"
                         className="touch-manipulation rounded-lg bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-theme-prime hover:bg-emerald-500/25"
                         onClick={selectAllNestableOwlMints}
+                        aria-label={
+                          nestableOwlMintIds.length > NESTING_NFT_STAKE_MAX_PER_RUN
+                            ? `Select up to ${NESTING_NFT_STAKE_MAX_PER_RUN} nestable ${nftAssetLabels.plural}`
+                            : `Select all nestable ${nftAssetLabels.plural}`
+                        }
                       >
-                        Max
+                        {nestableOwlMintIds.length > NESTING_NFT_STAKE_MAX_PER_RUN
+                          ? `Max ${NESTING_NFT_STAKE_MAX_PER_RUN}`
+                          : 'Max'}
                       </button>
                     ) : null}
                   </div>
@@ -4255,13 +4262,30 @@ export function DashboardNestingClient() {
               feeIncluded={platformFeeActive}
               closeSafe={stakeCloseSafe}
             />
+            {nftMintRequired && stakeTxPhase === 'idle' && selectedNftStakeAssetIds.length > 0 ? (
+              <NestCostSummary
+                assets={selectedNftStakeAssetIds.map((mint) => {
+                  const row = selectedOwlNestMintRows.find((r) => r.mint === mint)
+                  return {
+                    mint,
+                    name: row?.name ?? null,
+                    image: row?.image ?? null,
+                  }
+                })}
+                walletApprovals={chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length}
+                platformFeeActive={platformFeeActive}
+                assetSingular={nftAssetLabels.singular}
+                assetPlural={nftAssetLabels.plural}
+                remainingAfterBatch={Math.max(
+                  0,
+                  nestableOwlMintIds.length - selectedNftStakeAssetIds.length
+                )}
+              />
+            ) : null}
             {nftMintRequired && stakeTxPhase === 'idle' ? (
               <p className="text-xs text-center text-muted-foreground leading-relaxed px-1" role="note">
-                {chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length > 1
-                  ? `${chunkNftFreezeAssetIds(selectedNftStakeAssetIds).length} wallet approvals (up to ${NESTING_MPL_CORE_FREEZE_WALLET_BATCH_MAX} ${nftAssetLabels.plural} each)`
-                  : 'One wallet approval'}
-                {platformFeePerNestLabel ? ` · includes ${platformFeePerNestLabel} fee` : ''} · keep this page open
-                until you approve in your wallet — after that, nesting finishes in the background.
+                Keep this page open until you approve in your wallet — after that, nesting finishes in the
+                background.
               </p>
             ) : null}
             {nftMintRequired && stakeTxPhase === 'idle' ? (

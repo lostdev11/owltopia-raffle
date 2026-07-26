@@ -95,44 +95,61 @@ export function NestSwapOwlPickerDialog({
     [rows, filter]
   )
 
+  const nestableCount = counts.nestable
+  const needsBatching = nestableCount > maxPerRun
+  const selectBatchLabel = needsBatching
+    ? `Select ${maxPerRun}`
+    : nestableCount === 1
+      ? 'Select 1'
+      : 'Select all'
+
+  const hintText =
+    selectedCount > 0
+      ? needsBatching
+        ? `${selectedCount} of ${nestableCount} selected · confirm this batch, then pick more`
+        : `${selectedCount} selected · ready to confirm`
+      : needsBatching
+        ? `Wallet limit: nest up to ${maxPerRun} at a time (${nestableCount} nestable). Confirm each batch, then select again.`
+        : `Tap ${assetLabels.plural} to select · up to ${maxPerRun} per confirm`
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[min(90vh,40rem)] max-w-[min(94vw,26rem)] flex-col gap-0 overflow-hidden rounded-2xl border-emerald-500/20 bg-[#0c100e] p-0">
-        <DialogHeader className="shrink-0 border-b border-white/[0.06] p-4 pb-3">
-          <DialogTitle className="text-left text-base">
+        {/* Keep Select all below/clear of DialogContent’s absolute 44px close hit target */}
+        <DialogHeader className="shrink-0 border-b border-white/[0.06] p-4 pb-3 pr-12">
+          <DialogTitle className="text-left text-base pr-2">
             Select {assetLabels.plural}
           </DialogTitle>
+          <p className="pt-1 text-xs leading-snug text-muted-foreground">{hintText}</p>
           <div className="flex items-center justify-between gap-2 pt-1">
-            <p className="text-xs text-muted-foreground">
-              {selectedCount > 0
-                ? `${selectedCount} selected · up to ${maxPerRun} per confirm`
-                : `Tap ${assetLabels.plural} to select · up to ${maxPerRun} per confirm`}
-            </p>
-            <div className="flex shrink-0 items-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2 text-xs text-theme-prime disabled:opacity-40"
-                disabled={selectAllDisabled || filter !== 'nestable'}
-                onClick={onSelectAll}
-              >
-                Select all
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0 text-muted-foreground"
-                aria-label={`Reload ${assetLabels.plural}`}
-                disabled={reloading}
-                onClick={onReload}
-              >
-                <RefreshCw className={cn('h-4 w-4', reloading && 'animate-spin')} aria-hidden />
-              </Button>
-            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="min-h-[44px] touch-manipulation px-2.5 text-xs font-semibold text-theme-prime disabled:opacity-40"
+              disabled={selectAllDisabled || filter !== 'nestable'}
+              onClick={onSelectAll}
+              aria-label={
+                needsBatching
+                  ? `Select first ${maxPerRun} nestable ${assetLabels.plural}`
+                  : `Select all nestable ${assetLabels.plural}`
+              }
+            >
+              {selectBatchLabel}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="min-h-[44px] min-w-[44px] touch-manipulation p-0 text-muted-foreground"
+              aria-label={`Reload ${assetLabels.plural}`}
+              disabled={reloading}
+              onClick={onReload}
+            >
+              <RefreshCw className={cn('h-4 w-4', reloading && 'animate-spin')} aria-hidden />
+            </Button>
           </div>
-          <div className="flex flex-wrap gap-1.5 pt-3" role="tablist" aria-label="Filter by nest status">
+          <div className="flex flex-wrap gap-1.5 pt-2" role="tablist" aria-label="Filter by nest status">
             {FILTER_CHIPS.map((chip) => {
               const count = counts[chip.id]
               const active = filter === chip.id
@@ -237,11 +254,17 @@ export function NestSwapOwlPickerDialog({
             onClick={() => onOpenChange(false)}
           >
             {selectedCount > 0
-              ? `Done — ${selectedCount} ${selectedCount === 1 ? assetLabels.singular : assetLabels.plural}`
+              ? needsBatching
+                ? `Done — nest these ${selectedCount}`
+                : `Done — ${selectedCount} ${selectedCount === 1 ? assetLabels.singular : assetLabels.plural}`
               : 'Close'}
           </Button>
           <p className="mt-2 text-center text-[11px] leading-snug text-muted-foreground">
-            {capitalizedPlural} already nested or frozen elsewhere can&apos;t be selected.
+            {needsBatching
+              ? selectedCount > 0
+                ? `Confirm nest for this batch, then come back for the remaining ${Math.max(0, nestableCount - selectedCount)}.`
+                : `Larger flocks nest in batches of ${maxPerRun} — wallet size limit.`
+              : `${capitalizedPlural} already nested or frozen elsewhere can&apos;t be selected.`}
           </p>
         </div>
       </DialogContent>

@@ -58,8 +58,19 @@ export async function assertTransactionSimulatesClean(
       return
     }
 
-    // Legacy Transaction: older overload — omit signers so the node skips signature verification.
-    const sim = await connection.simulateTransaction(tx as Transaction)
+    // Legacy Transaction: compile to a versioned message so sigVerify/replaceRecentBlockhash apply
+    // the same way Phantom simulates it. Falls back to the older overload if compiling fails.
+    const legacy = tx as Transaction
+    let sim
+    try {
+      sim = await connection.simulateTransaction(new VersionedTransaction(legacy.compileMessage()), {
+        sigVerify: false,
+        commitment: 'confirmed',
+        replaceRecentBlockhash: true,
+      })
+    } catch {
+      sim = await connection.simulateTransaction(legacy)
+    }
     if (sim.value.err) {
       const logs = (sim.value.logs ?? []).slice(-10).join('\n')
       throw new PhantomPresimulateError(`${failPrefix}${logs ? `\n${logs}` : ''}`)

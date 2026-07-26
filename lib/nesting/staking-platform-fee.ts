@@ -72,3 +72,52 @@ export function formatStakingPlatformFeeTotalLabel(units: number): string {
   const unitStr = unitSol >= 0.01 ? unitSol.toFixed(3) : unitSol.toFixed(4)
   return `${totalStr} SOL platform fee (${units} NFT${units === 1 ? '' : 's'} × ${unitStr} SOL)`
 }
+
+/** Base Solana signature fee per approval — validators may charge a little more under load. */
+const APPROX_NETWORK_FEE_SOL_PER_APPROVAL = 0.000005
+
+export function formatSolAmount(sol: number): string {
+  if (sol <= 0) return '0 SOL'
+  if (sol < 0.0001) return `${sol.toFixed(6)} SOL`
+  return `${sol >= 0.01 ? sol.toFixed(3) : sol.toFixed(4)} SOL`
+}
+
+export type NestCostEstimate = {
+  nestCount: number
+  walletApprovals: number
+  feePerNestSol: number
+  platformFeeSol: number
+  networkFeeSol: number
+  totalSol: number
+  perNestLabel: string
+  platformFeeLabel: string
+  networkFeeLabel: string
+  totalLabel: string
+}
+
+/** Up-front "what this costs" numbers for the Confirm nest screen. */
+export function buildNestCostEstimate(params: {
+  nestCount: number
+  walletApprovals: number
+  platformFeeActive: boolean
+}): NestCostEstimate | null {
+  const nestCount = Math.max(0, Math.floor(params.nestCount))
+  if (nestCount < 1) return null
+  const walletApprovals = Math.max(1, Math.floor(params.walletApprovals))
+  const feePerNestSol = params.platformFeeActive ? getStakingPlatformFeeSol() : 0
+  const platformFeeSol = feePerNestSol * nestCount
+  const networkFeeSol = APPROX_NETWORK_FEE_SOL_PER_APPROVAL * walletApprovals
+  const totalSol = platformFeeSol + networkFeeSol
+  return {
+    nestCount,
+    walletApprovals,
+    feePerNestSol,
+    platformFeeSol,
+    networkFeeSol,
+    totalSol,
+    perNestLabel: formatSolAmount(feePerNestSol),
+    platformFeeLabel: formatSolAmount(platformFeeSol),
+    networkFeeLabel: `~${formatSolAmount(networkFeeSol)}`,
+    totalLabel: `~${formatSolAmount(totalSol)}`,
+  }
+}
