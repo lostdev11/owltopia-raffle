@@ -196,8 +196,8 @@ export function RaceLanding() {
             <div className="mt-8 w-full text-left">
               <RaceGame />
               <p className="mt-3 text-center text-xs text-zinc-500">
-                Phase 1 flight controller. The rigged owl model will replace
-                the placeholder without changing movement or physics.
+                Phase 1 flight controller with the optimized Smart Rig owl,
+                procedural wing motion, and live race physics.
               </p>
             </div>
           ) : null}
