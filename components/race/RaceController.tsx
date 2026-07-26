@@ -83,7 +83,10 @@ export function RaceController() {
       return
     }
 
-    const steer = Number(state.input.left) - Number(state.input.right)
+    const controlsEnabled = state.status === 'racing'
+    const steer = controlsEnabled
+      ? Number(state.input.left) - Number(state.input.right)
+      : 0
     yaw.current += steer * TURN_SPEED * delta
 
     // The owl model faces local -Z. Only A/D can change this heading.
@@ -95,13 +98,15 @@ export function RaceController() {
 
     // The placeholder owl's authored forward axis is opposite the scene axis,
     // so the input channels are intentionally resolved in model space.
-    const wantsForward = state.input.backward && !state.input.forward
-    const wantsBackward = state.input.forward && !state.input.backward
+    const wantsForward =
+      controlsEnabled && state.input.backward && !state.input.forward
+    const wantsBackward =
+      controlsEnabled && state.input.forward && !state.input.backward
     const moving = wantsForward || wantsBackward
     const boosting =
       wantsForward && state.input.sprint && state.stamina > 0.5
-    const climbing = state.input.climb
-    const diving = state.input.dive
+    const climbing = controlsEnabled && state.input.climb
+    const diving = controlsEnabled && state.input.dive
 
     const forwardSpeed = wantsForward
       ? boosting
