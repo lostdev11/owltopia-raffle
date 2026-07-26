@@ -165,6 +165,8 @@ function rpcEndpointLooksDevnet(endpoint: string | undefined): boolean {
 
 export function DashboardNestingClient() {
   const { publicKey, connected, signMessage, signTransaction, wallet } = useWallet()
+  /** Stable string — wallet adapters often recreate the PublicKey object each render. */
+  const walletAddr = publicKey?.toBase58() ?? ''
   const {
     acknowledged: securityAck,
     signing: securityAckSigning,
@@ -194,6 +196,7 @@ export function DashboardNestingClient() {
   const [positions, setPositions] = useState<StakingPositionRow[]>([])
   const [claimLedgerEvents, setClaimLedgerEvents] = useState<StakingRewardEventRow[]>([])
   const [loading, setLoading] = useState(true)
+  const refreshGenRef = useRef(0)
   const [walletReady, setWalletReady] = useState(() =>
     typeof window !== 'undefined' ? !isMobileDevice() : true
   )
@@ -298,8 +301,6 @@ export function DashboardNestingClient() {
     })
   }, [])
 
-  const walletAddr = publicKey?.toBase58() ?? ''
-
   const platformFeeActive = useMemo(
     () => platformFeeConfig.lamports > 0 && !!platformFeeConfig.treasury?.trim(),
     [platformFeeConfig]
@@ -344,12 +345,11 @@ export function DashboardNestingClient() {
   }, [])
 
   const loadClaimLedger = useCallback(async () => {
-    if (!connected || !publicKey) return
-    const addr = publicKey.toBase58()
+    if (!connected || !walletAddr) return
     const res = await fetch(nestingClientApiUrl('/api/me/staking/reward-events?limit=25'), {
       credentials: 'include',
       cache: 'no-store',
-      headers: { 'X-Connected-Wallet': addr },
+      headers: { 'X-Connected-Wallet': walletAddr },
     })
     if (!res.ok) {
       setClaimLedgerEvents([])
@@ -357,7 +357,7 @@ export function DashboardNestingClient() {
     }
     const json = await res.json().catch(() => ({}))
     setClaimLedgerEvents(Array.isArray(json.events) ? json.events : [])
-  }, [connected, publicKey])
+  }, [connected, walletAddr])
 
   const applyPositionsPayload = useCallback(
     (json: Record<string, unknown>, opts?: { showHealSuccess?: boolean }) => {
@@ -384,8 +384,7 @@ export function DashboardNestingClient() {
 
   const loadPositions = useCallback(
     async (opts?: { heal?: boolean; silent?: boolean }): Promise<boolean> => {
-      if (!connected || !publicKey) return false
-      const addr = publicKey.toBase58()
+      if (!connected || !walletAddr) return false
       const heal = opts?.heal !== false
       const url = heal
         ? '/api/me/staking/positions'
@@ -393,7 +392,7 @@ export function DashboardNestingClient() {
       const result = await fetchNestingJson<Record<string, unknown>>(url, {
         credentials: 'include',
         cache: 'no-store',
-        headers: { 'X-Connected-Wallet': addr },
+        headers: { 'X-Connected-Wallet': walletAddr },
       })
 
       if (result.status === 0 && !result.ok) {
@@ -432,16 +431,17 @@ export function DashboardNestingClient() {
       void loadClaimLedger()
       return true
     },
-    [connected, publicKey, loadClaimLedger, applyPositionsPayload]
+    [connected, walletAddr, loadClaimLedger, applyPositionsPayload]
   )
 
   const refreshAll = useCallback(async () => {
-    if (!connected || !publicKey) {
+    if (!connected || !walletAddr) {
       setLoading(false)
       setPositions([])
       setNeedsSignIn(false)
       return
     }
+    const gen = ++refreshGenRef.current
     setLoading(true)
     setError(null)
     let ok = false
@@ -450,6 +450,7 @@ export function DashboardNestingClient() {
         loadPools(),
         loadPositions({ heal: false }),
       ])
+      if (gen !== refreshGenRef.current) return
       ok = positionsLoaded
       if (
         !ok &&
@@ -458,6 +459,7 @@ export function DashboardNestingClient() {
         document.visibilityState === 'visible'
       ) {
         await new Promise((r) => setTimeout(r, MOBILE_401_RETRY_MS))
+        if (gen !== refreshGenRef.current) return
         ok = await loadPositions({ heal: false, silent: true })
       }
       if (
@@ -467,17 +469,22 @@ export function DashboardNestingClient() {
         document.visibilityState === 'visible'
       ) {
         await new Promise((r) => setTimeout(r, MOBILE_NETWORK_RETRY_MS))
+        if (gen !== refreshGenRef.current) return
         ok = await loadPositions({ heal: false, silent: true })
       }
     } catch (e) {
-      setError(formatNestingApiFetchError(e, 'positions'))
+      if (gen === refreshGenRef.current) {
+        setError(formatNestingApiFetchError(e, 'positions'))
+      }
     } finally {
-      setLoading(false)
+      if (gen === refreshGenRef.current) {
+        setLoading(false)
+      }
     }
-    if (ok) {
+    if (ok && gen === refreshGenRef.current) {
       void loadPositions({ heal: true, silent: true })
     }
-  }, [connected, publicKey, loadPools, loadPositions])
+  }, [connected, walletAddr, loadPools, loadPositions])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -485,21 +492,31 @@ export function DashboardNestingClient() {
       setWalletReady(true)
       return
     }
-    if (connected && publicKey) {
+    if (connected && walletAddr) {
       setWalletReady(true)
       return
     }
     const t = setTimeout(() => setWalletReady(true), MOBILE_WALLET_STABILIZE_MS)
     return () => clearTimeout(t)
-  }, [connected, publicKey])
+  }, [connected, walletAddr])
 
   useEffect(() => {
     if (!walletReady && isMobileDevice()) return
     void refreshAll()
   }, [refreshAll, walletReady])
 
+  /** Escape hatch — never leave the page stuck on "Warming up your nest". */
   useEffect(() => {
-    if (!connected || !publicKey) return
+    if (!loading) return
+    const t = window.setTimeout(() => {
+      setLoading(false)
+      setError((prev) => prev ?? nestingFetchTimeoutMessage('positions'))
+    }, 18_000)
+    return () => window.clearTimeout(t)
+  }, [loading])
+
+  useEffect(() => {
+    if (!connected || !walletAddr) return
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return
       const run = () => {
@@ -520,7 +537,7 @@ export function DashboardNestingClient() {
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [connected, publicKey, loadPositions])
+  }, [connected, walletAddr, loadPositions])
 
 
   const [rewardsNowMs, setRewardsNowMs] = useState(() => Date.now())
@@ -1282,7 +1299,7 @@ export function DashboardNestingClient() {
     }
     if (activeGenGroupKey && !selectedLockTierSlug) return 'Pick 90 or 180 days first.'
     if (!selectedPerch) return 'Choose a perch first.'
-    if (!securityAck) return 'Sign the nesting safeguards with your wallet above before confirming.'
+    if (!securityAck) return 'Sign the nesting notes with your wallet above before confirming.'
     if (nestingDisabled && !canOnlyResumeFreeze) {
       return 'Nesting is paused — you can only finish nests that are already opening.'
     }
@@ -3099,11 +3116,24 @@ export function DashboardNestingClient() {
 
   if (loading) {
     return (
-      <main className="container mx-auto px-4 py-10 max-w-4xl">
+      <main className="container mx-auto px-4 py-10 max-w-4xl space-y-4 safe-area-bottom">
         <div className="flex items-center gap-2 text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" />
+          <Loader2 className="h-5 w-5 animate-spin shrink-0" aria-hidden />
           Warming up your nest…
         </div>
+        <p className="text-xs text-muted-foreground leading-relaxed max-w-md">
+          Pulling your perches and nests. If this takes more than a few seconds, tap Retry — a refresh usually
+          clears a stuck wallet browser.
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-[44px] touch-manipulation"
+          onClick={() => void refreshAll()}
+        >
+          <RefreshCw className="h-4 w-4 mr-2" aria-hidden />
+          Retry
+        </Button>
       </main>
     )
   }
@@ -4268,7 +4298,7 @@ export function DashboardNestingClient() {
                   className="text-xs text-center text-amber-300 leading-relaxed px-1 underline underline-offset-2 touch-manipulation min-h-[44px] w-full"
                   onClick={scrollToSafeguards}
                 >
-                  {confirmNestDisabledReason} Tap to jump to the orange safeguards box.
+                  {confirmNestDisabledReason} Tap to jump to the nesting notes box.
                 </button>
               ) : (
                 <p
@@ -4300,7 +4330,7 @@ export function DashboardNestingClient() {
         ) : null}
       </section>
 
-      <section id="nesting-your-nests">
+      <section id="nesting-your-nests" className="scroll-mt-24">
         <SectionHeader
           title="Your nests"
           description="Claim OWL anytime—use it in raffles right away or let it stack. Many nests on the same perch show in one card—tap the header to expand or collapse."

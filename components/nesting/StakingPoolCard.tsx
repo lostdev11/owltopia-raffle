@@ -166,7 +166,13 @@ export function StakingPoolCard({ pool, compact = false, nestingPaused = false }
 
                 <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
 
-                  <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}`}>My nest</Link>
+                  <Link
+                    href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}#nesting-your-nests`}
+                    title="View and manage nests you already opened"
+                    aria-label="My nest — view and manage nests you already opened"
+                  >
+                    My nest
+                  </Link>
 
                 </Button>
 
@@ -176,17 +182,33 @@ export function StakingPoolCard({ pool, compact = false, nestingPaused = false }
 
               <>
 
-                <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
+                <Button asChild variant="default" size="sm" className="min-h-[44px] touch-manipulation font-semibold">
 
-                  <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}`}>Nest here</Link>
+                  <Link
+                    href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}#nesting-open-nest-form`}
+                    title="Start a new nest on this perch"
+                    aria-label="Nest here — start a new nest on this perch"
+                  >
+                    Nest here
+                  </Link>
 
                 </Button>
 
                 <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
 
-                  <Link href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}`}>My nest</Link>
+                  <Link
+                    href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}#nesting-your-nests`}
+                    title="View and manage nests you already opened"
+                    aria-label="My nest — view and manage nests you already opened"
+                  >
+                    My nest
+                  </Link>
 
                 </Button>
+
+                <p className="w-full text-[11px] leading-snug text-muted-foreground">
+                  Nest here = start nesting · My nest = manage yours
+                </p>
 
               </>
 

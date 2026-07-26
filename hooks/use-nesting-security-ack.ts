@@ -164,13 +164,13 @@ export function useNestingSecurityAck(publicKey: PublicKey | null) {
         ) {
           throw new Error(
             'Phantom/Solflare added a Lighthouse security instruction that Ledger cannot clear-sign for safeguards. ' +
-              'Enable Blind signing in the Ledger Solana app, unlock the device, close Ledger Live, prefer USB, then try “Sign safeguards with Ledger” again. ' +
-              'If it still fails, sign safeguards from a hot wallet — wallet + Ledger limitation, not an Owltopia fee.'
+              'Enable Blind signing in the Ledger Solana app, unlock the device, close Ledger Live, prefer USB, then try “Sign with Ledger” again. ' +
+              'If it still fails, sign nesting notes from a hot wallet — wallet + Ledger limitation, not an Owltopia fee.'
           )
         }
         throw new Error(
           formatSignMessageError(e, { walletName: params.walletName, context: 'safeguards' }) +
-            ' If Sign Message never appears on Ledger, use “Sign safeguards with Ledger” — approve the memo tx on the device (it is not broadcast; no fee is charged by Owltopia).'
+            ' If Sign Message never appears on Ledger, use “Sign with Ledger” — approve the memo tx on the device (it is not broadcast; no fee is charged by Owltopia).'
         )
       }
 
@@ -179,7 +179,7 @@ export function useNestingSecurityAck(publicKey: PublicKey | null) {
         signedTransactionBase64 = serializeSignedSignInTransaction(signed)
       } catch (e) {
         throw new Error(
-          `Could not read the signed Ledger transaction (${e instanceof Error ? e.message : 'serialize failed'}). Try Phantom or Solflare on desktop USB, then tap Sign safeguards with Ledger again.`
+          `Could not read the signed Ledger transaction (${e instanceof Error ? e.message : 'serialize failed'}). Try Phantom or Solflare on desktop USB, then tap Sign with Ledger again.`
         )
       }
 
@@ -265,7 +265,7 @@ export function useNestingSecurityAck(publicKey: PublicKey | null) {
           const signature = await withTimeout(
             signMessage(messageBytes),
             ACK_SIGN_TIMEOUT_MS,
-            'Timed out waiting for a safeguards signature. Approve Sign Message on your Ledger if prompted, or use “Sign safeguards with Ledger” below.'
+            'Timed out waiting for a nesting-notes signature. Approve Sign Message on your Ledger if prompted, or use “Sign with Ledger” below.'
           )
 
           const localVerify = verifyNestingSecurityAckClient(publicKey, challenge.message, signature)

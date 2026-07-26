@@ -14,7 +14,7 @@ type Step = {
 
 const STEPS: Step[] = [
   { id: 'connect', n: 1, title: 'Connect', hint: 'Wallet + sign-in' },
-  { id: 'safeguards', n: 2, title: 'Safeguards', hint: 'One short signature' },
+  { id: 'safeguards', n: 2, title: 'Notes', hint: 'One short signature' },
   { id: 'nest', n: 3, title: 'Nest', hint: 'Pick owls → Confirm' },
 ]
 
@@ -55,7 +55,7 @@ export function NestingEasyModeSteps({ current, className, onSafeguardsClick }: 
                 className={cn(
                   'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold',
                   done && 'bg-emerald-500/20 text-emerald-400',
-                  active && 'bg-amber-500 text-amber-950',
+                  active && 'bg-theme-prime text-background',
                   !done && !active && 'bg-muted text-muted-foreground'
                 )}
                 aria-hidden
@@ -84,7 +84,7 @@ export function NestingEasyModeSteps({ current, className, onSafeguardsClick }: 
                   onClick={onSafeguardsClick}
                   className={cn(
                     'flex w-full items-start gap-2 rounded-lg px-1.5 py-1.5 touch-manipulation min-h-[44px]',
-                    'ring-1 ring-amber-500/50 bg-amber-500/[0.08] hover:bg-amber-500/[0.14]'
+                    'ring-1 ring-theme-prime/45 bg-theme-prime/[0.08] hover:bg-theme-prime/[0.14]'
                   )}
                   aria-current="step"
                 >

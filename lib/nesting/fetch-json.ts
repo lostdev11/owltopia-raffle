@@ -40,6 +40,8 @@ function isLikelyFetchNetworkOrTimeout(e: unknown): boolean {
   )
 }
 
+const TIMEOUT_SENTINEL = Symbol('nesting-fetch-timeout')
+
 export async function fetchNestingJson<T = Record<string, unknown>>(
   url: string,
   init: RequestInit & { timeoutMs?: number } = {}
@@ -48,14 +50,41 @@ export async function fetchNestingJson<T = Record<string, unknown>>(
   const resolvedUrl = nestingClientApiUrl(url)
   const controller = new AbortController()
   let clientTimeout = false
+  let settleTimeout: ((v: typeof TIMEOUT_SENTINEL) => void) | null = null
+  const timeoutRace = new Promise<typeof TIMEOUT_SENTINEL>((resolve) => {
+    settleTimeout = resolve
+  })
   const timeoutId = setTimeout(() => {
     clientTimeout = true
-    controller.abort()
+    try {
+      controller.abort()
+    } catch {
+      /* some wallet WebViews throw on abort */
+    }
+    settleTimeout?.(TIMEOUT_SENTINEL)
   }, timeoutMs)
+
   try {
-    const res = await fetch(resolvedUrl, { ...fetchInit, signal: controller.signal })
-    const json = (await res.json().catch(() => null)) as T | null
-    return { ok: res.ok, status: res.status, json, timedOut: false, aborted: false, clientTimeout: false }
+    // Promise.race so we still unblock when AbortController is ignored (common in wallet WebViews).
+    const raced = await Promise.race([
+      fetch(resolvedUrl, { ...fetchInit, signal: controller.signal }).then(async (res) => {
+        const json = (await res.json().catch(() => null)) as T | null
+        return { ok: res.ok, status: res.status, json, timedOut: false, aborted: false, clientTimeout: false }
+      }),
+      timeoutRace,
+    ])
+
+    if (raced === TIMEOUT_SENTINEL) {
+      return {
+        ok: false,
+        status: 0,
+        json: null,
+        timedOut: true,
+        aborted: true,
+        clientTimeout: true,
+      }
+    }
+    return raced
   } catch (e) {
     const networkOrTimeout = isLikelyFetchNetworkOrTimeout(e)
     return {
@@ -89,7 +118,7 @@ export function nestingFetchNetworkErrorMessage(kind: 'positions' | 'claim' | 'g
   if (kind === 'claim') {
     return mobile
       ? `Could not reach Owltopia to finish your claim (connection dropped). Wait a few seconds, refresh, and check your OWL balance before claiming again.${fallback}`
-      : 'Could not reach the server to finish your claim. Refresh the page and check your OWL balance before trying again.'
+      : 'Could not reach the server to finish your claim. Refresh the page and check your wallet OWL balance before trying again.'
   }
   if (kind === 'positions') {
     return mobile

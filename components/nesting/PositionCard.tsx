@@ -313,7 +313,7 @@ export function PositionNestRow({
       <NestingActionStatusLine phase={showLinePhase} className="w-full min-h-[1.25rem]" />
       {securityAckRequired ? (
         <p className="w-full text-xs text-amber-200/95 leading-relaxed">
-          Sign the nesting safeguards with your wallet near the top of this page (orange box — Sign safeguards before
+          Sign the nesting notes with your wallet near the top of this page (nesting notes box — Sign nesting notes before
           you nest) to unlock claim and leave actions.
         </p>
       ) : null}

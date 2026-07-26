@@ -218,7 +218,7 @@ export function NestingLandingClient({
             Easy mode — nest in 3 steps
           </h2>
           <p className="mt-1 text-sm text-muted-foreground leading-relaxed max-w-2xl">
-            Connect, sign safeguards once per session, then pick your owls and confirm. Stay on the page while the wallet
+            Connect, sign nesting notes once per session, then pick your owls and confirm. Stay on the page while the wallet
             lock finishes (often under a minute).
           </p>
         </div>
@@ -233,8 +233,8 @@ export function NestingLandingClient({
             {
               n: '2',
               icon: Shield,
-              title: 'Sign the orange safeguards',
-              body: 'One wallet signature unlocks nesting for this browsing session. You cannot Confirm nest until this is done.',
+              title: 'Sign nesting notes',
+              body: 'One short signature unlocks nesting for this browsing session. You cannot Confirm nest until this is done.',
             },
             {
               n: '3',
@@ -246,7 +246,7 @@ export function NestingLandingClient({
             <Card key={title} className="rounded-xl border-border/60 bg-card/80">
               <CardHeader className="pb-2">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-500/15 text-amber-300 text-xs font-bold">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-theme-prime/15 text-theme-prime text-xs font-bold">
                     {n}
                   </span>
                   <Icon className="h-6 w-6 text-theme-prime" aria-hidden />
@@ -344,7 +344,7 @@ export function NestingLandingClient({
             },
             {
               q: 'What am I approving when I nest?',
-              a: 'A lock on each selected owl so it stays in your wallet but cannot transfer for the nest period. Phantom often lists this as “Approve to transfer” plus a small SOL fee when fees are enabled — the NFT is not leaving your wallet. On My nest, expand “What you are approving” for a short walkthrough. If you are not on owltopia.xyz, cancel.',
+              a: 'A lock on each selected owl so it stays in your wallet but cannot transfer for the nest period. Phantom often lists this as “Approve to transfer” — that is the freeze, not sending the NFT away. Jupiter can look a lot scarier for the same step; Phantom and Solflare usually show clearer wording. On My nest, expand “What you are approving” for a short walkthrough. If you are not on owltopia.xyz, cancel.',
             },
             {
               q: 'Why do you ask me to sign a message on the dashboard?',
@@ -352,7 +352,7 @@ export function NestingLandingClient({
             },
             {
               q: 'I use Ledger and the sign prompt never shows up',
-              a: 'This is a known Phantom/Solflare + Ledger gap for Sign Message (error Code 1 / 0x6a81). On My nest: (1) for wallet sign-in, tap “Sign with Ledger transaction”; (2) for the orange nesting safeguards box, tap “Sign safeguards with Ledger”. Approve the memo on the device (not broadcast, no Owltopia fee). Keep the Solana app open, Ledger Live closed, and prefer USB on desktop. Phantom/Solflare may add a Lighthouse security check to that memo — that is expected. If that still fails, sign once from a hot wallet, then switch back for nesting.',
+              a: 'This is a known Phantom/Solflare + Ledger gap for Sign Message (error Code 1 / 0x6a81). On My nest: (1) for wallet sign-in, tap “Sign with Ledger transaction”; (2) in the nesting notes box, tap “Sign with Ledger”. Approve the memo on the device (not broadcast, no Owltopia fee). Keep the Solana app open, Ledger Live closed, and prefer USB on desktop. Phantom/Solflare may add a Lighthouse security check to that memo — that is expected. If that still fails, sign once from a hot wallet, then switch back for nesting.',
             },
           ].map(({ q, a }) => (
             <div key={q} className="px-4 py-4 sm:px-5">

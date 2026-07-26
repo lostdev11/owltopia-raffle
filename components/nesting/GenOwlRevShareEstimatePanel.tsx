@@ -1,20 +1,63 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Coins, Loader2 } from 'lucide-react'
 
 import {
   formatGenOwlRevShareSol,
   formatGenOwlRevShareUsdc,
 } from '@/lib/nesting/gen-owl-rev-share'
-import type { GenOwlRevShareEstimateResult } from '@/lib/nesting/gen-owl-rev-share-estimate'
-import { genOwlRevShareDistributionSummary } from '@/lib/nesting/gen-owl-rev-share-copy'
+import type {
+  GenOwlRevShareEstimateResult,
+  GenOwlRevShareEstimateRow,
+} from '@/lib/nesting/gen-owl-rev-share-estimate'
+import {
+  GEN_OWL_REV_SHARE_SHORT_BLURB,
+  genOwlRevShareDistributionSummary,
+  genOwlRevShareGroupLabel,
+} from '@/lib/nesting/gen-owl-rev-share-copy'
+import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
 import { cn } from '@/lib/utils'
 
 type Props = {
   connected: boolean
   needsSignIn: boolean
   className?: string
+}
+
+type NestGroup = {
+  key: string
+  group: GenOwlStakingGroupKey
+  bucket: GenOwlRevShareEstimateRow['bucket']
+  label: string
+  count: number
+  amount_sol: number
+  amount_usdc: number
+}
+
+function groupEstimateNests(nests: GenOwlRevShareEstimateRow[]): NestGroup[] {
+  const map = new Map<string, NestGroup>()
+  for (const row of nests) {
+    const bucket = row.bucket ?? 'standard'
+    const key = `${row.group}:${bucket}`
+    const existing = map.get(key)
+    if (existing) {
+      existing.count += 1
+      existing.amount_sol += row.amount_sol
+      existing.amount_usdc += row.amount_usdc
+      continue
+    }
+    map.set(key, {
+      key,
+      group: row.group,
+      bucket: row.bucket,
+      label: genOwlRevShareGroupLabel(row.group, row.bucket),
+      count: 1,
+      amount_sol: row.amount_sol,
+      amount_usdc: row.amount_usdc,
+    })
+  }
+  return Array.from(map.values())
 }
 
 export function GenOwlRevShareEstimatePanel({ connected, needsSignIn, className }: Props) {
@@ -53,6 +96,17 @@ export function GenOwlRevShareEstimatePanel({ connected, needsSignIn, className 
     void load()
   }, [load])
 
+  const grouped = useMemo(
+    () => (estimate ? groupEstimateNests(estimate.nests) : []),
+    [estimate]
+  )
+
+  const splitNotes = useMemo(() => {
+    if (!estimate) return [] as string[]
+    const groups = new Set(estimate.nests.map((n) => n.group))
+    return Array.from(groups).map((g) => genOwlRevShareDistributionSummary(g))
+  }, [estimate])
+
   if (!connected) return null
   if (!needsSignIn && !loading && !estimate && !error) return null
 
@@ -68,8 +122,8 @@ export function GenOwlRevShareEstimatePanel({ connected, needsSignIn, className 
         <h3 className="text-sm font-semibold text-foreground">Your rev share this month</h3>
       </div>
       <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-        Projected from the deposited pool and today&apos;s nest counts. Final amounts lock at month-end; claim
-        opens on the 1st (UTC). {genOwlRevShareDistributionSummary('gen1-owl')}
+        {GEN_OWL_REV_SHARE_SHORT_BLURB}
+        {splitNotes.length > 0 ? ` ${splitNotes.join(' ')}` : null}
       </p>
 
       {needsSignIn ? (
@@ -95,29 +149,40 @@ export function GenOwlRevShareEstimatePanel({ connected, needsSignIn, className 
                 {formatGenOwlRevShareUsdc(estimate.total_usdc)} USDC
               </span>
             ) : null}{' '}
-            across {estimate.nests.length} nest{estimate.nests.length === 1 ? '' : 's'}
+            · {estimate.nests.length} nest{estimate.nests.length === 1 ? '' : 's'}
           </p>
           <ul className="space-y-1.5">
-            {estimate.nests.map((row) => (
-              <li
-                key={row.position_id}
-                className="flex flex-col gap-0.5 rounded-lg border border-white/[0.06] bg-black/15 px-2.5 py-2 text-xs sm:flex-row sm:items-center sm:justify-between"
-              >
-                <p className="text-muted-foreground truncate">
-                  {row.group === 'gen1-owl'
-                    ? row.bucket === 'one_of_one'
-                      ? 'Gen 1 1/1'
-                      : 'Gen 1 owl'
-                    : 'Gen 2 owl'}
-                  {row.asset_identifier ? ` · ${row.asset_identifier.slice(0, 8)}…` : ''}
-                </p>
-                <p className="tabular-nums text-theme-prime/95 shrink-0">
-                  {row.amount_sol > 0 ? `${formatGenOwlRevShareSol(row.amount_sol)} SOL` : null}
-                  {row.amount_sol > 0 && row.amount_usdc > 0 ? ' · ' : null}
-                  {row.amount_usdc > 0 ? `${formatGenOwlRevShareUsdc(row.amount_usdc)} USDC` : null}
-                </p>
-              </li>
-            ))}
+            {grouped.map((row) => {
+              const perNestSol = row.count > 0 ? row.amount_sol / row.count : 0
+              const perNestUsdc = row.count > 0 ? row.amount_usdc / row.count : 0
+              return (
+                <li
+                  key={row.key}
+                  className="flex flex-col gap-0.5 rounded-lg border border-white/[0.06] bg-black/15 px-2.5 py-2 text-xs sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium text-foreground">
+                      {row.label} · {row.count} nest{row.count === 1 ? '' : 's'}
+                    </p>
+                    {row.count > 1 && (perNestSol > 0 || perNestUsdc > 0) ? (
+                      <p className="text-[11px] text-muted-foreground tabular-nums">
+                        ≈{' '}
+                        {perNestSol > 0 ? `${formatGenOwlRevShareSol(perNestSol)} SOL` : null}
+                        {perNestSol > 0 && perNestUsdc > 0 ? ' · ' : null}
+                        {perNestUsdc > 0 ? `${formatGenOwlRevShareUsdc(perNestUsdc)} USDC` : null}
+                        {' '}
+                        each
+                      </p>
+                    ) : null}
+                  </div>
+                  <p className="tabular-nums font-semibold text-theme-prime/95 shrink-0">
+                    {row.amount_sol > 0 ? `${formatGenOwlRevShareSol(row.amount_sol)} SOL` : null}
+                    {row.amount_sol > 0 && row.amount_usdc > 0 ? ' · ' : null}
+                    {row.amount_usdc > 0 ? `${formatGenOwlRevShareUsdc(row.amount_usdc)} USDC` : null}
+                  </p>
+                </li>
+              )
+            })}
           </ul>
         </div>
       ) : null}

@@ -9,7 +9,10 @@ import {
   formatGenOwlRevShareUsdc,
 } from '@/lib/nesting/gen-owl-rev-share'
 import type { GenOwlRevShareClaimableRow } from '@/lib/nesting/gen-owl-rev-share-claimable'
-import { genOwlRevShareDistributionSummary } from '@/lib/nesting/gen-owl-rev-share-copy'
+import {
+  GEN_OWL_REV_SHARE_SHORT_BLURB,
+  genOwlRevShareDistributionSummary,
+} from '@/lib/nesting/gen-owl-rev-share-copy'
 import { cn } from '@/lib/utils'
 
 type Props = {
@@ -135,9 +138,8 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
         <h3 className="text-sm font-semibold text-foreground">Monthly rev share</h3>
       </div>
       <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-        Claim after each month ends (opens 1st of the next month, UTC). Paid from the dedicated rev-share pool
-        (not raffle funds escrow). {genOwlRevShareDistributionSummary('gen1-owl')} Gen 2 nests split evenly at
-        month-end.
+        {GEN_OWL_REV_SHARE_SHORT_BLURB} {genOwlRevShareDistributionSummary('gen1-owl')}{' '}
+        {genOwlRevShareDistributionSummary('gen2-owl')}
       </p>
 
       {needsSignIn ? (

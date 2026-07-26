@@ -1,4 +1,4 @@
-/** Quiet pre-sign copy — matches how Phantom labels nest Approve (matter-of-fact, not alarming). */
+/** Quiet pre-sign copy — matter-of-fact, not alarming (wallets often word freeze locks harshly). */
 
 export const NEST_WALLET_NOTICE_HEADLINE = 'What you are approving'
 
@@ -7,8 +7,8 @@ export const NEST_WALLET_NOTICE_SUMMARY =
 
 export const NEST_WALLET_NOTICE_BULLETS = [
   'Phantom may list each owl as “Approve to transfer” — that is the freeze lock, not sending the NFT away.',
-  'A small SOL platform fee may show in the same confirmation when fees are enabled.',
-  'Other wallets may word the same step differently; the action is still the nest lock on owltopia.xyz.',
+  'Jupiter can show a much scarier warning for the same step. That is still the nest freeze on owltopia.xyz — cancel if you are not on this site.',
+  'Phantom and Solflare usually word this more clearly; a small SOL platform fee may show when fees are enabled.',
 ] as const
 
 /** Helps users recognize the address their wallet shows for the nest lock. */

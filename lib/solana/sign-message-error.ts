@@ -116,7 +116,7 @@ function ledgerSignMessageHint(context: 'sign-in' | 'safeguards' | 'generic'): s
   if (context === 'safeguards') {
     return (
       'Ledger cannot complete Phantom/Owltopia Sign Message (error Code 1 / 0x6a81 is common). ' +
-      'Tap “Sign safeguards with Ledger” below — approve the memo on the device (not broadcast, no Owltopia fee). ' +
+      'Tap “Sign with Ledger” below — approve the memo on the device (not broadcast, no Owltopia fee). ' +
       'Unlock Ledger, open the Solana app, close Ledger Live; prefer USB on desktop.'
     )
   }
@@ -156,7 +156,7 @@ export function formatSignMessageError(
   ) {
     const action =
       context === 'safeguards'
-        ? 'then use “Sign safeguards with Ledger”'
+        ? 'then use “Sign with Ledger”'
         : 'then use “Sign with Ledger transaction”'
     const fallback =
       context === 'safeguards'

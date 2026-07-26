@@ -175,7 +175,13 @@ export function ConsolidatedGenOwlStakingCard({
 
                 <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
 
-                  <Link href={dashboardHref}>My nest</Link>
+                  <Link
+                    href={`${dashboardHref}#nesting-your-nests`}
+                    title="View and manage nests you already opened"
+                    aria-label="My nest — view and manage nests you already opened"
+                  >
+                    My nest
+                  </Link>
 
                 </Button>
 
@@ -185,17 +191,33 @@ export function ConsolidatedGenOwlStakingCard({
 
               <>
 
-                <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
+                <Button asChild variant="default" size="sm" className="min-h-[44px] touch-manipulation font-semibold">
 
-                  <Link href={dashboardHref}>Nest here</Link>
+                  <Link
+                    href={`${dashboardHref}#nesting-open-nest-form`}
+                    title="Start a new nest on this perch"
+                    aria-label="Nest here — start a new nest on this perch"
+                  >
+                    Nest here
+                  </Link>
 
                 </Button>
 
                 <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
 
-                  <Link href={dashboardHref}>My nest</Link>
+                  <Link
+                    href={`${dashboardHref}#nesting-your-nests`}
+                    title="View and manage nests you already opened"
+                    aria-label="My nest — view and manage nests you already opened"
+                  >
+                    My nest
+                  </Link>
 
                 </Button>
+
+                <p className="w-full text-[11px] leading-snug text-muted-foreground">
+                  Nest here = start nesting · My nest = manage yours
+                </p>
 
               </>
 
