@@ -6,21 +6,26 @@ import type { Group } from 'three'
 import { useRaceGameStore } from '@/lib/race/store'
 
 export function PlaceholderOwl() {
-  const wings = useRef<Group>(null)
+  const leftWing = useRef<Group>(null)
+  const rightWing = useRef<Group>(null)
+  const owl = useRef<Group>(null)
   const motion = useRaceGameStore((state) => state.motion)
 
   useFrame(({ clock }) => {
-    if (!wings.current) return
-    const active = motion === 'glide' || motion === 'jump'
-    const flap = active ? Math.sin(clock.elapsedTime * 10) * 0.18 : 0
-    wings.current.rotation.z = flap
+    if (!leftWing.current || !rightWing.current || !owl.current) return
+
+    const flapSpeed = motion === 'boost' ? 16 : motion === 'hover' ? 8 : 12
+    const flapAmount = motion === 'dive' ? 0.16 : 0.48
+    const flap = Math.sin(clock.elapsedTime * flapSpeed) * flapAmount
+    leftWing.current.rotation.z = 0.35 + flap
+    rightWing.current.rotation.z = -0.35 - flap
+    owl.current.position.y = Math.sin(clock.elapsedTime * 5) * 0.035
+    owl.current.rotation.x =
+      motion === 'climb' ? -0.2 : motion === 'dive' ? 0.22 : 0
   })
 
-  const bodyBounce =
-    motion === 'run' ? 0.02 : motion === 'sprint' ? 0.04 : 0
-
   return (
-    <group position={[0, -0.18 + bodyBounce, 0]}>
+    <group ref={owl} position={[0, -0.18, 0]}>
       <mesh castShadow position={[0, 0.16, 0]}>
         <sphereGeometry args={[0.58, 20, 16]} />
         <meshStandardMaterial color="#70523d" roughness={0.82} />
@@ -30,13 +35,15 @@ export function PlaceholderOwl() {
         <meshStandardMaterial color="#8b684c" roughness={0.8} />
       </mesh>
 
-      <group ref={wings}>
-        <mesh castShadow position={[-0.62, 0.24, 0]} rotation={[0, 0, 0.28]}>
-          <capsuleGeometry args={[0.22, 0.7, 8, 16]} />
+      <group ref={leftWing}>
+        <mesh castShadow position={[-0.66, 0.25, 0]}>
+          <capsuleGeometry args={[0.22, 0.78, 8, 16]} />
           <meshStandardMaterial color="#4d372c" roughness={0.9} />
         </mesh>
-        <mesh castShadow position={[0.62, 0.24, 0]} rotation={[0, 0, -0.28]}>
-          <capsuleGeometry args={[0.22, 0.7, 8, 16]} />
+      </group>
+      <group ref={rightWing}>
+        <mesh castShadow position={[0.66, 0.25, 0]}>
+          <capsuleGeometry args={[0.22, 0.78, 8, 16]} />
           <meshStandardMaterial color="#4d372c" roughness={0.9} />
         </mesh>
       </group>
