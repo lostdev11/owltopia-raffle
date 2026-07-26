@@ -69,6 +69,8 @@ import { myRaffleStatusLabel } from '@/components/dashboard/hosting/helpers'
 import { ReferralRewardsRedeem } from '@/components/dashboard/ReferralRewardsRedeem'
 import { ReferralCodeCopyRow } from '@/components/referrals/ReferralCodeCopyRow'
 import { ClaimSuccessOverlay } from '@/components/ClaimSuccessOverlay'
+import { GenOwlRevShareEstimatePanel } from '@/components/nesting/GenOwlRevShareEstimatePanel'
+import { GenOwlRevShareClaimPanel } from '@/components/nesting/GenOwlRevShareClaimPanel'
 import { extractTransactionSignature } from '@/lib/claims/extract-transaction-signature'
 import {
   getEscrowPrizeClaimSuccessCopy,
@@ -3622,6 +3624,24 @@ export default function DashboardPage() {
 
       </TabsContent>
       <TabsContent value="winnings" className="mt-0 space-y-6 focus-visible:outline-none">
+      <div className="space-y-3">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight text-foreground sm:text-lg">
+              Nest rev share
+            </h2>
+            <p className="text-xs text-muted-foreground leading-relaxed sm:text-sm">
+              Monthly SOL/USDC for nested Gen 1 / Gen 2 owls. Same claim flow as Nesting — paid from the rev-share
+              pool.
+            </p>
+          </div>
+          <Button asChild variant="outline" size="sm" className="min-h-[44px] touch-manipulation shrink-0">
+            <Link href="/dashboard/nesting">Open Nesting</Link>
+          </Button>
+        </div>
+        <GenOwlRevShareEstimatePanel connected={connected} needsSignIn={needsSignIn} />
+        <GenOwlRevShareClaimPanel connected={connected} needsSignIn={needsSignIn} />
+      </div>
       <Card className="mb-0 rounded-xl border-green-500/25 bg-green-500/[0.04] shadow-sm">
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
@@ -3634,8 +3654,8 @@ export default function DashboardPage() {
           <details className="mt-2 rounded-lg border border-border/50 bg-background/50 text-sm">
             <summary className="cursor-pointer px-3 py-2 font-medium touch-manipulation">What you can claim here</summary>
             <p className="border-t border-border/40 px-3 py-2 text-xs text-muted-foreground leading-relaxed">
-              Creator ticket proceeds are claimed from the Hosting tab (live claim tracker). This tab focuses on prizes
-              you won or giveaways assigned to you.
+              Nest SOL/USDC rev share is above this card. Creator ticket proceeds are claimed from the Hosting tab
+              (live claim tracker). This section focuses on prizes you won or giveaways assigned to you.
             </p>
           </details>
         </CardHeader>

@@ -227,7 +227,7 @@ export function DashboardOverviewSection({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <QuickNavLinkCard
           title="Nesting"
-          description="Stake your owls for 90 or 180 days and earn OWL — open or check your nests."
+          description="Stake owls for OWL rewards, and claim monthly SOL/USDC rev share from Wins or Nesting."
           href="/dashboard/nesting"
           icon={<Bird className="h-4 w-4" aria-hidden />}
         />
@@ -246,7 +246,7 @@ export function DashboardOverviewSection({
         />
         <QuickNavCard
           title="Wins"
-          description="Claim NFT prizes, giveaways, and see tickets you entered."
+          description="Claim nest rev share, NFT prizes, giveaways, and see tickets you entered."
           badge={stats.prizesToClaim > 0 ? `${stats.prizesToClaim} ready` : null}
           icon={<Gift className="h-4 w-4" aria-hidden />}
           onClick={() => onNavigateTab('winnings')}
