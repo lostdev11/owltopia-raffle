@@ -1,4 +1,4 @@
-import { payoutCryptoFromFundsEscrow } from '@/lib/raffles/funds-escrow'
+import { payoutCryptoFromGenOwlRevSharePool } from '@/lib/nesting/gen-owl-rev-share-pool'
 
 export type GenOwlRevSharePayoutResult = {
   sol_signature: string | null
@@ -6,7 +6,7 @@ export type GenOwlRevSharePayoutResult = {
   payout_errors: string[]
 }
 
-/** Send SOL/USDC rev share from funds escrow when configured. */
+/** Send SOL/USDC rev share from the dedicated rev-share pool (not funds escrow). */
 export async function payoutGenOwlRevShareClaim(params: {
   wallet: string
   amount_sol: number
@@ -17,7 +17,7 @@ export async function payoutGenOwlRevShareClaim(params: {
   let usdcSig: string | null = null
 
   if (params.amount_sol > 0) {
-    const res = await payoutCryptoFromFundsEscrow({
+    const res = await payoutCryptoFromGenOwlRevSharePool({
       recipientWallet: params.wallet,
       amount: params.amount_sol,
       currency: 'SOL',
@@ -27,7 +27,7 @@ export async function payoutGenOwlRevShareClaim(params: {
   }
 
   if (params.amount_usdc > 0) {
-    const res = await payoutCryptoFromFundsEscrow({
+    const res = await payoutCryptoFromGenOwlRevSharePool({
       recipientWallet: params.wallet,
       amount: params.amount_usdc,
       currency: 'USDC',

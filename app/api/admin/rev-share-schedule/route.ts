@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { getRevShareSchedule, updateRevShareSchedule } from '@/lib/db/rev-share-schedule'
-import { upsertGenOwlRevSharePeriodTotals } from '@/lib/db/gen-owl-rev-share-periods'
-import { formatPeriodMonthUtc } from '@/lib/nesting/gen-owl-rev-share-month'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -56,15 +54,13 @@ export async function PATCH(request: NextRequest) {
       body.gen2_total_sol !== undefined ? (body.gen2_total_sol == null ? null : Number(body.gen2_total_sol)) : undefined
     const gen2_total_usdc =
       body.gen2_total_usdc !== undefined ? (body.gen2_total_usdc == null ? null : Number(body.gen2_total_usdc)) : undefined
-    const period_month =
-      typeof body.period_month === 'string' && body.period_month.trim()
-        ? body.period_month.trim()
-        : formatPeriodMonthUtc(new Date())
 
     // Keep legacy next_date in sync with Gen 1 when Gen 1 date is saved and next_date was not sent.
     const resolvedNextDate =
       next_date !== undefined ? next_date : gen1_next_date !== undefined ? gen1_next_date : undefined
 
+    // Homepage schedule is display-only. Claimable period totals are credited only by verified
+    // deposits into the rev-share pool (POST /api/admin/gen-owl-rev-share/deposit).
     const updated = await updateRevShareSchedule({
       next_date: resolvedNextDate,
       gen1_next_date,
@@ -77,32 +73,15 @@ export async function PATCH(request: NextRequest) {
       gen2_total_usdc,
     })
 
-    if (
-      updated &&
-      (gen1_total_sol !== undefined ||
-        gen1_total_usdc !== undefined ||
-        gen2_total_sol !== undefined ||
-        gen2_total_usdc !== undefined)
-    ) {
-      await upsertGenOwlRevSharePeriodTotals({
-        period_month,
-        gen1_total_sol: updated.gen1_total_sol,
-        gen1_total_usdc: updated.gen1_total_usdc,
-        gen2_total_sol: updated.gen2_total_sol,
-        gen2_total_usdc: updated.gen2_total_usdc,
-      })
-    }
-
-    return NextResponse.json({
-      ...(updated ?? {
+    return NextResponse.json(
+      updated ?? {
         next_date: null,
         gen1_next_date: null,
         gen2_next_date: null,
         total_sol: null,
         total_usdc: null,
-      }),
-      period_month,
-    })
+      }
+    )
   } catch (e) {
     console.error(e)
     return NextResponse.json({ error: safeErrorMessage(e) }, { status: 500 })

@@ -18,6 +18,7 @@
     "generate:nesting-freeze-authority-key": "node scripts/generate-nesting-freeze-authority-keypair.mjs",
     "generate:nesting-reward-treasury-key": "node scripts/generate-nesting-reward-treasury-keypair.mjs",
     "generate:funds-escrow-key": "node scripts/generate-funds-escrow-keypair.mjs",
+    "generate:gen-owl-rev-share-pool-key": "node scripts/generate-gen-owl-rev-share-pool-keypair.mjs",
     "generate:council-owl-escrow-key": "node scripts/generate-council-owl-escrow-keypair.mjs",
     "generate:discord-marketplace-wallets": "node scripts/generate-discord-marketplace-wallets.mjs --write-env",
     "merge:discord-marketplace-env": "node scripts/merge-discord-marketplace-env.mjs",

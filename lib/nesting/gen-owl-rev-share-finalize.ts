@@ -1,10 +1,8 @@
 import {
   finalizeGenOwlRevSharePeriod,
   getGenOwlRevSharePeriod,
-  upsertGenOwlRevSharePeriodTotals,
   type GenOwlRevSharePeriodRow,
 } from '@/lib/db/gen-owl-rev-share-periods'
-import { getRevShareSchedule } from '@/lib/db/rev-share-schedule'
 import {
   computeEvenRevSharePerNest,
   computeGen1RevShareBucketAmounts,
@@ -16,21 +14,21 @@ import {
 } from '@/lib/nesting/gen-owl-rev-share-eligibility'
 import { claimsOpenForPeriod } from '@/lib/nesting/gen-owl-rev-share-month'
 
-/** Ensure a period row exists (from schedule template if missing). */
+function periodHasDepositTotals(period: GenOwlRevSharePeriodRow): boolean {
+  return (
+    (Number(period.gen1_total_sol) || 0) > 0 ||
+    (Number(period.gen1_total_usdc) || 0) > 0 ||
+    (Number(period.gen2_total_sol) || 0) > 0 ||
+    (Number(period.gen2_total_usdc) || 0) > 0
+  )
+}
+
+/**
+ * Period rows are created/credited only by verified admin deposits — never seeded from
+ * homepage schedule display amounts (those can be set without on-chain funding).
+ */
 export async function ensureGenOwlRevSharePeriodRow(periodMonth: string): Promise<GenOwlRevSharePeriodRow | null> {
-  const existing = await getGenOwlRevSharePeriod(periodMonth)
-  if (existing) return existing
-
-  const schedule = await getRevShareSchedule()
-  if (!schedule) return null
-
-  return upsertGenOwlRevSharePeriodTotals({
-    period_month: periodMonth,
-    gen1_total_sol: schedule.gen1_total_sol,
-    gen1_total_usdc: schedule.gen1_total_usdc,
-    gen2_total_sol: schedule.gen2_total_sol,
-    gen2_total_usdc: schedule.gen2_total_usdc,
-  })
+  return getGenOwlRevSharePeriod(periodMonth)
 }
 
 /** Snapshot eligible nest counts and per-nest amounts when claims open. */
@@ -40,7 +38,7 @@ export async function ensureGenOwlRevSharePeriodFinalized(
   if (!claimsOpenForPeriod(periodMonth)) return null
 
   let period = await ensureGenOwlRevSharePeriodRow(periodMonth)
-  if (!period) return null
+  if (!period || !periodHasDepositTotals(period)) return null
 
   if (period.finalized_at) return period
 

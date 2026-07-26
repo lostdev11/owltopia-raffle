@@ -1,4 +1,9 @@
-import { getGenOwlRevShareClaimForPosition, insertGenOwlRevShareClaim } from '@/lib/db/gen-owl-rev-share-claims'
+import {
+  deleteGenOwlRevShareClaim,
+  getGenOwlRevShareClaimForPosition,
+  insertGenOwlRevShareClaim,
+  updateGenOwlRevShareClaimSignatures,
+} from '@/lib/db/gen-owl-rev-share-claims'
 import type { GenOwlRevSharePeriodRow } from '@/lib/db/gen-owl-rev-share-periods'
 import { getStakingPositionForWallet } from '@/lib/db/staking-positions'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
@@ -85,40 +90,70 @@ export async function executeGenOwlRevShareClaim(params: {
     throw new StakingUserError('No rev share amount configured for this generation this month.', 400)
   }
 
-  const payout = await payoutGenOwlRevShareClaim({
-    wallet,
-    amount_sol: amounts.sol,
-    amount_usdc: amounts.usdc,
-  })
-
-  const payoutFailed =
-    payout.payout_errors.length > 0 &&
-    ((amounts.sol > 0 && !payout.sol_signature) || (amounts.usdc > 0 && !payout.usdc_signature))
-
-  if (payoutFailed) {
-    throw new StakingUserError(
-      `Rev share payout could not be sent: ${payout.payout_errors.join(' · ')}. Contact support if this persists.`,
-      503
-    )
-  }
-
-  const claim = await insertGenOwlRevShareClaim({
+  // Reserve unique claim row BEFORE payout so concurrent requests cannot double-pay.
+  const reserved = await insertGenOwlRevShareClaim({
     period_month: periodMonth,
     position_id: positionId,
     wallet_address: wallet,
     group_key: group,
     amount_sol: amounts.sol,
     amount_usdc: amounts.usdc,
+    sol_transaction_signature: null,
+    usdc_transaction_signature: null,
+  })
+  if (!reserved.ok) {
+    if (reserved.reason === 'duplicate') {
+      throw new StakingUserError('Rev share for this nest and month was already claimed.', 409)
+    }
+    throw new StakingUserError('Could not reserve rev share claim. Try again.', 500)
+  }
+
+  const payout = await payoutGenOwlRevShareClaim({
+    wallet,
+    amount_sol: amounts.sol,
+    amount_usdc: amounts.usdc,
+  })
+
+  const needSol = amounts.sol > 0
+  const needUsdc = amounts.usdc > 0
+  const solOk = !needSol || Boolean(payout.sol_signature)
+  const usdcOk = !needUsdc || Boolean(payout.usdc_signature)
+  const anyPaid = Boolean(payout.sol_signature || payout.usdc_signature)
+
+  if (!anyPaid) {
+    await deleteGenOwlRevShareClaim(reserved.claim.id)
+    throw new StakingUserError(
+      `Rev share payout could not be sent: ${payout.payout_errors.join(' · ') || 'unknown error'}. Try again.`,
+      503
+    )
+  }
+
+  const updated = await updateGenOwlRevShareClaimSignatures({
+    id: reserved.claim.id,
     sol_transaction_signature: payout.sol_signature,
     usdc_transaction_signature: payout.usdc_signature,
   })
+  if (!updated) {
+    throw new StakingUserError(
+      'Payout may have been sent but claim record failed to update. Contact support with your wallet and nest id.',
+      500
+    )
+  }
 
-  if (!claim) {
-    throw new StakingUserError('Could not record rev share claim. Try again.', 500)
+  if (!solOk || !usdcOk) {
+    throw new StakingUserError(
+      `Partial rev share payout recorded (${[
+        payout.sol_signature ? 'SOL sent' : needSol ? 'SOL failed' : null,
+        payout.usdc_signature ? 'USDC sent' : needUsdc ? 'USDC failed' : null,
+      ]
+        .filter(Boolean)
+        .join(', ')}). This nest is locked — contact support; do not retry.`,
+      503
+    )
   }
 
   return {
-    claim_id: claim.id,
+    claim_id: updated.id,
     amount_sol: amounts.sol,
     amount_usdc: amounts.usdc,
     sol_transaction_signature: payout.sol_signature,

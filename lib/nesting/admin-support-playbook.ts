@@ -201,7 +201,7 @@ export function buildAdminSupportPlaybook(params: {
     recommendations.push({
       action: 'Gen 1 / Gen 2: confirm perch + rev share',
       detail:
-        'Daily OWL claims use Claim all / per-nest claim. Month-end SOL/USDC rev share is separate (Gen Owl rev share panel). Do not use OWL catch-up for rev-share payouts.',
+        'Daily OWL claims use Claim all / per-nest claim. Month-end SOL/USDC rev share is separate (Gen Owl rev share panel) and pays from the dedicated rev-share pool — never funds escrow. Do not use OWL catch-up for rev-share payouts.',
     })
   }
 

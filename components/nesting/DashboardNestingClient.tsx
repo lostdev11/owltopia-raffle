@@ -75,6 +75,7 @@ import { filterPoolsForPublicNestingCatalog } from '@/lib/nesting/perch-catalog'
 import { NestingLockTierPicker } from '@/components/nesting/NestingLockTierPicker'
 import { GenOwlRevShareNotice } from '@/components/nesting/GenOwlRevShareNotice'
 import { GenOwlRevShareClaimPanel } from '@/components/nesting/GenOwlRevShareClaimPanel'
+import { GenOwlRevShareEstimatePanel } from '@/components/nesting/GenOwlRevShareEstimatePanel'
 import { nestGalleryAnchorId } from '@/lib/nesting/nest-position-anchor'
 import { NestingStakedAssetThumb } from '@/components/nesting/NestingStakedAssetThumb'
 import { SectionHeader } from '@/components/council/SectionHeader'
@@ -3242,6 +3243,11 @@ export function DashboardNestingClient() {
               })
             }}
             className="mt-3 max-w-md rounded-xl border border-emerald-500/20 bg-black/30 px-3 py-3"
+          />
+          <GenOwlRevShareEstimatePanel
+            connected={connected}
+            needsSignIn={needsSignIn}
+            className="mt-3 max-w-md"
           />
           <GenOwlRevShareClaimPanel
             connected={connected}

@@ -59,6 +59,11 @@ export async function listGenOwlRevShareClaimsForWallet(
   return data.map((row) => mapClaimRow(row as Record<string, unknown>))
 }
 
+export type InsertGenOwlRevShareClaimResult =
+  | { ok: true; claim: GenOwlRevShareClaimRow }
+  | { ok: false; reason: 'duplicate' | 'error' }
+
+/** Reserve / record a claim. Unique (period_month, position_id) → duplicate. */
 export async function insertGenOwlRevShareClaim(row: {
   period_month: string
   position_id: string
@@ -68,7 +73,7 @@ export async function insertGenOwlRevShareClaim(row: {
   amount_usdc: number
   sol_transaction_signature?: string | null
   usdc_transaction_signature?: string | null
-}): Promise<GenOwlRevShareClaimRow | null> {
+}): Promise<InsertGenOwlRevShareClaimResult> {
   const db = getSupabaseAdmin()
   const { data, error } = await db
     .from('gen_owl_rev_share_claims')
@@ -86,8 +91,42 @@ export async function insertGenOwlRevShareClaim(row: {
     .single()
 
   if (error) {
+    if (error.code === '23505') return { ok: false, reason: 'duplicate' }
     console.error('[gen-owl-rev-share-claims] insert:', error.message)
+    return { ok: false, reason: 'error' }
+  }
+  return { ok: true, claim: mapClaimRow(data as Record<string, unknown>) }
+}
+
+export async function updateGenOwlRevShareClaimSignatures(params: {
+  id: string
+  sol_transaction_signature: string | null
+  usdc_transaction_signature: string | null
+}): Promise<GenOwlRevShareClaimRow | null> {
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('gen_owl_rev_share_claims')
+    .update({
+      sol_transaction_signature: params.sol_transaction_signature?.trim() || null,
+      usdc_transaction_signature: params.usdc_transaction_signature?.trim() || null,
+    })
+    .eq('id', params.id)
+    .select('*')
+    .single()
+  if (error || !data) {
+    console.error('[gen-owl-rev-share-claims] update sigs:', error?.message)
     return null
   }
   return mapClaimRow(data as Record<string, unknown>)
+}
+
+/** Only for failed reserved claims with no on-chain payout yet. */
+export async function deleteGenOwlRevShareClaim(id: string): Promise<boolean> {
+  const db = getSupabaseAdmin()
+  const { error } = await db.from('gen_owl_rev_share_claims').delete().eq('id', id)
+  if (error) {
+    console.error('[gen-owl-rev-share-claims] delete:', error.message)
+    return false
+  }
+  return true
 }

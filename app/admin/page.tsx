@@ -30,6 +30,7 @@ import { DEV_TASK_MAX_SCREENSHOTS_TOTAL, type DevTask } from '@/lib/db/dev-tasks
 import { DEV_TASK_SCREENSHOT_MAX_BYTES, DEV_TASK_SCREENSHOT_MAX_FILES } from '@/lib/dev-task-screenshot-limits'
 import { AdminCreatorBlacklist } from '@/components/AdminCreatorBlacklist'
 import { GenOwlRevShareAdminPreview } from '@/components/nesting/GenOwlRevShareNotice'
+import { GenOwlRevShareAdminDepositPanel } from '@/components/nesting/GenOwlRevShareAdminDepositPanel'
 import { genOwlStakingGroupLabel } from '@/lib/nesting/gen-owl-staking-groups'
 import {
   buildGenOwlRevSharePreview,
@@ -2578,10 +2579,11 @@ export default function AdminDashboardPage() {
           }
         >
           <CardDescription className="mb-4">
-            Set the dates and total amounts for the next rev share (homepage holder pools). Gen 1 and Gen 2 have
-            their own payout date and their own pool — Gen 1 uses a 90% / 10% split (all staked vs 1/1 staked);
-            Gen 2 is an even split across active nests. Not auto-calculated from revenue; enter totals when you
-            are ready to pay out.
+            Set display dates (and optional homepage amounts), then deposit from your connected wallet into the
+            dedicated rev-share pool (not funds escrow). Only deposits credit claimable period totals. Gen 1 uses a
+            90% / 10% split (all staked vs 1/1 staked); Gen 2 is an even split across active nests. Nested holders see
+            projected amounts on Nesting; claims open on the 1st of the next month (UTC) and pay from the rev-share
+            pool.
           </CardDescription>
           <div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
@@ -2726,6 +2728,7 @@ export default function AdminDashboardPage() {
               onClick={saveRevShareSchedule}
               disabled={revShareScheduleSaving}
               className="mt-4"
+              variant="outline"
             >
               {revShareScheduleSaving ? (
                 <>
@@ -2733,9 +2736,27 @@ export default function AdminDashboardPage() {
                   Saving…
                 </>
               ) : (
-                'Save'
+                'Save dates / display totals'
               )}
             </Button>
+            <GenOwlRevShareAdminDepositPanel
+              edit={revShareScheduleEdit}
+              disabled={revShareScheduleSaving}
+              onScheduleUpdated={(schedule) => {
+                setRevShareSchedule(schedule as typeof revShareSchedule)
+              }}
+              onDepositSucceeded={() => {
+                setRevShareScheduleEdit((p) => ({
+                  ...p,
+                  total_sol: '',
+                  total_usdc: '',
+                  gen1_total_sol: '',
+                  gen1_total_usdc: '',
+                  gen2_total_sol: '',
+                  gen2_total_usdc: '',
+                }))
+              }}
+            />
           </div>
         </OwlVisionDisclosure>
         </>

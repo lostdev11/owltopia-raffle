@@ -135,8 +135,9 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
         <h3 className="text-sm font-semibold text-foreground">Monthly rev share</h3>
       </div>
       <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-        Claim after each month ends (opens 1st of the next month, UTC).{' '}
-        {genOwlRevShareDistributionSummary('gen1-owl')} Gen 2 nests split evenly at month-end.
+        Claim after each month ends (opens 1st of the next month, UTC). Paid from the dedicated rev-share pool
+        (not raffle funds escrow). {genOwlRevShareDistributionSummary('gen1-owl')} Gen 2 nests split evenly at
+        month-end.
       </p>
 
       {needsSignIn ? (

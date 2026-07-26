@@ -227,7 +227,9 @@ export default function HowItWorksPage() {
             For nested Gen 1 owls, rev share is <strong>not</strong> split evenly across every nest:{' '}
             <strong>90%</strong> of the Gen 1 pool is divided evenly across all staked Gen 1 owls, and{' '}
             <strong>10%</strong> is divided evenly across staked Gen 1 1/1s. Gen 2 nest rev share is split evenly
-            across eligible Gen 2 nests. Claims open on the 1st of the month after each period ends (UTC).
+            across eligible Gen 2 nests. The team deposits SOL/USDC into a <strong>dedicated rev-share pool</strong>{' '}
+            (separate from raffle funds escrow). Nested holders can see projected monthly amounts on Nesting; claims
+            open on the 1st of the month after each period ends (UTC) and pay from that pool.
           </p>
         </section>
 
