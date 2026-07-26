@@ -147,6 +147,7 @@ import {
   nestingClientApiUrl,
   NESTING_CLAIM_FETCH_TIMEOUT_MS,
   NESTING_CLAIM_ALL_FETCH_TIMEOUT_MS,
+  NESTING_POSITIONS_FETCH_TIMEOUT_MS,
   nestingFetchNetworkErrorMessage,
   nestingFetchTimeoutMessage,
 } from '@/lib/nesting/fetch-json'
@@ -156,6 +157,11 @@ const MOBILE_NETWORK_RETRY_MS = 1_200
 /** Match main dashboard: let wallet publicKey settle after redirect (Android / Seeker). */
 const MOBILE_WALLET_STABILIZE_MS = 450
 const MOBILE_VISIBILITY_REFRESH_MS = 350
+/**
+ * Must stay above the client fetch timeout. An earlier 18s hatch showed a false
+ * "taking longer than usual" while the positions request was still in flight.
+ */
+const NESTING_LOADING_ESCAPE_MS = NESTING_POSITIONS_FETCH_TIMEOUT_MS + 5_000
 const NESTING_ADMIN_SELLOUT_BYPASS_STORAGE_KEY = 'owl_nesting_admin_bypass_sellout_v1'
 
 function rpcEndpointLooksDevnet(endpoint: string | undefined): boolean {
@@ -428,6 +434,8 @@ export function DashboardNestingClient() {
       }
 
       setNeedsSignIn(false)
+      // Late success after a soft timeout / mobile retry must clear the red banner.
+      setError(null)
       applyPositionsPayload(json, { showHealSuccess: !opts?.silent })
       void loadClaimLedger()
       return true
@@ -445,33 +453,31 @@ export function DashboardNestingClient() {
     const gen = ++refreshGenRef.current
     setLoading(true)
     setError(null)
+    const mobileVisible =
+      typeof window !== 'undefined' && isMobileDevice() && document.visibilityState === 'visible'
     let ok = false
     try {
+      // On mobile, keep the first attempt silent — wallet WebViews often drop once;
+      // surface an error only after retries are exhausted.
       const [, positionsLoaded] = await Promise.all([
         loadPools(),
-        loadPositions({ heal: false }),
+        loadPositions({ heal: false, silent: mobileVisible }),
       ])
       if (gen !== refreshGenRef.current) return
       ok = positionsLoaded
-      if (
-        !ok &&
-        typeof window !== 'undefined' &&
-        isMobileDevice() &&
-        document.visibilityState === 'visible'
-      ) {
+      if (!ok && mobileVisible) {
         await new Promise((r) => setTimeout(r, MOBILE_401_RETRY_MS))
         if (gen !== refreshGenRef.current) return
         ok = await loadPositions({ heal: false, silent: true })
       }
-      if (
-        !ok &&
-        typeof window !== 'undefined' &&
-        isMobileDevice() &&
-        document.visibilityState === 'visible'
-      ) {
+      if (!ok && mobileVisible) {
         await new Promise((r) => setTimeout(r, MOBILE_NETWORK_RETRY_MS))
         if (gen !== refreshGenRef.current) return
         ok = await loadPositions({ heal: false, silent: true })
+      }
+      // Mobile kept earlier attempts silent — one last pass that may surface the banner.
+      if (!ok && mobileVisible && gen === refreshGenRef.current) {
+        ok = await loadPositions({ heal: false })
       }
     } catch (e) {
       if (gen === refreshGenRef.current) {
@@ -511,8 +517,9 @@ export function DashboardNestingClient() {
     if (!loading) return
     const t = window.setTimeout(() => {
       setLoading(false)
+      // Only show the soft timeout if fetchNestingJson / refreshAll did not already report.
       setError((prev) => prev ?? nestingFetchTimeoutMessage('positions'))
-    }, 18_000)
+    }, NESTING_LOADING_ESCAPE_MS)
     return () => window.clearTimeout(t)
   }, [loading])
 
