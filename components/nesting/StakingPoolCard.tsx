@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
@@ -18,7 +19,7 @@ type Props = {
   pool: StakingPoolRow
   /** Landing page passes false when showing inactive admin preview — default true */
   compact?: boolean
-  /** Kill switch: hide “Nest here” CTAs, show a short pause note */
+  /** Kill switch: hide Start Nest CTAs, show a short pause note */
   nestingPaused?: boolean
 }
 
@@ -38,6 +39,8 @@ export function StakingPoolCard({ pool, compact = false, nestingPaused = false }
           token
         )
       : null
+  const lockLabel =
+    pool.lock_period_days === 0 ? 'No lock' : `${pool.lock_period_days}-day lock`
 
   return (
     <Card className="flex flex-col rounded-xl border-border/70 bg-card/90 shadow-sm backdrop-blur-sm">
@@ -51,8 +54,7 @@ export function StakingPoolCard({ pool, compact = false, nestingPaused = false }
             <PoolStatusBadge active={pool.is_active} />
           </div>
         </div>
-        <p className="text-sm text-muted-foreground leading-snug">{pool.description}</p>
-        <NestingPlatformFeeNotice className="text-xs text-muted-foreground leading-relaxed pt-1" stakeBundled />
+        <p className="text-sm text-muted-foreground leading-snug line-clamp-2">{pool.description}</p>
       </CardHeader>
       <CardContent className="flex-1 space-y-2 text-sm">
         <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs sm:text-sm">
@@ -66,32 +68,56 @@ export function StakingPoolCard({ pool, compact = false, nestingPaused = false }
               {pool.lock_period_days === 0 ? 'None' : `${pool.lock_period_days} days`}
             </dd>
           </div>
-          <div>
-            <dt className="text-muted-foreground">Daily OWL</dt>
-            <dd className="font-medium tabular-nums text-theme-prime">{dailyLabel}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Balance / nest</dt>
-            <dd className="font-medium tabular-nums">
-              {balanceLabel ?? 'No fixed lock total'}
-            </dd>
-          </div>
-          <div className="col-span-2">
-            <dt className="text-muted-foreground">Amount range</dt>
-            <dd className="font-mono text-xs">{minMax}</dd>
-          </div>
-          {pool.partner_project_slug ? (
-            <div className="col-span-2">
-              <dt className="text-muted-foreground">Partner</dt>
-              <dd className="font-medium truncate">{pool.partner_project_slug}</dd>
-            </div>
-          ) : null}
         </dl>
-        {balanceLabel ? (
-          <p className="text-[11px] leading-snug text-muted-foreground">
-            Balance / nest is total {token} if you hold through unlock.
-          </p>
-        ) : null}
+
+        <details className="group rounded-lg border border-border/60 bg-muted/15 open:bg-muted/20">
+          <summary
+            className={cn(
+              'flex min-h-[44px] cursor-pointer touch-manipulation list-none items-center gap-2 px-3 py-2',
+              'text-xs sm:text-sm [&::-webkit-details-marker]:hidden'
+            )}
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium text-foreground">Rates & details</span>
+              <span className="mt-0.5 block truncate tabular-nums text-[11px] text-muted-foreground group-open:hidden">
+                {dailyLabel}
+                {balanceLabel ? ` · ${balanceLabel}` : ''}
+              </span>
+            </span>
+            <ChevronDown
+              className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+              aria-hidden
+            />
+          </summary>
+          <div className="space-y-2 border-t border-border/50 px-3 pb-3 pt-2.5">
+            <NestingPlatformFeeNotice className="text-xs text-muted-foreground leading-relaxed" stakeBundled />
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs sm:text-sm">
+              <div>
+                <dt className="text-muted-foreground">Daily OWL</dt>
+                <dd className="font-medium tabular-nums text-theme-prime">{dailyLabel}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Balance / nest</dt>
+                <dd className="font-medium tabular-nums">{balanceLabel ?? 'No fixed lock total'}</dd>
+              </div>
+              <div className="col-span-2">
+                <dt className="text-muted-foreground">Amount range</dt>
+                <dd className="font-mono text-xs">{minMax}</dd>
+              </div>
+              {pool.partner_project_slug ? (
+                <div className="col-span-2">
+                  <dt className="text-muted-foreground">Partner</dt>
+                  <dd className="font-medium truncate">{pool.partner_project_slug}</dd>
+                </div>
+              ) : null}
+            </dl>
+            {balanceLabel ? (
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                Balance / nest is total {token} if you hold through unlock ({lockLabel}).
+              </p>
+            ) : null}
+          </div>
+        </details>
       </CardContent>
       {!compact && (
         <CardFooter className="flex items-end justify-between gap-3 border-t border-border/60 pt-4">
@@ -107,10 +133,10 @@ export function StakingPoolCard({ pool, compact = false, nestingPaused = false }
                 <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
                   <Link
                     href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}#nesting-your-nests`}
-                    title="View and manage nests you already opened"
-                    aria-label="My nest — view and manage nests you already opened"
+                    title="Manage nests you already opened"
+                    aria-label="Manage Nest — view and manage nests you already opened"
                   >
-                    My nest
+                    Manage Nest
                   </Link>
                 </Button>
               </>
@@ -120,23 +146,20 @@ export function StakingPoolCard({ pool, compact = false, nestingPaused = false }
                   <Link
                     href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}#nesting-open-nest-form`}
                     title="Start a new nest on this perch"
-                    aria-label="Nest here — start a new nest on this perch"
+                    aria-label="Start Nest — open a new nest on this perch"
                   >
-                    Nest here
+                    Start Nest
                   </Link>
                 </Button>
                 <Button asChild variant="outline" size="sm" className={cn(nestingMutedActionButtonClass)}>
                   <Link
                     href={`/dashboard/nesting?pool=${encodeURIComponent(pool.slug)}#nesting-your-nests`}
-                    title="View and manage nests you already opened"
-                    aria-label="My nest — view and manage nests you already opened"
+                    title="Manage nests you already opened"
+                    aria-label="Manage Nest — view and manage nests you already opened"
                   >
-                    My nest
+                    Manage Nest
                   </Link>
                 </Button>
-                <p className="w-full text-[11px] leading-snug text-muted-foreground">
-                  Nest here = start nesting · My nest = manage yours
-                </p>
               </>
             )}
           </div>

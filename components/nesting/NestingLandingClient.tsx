@@ -193,8 +193,8 @@ export function NestingLandingClient({
           <p className="font-medium text-foreground">Admin preview — Gen 1 &amp; Gen 2 perches</p>
           <p className="mt-1 text-muted-foreground leading-relaxed">
             Gen 1 and Gen 2 owl nesting is visible only to admins until launch. Tap{' '}
-            <span className="font-medium text-foreground">Nest here</span>, pick 90 or 180 days when you stake, and
-            use <span className="font-medium text-foreground">My nest</span> to test freeze, claim, and unstake on
+            <span className="font-medium text-foreground">Start Nest</span>, pick 90 or 180 days when you stake, and
+            use <span className="font-medium text-foreground">Manage Nest</span> to test freeze, claim, and unstake on
             mobile and desktop.
           </p>
         </div>
