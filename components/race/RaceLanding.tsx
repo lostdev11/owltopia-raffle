@@ -30,13 +30,13 @@ type AdminCheckState = 'idle' | 'loading' | 'allowed' | 'denied'
 
 const featureCards = [
   {
-    title: 'Run, jump, glide',
-    description: 'Master an owl built for speed, precision, and limited flight.',
+    title: 'Fly the course',
+    description: 'Steer, climb, dive, and boost through a forest built for owl racing.',
     icon: Bird,
   },
   {
     title: 'Chase your best time',
-    description: 'Ordered checkpoints and verified splits keep every run accountable.',
+    description: 'Ordered checkpoints and verified splits keep every flight accountable.',
     icon: Timer,
   },
   {
@@ -123,8 +123,8 @@ export function RaceLanding() {
             Owltopia Flight League
           </h1>
           <p className="mt-5 max-w-2xl text-base leading-relaxed text-zinc-300 sm:text-lg">
-            Run the forest, manage your stamina, catch the perfect glide, and
-            chase a verified place on the weekly leaderboard.
+            Fly through the forest, manage your boost stamina, master each
+            climb and dive, and chase a verified place on the weekly leaderboard.
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -196,7 +196,7 @@ export function RaceLanding() {
             <div className="mt-8 w-full text-left">
               <RaceGame />
               <p className="mt-3 text-center text-xs text-zinc-500">
-                Phase 1 gray-box controller. The rigged owl model will replace
+                Phase 1 flight controller. The rigged owl model will replace
                 the placeholder without changing movement or physics.
               </p>
             </div>
