@@ -1612,6 +1612,42 @@ export default function AdminDashboardPage() {
     }
   }
 
+  const handleCoverTreasuryBuyoutFromEscrow = async (offerId: string) => {
+    const trimmedOfferId = offerId.trim()
+    if (!trimmedOfferId) return
+
+    setTreasuryBuyoutSendSavingId(trimmedOfferId)
+    setBuyoutRecordResult(null)
+    try {
+      const response = await fetch(
+        `/api/admin/buyout-offers/${encodeURIComponent(trimmedOfferId)}/cover-from-escrow`,
+        { method: 'POST', credentials: 'include' },
+      )
+      const data = await response.json()
+      if (!response.ok) {
+        setBuyoutRecordResult({
+          ok: false,
+          error: data.error || 'Failed to cover legacy buyout refund from escrow',
+        })
+      } else {
+        setBuyoutRecordResult({
+          ok: true,
+          refundTransactionSignature: data.refundTransactionSignature,
+          amount: data.amount,
+          currency: data.currency,
+          bidderWallet: data.bidderWallet,
+        })
+        if (walletRefundLookupInput.trim()) {
+          await handleWalletRefundLookup(walletRefundLookupInput.trim())
+        }
+      }
+    } catch {
+      setBuyoutRecordResult({ ok: false, error: 'Network error' })
+    } finally {
+      setTreasuryBuyoutSendSavingId(null)
+    }
+  }
+
   const handleWalletRefundLookup = async (walletOverride?: string) => {
     const wallet = (walletOverride ?? walletRefundLookupInput).trim()
     if (!wallet) return
@@ -3893,8 +3929,8 @@ export default function AdminDashboardPage() {
                               Legacy buyout refund (fee treasury)
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              Send from RAFFLE_RECIPIENT_WALLET, then record the refund tx. Or use Send refund when
-                              treasury signing is configured on the server.
+                              Bid is still in RAFFLE_RECIPIENT_WALLET. Prefer covering from funds escrow (platform
+                              pays; original bid stays in treasury), or send from the fee treasury and record the tx.
                             </p>
                             {walletRefundLookupData.buyoutTreasury.map((b) => (
                               <div
@@ -3907,7 +3943,7 @@ export default function AdminDashboardPage() {
                                 <p className="font-mono text-[10px] text-muted-foreground break-all">
                                   Offer {b.offerId}
                                 </p>
-                                {treasurySigningBuyoutRefunds === true && (
+                                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                                   <Button
                                     type="button"
                                     variant="default"
@@ -3917,18 +3953,33 @@ export default function AdminDashboardPage() {
                                       treasuryBuyoutSendSavingId === b.offerId ||
                                       treasuryBuyoutRecordSavingId === b.offerId
                                     }
-                                    onClick={() => void handleSendTreasuryBuyoutRefund(b.offerId)}
+                                    onClick={() => void handleCoverTreasuryBuyoutFromEscrow(b.offerId)}
                                   >
                                     {treasuryBuyoutSendSavingId === b.offerId ? (
                                       <>
                                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        Sending refund…
+                                        Covering from escrow…
                                       </>
                                     ) : (
-                                      'Send refund from fee treasury'
+                                      'Cover refund from funds escrow'
                                     )}
                                   </Button>
-                                )}
+                                  {treasurySigningBuyoutRefunds === true && (
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="sm"
+                                      className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                                      disabled={
+                                        treasuryBuyoutSendSavingId === b.offerId ||
+                                        treasuryBuyoutRecordSavingId === b.offerId
+                                      }
+                                      onClick={() => void handleSendTreasuryBuyoutRefund(b.offerId)}
+                                    >
+                                      Send from fee treasury
+                                    </Button>
+                                  )}
+                                </div>
                                 <Input
                                   className="font-mono text-xs"
                                   placeholder="Refund TX after sending from fee treasury"

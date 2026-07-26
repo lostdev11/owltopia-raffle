@@ -337,6 +337,7 @@ type DashboardData = {
     status: string
     deposit_tx_signature: string | null
     refunded_at: string | null
+    refundDepositSource?: 'funds_escrow' | 'treasury' | 'unknown' | null
   }>
   milestoneBonusWins?: MilestoneBonusWinRow[]
 }
@@ -1895,6 +1896,12 @@ export default function DashboardPage() {
       o.deposit_tx_signature &&
       !o.refunded_at,
   )
+  const buyoutClaimableFromEscrow = buyoutRefundEligible.filter(
+    (o) => o.refundDepositSource !== 'treasury' && o.refundDepositSource !== 'unknown',
+  )
+  const buyoutNeedsAdminRefund = buyoutRefundEligible.filter(
+    (o) => o.refundDepositSource === 'treasury' || o.refundDepositSource === 'unknown',
+  )
 
   const refundableEntries = myEntries.filter(
     (x) =>
@@ -3439,12 +3446,11 @@ export default function DashboardPage() {
             </CardTitle>
             <CardDescription>
               Your buyout deposit can be returned when the offer expired or the winner accepted someone else&apos;s bid.
-              Refunds are sent from funds escrow. Older bids that went to the fee treasury need a manual refund from
-              platform admin.
+              New bids refund from funds escrow. Older bids that went to the fee treasury are handled by platform admin.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {buyoutRefundEligible.length > 1 && (
+            {buyoutClaimableFromEscrow.length > 1 && (
               <div className="flex justify-end">
                 <Button
                   type="button"
@@ -3452,7 +3458,7 @@ export default function DashboardPage() {
                   size="sm"
                   className="touch-manipulation min-h-[44px]"
                   disabled={buyoutRefundLoadingId !== null || isClaimingAllBuyoutRefunds}
-                  onClick={() => void handleClaimAllBuyoutRefunds(buyoutRefundEligible)}
+                  onClick={() => void handleClaimAllBuyoutRefunds(buyoutClaimableFromEscrow)}
                 >
                   {isClaimingAllBuyoutRefunds ? (
                     <>
@@ -3460,12 +3466,12 @@ export default function DashboardPage() {
                       Claiming all…
                     </>
                   ) : (
-                    `Claim all (${buyoutRefundEligible.length})`
+                    `Claim all (${buyoutClaimableFromEscrow.length})`
                   )}
                 </Button>
               </div>
             )}
-            {buyoutRefundEligible.map((o) => (
+            {buyoutClaimableFromEscrow.map((o) => (
               <div
                 key={o.id}
                 className="flex flex-col gap-2 rounded-lg border border-border/50 bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between"
@@ -3497,6 +3503,26 @@ export default function DashboardPage() {
                     'Claim refund'
                   )}
                 </Button>
+              </div>
+            ))}
+            {buyoutNeedsAdminRefund.map((o) => (
+              <div
+                key={o.id}
+                className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3"
+              >
+                <Link href={`/raffles/${o.raffle_slug}`} className="block truncate font-medium hover:underline">
+                  {o.raffle_title}
+                </Link>
+                <p className="mt-1 text-sm tabular-nums text-muted-foreground">
+                  {o.amount} {o.currency} · {o.status}
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  This older bid went to the fee treasury, so self-claim is unavailable. Platform admin will refund it
+                  from Owl Vision (Cover refund from funds escrow).
+                </p>
+                <p className="mt-1 font-mono text-[10px] text-muted-foreground/80 break-all" title="Offer ID">
+                  {o.id}
+                </p>
               </div>
             ))}
           </CardContent>

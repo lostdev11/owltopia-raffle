@@ -176,7 +176,7 @@ async function refundBuyoutFromTreasury(offer: RaffleBuyoutOffer): Promise<Settl
     return {
       ok: false,
       error:
-        'This bid was deposited to the fee treasury before buyouts used funds escrow. Send the refund from RAFFLE_RECIPIENT_WALLET, then record it in Owl Vision admin (Legacy buyout refund).',
+        'This bid was deposited to the fee treasury before buyouts used funds escrow. In Owl Vision admin, use Cover refund from funds escrow (or send from RAFFLE_RECIPIENT_WALLET and record the tx).',
     }
   }
 
