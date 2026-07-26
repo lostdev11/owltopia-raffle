@@ -15,10 +15,10 @@ import { Button } from '@/components/ui/button'
 import { useRaceGameStore } from '@/lib/race/store'
 
 const KEY_BINDINGS = {
-  KeyW: 'forward',
-  ArrowUp: 'forward',
-  KeyS: 'backward',
-  ArrowDown: 'backward',
+  KeyW: 'backward',
+  ArrowUp: 'backward',
+  KeyS: 'forward',
+  ArrowDown: 'forward',
   KeyA: 'left',
   ArrowLeft: 'left',
   KeyD: 'right',
@@ -113,14 +113,14 @@ export function RaceControls() {
     <>
       <div className="pointer-events-auto absolute bottom-4 left-4 grid grid-cols-3 gap-1 md:hidden">
         <span />
-        <ControlButton label="Fly forward" input="forward">
+        <ControlButton label="Fly forward" input="backward">
           <ArrowUp className="h-5 w-5" />
         </ControlButton>
         <span />
         <ControlButton label="Steer left" input="left">
           <ArrowLeft className="h-5 w-5" />
         </ControlButton>
-        <ControlButton label="Slow down" input="backward">
+        <ControlButton label="Slow down" input="forward">
           <ArrowDown className="h-5 w-5" />
         </ControlButton>
         <ControlButton label="Steer right" input="right">
