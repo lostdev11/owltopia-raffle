@@ -1,12 +1,24 @@
 'use client'
 
-import { Environment, Stars } from '@react-three/drei'
+import { Environment, Float, Stars } from '@react-three/drei'
 import {
   CuboidCollider,
   Physics,
   RigidBody,
 } from '@react-three/rapier'
 import { RaceController } from '@/components/race/RaceController'
+import { useRaceGameStore } from '@/lib/race/store'
+
+const CHECKPOINTS: Array<{
+  position: [number, number, number]
+  label: string
+}> = [
+  { position: [0, 5.5, 0], label: '1' },
+  { position: [-2.5, 6.2, -8], label: '2' },
+  { position: [2.8, 4.6, -16], label: '3' },
+  { position: [-2.2, 7.2, -25], label: '4' },
+  { position: [0, 5.2, -34], label: 'FINISH' },
+]
 
 function CourseBlock({
   position,
@@ -26,6 +38,58 @@ function CourseBlock({
         <boxGeometry args={size} />
         <meshStandardMaterial color={color} roughness={0.88} />
       </mesh>
+    </RigidBody>
+  )
+}
+
+function CheckpointGate({
+  index,
+  position,
+  label,
+}: {
+  index: number
+  position: [number, number, number]
+  label: string
+}) {
+  const status = useRaceGameStore((state) => state.status)
+  const currentCheckpoint = useRaceGameStore(
+    (state) => state.currentCheckpoint
+  )
+  const crossCheckpoint = useRaceGameStore(
+    (state) => state.crossCheckpoint
+  )
+
+  const cleared = currentCheckpoint > index
+  const active = status === 'racing' && currentCheckpoint === index
+  const color = cleared ? '#24553b' : active ? '#8cff65' : '#64748b'
+  const emissive = active ? '#22c55e' : cleared ? '#123b28' : '#111827'
+
+  return (
+    <RigidBody type="fixed" colliders={false} position={position}>
+      <CuboidCollider
+        args={[2.15, 2.15, 0.3]}
+        sensor
+        onIntersectionEnter={() => crossCheckpoint(index)}
+      />
+      <Float speed={active ? 2.2 : 1} rotationIntensity={0} floatIntensity={0.12}>
+        <mesh castShadow>
+          <torusGeometry args={[2.15, 0.2, 12, 48]} />
+          <meshStandardMaterial
+            color={color}
+            emissive={emissive}
+            emissiveIntensity={active ? 2.5 : 0.45}
+            roughness={0.35}
+            metalness={0.25}
+          />
+        </mesh>
+        <mesh position={[0, 2.75, 0]}>
+          <planeGeometry args={[label === 'FINISH' ? 2.8 : 0.9, 0.75]} />
+          <meshBasicMaterial color={color} transparent opacity={0.9} />
+        </mesh>
+        {active ? (
+          <pointLight color="#65ff8b" intensity={8} distance={9} />
+        ) : null}
+      </Float>
     </RigidBody>
   )
 }
@@ -64,11 +128,15 @@ function GrayBoxCourse() {
         color="#47704c"
         rotation={[-0.18, 0, 0]}
       />
-      <CourseBlock
-        position={[0, 0.1, -34]}
-        size={[12, 0.2, 0.5]}
-        color="#58d481"
-      />
+
+      {CHECKPOINTS.map((checkpoint, index) => (
+        <CheckpointGate
+          key={checkpoint.label}
+          index={index}
+          position={checkpoint.position}
+          label={checkpoint.label}
+        />
+      ))}
 
       {Array.from({ length: 16 }, (_, index) => {
         const side = index % 2 === 0 ? -1 : 1
