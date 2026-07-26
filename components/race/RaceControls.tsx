@@ -71,6 +71,7 @@ function ControlButton({
 export function RaceControls() {
   const resetInput = useRaceGameStore((state) => state.resetInput)
   const setInput = useRaceGameStore((state) => state.setInput)
+  const prepareRace = useRaceGameStore((state) => state.prepareRace)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -149,10 +150,13 @@ export function RaceControls() {
         size="sm"
         variant="outline"
         className="pointer-events-auto absolute right-3 top-3 border-white/20 bg-black/55 text-white hover:bg-black/75"
-        onClick={() => window.dispatchEvent(new Event('owl-race-reset'))}
+        onClick={() => {
+          window.dispatchEvent(new Event('owl-race-reset'))
+          prepareRace()
+        }}
       >
         <RotateCcw className="mr-2 h-4 w-4" />
-        Reset
+        Restart
       </Button>
     </>
   )
