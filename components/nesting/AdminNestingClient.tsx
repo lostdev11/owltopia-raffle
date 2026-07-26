@@ -823,8 +823,23 @@ export function AdminNestingClient() {
         typeof json?.summary?.remaining_high_severity === 'number'
           ? json.summary.remaining_high_severity
           : null
+      const skipped = Array.isArray(json?.skipped_pending) ? json.skipped_pending : []
+      const graceSkips = skipped.filter(
+        (s: { reason?: string }) => s?.reason === 'opening_grace'
+      ).length
+      const frozenSkips = skipped.filter(
+        (s: { reason?: string }) => s?.reason === 'still_frozen_on_chain'
+      ).length
+      const skipNote =
+        graceSkips > 0
+          ? ` ${graceSkips} pending still in the 10-min open grace — wait and re-heal, or user Finish opening.`
+          : frozenSkips > 0
+            ? ` ${frozenSkips} pending still frozen on-chain — user should refresh My nest (promote), not clear.`
+            : skipped.length > 0
+              ? ` ${skipped.length} pending skipped (see heal response).`
+              : ''
       setWalletSupportMsg(
-        `Healed ${wallet}: ${pending} pending, ${active} active orphan, ${cross} cross-wallet row(s) cleared.${
+        `Healed ${wallet}: ${pending} pending, ${active} active orphan, ${cross} cross-wallet row(s) cleared.${skipNote}${
           remaining != null ? ` ${remaining} high-severity issue(s) remain — re-run diagnostics.` : ''
         } User should refresh nesting and re-open nests with wallet lock.`
       )

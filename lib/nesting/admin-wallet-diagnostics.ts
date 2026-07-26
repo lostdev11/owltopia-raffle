@@ -590,6 +590,12 @@ export type HealHolderWalletNestsResult = {
   cleared_pending_count: number
   cleared_active_count: number
   cleared_cross_wallet_count: number
+  /** Pending rows not cleared — grace window, still frozen on-chain, etc. */
+  skipped_pending?: Array<{
+    positionId: string
+    asset_identifier: string | null
+    reason: string
+  }>
   diagnostics_after?: NestingWalletDiagnostics
 }
 
@@ -605,10 +611,18 @@ export async function healHolderWalletNests(
   let clearedPending = 0
   let clearedActive = 0
   let clearedCross = 0
+  let skippedPending: HealHolderWalletNestsResult['skipped_pending']
 
   if (clearPending) {
     const r = await clearOrphanedPendingNftNestsForWallet(holder)
     clearedPending = r.cleared_count
+    skippedPending = r.results
+      .filter((row) => !row.cleared && row.reason)
+      .map((row) => ({
+        positionId: row.positionId,
+        asset_identifier: row.asset_identifier,
+        reason: row.reason!,
+      }))
   }
   if (clearActive) {
     const r = await clearOrphanedActiveNftNestsForWallet(holder)
@@ -624,5 +638,6 @@ export async function healHolderWalletNests(
     cleared_pending_count: clearedPending,
     cleared_active_count: clearedActive,
     cleared_cross_wallet_count: clearedCross,
+    ...(skippedPending && skippedPending.length > 0 ? { skipped_pending: skippedPending } : {}),
   }
 }
