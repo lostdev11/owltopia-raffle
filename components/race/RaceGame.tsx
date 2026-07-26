@@ -9,7 +9,6 @@ import { useRaceGameStore } from '@/lib/race/store'
 
 export function RaceGame() {
   const stamina = useRaceGameStore((state) => state.stamina)
-  const grounded = useRaceGameStore((state) => state.grounded)
   const motion = useRaceGameStore((state) => state.motion)
 
   return (
@@ -17,7 +16,7 @@ export function RaceGame() {
       <Canvas
         shadows
         dpr={[1, 1.6]}
-        camera={{ fov: 55, near: 0.1, far: 130, position: [0, 4, 13] }}
+        camera={{ fov: 55, near: 0.1, far: 130, position: [0, 8, 15] }}
       >
         <Suspense fallback={null}>
           <RaceWorld />
@@ -26,7 +25,7 @@ export function RaceGame() {
 
       <div className="pointer-events-none absolute left-3 top-3 w-48 rounded-xl border border-white/15 bg-black/60 p-3 text-white backdrop-blur">
         <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-zinc-300">
-          <span>Stamina</span>
+          <span>Boost stamina</span>
           <span>{Math.round(stamina)}%</span>
         </div>
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/15">
@@ -37,12 +36,12 @@ export function RaceGame() {
         </div>
         <div className="mt-2 flex items-center justify-between text-[11px] text-zinc-400">
           <span className="capitalize">{motion}</span>
-          <span>{grounded ? 'Grounded' : 'Airborne'}</span>
+          <span>Airborne</span>
         </div>
       </div>
 
       <div className="pointer-events-none absolute bottom-3 left-1/2 hidden -translate-x-1/2 rounded-lg border border-white/10 bg-black/55 px-4 py-2 text-xs text-zinc-200 backdrop-blur md:block">
-        WASD move · Shift sprint · Space jump · E glide
+        W/S speed · A/D steer · Shift boost · Space climb · E dive
       </div>
 
       <RaceControls />
