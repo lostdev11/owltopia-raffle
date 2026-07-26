@@ -8,7 +8,7 @@ import {
   type RapierRigidBody,
 } from '@react-three/rapier'
 import { Group, MathUtils, PerspectiveCamera, Vector3 } from 'three'
-import { PlaceholderOwl } from '@/components/race/PlaceholderOwl'
+import { RiggedOwl } from '@/components/race/RiggedOwl'
 import { useRaceGameStore, type RaceMotionState } from '@/lib/race/store'
 
 const SPAWN = { x: 0, y: 5.5, z: 7 }
@@ -229,7 +229,7 @@ export function RaceController() {
     >
       <CapsuleCollider args={[0.48, 0.42]} position={[0, -0.02, 0]} />
       <group ref={visual}>
-        <PlaceholderOwl />
+        <RiggedOwl />
       </group>
     </RigidBody>
   )
