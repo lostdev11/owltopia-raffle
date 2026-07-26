@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   Bird,
+  Flag,
   Gavel,
   Gift,
   HeartHandshake,
@@ -94,6 +95,12 @@ export const COMMUNITY_NAV_GROUP: SiteNavGroup = {
   triggerIcon: Landmark,
   iconAccentClass: 'text-sky-400/90',
   items: [
+    {
+      href: '/race',
+      label: 'Flight League',
+      description: 'Holder-only owl racing and seasonal time trials',
+      icon: Flag,
+    },
     {
       href: '/leaderboard',
       label: 'Leaderboard',

@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  type LucideIcon,
 } from 'lucide-react'
 import { leaderboardTableDescriptions } from '@/lib/leaderboard/copy'
 
@@ -87,7 +88,7 @@ function LeaderboardTable({
   description: string
   entries: LeaderboardEntry[]
   valueLabel: string
-  icon: React.ElementType
+  icon: LucideIcon
   displayNames: Record<string, string>
   defaultOpen?: boolean
   /** When true, title + description always visible (mobile single-table view). */
@@ -211,7 +212,7 @@ const LEADERBOARD_CATEGORIES: {
   key: LeaderboardCategory
   title: string
   valueLabel: string
-  icon: React.ElementType
+  icon: LucideIcon
   descriptionKey: keyof ReturnType<typeof leaderboardTableDescriptions>
 }[] = [
   {
