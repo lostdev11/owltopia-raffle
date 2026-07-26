@@ -372,11 +372,13 @@ export function RaffleMilestonesPanel({
       <div className="space-y-3">
         {milestoneProgressBlocks.map(({ m, target, progress, unlocked }) => (
           <div key={m.id} className="space-y-1">
-            <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
-              <span>
+            <div className="flex flex-wrap items-center justify-between gap-x-2 text-xs tabular-nums">
+              <span className="text-muted-foreground">
+                <span className="font-medium text-amber-400">{formatMilestonePrize(m)} bonus</span>
+                {' · '}
                 {sold} / {target} tickets
               </span>
-              <span>{unlocked ? 'Unlocked' : `${progress}%`}</span>
+              <span className="text-muted-foreground">{unlocked ? 'Unlocked' : `${progress}%`}</span>
             </div>
             <div className="h-2 rounded-full bg-muted overflow-hidden">
               <div
