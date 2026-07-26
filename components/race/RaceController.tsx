@@ -93,8 +93,10 @@ export function RaceController() {
       -Math.cos(yaw.current)
     )
 
-    const wantsForward = state.input.forward && !state.input.backward
-    const wantsBackward = state.input.backward && !state.input.forward
+    // The placeholder owl's authored forward axis is opposite the scene axis,
+    // so the input channels are intentionally resolved in model space.
+    const wantsForward = state.input.backward && !state.input.forward
+    const wantsBackward = state.input.forward && !state.input.backward
     const moving = wantsForward || wantsBackward
     const boosting =
       wantsForward && state.input.sprint && state.stamina > 0.5
