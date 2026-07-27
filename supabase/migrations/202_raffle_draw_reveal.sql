@@ -11,7 +11,7 @@ ALTER TABLE raffles
   ADD COLUMN IF NOT EXISTS draw_revealed_at timestamptz;
 
 COMMENT ON COLUMN raffles.draw_algo IS 'Draw algorithm id, e.g. owltopia-draw-v1';
-COMMENT ON COLUMN raffles.draw_seed IS 'Public draw seed (base58 pubkey) used to derive winner index';
+COMMENT ON COLUMN raffles.draw_seed IS 'Public draw seed (32-byte hex) used to derive winner index';
 COMMENT ON COLUMN raffles.draw_sold_count IS 'Confirmed ticket weight at draw time';
 COMMENT ON COLUMN raffles.draw_winner_index IS 'Winning ticket index in [0, draw_sold_count)';
 COMMENT ON COLUMN raffles.draw_ledger_hash IS 'SHA-256 hex of canonical wallet:tickets ledger';
