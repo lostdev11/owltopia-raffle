@@ -27,6 +27,7 @@ import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-econo
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
 import { getSupabasePublishableKey, getSupabaseSecretKey } from '@/lib/supabase-env'
+import { performDrawV1, sendDrawRevealMemoTransaction } from '@/lib/raffles/draw'
 
 function getSupabaseForRead() {
   return getSupabaseForServerRead(supabase)
@@ -109,6 +110,10 @@ const RAFFLE_TAIL_EXTENDED =
   RAFFLE_TAIL_MINIMAL +
   ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,cancellation_fee_paid_at,cancellation_fee_payment_tx,purchases_blocked_at,creator_restricted_listing,moderation_listing_fee_lamports,moderation_listing_fee_paid_at,moderation_listing_fee_payment_tx,list_on_platform,sol_domains_hub,buyout_closed_at'
 
+/** Migration 202: provably-auditable draw / reveal fields. */
+const RAFFLE_DRAW_REVEAL_SUFFIX =
+  ',draw_algo,draw_seed,draw_sold_count,draw_winner_index,draw_ledger_hash,draw_reveal_tx,draw_revealed_at'
+
 const NFT_COLUMN_SUFFIX =
   ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
 
@@ -149,6 +154,11 @@ let discordPartnerTenantColumnCache: { applied: boolean; checked: boolean } = {
 }
 
 let promoXHandleColumnCache: { applied: boolean; checked: boolean } = {
+  applied: false,
+  checked: false,
+}
+
+let drawRevealColumnCache: { applied: boolean; checked: boolean } = {
   applied: false,
   checked: false,
 }
@@ -216,6 +226,25 @@ async function checkPromoXHandleColumnApplied(): Promise<boolean> {
   }
 }
 
+async function checkDrawRevealColumnsApplied(): Promise<boolean> {
+  if (drawRevealColumnCache.checked) {
+    return drawRevealColumnCache.applied
+  }
+  try {
+    const { error } = await getSupabaseForRead()
+      .from('raffles')
+      .select('id,draw_algo,draw_seed,draw_sold_count,draw_winner_index,draw_ledger_hash,draw_reveal_tx,draw_revealed_at')
+      .limit(1)
+    const applied = !error
+    drawRevealColumnCache = { applied, checked: true }
+    return applied
+  } catch (err) {
+    console.warn('Could not check draw reveal columns:', err)
+    drawRevealColumnCache = { applied: false, checked: true }
+    return false
+  }
+}
+
 const FULL_RAFFLE_COLUMNS = getBaseRaffleColumnsCore(true) + NFT_COLUMN_SUFFIX
 
 /**
@@ -230,10 +259,12 @@ async function getRaffleColumns(): Promise<string> {
   const hasImageFallback = await checkImageFallbackColumnApplied()
   const hasDiscordTenant = await checkDiscordPartnerTenantColumnApplied()
   const hasPromoXHandle = await checkPromoXHandleColumnApplied()
+  const hasDrawReveal = await checkDrawRevealColumnsApplied()
   const base =
     getBaseRaffleColumnsCore(hasImageFallback) +
     (hasDiscordTenant ? ',discord_partner_tenant_id' : '') +
-    (hasPromoXHandle ? ',promo_x_handle' : '')
+    (hasPromoXHandle ? ',promo_x_handle' : '') +
+    (hasDrawReveal ? RAFFLE_DRAW_REVEAL_SUFFIX : '')
   raffleColumnsCache = hasNftSupport ? base + NFT_COLUMN_SUFFIX : base
   return raffleColumnsCache
 }
@@ -694,6 +725,7 @@ export async function getRaffleBySlug(slug: string) {
         imageFallbackColumnCache = { applied: false, checked: true }
         discordPartnerTenantColumnCache = { applied: false, checked: false }
         raffleColumnsCache = null
+        drawRevealColumnCache = { applied: false, checked: false }
         const hasNftSupport = await checkNftMigrationApplied()
         const minimalColumns = hasNftSupport
           ? getMinimalBaseRaffleColumnsCore(false) + NFT_COLUMN_SUFFIX
@@ -746,6 +778,7 @@ export async function getRaffleById(id: string) {
         imageFallbackColumnCache = { applied: false, checked: true }
         discordPartnerTenantColumnCache = { applied: false, checked: false }
         raffleColumnsCache = null
+        drawRevealColumnCache = { applied: false, checked: false }
         const hasNftSupport = await checkNftMigrationApplied()
         const minimalColumns = hasNftSupport
           ? getMinimalBaseRaffleColumnsCore(false) + NFT_COLUMN_SUFFIX
@@ -880,6 +913,21 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
       return Number.isFinite(n) && n > 0 ? n : null
     })(),
     time_extension_count,
+    draw_algo: (row.draw_algo as string | null | undefined) ?? null,
+    draw_seed: (row.draw_seed as string | null | undefined) ?? null,
+    draw_sold_count: (() => {
+      if (row.draw_sold_count == null || row.draw_sold_count === '') return null
+      const n = Number(row.draw_sold_count)
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : null
+    })(),
+    draw_winner_index: (() => {
+      if (row.draw_winner_index == null || row.draw_winner_index === '') return null
+      const n = Number(row.draw_winner_index)
+      return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null
+    })(),
+    draw_ledger_hash: (row.draw_ledger_hash as string | null | undefined) ?? null,
+    draw_reveal_tx: (row.draw_reveal_tx as string | null | undefined) ?? null,
+    draw_revealed_at: (row.draw_revealed_at as string | null | undefined) ?? null,
   } as Raffle
 }
 
@@ -901,6 +949,7 @@ export async function getRafflesByCreator(walletAddress: string): Promise<Raffle
         imageFallbackColumnCache = { applied: false, checked: true }
         discordPartnerTenantColumnCache = { applied: false, checked: false }
         raffleColumnsCache = null
+        drawRevealColumnCache = { applied: false, checked: false }
         const hasNftSupport = await checkNftMigrationApplied()
         const minimalColumns = hasNftSupport
           ? getMinimalBaseRaffleColumnsCore(false) + NFT_COLUMN_SUFFIX
@@ -1843,37 +1892,18 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     return null
   }
 
-  // Aggregate ticket quantities by wallet address
-  const walletTickets = new Map<string, number>()
-  for (const entry of confirmedEntries) {
-    const current = walletTickets.get(entry.wallet_address) || 0
-    walletTickets.set(entry.wallet_address, current + Number(entry.ticket_quantity ?? 0))
-  }
-
-  const drawRows = Array.from(walletTickets.entries())
-    .map(([wallet, qty]) => ({
-      wallet,
-      tickets: Math.max(0, Math.floor(Number(qty) || 0)),
-    }))
-    .filter((r) => r.tickets > 0)
-
-  const totalTicketWeight = drawRows.reduce((s, r) => s + r.tickets, 0)
-  if (totalTicketWeight <= 0) {
-    console.warn(`No wallets with positive ticket totals for raffle ${raffleId}`)
+  // Provably-auditable draw (owltopia-draw-v1): seeded RNG + ledger hash; memo reveal best-effort after.
+  let draw
+  try {
+    draw = performDrawV1(confirmedEntries)
+  } catch (e) {
+    console.warn(
+      `No drawable tickets for raffle ${raffleId}:`,
+      e instanceof Error ? e.message : e
+    )
     return null
   }
-
-  // Integer index in [0, totalTicketWeight): each ticket is one equally likely outcome.
-  const pick = Math.floor(Math.random() * totalTicketWeight)
-  let cumulative = 0
-  let winnerWallet = drawRows[0].wallet
-  for (const row of drawRows) {
-    cumulative += row.tickets
-    if (pick < cumulative) {
-      winnerWallet = row.wallet
-      break
-    }
-  }
+  const winnerWallet = draw.winnerWallet
 
   // Compute settlement amounts (fee + creator payout) at settlement time
   const revenue = getRaffleRevenue(entries)
@@ -1889,6 +1919,17 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     : 'completed'
 
   const now = new Date().toISOString()
+  const hasDrawRevealCols = await checkDrawRevealColumnsApplied()
+  const drawFields = hasDrawRevealCols
+    ? {
+        draw_algo: draw.algo,
+        draw_seed: draw.drawSeed,
+        draw_sold_count: draw.soldCount,
+        draw_winner_index: draw.winnerIndex,
+        draw_ledger_hash: draw.ledgerHash,
+      }
+    : {}
+
   const { data: updatedRaffle, error } = await getSupabaseAdmin()
     .from('raffles')
     .update({
@@ -1901,6 +1942,7 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
       platform_fee_amount: platformFee,
       creator_payout_amount: creatorPayout,
       settled_at: now,
+      ...drawFields,
     })
     .eq('id', raffleId)
     .is('winner_wallet', null)
@@ -1918,11 +1960,42 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     return latest?.winner_wallet ?? null
   }
 
-  const rawTickets = walletTickets.get(winnerWallet) ?? 0
   console.log(
-    `Winner selected for raffle ${raffleId}: ${winnerWallet} (${rawTickets} tickets for winner; ` +
-      `${totalTicketWeight} total ticket weights across ${drawRows.length} wallets)`,
+    `Winner selected for raffle ${raffleId}: ${winnerWallet} ` +
+      `(algo=${draw.algo} index=${draw.winnerIndex}/${draw.soldCount} ledger=${draw.ledgerHash.slice(0, 12)}…)`
   )
+
+  if (hasDrawRevealCols) {
+    try {
+      const reveal = await sendDrawRevealMemoTransaction({
+        algo: draw.algo,
+        raffleId,
+        drawSeed: draw.drawSeed,
+        soldCount: draw.soldCount,
+        winnerIndex: draw.winnerIndex,
+        ledgerHash: draw.ledgerHash,
+      })
+      if (reveal.ok) {
+        const revealedAt = new Date().toISOString()
+        const { error: revealErr } = await getSupabaseAdmin()
+          .from('raffles')
+          .update({
+            draw_reveal_tx: reveal.signature,
+            draw_revealed_at: revealedAt,
+          })
+          .eq('id', raffleId)
+        if (revealErr) {
+          console.error(`[selectWinner] failed to persist draw_reveal_tx for ${raffleId}:`, revealErr)
+        } else {
+          console.log(`[selectWinner] draw reveal tx for ${raffleId}: ${reveal.signature}`)
+        }
+      } else {
+        console.warn(`[selectWinner] draw reveal skipped for ${raffleId}: ${reveal.error}`)
+      }
+    } catch (revealCatch) {
+      console.warn(`[selectWinner] draw reveal error for ${raffleId}:`, revealCatch)
+    }
+  }
 
   const winnerDiscordId = await discordUserIdForWinnerWallet(winnerWallet)
   await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId)

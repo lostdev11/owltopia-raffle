@@ -308,6 +308,20 @@ export interface Raffle {
   prize_return_reason: string | null
   /** Solana tx signature for the return transfer to creator. */
   prize_return_tx: string | null
+  /** Draw algorithm id (e.g. owltopia-draw-v1). Null for legacy Math.random draws. */
+  draw_algo?: string | null
+  /** Public seed used to derive winner index (hex for v1). */
+  draw_seed?: string | null
+  /** Confirmed ticket weight at draw time. */
+  draw_sold_count?: number | null
+  /** Winning ticket index in [0, draw_sold_count). */
+  draw_winner_index?: number | null
+  /** SHA-256 hex of canonical wallet:tickets ledger at draw time. */
+  draw_ledger_hash?: string | null
+  /** Solana memo reveal transaction signature (Solscanable). */
+  draw_reveal_tx?: string | null
+  /** When the reveal memo tx was confirmed. */
+  draw_revealed_at?: string | null
   /** Enriched at list time: true if creator is an Owltopia (Owl NFT) holder. Used for card badge. */
   creator_is_holder?: boolean
   /** Enriched at list time: creator wallet is in partner_community_creators (2% fee, spotlight). */
