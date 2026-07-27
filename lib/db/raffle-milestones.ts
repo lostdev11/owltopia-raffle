@@ -115,10 +115,18 @@ export async function updateRaffleMilestone(
   }
 }
 
+/** Milestones that still require escrow before ticket sales / publish. */
+export function milestonesRequiringDeposit(
+  milestones: Array<{ status: string; deposit_verified_at: string | null }>
+): Array<{ status: string; deposit_verified_at: string | null }> {
+  return milestones.filter(
+    (m) => m.status !== 'void' && m.status !== 'returned' && !m.deposit_verified_at
+  )
+}
+
 export async function allMilestonesDeposited(raffleId: string): Promise<boolean> {
   const milestones = await getMilestonesByRaffleId(raffleId)
-  if (milestones.length === 0) return true
-  return milestones.every((m) => !!m.deposit_verified_at)
+  return milestonesRequiringDeposit(milestones).length === 0
 }
 
 export async function getPriorMilestoneWinnerWallets(

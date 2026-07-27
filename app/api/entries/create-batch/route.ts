@@ -148,7 +148,14 @@ export async function POST(request: NextRequest) {
 
       const { raffleHasPendingMilestoneDeposits } = await import('@/lib/raffles/publish-after-deposits')
       if (await raffleHasPendingMilestoneDeposits(raffleIdStr)) {
-        return NextResponse.json(ERROR_BODY, { status: 400 })
+        return NextResponse.json(
+          {
+            success: false as const,
+            error:
+              'Ticket sales are paused until the host funds this raffle’s bonus prize escrow. Please try again later.',
+          },
+          { status: 400 }
+        )
       }
 
       const purchasesBlockedAt = (raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at

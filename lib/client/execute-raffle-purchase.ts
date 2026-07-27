@@ -131,10 +131,16 @@ function classifyPurchaseError(err: unknown): {
       errorMessage =
         'Transaction confirmation timed out. You can retry verify from your orders if payment went through.'
       isUnconfirmedPayment = true
-    } else if (errMsg === 'server error' || errMsg.includes('Failed to verify')) {
+    } else if (errMsg.includes('Failed to verify')) {
+      // Only claim payment was sent when verify failed after a signature exists.
       errorMessage =
         "Your payment was sent, but we couldn't confirm it right away. Refresh the page in a moment — your ticket should appear. If it doesn't, try again or contact support with your transaction signature."
       isUnconfirmedPayment = true
+    } else if (errMsg === 'server error') {
+      // `/api/entries/create` returns this opaque body for many pre-sign failures
+      // (DB timeout, rate limit, etc.). Do not imply SOL left the wallet.
+      errorMessage =
+        'Couldn’t start the purchase right now (temporary server issue). Nothing was charged — refresh and try again in a moment.'
     } else {
       errorMessage = errMsg
     }

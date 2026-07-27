@@ -72,7 +72,5 @@ export async function finalizeRafflePublicationAfterPrizeVerify(raffleId: string
 }
 
 export async function raffleHasPendingMilestoneDeposits(raffleId: string): Promise<boolean> {
-  const milestones = await getMilestonesByRaffleId(raffleId)
-  if (milestones.length === 0) return false
   return !(await allMilestonesDeposited(raffleId))
 }
