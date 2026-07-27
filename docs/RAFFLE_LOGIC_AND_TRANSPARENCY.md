@@ -15,12 +15,13 @@ This document answers common questions about how Owl Raffle works: where logic r
 
 ## 2. Is there a smart contract that determines the winner?
 
-**No.** There is no on-chain smart contract that selects the raffle winner.
+**Not yet (v1).** There is no Solana program that selects the raffle winner on-chain.
 
-- **Payments:** Ticket purchases are real on-chain Solana transactions (SOL or USDC to the raffle recipient wallet). Those can be verified on-chain (signatures, amounts, recipient).
-- **Winner selection:** The **draw** (who wins) is computed **off-chain** in our backend, not by a Solana program.
+- **Payments:** Ticket purchases are real on-chain Solana transactions. Those can be verified on-chain (signatures, amounts, recipient).
+- **Winner selection:** The **draw** is computed **off-chain**, then published with a public seed + ledger hash. A **reveal memo transaction** is posted on Solana so anyone can recompute the result (see §3).
+- **Roadmap:** Commit–reveal and/or on-chain VRF can upgrade fairness without changing the verify UX.
 
-So: **payments = on-chain; draw logic = off-chain.**
+So: **payments + reveal memo = on-chain; draw math = off-chain but publicly verifiable in v1.**
 
 ---
 
@@ -40,18 +41,23 @@ Implementation: `lib/raffles/min-threshold-extension.ts` (extension), `lib/raffl
 ## 3. How is the winner determined? (draw logic)
 
 - **Where it runs:** Backend (Next.js API + Supabase).  
-  - Code: `lib/db/raffles.ts` → function `selectWinner(raffleId)`.
+  - Code: `lib/db/raffles.ts` → `selectWinner(raffleId)` → `lib/raffles/draw` (`performDrawV1`).
 - **When it runs:**
   - When an admin triggers “Select winner” for a raffle, or
-  - When someone visits a raffle’s detail page after it has ended and no winner has been selected yet (auto-draw).
-- **Algorithm:**
-  1. Only **confirmed** entries count (entries whose payment was verified).
-  2. Tickets are summed **per wallet** from those entries (same totals used for display and revenue).
-  3. **Weighted random by ticket count:** each **confirmed ticket** is one equally likely outcome; the winning **wallet** is whichever wallet owns the ticket index that was drawn. More tickets ⇒ higher win probability; the result is still **random** (a large holder is not guaranteed to win).
-  4. Implemented as: total weight = sum of confirmed ticket counts across wallets, draw `Math.floor(Math.random() * total)`, then walk cumulative ticket counts to pick the winner wallet (`selectWinner` in `lib/db/raffles.ts`).
-  5. The chosen `winner_wallet` and `winner_selected_at` are stored in the `raffles` table in Supabase.
+  - When cron / auto-draw runs after end time with threshold met.
+- **Algorithm (`owltopia-draw-v1`):**
+  1. Only **confirmed** entries count (entries whose payment was verified; refunded excluded).
+  2. Tickets are summed **per wallet**, then wallets are sorted **lexicographically** into a contiguous ticket ledger.
+  3. A fresh public `drawSeed` (32-byte hex) is generated at draw time.
+  4. `winnerIndex = SHA256(seed + ":" + soldCount) % soldCount` (first 8 bytes of the hash as a big-endian uint).
+  5. The wallet owning that ticket index wins. More tickets ⇒ higher win probability.
+  6. Stored on the raffle: `draw_algo`, `draw_seed`, `draw_sold_count`, `draw_winner_index`, `draw_ledger_hash`.
+  7. Best-effort **on-chain reveal memo** tx posts  
+     `owltopia-draw-v1:<raffleId>:<seed>:<soldCount>:<winnerIndex>:<ledgerHash>`  
+     (signature in `draw_reveal_tx`). Anyone can recompute via **Verify draw** on the raffle page or `GET /api/raffles/[id]/verify-draw`.
+- **Trust model (v1):** Payments + escrow + reveal memo are on-chain; the draw math is publicly re-derivable. Seed is chosen at draw time (not pre-committed). Stronger trust (commit–reveal / on-chain VRF) is a planned upgrade behind the same verify UX.
 
-So there is **no proof-of-work or on-chain verifiable randomness**; the draw uses pseudorandom selection in our server code. For full on-chain transparency you’d need a future design (e.g. commit–reveal, or a verifiable random function / oracle used by a smart contract).
+Legacy raffles drawn before this change have no seed fields and show as `legacy_draw` in the verify API.
 
 ---
 
@@ -61,10 +67,12 @@ So there is **no proof-of-work or on-chain verifiable randomness**; the draw use
 |-------------------------|--------|
 | Ticket purchases        | On-chain (Solana: SOL or USDC transfer). Signatures can be stored and verified. |
 | Entry records           | Supabase DB (`entries` table: wallet, ticket_quantity, status, transaction_signature, etc.). |
-| Winner selection (draw) | Off-chain: `lib/db/raffles.ts` → `selectWinner()`, triggered by API or raffle detail page. |
-| Winner storage          | Supabase DB (`raffles.winner_wallet`, `raffles.winner_selected_at`). |
+| Winner selection (draw) | Off-chain: `lib/raffles/draw` + `selectWinner()`, triggered by API/cron. |
+| Public verify           | `GET /api/raffles/[id]/verify-draw` + raffle page **Verify draw** panel. |
+| Reveal memo             | On-chain Solana memo tx (`draw_reveal_tx`) when escrow key can sign. |
+| Winner storage          | Supabase DB (`raffles.winner_wallet`, `winner_selected_at`, draw_* fields). |
 
-So: **draw logic lives in the app backend (Node/Next + Supabase), not on Solana.**
+So: **ticket payments and reveal memo = on-chain; draw computation = off-chain but publicly verifiable (v1).**
 
 ---
 
@@ -82,11 +90,11 @@ Recommendation: Confirm that understanding in a short partner agreement or email
 ## 6. Quick answers for Dralcor
 
 - **Whitepaper:** The “Whitepaper” link currently points to `https://tinyurl.com/owltopia`. If it doesn’t show raffle details, we’ll add a dedicated raffle FAQ or update the link.
-- **Smart contract for winner?** No. We don’t use a smart contract to determine the winner.
-- **Proof of work / detailed winner logic?** Yes, but only in backend code: random draw where each **confirmed ticket** is one chance (win probability proportional to ticket count per wallet), in `lib/db/raffles.ts`. No on-chain proof.
-- **Where does the draw happen?** In our backend (API + DB). Ticket purchases are on-chain; the draw itself is off-chain.
+- **Smart contract for winner?** Not yet. v1 publishes a verifiable seed + on-chain reveal memo; full on-chain selection (VRF/program) is a later upgrade.
+- **Proof of work / detailed winner logic?** Yes: weighted by confirmed tickets, seeded SHA-256 index, public verify endpoint.
+- **Where does the draw happen?** In our backend; anyone can recompute from published seed + ledger.
 - **Business model (NFT, 100% value, profits)?** That’s a commercial/legal point; the founder should confirm and optionally publish a short, clear statement on the site.
 
 ---
 
-*Last updated: Feb 2025. Reflects current codebase (Next.js + Supabase; draw in `lib/db/raffles.ts`).*
+*Last updated: Jul 2026. Reflects `owltopia-draw-v1` (Next.js + Supabase; draw in `lib/raffles/draw`).*

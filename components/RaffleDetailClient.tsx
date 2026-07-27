@@ -158,6 +158,7 @@ import { LinkifiedText } from '@/components/LinkifiedText'
 import { RaffleDescriptionText } from '@/components/RaffleDescriptionText'
 import { RafflePromoPngButton } from '@/components/RafflePromoPngButton'
 import { RaffleWinnerPngButton } from '@/components/RaffleWinnerPngButton'
+import { RaffleDrawVerifyPanel } from '@/components/RaffleDrawVerifyPanel'
 import {
   RaffleOverThresholdPngButton,
   buildOverThresholdFlexMetaLines,
@@ -4538,6 +4539,7 @@ export function RaffleDetailClient({
                   View Winner
                 </Button>
               )}
+              {raffle.winner_wallet && <RaffleDrawVerifyPanel raffleId={raffle.id} />}
               {showClaimPrizeButton && (
                 <Button
                   variant="default"
