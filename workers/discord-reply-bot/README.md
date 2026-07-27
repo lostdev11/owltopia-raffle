@@ -56,6 +56,7 @@ npm run dev
 
 - Responds on **@mention** or **reply to bot** only (no random keyword scanning).
 - **Mint / presale** prompts → live stats from `GET /api/gen2-presale/stats`.
+- **Draw / verify / fairness** prompts → commit–reveal blurb + `/how-it-works#how-draws-work`.
 - **Raffle** prompts → link to `/raffles`.
 - Default → short links to presale + raffles.
 - No @mentions in replies (avoids ping loops).

@@ -18,20 +18,23 @@ const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
 
 export const metadata: Metadata = {
   title: `How It Works | ${PLATFORM_NAME}`,
-  description: 'How raffles work: escrow, refunds, winner selection, and Owl Vision trust scoring.',
+  description:
+    'How raffles work: escrow, refunds, verifiable owltopia-draw-v1 winner selection, and Owl Vision trust scoring.',
   alternates: { canonical: `${SITE_URL}/how-it-works` },
   openGraph: {
     type: 'website',
     url: `${SITE_URL}/how-it-works`,
     siteName: PLATFORM_NAME,
     title: `How It Works | ${PLATFORM_NAME}`,
-    description: 'How raffles work: escrow, refunds, winner selection, and Owl Vision trust scoring.',
+    description:
+      'How raffles work: escrow, refunds, verifiable owltopia-draw-v1 winner selection, and Owl Vision trust scoring.',
     images: [{ url: OG_IMAGE, ...DEFAULT_OG_IMAGE_DIMS, alt: OG_ALT, type: DEFAULT_OG_IMAGE_TYPE }],
   },
   twitter: {
     card: 'summary_large_image',
     title: `How It Works | ${PLATFORM_NAME}`,
-    description: 'How raffles work: escrow, refunds, winner selection, and Owl Vision trust scoring.',
+    description:
+      'How raffles work: escrow, refunds, verifiable owltopia-draw-v1 winner selection, and Owl Vision trust scoring.',
     images: [{ url: OG_IMAGE, alt: OG_ALT, ...DEFAULT_OG_IMAGE_DIMS }],
   },
 }
@@ -49,7 +52,7 @@ export default function HowItWorksPage() {
       <div className="prose prose-invert max-w-none">
         <h1 className="text-4xl font-bold mb-2">How It Works</h1>
         <p className="text-muted-foreground mb-8">
-          Raffles, escrow, refunds, winner selection, and the Owl Vision trust score — explained.
+          Raffles, escrow, refunds, verifiable winner selection, and the Owl Vision trust score — explained.
         </p>
 
         {/* How raffles work */}
@@ -85,15 +88,18 @@ export default function HowItWorksPage() {
               </Link>{' '}
               when it is ready (on-chain claim).
             </li>
-            <li>
-              <strong>Raffle ends</strong> — When the end time is reached, the raffle stops accepting new entries. If a <strong>minimum ticket threshold</strong> is set and it is not met, the end date is usually <strong>extended once</strong> by the same length as the original raffle window (with a 7-day minimum if that length cannot be determined). If the minimum is still not met after that extension (or tickets otherwise do not sell through under the raffle rules), refunds are <strong>automatic from escrow</strong>: buyers claim ticket refunds and creators claim their escrowed NFT back from the{' '}
+            <li id="second-selling-round" className="scroll-mt-24">
+              <strong>Raffle ends</strong> — When the end time is reached, the raffle stops accepting new entries. If a <strong>minimum ticket threshold</strong> is set and it is not met, the end date is usually <strong>extended once</strong> by the same length as the original raffle window (with a 7-day minimum if that length cannot be determined). That extension is a <strong>second selling round</strong> only — no winner is drawn yet, and fairness seeds are not re-rolled. If enough tickets sell in the second round, the draw runs later against the <strong>final</strong> ticket ledger (round 1 + round 2). If the minimum is still not met after that extension (or tickets otherwise do not sell through under the raffle rules), refunds are <strong>automatic from escrow</strong>: buyers claim ticket refunds and creators claim their escrowed NFT back from the{' '}
               <Link href="/dashboard" className="text-green-500 hover:underline">
                 dashboard
               </Link>
-              .
+              . There is no draw and no on-chain randomness fee in that refund case.
             </li>
-            <li>
-              <strong>Winner is selected</strong> — One winning <strong>wallet</strong> is chosen by <strong>weighted random selection</strong> in our backend: your chance is proportional to how many <strong>confirmed</strong> tickets that wallet holds (tickets from the same wallet are combined). The draw is not an on-chain randomness oracle; it is verifiable in the sense that only confirmed entries participate and the rules are applied consistently. Draws run when the raffle has ended, thresholds are satisfied, and (for NFT prizes) the prize is confirmed in escrow — often on a schedule (cron) or when an admin triggers processing.
+            <li id="how-draws-work" className="scroll-mt-24">
+              <strong>Winner is selected</strong> — Confirmed tickets are lined up in a public <strong>ticket ledger</strong> (wallets sorted lexicographically; same-wallet tickets combined). New raffles use <strong>commit–reveal</strong> (
+              <code className="text-sm">owltopia-draw-v2-commit-reveal</code>): when the raffle is created we publish{' '}
+              <code className="text-sm">SHA256(seed)</code> (the commit hash) while keeping the raw seed private. That commit stays the same through a second selling round. At draw time — only when the raffle is actually eligible to pick a winner — we reveal the seed and compute{' '}
+              <code className="text-sm">winnerIndex = SHA256(seed:soldCount) % soldCount</code> over the final ledger. Your chance is proportional to how many confirmed tickets that wallet holds. Anyone can open <strong>Verify draw</strong> before the draw to see the commit hash, and after the draw to check the seed matches the commit, recompute the winner, open the Solscan reveal memo, and download the ticket map (CSV/JSON). Older raffles may use <code className="text-sm">owltopia-draw-v1</code> (seed chosen at draw time) or show as <strong>legacy</strong>. Draw math runs off-chain; payments and the reveal memo are on-chain. Draws run when the raffle has ended, thresholds are satisfied, and (for NFT prizes) the prize is confirmed in escrow — often on a schedule (cron) or when an admin triggers processing. A planned upgrade is on-chain VRF randomness at draw time (still only when a winner is selected, never on a failed round).
             </li>
             <li>
               <strong>Prize delivery</strong> — NFT winners claim from escrow as above. For cash or token prizes, settlement depends on raffle setup; creators on funds-escrow raffles typically <strong>claim net proceeds</strong> (after the platform fee) from the dashboard after the draw.
@@ -111,10 +117,14 @@ export default function HowItWorksPage() {
             Common questions
           </h2>
           <ul className="list-none pl-0 space-y-4 mb-0">
-            <li>
+            <li id="second-round-faq" className="scroll-mt-24">
               <strong>What if all tickets are not sold?</strong>
               <p className="text-sm text-muted-foreground mt-1 mb-0">
-                If a minimum threshold still is not met after the one-time extension, the raffle moves to a refundable state. Ticket buyers claim refunds from escrow in the dashboard; the creator claims the NFT (or other escrowed prize) back the same way.
+                If a minimum threshold is not met at the first end time, the raffle usually gets <strong>one second selling round</strong> (an automatic deadline extension). That is more ticket sales only — <strong>no winner is drawn</strong> and the committed draw seed is not regenerated. If enough tickets sell in round 2, the draw uses the final ledger (all confirmed tickets from both rounds). If the threshold is still not met after the extension, the raffle moves to a refundable state: buyers claim ticket refunds from escrow in the dashboard; the creator claims the NFT (or other escrowed prize) back the same way. See{' '}
+                <a href="#second-selling-round" className="text-green-500 hover:underline">
+                  Raffle ends
+                </a>{' '}
+                above.
               </p>
             </li>
             <li>
@@ -123,10 +133,15 @@ export default function HowItWorksPage() {
                 The platform <strong>prize escrow</strong> wallet holds the NFT for the life of the raffle. Ticket payments for modern raffles are held in the separate <strong>funds escrow</strong> until refund or settlement.
               </p>
             </li>
-            <li>
+            <li id="winner-selection-faq">
               <strong>How is the winner selected?</strong>
               <p className="text-sm text-muted-foreground mt-1 mb-0">
-                Weighted random by confirmed ticket count per wallet (see step above). More confirmed tickets = higher chance; selection runs in our backend after the raffle is eligible to draw.
+                New raffles use commit–reveal (<code className="text-xs">owltopia-draw-v2-commit-reveal</code>): a public commit hash of the seed is published at create; at draw the seed is revealed and{' '}
+                <code className="text-xs">SHA256(seed:soldCount) % soldCount</code> picks the winner over the ticket ledger. Open the raffle → <strong>Verify draw</strong> (before or after) to inspect the commit, recompute, Solscan, and download the ticket map. See{' '}
+                <a href="#how-draws-work" className="text-green-500 hover:underline">
+                  Winner is selected
+                </a>{' '}
+                above.
               </p>
             </li>
             <li>

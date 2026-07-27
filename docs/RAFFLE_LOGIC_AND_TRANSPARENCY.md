@@ -29,12 +29,15 @@ So: **payments + reveal memo = on-chain; draw math = off-chain but publicly veri
 
 If a raffle has a **minimum tickets** (or NFT floor–derived) threshold and it is **not** met when the first `end_time` passes:
 
-1. The app may **extend the sale deadline once** (same length as the original raffle window, or 7 days as a fallback), so there is a **second chance** to sell enough tickets.
-2. If the threshold is still **not** met when that extended deadline passes, the raffle is set to **`failed_refund_available`**:  
+1. The app may **extend the sale deadline once** (same length as the original raffle window, or 7 days as a fallback), so there is a **second selling round**.
+2. That extension is **sales only** — no winner is drawn, commit–reveal seeds are **not** regenerated, and (when VRF is enabled) no randomness request is made yet.
+3. If the threshold is met after round 2, the draw runs against the **final** ticket ledger (round 1 + round 2 confirmed tickets).
+4. If the threshold is still **not** met when that extended deadline passes, the raffle is set to **`failed_refund_available`**:  
    - **Buyers** can claim **refunds** for their tickets (per the app’s refund / funds-escrow flows).  
-   - **NFT (or partner SPL) prizes** that were held in escrow are **returned to the creator** when possible (automatically, or via the creator “claim prize back” action if the on-chain return needs a retry).
+   - **NFT (or partner SPL) prizes** that were held in escrow are **returned to the creator** when possible (automatically, or via the creator “claim prize back” action if the on-chain return needs a retry).  
+   - There is **no draw** and no VRF / reveal fee in the refund path.
 
-Implementation: `lib/raffles/min-threshold-extension.ts` (extension), `lib/raffles/min-threshold-terminal.ts` (terminal state + prize return attempt), `app/api/raffles/[id]/claim-failed-min-prize-return` (creator claim if needed).
+Implementation: `lib/raffles/min-threshold-extension.ts` (extension), `lib/raffles/min-threshold-terminal.ts` (terminal state + prize return attempt), `app/api/raffles/[id]/claim-failed-min-prize-return` (creator claim if needed). Public FAQ: `/how-it-works#second-selling-round`.
 
 ---
 
@@ -45,17 +48,22 @@ Implementation: `lib/raffles/min-threshold-extension.ts` (extension), `lib/raffl
 - **When it runs:**
   - When an admin triggers “Select winner” for a raffle, or
   - When cron / auto-draw runs after end time with threshold met.
-- **Algorithm (`owltopia-draw-v1`):**
+- **Algorithm (`owltopia-draw-v1` / `owltopia-draw-v2-commit-reveal`):**
   1. Only **confirmed** entries count (entries whose payment was verified; refunded excluded).
   2. Tickets are summed **per wallet**, then wallets are sorted **lexicographically** into a contiguous ticket ledger.
-  3. A fresh public `drawSeed` (32-byte hex) is generated at draw time.
-  4. `winnerIndex = SHA256(seed + ":" + soldCount) % soldCount` (first 8 bytes of the hash as a big-endian uint).
+  3. **Seed timing**
+     - **v1:** a fresh public `drawSeed` (32-byte hex) is generated **at draw time**.
+     - **v2 (default for new raffles):** the seed is chosen **at raffle create**. Public `draw_commit_hash = SHA256(seed)` is stored immediately; the raw seed stays in a **service-role-only** secrets table until draw.
+  4. `winnerIndex = SHA256(seed + ":" + soldCount) % soldCount` (first 8 bytes of the hash as a big-endian uint). Same math for v1 and v2.
   5. The wallet owning that ticket index wins. More tickets ⇒ higher win probability.
-  6. Stored on the raffle: `draw_algo`, `draw_seed`, `draw_sold_count`, `draw_winner_index`, `draw_ledger_hash`.
+  6. Stored on the raffle at draw: `draw_algo`, `draw_seed`, `draw_sold_count`, `draw_winner_index`, `draw_ledger_hash` (plus `draw_commit_hash` for v2).
   7. Best-effort **on-chain reveal memo** tx posts  
-     `owltopia-draw-v1:<raffleId>:<seed>:<soldCount>:<winnerIndex>:<ledgerHash>`  
-     (signature in `draw_reveal_tx`). Anyone can recompute via **Verify draw** on the raffle page or `GET /api/raffles/[id]/verify-draw`.
-- **Trust model (v1):** Payments + escrow + reveal memo are on-chain; the draw math is publicly re-derivable. Seed is chosen at draw time (not pre-committed). Stronger trust (commit–reveal / on-chain VRF) is a planned upgrade behind the same verify UX.
+     `owltopia-draw-v*:<raffleId>:<seed>:<soldCount>:<winnerIndex>:<ledgerHash>`  
+     (signature in `draw_reveal_tx`). Anyone can recompute via **Verify draw** on the raffle page or `GET /api/raffles/[id]/verify-draw`, and download the ticket map (CSV/JSON). Public FAQ: `/how-it-works#how-draws-work`.
+- **Trust model:**
+  - **v1:** Payments + escrow + reveal memo are on-chain; draw math is publicly re-derivable. Seed is chosen at draw time (not pre-committed).
+  - **v2:** Same as v1, plus the community can see `draw_commit_hash` **before** the draw and check that the revealed seed matches it (operator cannot pick a seed after seeing the final ticket ledger without breaking the commit).
+  - **Roadmap (v3):** on-chain VRF / raffle program behind the same Verify UX.
 
 Legacy raffles drawn before this change have no seed fields and show as `legacy_draw` in the verify API.
 
@@ -97,4 +105,4 @@ Recommendation: Confirm that understanding in a short partner agreement or email
 
 ---
 
-*Last updated: Jul 2026. Reflects `owltopia-draw-v1` (Next.js + Supabase; draw in `lib/raffles/draw`).*
+*Last updated: Jul 2026. Reflects `owltopia-draw-v2-commit-reveal` (default for new raffles) and `owltopia-draw-v1` fallback.*

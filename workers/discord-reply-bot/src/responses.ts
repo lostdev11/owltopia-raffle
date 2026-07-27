@@ -54,6 +54,20 @@ export async function buildReplyText(
     }
   }
 
+  if (
+    /\b(draw|draws|winner|winners|verify|verif(y|iable)|fair|fairness|rng|seed|ledger|provably|transparent|transparency)\b/.test(
+      prompt
+    ) ||
+    /\bhow (is|are|do|does).*(draw|winner|win)\b/.test(prompt)
+  ) {
+    return [
+      'Raffle draws use **commit–reveal** (`owltopia-draw-v2`): SHA256(seed) is published when the raffle is created; the seed is revealed at draw and `SHA256(seed:soldCount) % soldCount` picks the winner.',
+      'On a raffle page, tap **Verify draw** to see the commit (before draw) or recompute + Solscan + ticket map (after).',
+      `How it works: ${siteUrl}/how-it-works#how-draws-work`,
+      `Live raffles: ${siteUrl}/raffles`,
+    ].join('\n')
+  }
+
   if (/\b(raffle|raffles|giveaway|giveaways)\b/.test(prompt)) {
     return `Live raffles and giveaways are on owltopia — ${siteUrl}/raffles`
   }
