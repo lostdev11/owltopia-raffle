@@ -6,6 +6,8 @@ import {
   encodeDrawRevealMemo,
   verifyDraw,
   DRAW_ALGO_V1,
+  DRAW_ALGO_V2_COMMIT_REVEAL,
+  hashDrawCommit,
 } from '@/lib/raffles/draw'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
@@ -18,7 +20,7 @@ function solscanTxUrl(signature: string): string {
 
 /**
  * GET /api/raffles/[id]/verify-draw
- * Public: recompute draw from confirmed entries + stored seed/index; return audit pack + Solscan link.
+ * Public: commit hash (pre-draw) or full verify pack after draw + Solscan link.
  */
 export async function GET(
   _request: NextRequest,
@@ -37,7 +39,26 @@ export async function GET(
     }
 
     const winnerWallet = (raffle.winner_wallet ?? '').trim()
+    const commitHash = (raffle.draw_commit_hash ?? '').trim().toLowerCase()
+    const committedAt = raffle.draw_committed_at ?? null
+    const algoHint = (raffle.draw_algo ?? '').trim() || (commitHash ? DRAW_ALGO_V2_COMMIT_REVEAL : null)
+
     if (!winnerWallet) {
+      if (commitHash) {
+        return NextResponse.json(
+          {
+            status: 'committed',
+            message:
+              'A draw seed was committed when this raffle was created. The raw seed stays private until the draw; anyone can check that the revealed seed matches this commit hash afterward.',
+            algo: algoHint,
+            drawCommitHash: commitHash,
+            drawCommittedAt: committedAt,
+            howItWorks:
+              'owltopia-draw-v2-commit-reveal: at create we publish SHA256(seed). At draw we reveal seed and compute winnerIndex = SHA256(seed:soldCount) % soldCount over the lexicographic ticket ledger.',
+          },
+          { status: 200 }
+        )
+      }
       return NextResponse.json(
         {
           status: 'not_drawn',
@@ -62,6 +83,7 @@ export async function GET(
             'This raffle was drawn before public verify seeds were stored. Payments and prize transfers remain on-chain; future draws include a verify pack.',
           winnerWallet,
           winnerSelectedAt: raffle.winner_selected_at,
+          drawCommitHash: commitHash || null,
         },
         { status: 200 }
       )
@@ -77,6 +99,7 @@ export async function GET(
       winnerIndex,
       winnerWallet,
       ledgerHash,
+      drawCommitHash: commitHash || null,
       entries,
     })
 
@@ -96,12 +119,24 @@ export async function GET(
       memo = `${algo}:${raffle.id}:${drawSeed}:${soldCount}:${winnerIndex}:${ledgerHash}`
     }
 
+    let recomputedCommitHash: string | null = null
+    try {
+      recomputedCommitHash = hashDrawCommit(drawSeed)
+    } catch {
+      recomputedCommitHash = null
+    }
+
+    const isV2 = algo === DRAW_ALGO_V2_COMMIT_REVEAL || Boolean(commitHash)
+
     return NextResponse.json({
       status: verification.ok ? 'verified' : 'mismatch',
       ok: verification.ok,
       error: verification.ok ? null : verification.error,
       algo,
       drawSeed,
+      drawCommitHash: commitHash || null,
+      drawCommittedAt: committedAt,
+      recomputedCommitHash,
       soldCount,
       winnerIndex,
       winnerWallet,
@@ -113,8 +148,9 @@ export async function GET(
       revealTx: revealTx || null,
       revealTxUrl: revealTx ? solscanTxUrl(revealTx) : null,
       revealedAt: raffle.draw_revealed_at ?? null,
-      howItWorks:
-        'Each confirmed ticket is one equal chance. Wallets are sorted lexicographically into a ticket ledger. winnerIndex = SHA256(seed:soldCount) % soldCount (owltopia-draw-v1). The reveal memo on Solana publishes seed, soldCount, winnerIndex, and ledgerHash.',
+      howItWorks: isV2
+        ? 'Commit–reveal (owltopia-draw-v2): SHA256(seed) was published at create. winnerIndex = SHA256(seed:soldCount) % soldCount over a lexicographic ticket ledger. Verify checks the seed against the commit hash and recomputes the winner.'
+        : 'Each confirmed ticket is one equal chance. Wallets are sorted lexicographically into a ticket ledger. winnerIndex = SHA256(seed:soldCount) % soldCount (owltopia-draw-v1). The reveal memo on Solana publishes seed, soldCount, winnerIndex, and ledgerHash.',
     })
   } catch (error) {
     console.error('[verify-draw]', error)

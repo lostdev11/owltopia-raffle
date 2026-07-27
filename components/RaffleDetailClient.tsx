@@ -4539,7 +4539,9 @@ export function RaffleDetailClient({
                   View Winner
                 </Button>
               )}
-              {raffle.winner_wallet && <RaffleDrawVerifyPanel raffleId={raffle.id} />}
+              {(raffle.winner_wallet || raffle.draw_commit_hash) && (
+                <RaffleDrawVerifyPanel raffleId={raffle.id} />
+              )}
               {showClaimPrizeButton && (
                 <Button
                   variant="default"

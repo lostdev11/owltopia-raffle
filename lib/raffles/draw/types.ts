@@ -1,13 +1,18 @@
 /**
  * Provably-auditable raffle draw types.
- * v1 = off-chain seeded RNG + on-chain memo reveal (FFF-shaped).
- * Later algos (commit–reveal, VRF) plug in via {@link DrawAlgoId} without changing verify UX.
+ * v1 = seed chosen at draw + on-chain memo reveal (FFF-shaped).
+ * v2 = commit–reveal: hash(seed) published at create; seed revealed at draw.
+ * Later algos (VRF) plug in via {@link DrawAlgoId} without changing verify UX.
  */
 
 export const DRAW_ALGO_V1 = 'owltopia-draw-v1' as const
+export const DRAW_ALGO_V2_COMMIT_REVEAL = 'owltopia-draw-v2-commit-reveal' as const
 
-/** Future: 'owltopia-draw-v2-commit-reveal' | 'owltopia-draw-v3-vrf' */
-export type DrawAlgoId = typeof DRAW_ALGO_V1 | string
+/** Future: 'owltopia-draw-v3-vrf' */
+export type DrawAlgoId =
+  | typeof DRAW_ALGO_V1
+  | typeof DRAW_ALGO_V2_COMMIT_REVEAL
+  | string
 
 export type DrawEntryLike = {
   id: string
@@ -36,13 +41,15 @@ export type DrawLedger = {
 }
 
 export type DrawResult = {
-  algo: typeof DRAW_ALGO_V1
+  algo: DrawAlgoId
   drawSeed: string
   soldCount: number
   winnerIndex: number
   winnerWallet: string
   ledgerHash: string
   ranges: DrawLedgerRange[]
+  /** Present when algo is commit–reveal. */
+  drawCommitHash?: string | null
 }
 
 export type DrawRevealMemoParts = {
@@ -63,6 +70,11 @@ export type VerifyDrawInput = {
   ledgerHash: string
   /** Optional; included in returned memo string for display. */
   raffleId?: string
+  /**
+   * When set (v2), verify sha256(drawSeed) === drawCommitHash.
+   * Required for owltopia-draw-v2-commit-reveal.
+   */
+  drawCommitHash?: string | null
   /** Confirmed entries used to rebuild the ledger (same filter as draw time). */
   entries: DrawEntryLike[]
 }
@@ -73,6 +85,7 @@ export type VerifyDrawResult =
       recomputedWinnerIndex: number
       recomputedWinnerWallet: string
       recomputedLedgerHash: string
+      recomputedCommitHash?: string
       memo: string
     }
   | {
@@ -81,4 +94,5 @@ export type VerifyDrawResult =
       recomputedWinnerIndex?: number
       recomputedWinnerWallet?: string
       recomputedLedgerHash?: string
+      recomputedCommitHash?: string
     }

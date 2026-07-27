@@ -3,8 +3,10 @@ import { DRAW_ALGO_V1, type DrawRevealMemoParts } from '@/lib/raffles/draw/types
 /**
  * On-chain memo format (colon-separated):
  *   owltopia-draw-v1:<raffleId>:<drawSeed>:<soldCount>:<winnerIndex>:<ledgerHash>
+ *   (same shape for v2; algo id distinguishes commit–reveal)
  *
  * FFF uses seed:soldCount:winnerIndex; we prefix algo + raffleId + ledgerHash for upgradeability.
+ * drawSeed is hex (no colons).
  */
 export function encodeDrawRevealMemo(parts: DrawRevealMemoParts): string {
   const algo = parts.algo.trim() || DRAW_ALGO_V1
@@ -32,7 +34,7 @@ export function parseDrawRevealMemo(memo: string): DrawRevealMemoParts | null {
   if (!raw) return null
   const parts = raw.split(':')
   // algo : raffleId : drawSeed : soldCount : winnerIndex : ledgerHash
-  // raffleId is UUID (no colons); drawSeed is base58 (no colons); ledgerHash is hex.
+  // raffleId is UUID (no colons); drawSeed is hex (no colons); ledgerHash is hex.
   if (parts.length < 6) return null
 
   const algo = parts[0]!

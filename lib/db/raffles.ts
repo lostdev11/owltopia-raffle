@@ -27,7 +27,19 @@ import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-econo
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
 import { getSupabasePublishableKey, getSupabaseSecretKey } from '@/lib/supabase-env'
-import { performDrawV1, sendDrawRevealMemoTransaction } from '@/lib/raffles/draw'
+import {
+  DRAW_ALGO_V1,
+  DRAW_ALGO_V2_COMMIT_REVEAL,
+  generateDrawSeed,
+  hashDrawCommit,
+  performDraw,
+  sendDrawRevealMemoTransaction,
+} from '@/lib/raffles/draw'
+import {
+  deleteRaffleDrawSecret,
+  getRaffleDrawSecret,
+  insertRaffleDrawSecret,
+} from '@/lib/db/raffle-draw-secrets'
 
 function getSupabaseForRead() {
   return getSupabaseForServerRead(supabase)
@@ -110,9 +122,11 @@ const RAFFLE_TAIL_EXTENDED =
   RAFFLE_TAIL_MINIMAL +
   ',prize_returned_at,prize_return_reason,prize_return_tx,cancellation_requested_at,cancelled_at,cancellation_fee_amount,cancellation_fee_currency,cancellation_refund_policy,cancellation_fee_paid_at,cancellation_fee_payment_tx,purchases_blocked_at,creator_restricted_listing,moderation_listing_fee_lamports,moderation_listing_fee_paid_at,moderation_listing_fee_payment_tx,list_on_platform,sol_domains_hub,buyout_closed_at'
 
-/** Migration 202: provably-auditable draw / reveal fields. */
+/** Migration 202–203: provably-auditable draw / reveal / commit fields. */
 const RAFFLE_DRAW_REVEAL_SUFFIX =
   ',draw_algo,draw_seed,draw_sold_count,draw_winner_index,draw_ledger_hash,draw_reveal_tx,draw_revealed_at'
+
+const RAFFLE_DRAW_COMMIT_SUFFIX = ',draw_commit_hash,draw_committed_at'
 
 const NFT_COLUMN_SUFFIX =
   ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
@@ -159,6 +173,11 @@ let promoXHandleColumnCache: { applied: boolean; checked: boolean } = {
 }
 
 let drawRevealColumnCache: { applied: boolean; checked: boolean } = {
+  applied: false,
+  checked: false,
+}
+
+let drawCommitColumnCache: { applied: boolean; checked: boolean } = {
   applied: false,
   checked: false,
 }
@@ -245,6 +264,25 @@ async function checkDrawRevealColumnsApplied(): Promise<boolean> {
   }
 }
 
+async function checkDrawCommitColumnsApplied(): Promise<boolean> {
+  if (drawCommitColumnCache.checked) {
+    return drawCommitColumnCache.applied
+  }
+  try {
+    const { error } = await getSupabaseForRead()
+      .from('raffles')
+      .select('id,draw_commit_hash,draw_committed_at')
+      .limit(1)
+    const applied = !error
+    drawCommitColumnCache = { applied, checked: true }
+    return applied
+  } catch (err) {
+    console.warn('Could not check draw commit columns:', err)
+    drawCommitColumnCache = { applied: false, checked: true }
+    return false
+  }
+}
+
 const FULL_RAFFLE_COLUMNS = getBaseRaffleColumnsCore(true) + NFT_COLUMN_SUFFIX
 
 /**
@@ -260,11 +298,13 @@ async function getRaffleColumns(): Promise<string> {
   const hasDiscordTenant = await checkDiscordPartnerTenantColumnApplied()
   const hasPromoXHandle = await checkPromoXHandleColumnApplied()
   const hasDrawReveal = await checkDrawRevealColumnsApplied()
+  const hasDrawCommit = await checkDrawCommitColumnsApplied()
   const base =
     getBaseRaffleColumnsCore(hasImageFallback) +
     (hasDiscordTenant ? ',discord_partner_tenant_id' : '') +
     (hasPromoXHandle ? ',promo_x_handle' : '') +
-    (hasDrawReveal ? RAFFLE_DRAW_REVEAL_SUFFIX : '')
+    (hasDrawReveal ? RAFFLE_DRAW_REVEAL_SUFFIX : '') +
+    (hasDrawCommit ? RAFFLE_DRAW_COMMIT_SUFFIX : '')
   raffleColumnsCache = hasNftSupport ? base + NFT_COLUMN_SUFFIX : base
   return raffleColumnsCache
 }
@@ -915,6 +955,8 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     time_extension_count,
     draw_algo: (row.draw_algo as string | null | undefined) ?? null,
     draw_seed: (row.draw_seed as string | null | undefined) ?? null,
+    draw_commit_hash: (row.draw_commit_hash as string | null | undefined) ?? null,
+    draw_committed_at: (row.draw_committed_at as string | null | undefined) ?? null,
     draw_sold_count: (() => {
       if (row.draw_sold_count == null || row.draw_sold_count === '') return null
       const n = Number(row.draw_sold_count)
@@ -1581,6 +1623,17 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
   insertData.list_on_platform = raffle.list_on_platform === false ? false : true
   insertData.sol_domains_hub = raffle.sol_domains_hub === true
 
+  // Commit–reveal (v2): publish hash(seed) at create; keep raw seed in service-role secrets table.
+  let pendingDrawSeed: string | null = null
+  const hasDrawCommit = await checkDrawCommitColumnsApplied()
+  const hasDrawReveal = await checkDrawRevealColumnsApplied()
+  if (hasDrawCommit && hasDrawReveal) {
+    pendingDrawSeed = generateDrawSeed()
+    insertData.draw_algo = DRAW_ALGO_V2_COMMIT_REVEAL
+    insertData.draw_commit_hash = hashDrawCommit(pendingDrawSeed)
+    insertData.draw_committed_at = new Date().toISOString()
+  }
+
   const { data, error } = await getSupabaseAdmin()
     .from('raffles')
     .insert(insertData)
@@ -1625,7 +1678,20 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     throw new Error(`Database error: ${error.message}`)
   }
 
-  return data as unknown as Raffle
+  if (pendingDrawSeed && data?.id) {
+    try {
+      await insertRaffleDrawSecret(String(data.id), pendingDrawSeed)
+    } catch (secretErr) {
+      console.error('[createRaffle] draw secret insert failed; rolling back raffle:', secretErr)
+      await getSupabaseAdmin().from('raffles').delete().eq('id', data.id)
+      throw secretErr instanceof Error
+        ? secretErr
+        : new Error('Failed to commit draw seed')
+    }
+  }
+
+  // Never return a raw seed — normalize strips unknown fields; secret is not on this row.
+  return normalizeRaffleRow(data as unknown as Record<string, unknown>)
 }
 
 /**
@@ -1868,6 +1934,10 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     return null
   }
 
+  if ((raffle.winner_wallet ?? '').trim()) {
+    return raffle.winner_wallet!.trim()
+  }
+
   // Get all confirmed entries for this raffle
   const entries = await getEntriesByRaffleId(raffleId)
   const confirmedEntries = entries.filter(
@@ -1892,10 +1962,34 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     return null
   }
 
-  // Provably-auditable draw (owltopia-draw-v1): seeded RNG + ledger hash; memo reveal best-effort after.
+  // Provably-auditable draw: v2 commit–reveal when seed was committed at create; else v1 at draw time.
   let draw
   try {
-    draw = performDrawV1(confirmedEntries)
+    const commitHash = (raffle.draw_commit_hash ?? '').trim().toLowerCase()
+    if (commitHash) {
+      const committedSeed = await getRaffleDrawSecret(raffleId)
+      if (!committedSeed) {
+        const latest = await getRaffleById(raffleId)
+        if ((latest?.winner_wallet ?? '').trim()) {
+          return latest!.winner_wallet!.trim()
+        }
+        console.error(
+          `[selectWinner] missing draw secret for committed raffle ${raffleId} — cannot draw safely`
+        )
+        return null
+      }
+      if (hashDrawCommit(committedSeed) !== commitHash) {
+        console.error(`[selectWinner] draw secret does not match commit hash for ${raffleId}`)
+        return null
+      }
+      draw = performDraw(confirmedEntries, {
+        algo: (raffle.draw_algo || DRAW_ALGO_V2_COMMIT_REVEAL).trim() || DRAW_ALGO_V2_COMMIT_REVEAL,
+        drawSeed: committedSeed,
+        drawCommitHash: commitHash,
+      })
+    } else {
+      draw = performDraw(confirmedEntries, { algo: DRAW_ALGO_V1 })
+    }
   } catch (e) {
     console.warn(
       `No drawable tickets for raffle ${raffleId}:`,
@@ -1958,6 +2052,11 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
   if (!updatedRaffle) {
     const latest = await getRaffleById(raffleId)
     return latest?.winner_wallet ?? null
+  }
+
+  // Destroy private seed after public reveal fields are persisted.
+  if ((raffle.draw_commit_hash ?? '').trim()) {
+    await deleteRaffleDrawSecret(raffleId)
   }
 
   console.log(

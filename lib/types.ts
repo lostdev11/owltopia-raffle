@@ -308,10 +308,14 @@ export interface Raffle {
   prize_return_reason: string | null
   /** Solana tx signature for the return transfer to creator. */
   prize_return_tx: string | null
-  /** Draw algorithm id (e.g. owltopia-draw-v1). Null for legacy Math.random draws. */
+  /** Draw algorithm id (e.g. owltopia-draw-v1 / v2-commit-reveal). Null for legacy Math.random draws. */
   draw_algo?: string | null
-  /** Public seed used to derive winner index (hex for v1). */
+  /** Public seed used to derive winner index (hex). Null until reveal for v2. */
   draw_seed?: string | null
+  /** Public SHA-256(seed) committed at raffle create (v2). */
+  draw_commit_hash?: string | null
+  /** When draw_commit_hash was published. */
+  draw_committed_at?: string | null
   /** Confirmed ticket weight at draw time. */
   draw_sold_count?: number | null
   /** Winning ticket index in [0, draw_sold_count). */

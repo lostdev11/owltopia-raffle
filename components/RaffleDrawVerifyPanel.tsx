@@ -1,8 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { ExternalLink, ShieldCheck, Loader2 } from 'lucide-react'
+import { Download, ExternalLink, ShieldCheck, Loader2 } from 'lucide-react'
 
 type VerifyRange = {
   wallet: string
@@ -12,12 +13,15 @@ type VerifyRange = {
 }
 
 type VerifyPayload = {
-  status: 'not_drawn' | 'legacy_draw' | 'verified' | 'mismatch'
+  status: 'not_drawn' | 'committed' | 'legacy_draw' | 'verified' | 'mismatch'
   ok?: boolean
   error?: string | null
   message?: string
   algo?: string
   drawSeed?: string
+  drawCommitHash?: string | null
+  drawCommittedAt?: string | null
+  recomputedCommitHash?: string | null
   soldCount?: number
   winnerIndex?: number
   winnerWallet?: string
@@ -32,6 +36,27 @@ type VerifyPayload = {
 function shorten(s: string, left = 6, right = 4): string {
   if (s.length <= left + right + 1) return s
   return `${s.slice(0, left)}…${s.slice(-right)}`
+}
+
+function downloadBlob(filename: string, contents: string, mime: string) {
+  const blob = new Blob([contents], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+function rangesToCsv(ranges: VerifyRange[]): string {
+  const header = 'wallet,tickets,start_index,end_index'
+  const rows = ranges.map(
+    (r) => `${r.wallet},${r.tickets},${r.startIndex},${r.endIndex}`
+  )
+  return [header, ...rows].join('\n') + '\n'
 }
 
 export function RaffleDrawVerifyPanel({ raffleId }: { raffleId: string }) {
@@ -67,6 +92,37 @@ export function RaffleDrawVerifyPanel({ raffleId }: { raffleId: string }) {
     void load()
   }, [open, load])
 
+  const downloadCsv = useCallback(() => {
+    if (!data?.ranges?.length) return
+    downloadBlob(
+      `owltopia-ticket-map-${raffleId}.csv`,
+      rangesToCsv(data.ranges),
+      'text/csv;charset=utf-8'
+    )
+  }, [data, raffleId])
+
+  const downloadJson = useCallback(() => {
+    if (!data?.ranges?.length) return
+    const pack = {
+      raffleId,
+      algo: data.algo ?? null,
+      drawSeed: data.drawSeed ?? null,
+      drawCommitHash: data.drawCommitHash ?? null,
+      soldCount: data.soldCount ?? null,
+      winnerIndex: data.winnerIndex ?? null,
+      winnerWallet: data.winnerWallet ?? null,
+      ledgerHash: data.ledgerHash ?? null,
+      memo: data.memo ?? null,
+      revealTx: data.revealTx ?? null,
+      ranges: data.ranges,
+    }
+    downloadBlob(
+      `owltopia-ticket-map-${raffleId}.json`,
+      `${JSON.stringify(pack, null, 2)}\n`,
+      'application/json;charset=utf-8'
+    )
+  }, [data, raffleId])
+
   return (
     <div className="w-full sm:w-auto">
       <Button
@@ -91,8 +147,57 @@ export function RaffleDrawVerifyPanel({ raffleId }: { raffleId: string }) {
           {!loading && data?.status === 'not_drawn' && (
             <p className="text-muted-foreground">{data.message}</p>
           )}
+          {!loading && data?.status === 'committed' && (
+            <>
+              <p className="text-emerald-600 dark:text-emerald-400 font-medium">
+                Draw seed committed — waiting for reveal at draw time.
+              </p>
+              {data.message && <p className="text-muted-foreground text-xs leading-relaxed">{data.message}</p>}
+              {data.howItWorks && (
+                <p className="text-muted-foreground text-xs leading-relaxed">{data.howItWorks}</p>
+              )}
+              <dl className="grid grid-cols-1 gap-2 text-xs sm:text-sm">
+                {data.algo && (
+                  <div>
+                    <dt className="text-muted-foreground">Algorithm</dt>
+                    <dd className="font-mono break-all">{data.algo}</dd>
+                  </div>
+                )}
+                <div>
+                  <dt className="text-muted-foreground">Commit hash (SHA-256 of seed)</dt>
+                  <dd className="font-mono break-all">{data.drawCommitHash}</dd>
+                </div>
+                {data.drawCommittedAt && (
+                  <div>
+                    <dt className="text-muted-foreground">Committed at</dt>
+                    <dd className="font-mono break-all">{data.drawCommittedAt}</dd>
+                  </div>
+                )}
+              </dl>
+              <p className="text-xs text-muted-foreground">
+                After the draw, Verify will check that the revealed seed matches this hash.{' '}
+                <Link
+                  href="/how-it-works#how-draws-work"
+                  className="text-primary underline-offset-2 hover:underline"
+                >
+                  How it works
+                </Link>
+              </p>
+            </>
+          )}
           {!loading && data?.status === 'legacy_draw' && (
-            <p className="text-muted-foreground">{data.message}</p>
+            <>
+              <p className="text-muted-foreground">{data.message}</p>
+              <p className="text-xs text-muted-foreground">
+                How new draws work:{' '}
+                <Link
+                  href="/how-it-works#how-draws-work"
+                  className="text-primary underline-offset-2 hover:underline"
+                >
+                  How it works → Winner selection
+                </Link>
+              </p>
+            </>
           )}
           {!loading && (data?.status === 'verified' || data?.status === 'mismatch') && (
             <>
@@ -108,6 +213,15 @@ export function RaffleDrawVerifyPanel({ raffleId }: { raffleId: string }) {
               {data.howItWorks && (
                 <p className="text-muted-foreground text-xs leading-relaxed">{data.howItWorks}</p>
               )}
+              <p className="text-xs text-muted-foreground">
+                Full explanation:{' '}
+                <Link
+                  href="/how-it-works#how-draws-work"
+                  className="text-primary underline-offset-2 hover:underline"
+                >
+                  How it works → Winner selection
+                </Link>
+              </p>
               <dl className="grid grid-cols-1 gap-2 text-xs sm:text-sm">
                 <div>
                   <dt className="text-muted-foreground">Algorithm</dt>
@@ -117,6 +231,12 @@ export function RaffleDrawVerifyPanel({ raffleId }: { raffleId: string }) {
                   <dt className="text-muted-foreground">Seed</dt>
                   <dd className="font-mono break-all">{data.drawSeed}</dd>
                 </div>
+                {data.drawCommitHash && (
+                  <div>
+                    <dt className="text-muted-foreground">Commit hash</dt>
+                    <dd className="font-mono break-all">{data.drawCommitHash}</dd>
+                  </div>
+                )}
                 <div>
                   <dt className="text-muted-foreground">Winner index / tickets</dt>
                   <dd className="font-mono">
@@ -139,7 +259,7 @@ export function RaffleDrawVerifyPanel({ raffleId }: { raffleId: string }) {
                   href={data.revealTxUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-primary underline-offset-2 hover:underline"
+                  className="inline-flex items-center gap-1.5 min-h-[44px] text-primary underline-offset-2 hover:underline touch-manipulation"
                 >
                   View reveal transaction on Solscan
                   <ExternalLink className="h-3.5 w-3.5" />
@@ -150,18 +270,42 @@ export function RaffleDrawVerifyPanel({ raffleId }: { raffleId: string }) {
                 </p>
               )}
               {data.ranges && data.ranges.length > 0 && (
-                <details className="text-xs">
-                  <summary className="cursor-pointer text-muted-foreground">
-                    Ticket ledger ({data.ranges.length} wallets)
-                  </summary>
-                  <ul className="mt-2 max-h-48 overflow-y-auto space-y-1 font-mono">
-                    {data.ranges.map((r) => (
-                      <li key={r.wallet}>
-                        [{r.startIndex},{r.endIndex}) {shorten(r.wallet)} ×{r.tickets}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
+                <>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="default"
+                      className="w-full sm:w-auto touch-manipulation min-h-[44px]"
+                      onClick={downloadCsv}
+                    >
+                      <Download className="mr-2 h-4 w-4 shrink-0" />
+                      Download ticket map (CSV)
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="default"
+                      className="w-full sm:w-auto touch-manipulation min-h-[44px]"
+                      onClick={downloadJson}
+                    >
+                      <Download className="mr-2 h-4 w-4 shrink-0" />
+                      Download JSON
+                    </Button>
+                  </div>
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-muted-foreground touch-manipulation min-h-[44px] flex items-center">
+                      Ticket ledger ({data.ranges.length} wallets)
+                    </summary>
+                    <ul className="mt-2 max-h-48 overflow-y-auto space-y-1 font-mono">
+                      {data.ranges.map((r) => (
+                        <li key={r.wallet}>
+                          [{r.startIndex},{r.endIndex}) {shorten(r.wallet)} ×{r.tickets}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                </>
               )}
             </>
           )}

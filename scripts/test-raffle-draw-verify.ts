@@ -3,11 +3,15 @@ import {
   buildDrawLedger,
   encodeDrawRevealMemo,
   parseDrawRevealMemo,
+  performDraw,
   performDrawV1,
   pickWinnerIndexV1,
   verifyDraw,
   walletForTicketIndex,
+  hashDrawCommit,
+  generateDrawSeed,
   DRAW_ALGO_V1,
+  DRAW_ALGO_V2_COMMIT_REVEAL,
 } from '../lib/raffles/draw'
 
 const entries = [
@@ -43,7 +47,6 @@ const entries = [
 const ledger = buildDrawLedger(entries)
 assert.equal(ledger.soldCount, 5, 'pending + refunded excluded')
 assert.equal(ledger.ranges.length, 2)
-// Lexicographic: WalletA before WalletB
 assert.equal(ledger.ranges[0]!.wallet.startsWith('WalletA'), true)
 assert.equal(ledger.ranges[0]!.tickets, 3)
 assert.equal(ledger.ranges[0]!.startIndex, 0)
@@ -109,4 +112,68 @@ const bad = verifyDraw({
 })
 assert.equal(bad.ok, false)
 
-console.log('raffle draw verify ok')
+// --- v2 commit–reveal ---
+const v2Seed = generateDrawSeed()
+const commit = hashDrawCommit(v2Seed)
+assert.equal(hashDrawCommit(v2Seed), commit, 'commit hash deterministic')
+assert.notEqual(hashDrawCommit(generateDrawSeed()), commit, 'different seeds → different commits')
+
+const v2Draw = performDraw(entries, {
+  algo: DRAW_ALGO_V2_COMMIT_REVEAL,
+  drawSeed: v2Seed,
+  drawCommitHash: commit,
+})
+assert.equal(v2Draw.algo, DRAW_ALGO_V2_COMMIT_REVEAL)
+assert.equal(v2Draw.drawSeed, v2Seed)
+assert.equal(v2Draw.drawCommitHash, commit)
+assert.equal(v2Draw.winnerIndex, pickWinnerIndexV1(v2Seed, 5))
+
+assert.throws(
+  () =>
+    performDraw(entries, {
+      algo: DRAW_ALGO_V2_COMMIT_REVEAL,
+      drawSeed: v2Seed,
+      drawCommitHash: hashDrawCommit('wrong-seed-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+    }),
+  /does not match/
+)
+
+const v2Ok = verifyDraw({
+  algo: DRAW_ALGO_V2_COMMIT_REVEAL,
+  drawSeed: v2Seed,
+  drawCommitHash: commit,
+  soldCount: v2Draw.soldCount,
+  winnerIndex: v2Draw.winnerIndex,
+  winnerWallet: v2Draw.winnerWallet,
+  ledgerHash: v2Draw.ledgerHash,
+  entries,
+})
+assert.equal(v2Ok.ok, true)
+if (v2Ok.ok) {
+  assert.equal(v2Ok.recomputedCommitHash, commit)
+}
+
+const v2BadCommit = verifyDraw({
+  algo: DRAW_ALGO_V2_COMMIT_REVEAL,
+  drawSeed: v2Seed,
+  drawCommitHash: hashDrawCommit('other-seed-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'),
+  soldCount: v2Draw.soldCount,
+  winnerIndex: v2Draw.winnerIndex,
+  winnerWallet: v2Draw.winnerWallet,
+  ledgerHash: v2Draw.ledgerHash,
+  entries,
+})
+assert.equal(v2BadCommit.ok, false)
+
+const v2MissingCommit = verifyDraw({
+  algo: DRAW_ALGO_V2_COMMIT_REVEAL,
+  drawSeed: v2Seed,
+  soldCount: v2Draw.soldCount,
+  winnerIndex: v2Draw.winnerIndex,
+  winnerWallet: v2Draw.winnerWallet,
+  ledgerHash: v2Draw.ledgerHash,
+  entries,
+})
+assert.equal(v2MissingCommit.ok, false)
+
+console.log('raffle draw verify ok (v1 + v2 commit–reveal)')
