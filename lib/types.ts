@@ -316,6 +316,16 @@ export interface Raffle {
   draw_commit_hash?: string | null
   /** When draw_commit_hash was published. */
   draw_committed_at?: string | null
+  /** VRF provider id (e.g. switchboard). */
+  draw_vrf_provider?: string | null
+  /** pending | failed | fulfilled */
+  draw_vrf_status?: 'pending' | 'failed' | 'fulfilled' | null
+  draw_vrf_account?: string | null
+  draw_vrf_request_tx?: string | null
+  draw_vrf_fulfill_tx?: string | null
+  draw_vrf_error?: string | null
+  draw_vrf_requested_at?: string | null
+  draw_vrf_fulfilled_at?: string | null
   /** Confirmed ticket weight at draw time. */
   draw_sold_count?: number | null
   /** Winning ticket index in [0, draw_sold_count). */

@@ -10,8 +10,11 @@ import {
   walletForTicketIndex,
   hashDrawCommit,
   generateDrawSeed,
+  seedFromVrfBytes,
+  seedFromVrfHex,
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
+  DRAW_ALGO_V3_VRF,
 } from '../lib/raffles/draw'
 
 const entries = [
@@ -176,4 +179,31 @@ const v2MissingCommit = verifyDraw({
 })
 assert.equal(v2MissingCommit.ok, false)
 
-console.log('raffle draw verify ok (v1 + v2 commit–reveal)')
+// --- v3 VRF seed mapping (same index math; entropy from VRF bytes) ---
+const vrfBytes = Buffer.alloc(32, 7)
+const vrfSeed = seedFromVrfBytes(vrfBytes)
+assert.equal(vrfSeed.length, 64)
+assert.equal(seedFromVrfHex(vrfSeed), vrfSeed)
+assert.equal(seedFromVrfHex('0x' + vrfSeed), vrfSeed)
+
+const v3Draw = performDraw(entries, { algo: DRAW_ALGO_V3_VRF, drawSeed: vrfSeed })
+assert.equal(v3Draw.algo, DRAW_ALGO_V3_VRF)
+assert.equal(v3Draw.winnerIndex, pickWinnerIndexV1(vrfSeed, 5))
+
+assert.throws(
+  () => performDraw(entries, { algo: DRAW_ALGO_V3_VRF }),
+  /VRF|drawSeed/i
+)
+
+const v3Ok = verifyDraw({
+  algo: DRAW_ALGO_V3_VRF,
+  drawSeed: vrfSeed,
+  soldCount: v3Draw.soldCount,
+  winnerIndex: v3Draw.winnerIndex,
+  winnerWallet: v3Draw.winnerWallet,
+  ledgerHash: v3Draw.ledgerHash,
+  entries,
+})
+assert.equal(v3Ok.ok, true)
+
+console.log('raffle draw verify ok (v1 + v2 commit–reveal + v3 VRF seed)')

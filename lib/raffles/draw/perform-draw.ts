@@ -4,6 +4,7 @@ import { generateDrawSeed, hashDrawCommit, pickWinnerIndex } from '@/lib/raffles
 import {
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
+  DRAW_ALGO_V3_VRF,
   type DrawAlgoId,
   type DrawEntryLike,
   type DrawResult,
@@ -41,6 +42,11 @@ export function performDraw(entries: DrawEntryLike[], options: PerformDrawOption
     if (recomputed !== commitHash) {
       throw new Error('drawSeed does not match drawCommitHash')
     }
+  } else if (algo === DRAW_ALGO_V3_VRF) {
+    // Seed must be supplied from VRF reveal — never generate server entropy here.
+    if (!options.drawSeed?.trim()) {
+      throw new Error('drawSeed from VRF is required for owltopia-draw-v3-vrf')
+    }
   } else if (commitHash) {
     const recomputed = hashDrawCommit(seed)
     if (recomputed !== commitHash) {
@@ -76,7 +82,7 @@ export function performDrawV1(entries: DrawEntryLike[], drawSeed?: string): Draw
  */
 export function verifyDraw(input: VerifyDrawInput): VerifyDrawResult {
   const algo = input.algo.trim() || DRAW_ALGO_V1
-  if (algo !== DRAW_ALGO_V1 && algo !== DRAW_ALGO_V2_COMMIT_REVEAL) {
+  if (algo !== DRAW_ALGO_V1 && algo !== DRAW_ALGO_V2_COMMIT_REVEAL && algo !== DRAW_ALGO_V3_VRF) {
     return { ok: false, error: `Unsupported draw algo: ${algo}` }
   }
 

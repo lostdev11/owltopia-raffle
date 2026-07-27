@@ -13,7 +13,14 @@ type VerifyRange = {
 }
 
 type VerifyPayload = {
-  status: 'not_drawn' | 'committed' | 'legacy_draw' | 'verified' | 'mismatch'
+  status:
+    | 'not_drawn'
+    | 'committed'
+    | 'vrf_pending'
+    | 'vrf_failed'
+    | 'legacy_draw'
+    | 'verified'
+    | 'mismatch'
   ok?: boolean
   error?: string | null
   message?: string
@@ -30,6 +37,9 @@ type VerifyPayload = {
   memo?: string
   revealTx?: string | null
   revealTxUrl?: string | null
+  drawVrfRequestTxUrl?: string | null
+  drawVrfFulfillTxUrl?: string | null
+  drawVrfError?: string | null
   howItWorks?: string
 }
 
@@ -185,6 +195,37 @@ export function RaffleDrawVerifyPanel({ raffleId }: { raffleId: string }) {
               </p>
             </>
           )}
+          {!loading && (data?.status === 'vrf_pending' || data?.status === 'vrf_failed') && (
+            <>
+              <p
+                className={
+                  data.status === 'vrf_failed'
+                    ? 'text-destructive font-medium'
+                    : 'text-amber-600 dark:text-amber-400 font-medium'
+                }
+              >
+                {data.status === 'vrf_failed' ? 'VRF draw failed — admin can retry.' : 'VRF draw pending on-chain…'}
+              </p>
+              {data.message && <p className="text-muted-foreground text-xs leading-relaxed">{data.message}</p>}
+              {data.drawVrfError && (
+                <p className="text-destructive text-xs font-mono break-all">{data.drawVrfError}</p>
+              )}
+              {data.howItWorks && (
+                <p className="text-muted-foreground text-xs leading-relaxed">{data.howItWorks}</p>
+              )}
+              {data.drawVrfRequestTxUrl && (
+                <a
+                  href={data.drawVrfRequestTxUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 min-h-[44px] text-primary underline-offset-2 hover:underline touch-manipulation"
+                >
+                  View VRF request on Solscan
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
+            </>
+          )}
           {!loading && data?.status === 'legacy_draw' && (
             <>
               <p className="text-muted-foreground">{data.message}</p>
@@ -268,6 +309,28 @@ export function RaffleDrawVerifyPanel({ raffleId }: { raffleId: string }) {
                 <p className="text-muted-foreground text-xs">
                   Reveal transaction not posted yet (seed and index above are still enough to recompute).
                 </p>
+              )}
+              {data.drawVrfRequestTxUrl && (
+                <a
+                  href={data.drawVrfRequestTxUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 min-h-[44px] text-primary underline-offset-2 hover:underline touch-manipulation"
+                >
+                  View VRF request on Solscan
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
+              {data.drawVrfFulfillTxUrl && (
+                <a
+                  href={data.drawVrfFulfillTxUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 min-h-[44px] text-primary underline-offset-2 hover:underline touch-manipulation"
+                >
+                  View VRF fulfill on Solscan
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
               )}
               {data.ranges && data.ranges.length > 0 && (
                 <>
