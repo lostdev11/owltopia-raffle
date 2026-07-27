@@ -7,6 +7,7 @@ import {
   verifyDraw,
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
+  DRAW_ALGO_V3_VRF,
   hashDrawCommit,
 } from '@/lib/raffles/draw'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
@@ -42,8 +43,36 @@ export async function GET(
     const commitHash = (raffle.draw_commit_hash ?? '').trim().toLowerCase()
     const committedAt = raffle.draw_committed_at ?? null
     const algoHint = (raffle.draw_algo ?? '').trim() || (commitHash ? DRAW_ALGO_V2_COMMIT_REVEAL : null)
+    const vrfStatus = (raffle.draw_vrf_status ?? '').trim()
+    const vrfRequestTx = (raffle.draw_vrf_request_tx ?? '').trim()
+    const vrfFulfillTx = (raffle.draw_vrf_fulfill_tx ?? '').trim()
+    const vrfAccount = (raffle.draw_vrf_account ?? '').trim()
 
     if (!winnerWallet) {
+      if (vrfStatus === 'pending' || vrfStatus === 'failed') {
+        return NextResponse.json(
+          {
+            status: vrfStatus === 'failed' ? 'vrf_failed' : 'vrf_pending',
+            message:
+              vrfStatus === 'failed'
+                ? raffle.draw_vrf_error ||
+                  'VRF request failed. An admin can retry against the same frozen ticket ledger.'
+                : 'Waiting for Switchboard VRF reveal. The ticket ledger is frozen; randomness is requested on-chain.',
+            algo: algoHint || 'owltopia-draw-v3-vrf',
+            drawVrfProvider: raffle.draw_vrf_provider ?? 'switchboard',
+            drawVrfStatus: vrfStatus,
+            drawVrfAccount: vrfAccount || null,
+            drawVrfRequestTx: vrfRequestTx || null,
+            drawVrfRequestTxUrl: vrfRequestTx ? solscanTxUrl(vrfRequestTx) : null,
+            drawVrfError: raffle.draw_vrf_error ?? null,
+            soldCount: raffle.draw_sold_count ?? null,
+            ledgerHash: (raffle.draw_ledger_hash ?? '').trim().toLowerCase() || null,
+            howItWorks:
+              'owltopia-draw-v3-vrf: at draw time we freeze the ticket ledger, commit Switchboard randomness on-chain, then reveal. winnerIndex = SHA256(seed:soldCount) % soldCount using the VRF output as seed. No VRF runs on a second selling round or refund path.',
+          },
+          { status: 200 }
+        )
+      }
       if (commitHash) {
         return NextResponse.json(
           {
@@ -127,6 +156,7 @@ export async function GET(
     }
 
     const isV2 = algo === DRAW_ALGO_V2_COMMIT_REVEAL || Boolean(commitHash)
+    const isV3 = algo === DRAW_ALGO_V3_VRF || Boolean(vrfFulfillTx || vrfRequestTx)
 
     return NextResponse.json({
       status: verification.ok ? 'verified' : 'mismatch',
@@ -148,9 +178,18 @@ export async function GET(
       revealTx: revealTx || null,
       revealTxUrl: revealTx ? solscanTxUrl(revealTx) : null,
       revealedAt: raffle.draw_revealed_at ?? null,
-      howItWorks: isV2
-        ? 'Commit–reveal (owltopia-draw-v2): SHA256(seed) was published at create. winnerIndex = SHA256(seed:soldCount) % soldCount over a lexicographic ticket ledger. Verify checks the seed against the commit hash and recomputes the winner.'
-        : 'Each confirmed ticket is one equal chance. Wallets are sorted lexicographically into a ticket ledger. winnerIndex = SHA256(seed:soldCount) % soldCount (owltopia-draw-v1). The reveal memo on Solana publishes seed, soldCount, winnerIndex, and ledgerHash.',
+      drawVrfProvider: raffle.draw_vrf_provider ?? null,
+      drawVrfStatus: raffle.draw_vrf_status ?? null,
+      drawVrfAccount: vrfAccount || null,
+      drawVrfRequestTx: vrfRequestTx || null,
+      drawVrfRequestTxUrl: vrfRequestTx ? solscanTxUrl(vrfRequestTx) : null,
+      drawVrfFulfillTx: vrfFulfillTx || null,
+      drawVrfFulfillTxUrl: vrfFulfillTx ? solscanTxUrl(vrfFulfillTx) : null,
+      howItWorks: isV3
+        ? 'VRF (owltopia-draw-v3-vrf): Switchboard on-demand randomness provides the seed at draw time. winnerIndex = SHA256(seed:soldCount) % soldCount over the frozen lexicographic ticket ledger. Verify recomputes from the published VRF seed; Solscan links show request + fulfill txs.'
+        : isV2
+          ? 'Commit–reveal (owltopia-draw-v2): SHA256(seed) was published at create. winnerIndex = SHA256(seed:soldCount) % soldCount over a lexicographic ticket ledger. Verify checks the seed against the commit hash and recomputes the winner.'
+          : 'Each confirmed ticket is one equal chance. Wallets are sorted lexicographically into a ticket ledger. winnerIndex = SHA256(seed:soldCount) % soldCount (owltopia-draw-v1). The reveal memo on Solana publishes seed, soldCount, winnerIndex, and ledgerHash.',
     })
   } catch (error) {
     console.error('[verify-draw]', error)

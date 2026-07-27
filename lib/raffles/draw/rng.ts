@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { DRAW_ALGO_V1, DRAW_ALGO_V2_COMMIT_REVEAL } from '@/lib/raffles/draw/types'
+import { DRAW_ALGO_V1, DRAW_ALGO_V2_COMMIT_REVEAL, DRAW_ALGO_V3_VRF } from '@/lib/raffles/draw/types'
 
 /**
  * Generate a draw seed (64 hex chars / 32 bytes).
@@ -38,7 +38,11 @@ export function pickWinnerIndexV1(drawSeed: string, soldCount: number): number {
 }
 
 export function pickWinnerIndex(algo: string, drawSeed: string, soldCount: number): number {
-  if (algo === DRAW_ALGO_V1 || algo === DRAW_ALGO_V2_COMMIT_REVEAL) {
+  if (
+    algo === DRAW_ALGO_V1 ||
+    algo === DRAW_ALGO_V2_COMMIT_REVEAL ||
+    algo === DRAW_ALGO_V3_VRF
+  ) {
     return pickWinnerIndexV1(drawSeed, soldCount)
   }
   throw new Error(`Unsupported draw algo: ${algo}`)

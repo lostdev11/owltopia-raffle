@@ -30,11 +30,15 @@ import { getSupabasePublishableKey, getSupabaseSecretKey } from '@/lib/supabase-
 import {
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
+  DRAW_ALGO_V3_VRF,
   generateDrawSeed,
   hashDrawCommit,
   performDraw,
   sendDrawRevealMemoTransaction,
+  defaultDrawAlgoForCreate,
+  raffleUsesDrawVrf,
 } from '@/lib/raffles/draw'
+import { runRaffleVrfFlow } from '@/lib/raffles/draw/vrf-draw-flow'
 import {
   deleteRaffleDrawSecret,
   getRaffleDrawSecret,
@@ -128,6 +132,9 @@ const RAFFLE_DRAW_REVEAL_SUFFIX =
 
 const RAFFLE_DRAW_COMMIT_SUFFIX = ',draw_commit_hash,draw_committed_at'
 
+const RAFFLE_DRAW_VRF_SUFFIX =
+  ',draw_vrf_provider,draw_vrf_status,draw_vrf_account,draw_vrf_request_tx,draw_vrf_fulfill_tx,draw_vrf_error,draw_vrf_requested_at,draw_vrf_fulfilled_at'
+
 const NFT_COLUMN_SUFFIX =
   ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
 
@@ -178,6 +185,11 @@ let drawRevealColumnCache: { applied: boolean; checked: boolean } = {
 }
 
 let drawCommitColumnCache: { applied: boolean; checked: boolean } = {
+  applied: false,
+  checked: false,
+}
+
+let drawVrfColumnCache: { applied: boolean; checked: boolean } = {
   applied: false,
   checked: false,
 }
@@ -283,6 +295,27 @@ async function checkDrawCommitColumnsApplied(): Promise<boolean> {
   }
 }
 
+async function checkDrawVrfColumnsApplied(): Promise<boolean> {
+  if (drawVrfColumnCache.checked) {
+    return drawVrfColumnCache.applied
+  }
+  try {
+    const { error } = await getSupabaseForRead()
+      .from('raffles')
+      .select(
+        'id,draw_vrf_provider,draw_vrf_status,draw_vrf_account,draw_vrf_request_tx,draw_vrf_fulfill_tx,draw_vrf_error,draw_vrf_requested_at,draw_vrf_fulfilled_at'
+      )
+      .limit(1)
+    const applied = !error
+    drawVrfColumnCache = { applied, checked: true }
+    return applied
+  } catch (err) {
+    console.warn('Could not check draw VRF columns:', err)
+    drawVrfColumnCache = { applied: false, checked: true }
+    return false
+  }
+}
+
 const FULL_RAFFLE_COLUMNS = getBaseRaffleColumnsCore(true) + NFT_COLUMN_SUFFIX
 
 /**
@@ -299,12 +332,14 @@ async function getRaffleColumns(): Promise<string> {
   const hasPromoXHandle = await checkPromoXHandleColumnApplied()
   const hasDrawReveal = await checkDrawRevealColumnsApplied()
   const hasDrawCommit = await checkDrawCommitColumnsApplied()
+  const hasDrawVrf = await checkDrawVrfColumnsApplied()
   const base =
     getBaseRaffleColumnsCore(hasImageFallback) +
     (hasDiscordTenant ? ',discord_partner_tenant_id' : '') +
     (hasPromoXHandle ? ',promo_x_handle' : '') +
     (hasDrawReveal ? RAFFLE_DRAW_REVEAL_SUFFIX : '') +
-    (hasDrawCommit ? RAFFLE_DRAW_COMMIT_SUFFIX : '')
+    (hasDrawCommit ? RAFFLE_DRAW_COMMIT_SUFFIX : '') +
+    (hasDrawVrf ? RAFFLE_DRAW_VRF_SUFFIX : '')
   raffleColumnsCache = hasNftSupport ? base + NFT_COLUMN_SUFFIX : base
   return raffleColumnsCache
 }
@@ -957,6 +992,14 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     draw_seed: (row.draw_seed as string | null | undefined) ?? null,
     draw_commit_hash: (row.draw_commit_hash as string | null | undefined) ?? null,
     draw_committed_at: (row.draw_committed_at as string | null | undefined) ?? null,
+    draw_vrf_provider: (row.draw_vrf_provider as string | null | undefined) ?? null,
+    draw_vrf_status: (row.draw_vrf_status as Raffle['draw_vrf_status'] | null | undefined) ?? null,
+    draw_vrf_account: (row.draw_vrf_account as string | null | undefined) ?? null,
+    draw_vrf_request_tx: (row.draw_vrf_request_tx as string | null | undefined) ?? null,
+    draw_vrf_fulfill_tx: (row.draw_vrf_fulfill_tx as string | null | undefined) ?? null,
+    draw_vrf_error: (row.draw_vrf_error as string | null | undefined) ?? null,
+    draw_vrf_requested_at: (row.draw_vrf_requested_at as string | null | undefined) ?? null,
+    draw_vrf_fulfilled_at: (row.draw_vrf_fulfilled_at as string | null | undefined) ?? null,
     draw_sold_count: (() => {
       if (row.draw_sold_count == null || row.draw_sold_count === '') return null
       const n = Number(row.draw_sold_count)
@@ -1623,15 +1666,21 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
   insertData.list_on_platform = raffle.list_on_platform === false ? false : true
   insertData.sol_domains_hub = raffle.sol_domains_hub === true
 
-  // Commit–reveal (v2): publish hash(seed) at create; keep raw seed in service-role secrets table.
+  // Draw algo at create: v3 VRF (flag) stamps algo only; v2 commit–reveal publishes hash(seed).
   let pendingDrawSeed: string | null = null
   const hasDrawCommit = await checkDrawCommitColumnsApplied()
   const hasDrawReveal = await checkDrawRevealColumnsApplied()
-  if (hasDrawCommit && hasDrawReveal) {
-    pendingDrawSeed = generateDrawSeed()
-    insertData.draw_algo = DRAW_ALGO_V2_COMMIT_REVEAL
-    insertData.draw_commit_hash = hashDrawCommit(pendingDrawSeed)
-    insertData.draw_committed_at = new Date().toISOString()
+  const hasDrawVrf = await checkDrawVrfColumnsApplied()
+  if (hasDrawReveal) {
+    const algo = defaultDrawAlgoForCreate()
+    if (algo === DRAW_ALGO_V3_VRF && hasDrawVrf) {
+      insertData.draw_algo = DRAW_ALGO_V3_VRF
+    } else if (hasDrawCommit) {
+      pendingDrawSeed = generateDrawSeed()
+      insertData.draw_algo = DRAW_ALGO_V2_COMMIT_REVEAL
+      insertData.draw_commit_hash = hashDrawCommit(pendingDrawSeed)
+      insertData.draw_committed_at = new Date().toISOString()
+    }
   }
 
   const { data, error } = await getSupabaseAdmin()
@@ -1927,7 +1976,11 @@ export async function deleteRaffle(id: string) {
  * @param forceOverride - If true, bypass minimum check (for admin override)
  * @returns The winner's wallet address, or null if no valid entries or minimum not met
  */
-export async function selectWinner(raffleId: string, forceOverride: boolean = false): Promise<string | null> {
+export async function selectWinner(
+  raffleId: string,
+  forceOverride: boolean = false,
+  opts?: { forceVrfRetry?: boolean }
+): Promise<string | null> {
   const raffle = await getRaffleById(raffleId)
   if (!raffle) {
     console.warn(`Raffle not found: ${raffleId}`)
@@ -1962,33 +2015,64 @@ export async function selectWinner(raffleId: string, forceOverride: boolean = fa
     return null
   }
 
-  // Provably-auditable draw: v2 commit–reveal when seed was committed at create; else v1 at draw time.
+  // Provably-auditable draw: v3 VRF (flag/pilot), else v2 commit–reveal, else v1 at draw time.
   let draw
   try {
-    const commitHash = (raffle.draw_commit_hash ?? '').trim().toLowerCase()
-    if (commitHash) {
-      const committedSeed = await getRaffleDrawSecret(raffleId)
-      if (!committedSeed) {
-        const latest = await getRaffleById(raffleId)
-        if ((latest?.winner_wallet ?? '').trim()) {
-          return latest!.winner_wallet!.trim()
-        }
-        console.error(
-          `[selectWinner] missing draw secret for committed raffle ${raffleId} — cannot draw safely`
+    const useVrf =
+      (await checkDrawVrfColumnsApplied()) &&
+      raffleUsesDrawVrf(raffle) &&
+      (raffle.draw_algo ?? '').trim() !== DRAW_ALGO_V2_COMMIT_REVEAL &&
+      !(raffle.draw_commit_hash ?? '').trim()
+
+    if (useVrf) {
+      const vrf = await runRaffleVrfFlow({
+        raffle,
+        entries: confirmedEntries,
+        forceNewRequest: opts?.forceVrfRetry === true,
+      })
+      if (vrf.status !== 'fulfilled') {
+        console.warn(
+          `[selectWinner] VRF not fulfilled for ${raffleId}: ${vrf.status} ${vrf.error || ''}`
         )
         return null
       }
-      if (hashDrawCommit(committedSeed) !== commitHash) {
-        console.error(`[selectWinner] draw secret does not match commit hash for ${raffleId}`)
+      draw = performDraw(confirmedEntries, {
+        algo: DRAW_ALGO_V3_VRF,
+        drawSeed: vrf.drawSeed,
+      })
+      // Ensure ledger fields match the frozen VRF snapshot.
+      if (draw.ledgerHash !== vrf.ledgerHash || draw.soldCount !== vrf.soldCount) {
+        console.error(
+          `[selectWinner] VRF ledger mismatch for ${raffleId}: draw=${draw.ledgerHash}/${draw.soldCount} vrf=${vrf.ledgerHash}/${vrf.soldCount}`
+        )
         return null
       }
-      draw = performDraw(confirmedEntries, {
-        algo: (raffle.draw_algo || DRAW_ALGO_V2_COMMIT_REVEAL).trim() || DRAW_ALGO_V2_COMMIT_REVEAL,
-        drawSeed: committedSeed,
-        drawCommitHash: commitHash,
-      })
     } else {
-      draw = performDraw(confirmedEntries, { algo: DRAW_ALGO_V1 })
+      const commitHash = (raffle.draw_commit_hash ?? '').trim().toLowerCase()
+      if (commitHash) {
+        const committedSeed = await getRaffleDrawSecret(raffleId)
+        if (!committedSeed) {
+          const latest = await getRaffleById(raffleId)
+          if ((latest?.winner_wallet ?? '').trim()) {
+            return latest!.winner_wallet!.trim()
+          }
+          console.error(
+            `[selectWinner] missing draw secret for committed raffle ${raffleId} — cannot draw safely`
+          )
+          return null
+        }
+        if (hashDrawCommit(committedSeed) !== commitHash) {
+          console.error(`[selectWinner] draw secret does not match commit hash for ${raffleId}`)
+          return null
+        }
+        draw = performDraw(confirmedEntries, {
+          algo: (raffle.draw_algo || DRAW_ALGO_V2_COMMIT_REVEAL).trim() || DRAW_ALGO_V2_COMMIT_REVEAL,
+          drawSeed: committedSeed,
+          drawCommitHash: commitHash,
+        })
+      } else {
+        draw = performDraw(confirmedEntries, { algo: DRAW_ALGO_V1 })
+      }
     }
   } catch (e) {
     console.warn(

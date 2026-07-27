@@ -2,17 +2,20 @@
  * Provably-auditable raffle draw types.
  * v1 = seed chosen at draw + on-chain memo reveal (FFF-shaped).
  * v2 = commit–reveal: hash(seed) published at create; seed revealed at draw.
- * Later algos (VRF) plug in via {@link DrawAlgoId} without changing verify UX.
+ * v3 = Switchboard VRF output becomes the seed at draw time (same index math).
  */
 
 export const DRAW_ALGO_V1 = 'owltopia-draw-v1' as const
 export const DRAW_ALGO_V2_COMMIT_REVEAL = 'owltopia-draw-v2-commit-reveal' as const
+export const DRAW_ALGO_V3_VRF = 'owltopia-draw-v3-vrf' as const
 
-/** Future: 'owltopia-draw-v3-vrf' */
 export type DrawAlgoId =
   | typeof DRAW_ALGO_V1
   | typeof DRAW_ALGO_V2_COMMIT_REVEAL
+  | typeof DRAW_ALGO_V3_VRF
   | string
+
+export type DrawVrfStatus = 'pending' | 'failed' | 'fulfilled'
 
 export type DrawEntryLike = {
   id: string
