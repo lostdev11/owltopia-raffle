@@ -29,12 +29,15 @@ So: **payments + reveal memo = on-chain; draw math = off-chain but publicly veri
 
 If a raffle has a **minimum tickets** (or NFT floor–derived) threshold and it is **not** met when the first `end_time` passes:
 
-1. The app may **extend the sale deadline once** (same length as the original raffle window, or 7 days as a fallback), so there is a **second chance** to sell enough tickets.
-2. If the threshold is still **not** met when that extended deadline passes, the raffle is set to **`failed_refund_available`**:  
+1. The app may **extend the sale deadline once** (same length as the original raffle window, or 7 days as a fallback), so there is a **second selling round**.
+2. That extension is **sales only** — no winner is drawn, commit–reveal seeds are **not** regenerated, and (when VRF is enabled) no randomness request is made yet.
+3. If the threshold is met after round 2, the draw runs against the **final** ticket ledger (round 1 + round 2 confirmed tickets).
+4. If the threshold is still **not** met when that extended deadline passes, the raffle is set to **`failed_refund_available`**:  
    - **Buyers** can claim **refunds** for their tickets (per the app’s refund / funds-escrow flows).  
-   - **NFT (or partner SPL) prizes** that were held in escrow are **returned to the creator** when possible (automatically, or via the creator “claim prize back” action if the on-chain return needs a retry).
+   - **NFT (or partner SPL) prizes** that were held in escrow are **returned to the creator** when possible (automatically, or via the creator “claim prize back” action if the on-chain return needs a retry).  
+   - There is **no draw** and no VRF / reveal fee in the refund path.
 
-Implementation: `lib/raffles/min-threshold-extension.ts` (extension), `lib/raffles/min-threshold-terminal.ts` (terminal state + prize return attempt), `app/api/raffles/[id]/claim-failed-min-prize-return` (creator claim if needed).
+Implementation: `lib/raffles/min-threshold-extension.ts` (extension), `lib/raffles/min-threshold-terminal.ts` (terminal state + prize return attempt), `app/api/raffles/[id]/claim-failed-min-prize-return` (creator claim if needed). Public FAQ: `/how-it-works#second-selling-round`.
 
 ---
 
