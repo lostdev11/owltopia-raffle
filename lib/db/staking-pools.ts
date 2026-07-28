@@ -92,6 +92,12 @@ export async function listAllStakingPoolsAdmin(): Promise<StakingPoolRow[]> {
   return (data || []) as StakingPoolRow[]
 }
 
+/** NFT / token perches tagged with a partner_project_slug (partner staking). */
+export async function listPartnerStakingPoolsAdmin(): Promise<StakingPoolRow[]> {
+  const all = await listAllStakingPoolsAdmin()
+  return all.filter((p) => Boolean(p.partner_project_slug?.trim()))
+}
+
 export async function getStakingPoolById(id: string): Promise<StakingPoolRow | null> {
   const db = getSupabaseAdmin()
   const { data, error } = await db.from('staking_pools').select('*').eq('id', id).maybeSingle()

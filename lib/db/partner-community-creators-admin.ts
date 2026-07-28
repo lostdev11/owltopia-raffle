@@ -46,6 +46,25 @@ export async function listPartnerCommunityCreatorsAdmin(): Promise<PartnerCommun
   return (data ?? []) as PartnerCommunityCreatorRow[]
 }
 
+/** Single allowlist row by creator wallet (active or inactive). */
+export async function getPartnerCommunityCreatorByWallet(
+  creatorWallet: string
+): Promise<PartnerCommunityCreatorRow | null> {
+  const w = typeof creatorWallet === 'string' ? creatorWallet.trim() : ''
+  if (!w) return null
+  const sb = getSupabaseAdmin()
+  const { data, error } = await sb
+    .from('partner_community_creators')
+    .select(
+      'creator_wallet, display_label, partner_tier, sort_order, is_active, logo_url, discord_partner_tenant_id, partner_pro_monthly_quote_usdc, created_at, updated_at'
+    )
+    .eq('creator_wallet', w)
+    .maybeSingle()
+
+  if (error) throw new Error(error.message)
+  return (data as PartnerCommunityCreatorRow | null) ?? null
+}
+
 export async function insertPartnerCommunityCreator(input: {
   creator_wallet: string
   display_label?: string | null

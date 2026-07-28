@@ -3673,6 +3673,20 @@ export default function AdminDashboardPage() {
                 </Link>
               </Card>
               <Card className="hover:border-primary transition-colors cursor-pointer">
+                <Link href="/admin/partner-nesting">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Bird className="h-5 w-5" />
+                      Partner Nesting
+                    </CardTitle>
+                    <CardDescription>
+                      Add a partner collection address to open an Owl Nesting stake perch — pick allowlisted partner,
+                      paste mint, choose lock standard.
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+              <Card className="hover:border-primary transition-colors cursor-pointer">
                 <Link href="/admin/nesting">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
