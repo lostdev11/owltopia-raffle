@@ -10,7 +10,7 @@ import {
 } from '@/lib/nesting/gomt-migration-copy'
 
 /**
- * Holder-facing notice: staking moved from GOMT Labz to Owltopia Nesting.
+ * Holder-facing notice: staking moved from GOTM Labz to Owltopia Nesting.
  * Shown on public nesting landing and dashboard until migration window closes.
  * Collapsed by default so the page stays scannable on mobile.
  */
@@ -37,7 +37,7 @@ export function NestingGomtMigrationNotice() {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 font-medium text-emerald-400 hover:text-emerald-300 underline-offset-4 hover:underline touch-manipulation min-h-[44px]"
           >
-            GOMT Labz
+            GOTM Labz
             <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
           </a>
           , finish there first: <span className="font-medium text-foreground/90">unstake</span> or wait until your lock

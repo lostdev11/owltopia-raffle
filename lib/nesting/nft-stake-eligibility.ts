@@ -40,7 +40,7 @@ export type WalletNestMintRow = {
 
 function externalNestFreezeMessage(): string {
   return (
-    'This NFT is frozen by another staking program (for example GOMT Labz). ' +
+    'This NFT is frozen by another staking program (for example GOTM Labz). ' +
     'Unstake or wait for the lock to end there before nesting on Owltopia.'
   )
 }
