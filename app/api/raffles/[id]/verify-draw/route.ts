@@ -73,6 +73,20 @@ export async function GET(
           { status: 200 }
         )
       }
+      if (algoHint === DRAW_ALGO_V3_VRF || algoHint === 'owltopia-draw-v3-vrf') {
+        return NextResponse.json(
+          {
+            status: 'vrf_awaiting',
+            message:
+              'This raffle will use Switchboard VRF at draw time. There is no commit hash before the draw — randomness is requested on-chain when a winner is selected.',
+            algo: DRAW_ALGO_V3_VRF,
+            drawVrfProvider: raffle.draw_vrf_provider ?? 'switchboard',
+            howItWorks:
+              'owltopia-draw-v3-vrf: at draw time we freeze the ticket ledger, commit Switchboard randomness on-chain, then reveal. winnerIndex = SHA256(seed:soldCount) % soldCount using the VRF output as seed. No VRF runs on a second selling round or refund path.',
+          },
+          { status: 200 }
+        )
+      }
       if (commitHash) {
         return NextResponse.json(
           {

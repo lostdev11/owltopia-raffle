@@ -16,6 +16,7 @@ type VerifyPayload = {
   status:
     | 'not_drawn'
     | 'committed'
+    | 'vrf_awaiting'
     | 'vrf_pending'
     | 'vrf_failed'
     | 'legacy_draw'
@@ -37,6 +38,7 @@ type VerifyPayload = {
   memo?: string
   revealTx?: string | null
   revealTxUrl?: string | null
+  drawVrfProvider?: string | null
   drawVrfRequestTxUrl?: string | null
   drawVrfFulfillTxUrl?: string | null
   drawVrfError?: string | null
@@ -186,6 +188,40 @@ export function RaffleDrawVerifyPanel({ raffleId }: { raffleId: string }) {
               </dl>
               <p className="text-xs text-muted-foreground">
                 After the draw, Verify will check that the revealed seed matches this hash.{' '}
+                <Link
+                  href="/how-it-works#how-draws-work"
+                  className="text-primary underline-offset-2 hover:underline"
+                >
+                  How it works
+                </Link>
+              </p>
+            </>
+          )}
+          {!loading && data?.status === 'vrf_awaiting' && (
+            <>
+              <p className="text-emerald-600 dark:text-emerald-400 font-medium">
+                VRF draw scheduled — Switchboard randomness at draw time.
+              </p>
+              {data.message && <p className="text-muted-foreground text-xs leading-relaxed">{data.message}</p>}
+              {data.howItWorks && (
+                <p className="text-muted-foreground text-xs leading-relaxed">{data.howItWorks}</p>
+              )}
+              <dl className="grid grid-cols-1 gap-2 text-xs sm:text-sm">
+                {data.algo && (
+                  <div>
+                    <dt className="text-muted-foreground">Algorithm</dt>
+                    <dd className="font-mono break-all">{data.algo}</dd>
+                  </div>
+                )}
+                {data.drawVrfProvider && (
+                  <div>
+                    <dt className="text-muted-foreground">Provider</dt>
+                    <dd className="font-mono break-all">{data.drawVrfProvider}</dd>
+                  </div>
+                )}
+              </dl>
+              <p className="text-xs text-muted-foreground">
+                After the draw, Verify will show the seed, ledger, Solscan txs, and ticket map.{' '}
                 <Link
                   href="/how-it-works#how-draws-work"
                   className="text-primary underline-offset-2 hover:underline"

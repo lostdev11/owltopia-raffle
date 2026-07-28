@@ -4541,6 +4541,7 @@ export function RaffleDetailClient({
               )}
               {(raffle.winner_wallet ||
                 raffle.draw_commit_hash ||
+                raffle.draw_algo === 'owltopia-draw-v3-vrf' ||
                 raffle.draw_vrf_status === 'pending' ||
                 raffle.draw_vrf_status === 'failed') && (
                 <RaffleDrawVerifyPanel raffleId={raffle.id} />
