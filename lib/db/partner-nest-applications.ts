@@ -282,6 +282,14 @@ export async function approvePartnerNestApplication(params: {
         'Cannot approve as partner_token: application is missing reward mint or symbol. Approve as platform_owl or ask them to resubmit.'
       )
     }
+    const { resolveSplMintOnChain } = await import('@/lib/solana/resolve-spl-mint')
+    const resolved = await resolveSplMintOnChain(app.reward_mint)
+    if (!resolved.ok) {
+      throw new Error(`Cannot approve partner token: ${resolved.error}`)
+    }
+    // Keep application mint normalized + refresh decimals from chain before provisioning.
+    app.reward_mint = resolved.mint.mint
+    app.reward_decimals = resolved.mint.decimals
   }
 
   const label =

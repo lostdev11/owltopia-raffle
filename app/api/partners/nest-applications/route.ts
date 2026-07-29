@@ -8,6 +8,8 @@ import {
   type PartnerNestRewardMode,
 } from '@/lib/db/partner-nest-applications'
 import { listPartnerStakingPoolsAdmin } from '@/lib/db/staking-pools'
+import { resolveSplMintOnChain } from '@/lib/solana/resolve-spl-mint'
+import { isProbableSolanaPubkey } from '@/lib/nesting/admin-quick-pool'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -74,6 +76,29 @@ export async function POST(request: NextRequest) {
     const reward_mode_requested: PartnerNestRewardMode =
       rewardModeRaw === 'partner_token' ? 'partner_token' : 'platform_owl'
 
+    let reward_mint: string | null =
+      typeof body.reward_mint === 'string' ? body.reward_mint.trim() || null : null
+    let reward_decimals: number | null =
+      body.reward_decimals !== undefined && body.reward_decimals !== null && body.reward_decimals !== ''
+        ? Number(body.reward_decimals)
+        : null
+
+    if (reward_mode_requested === 'partner_token') {
+      if (!reward_mint || !isProbableSolanaPubkey(reward_mint)) {
+        return NextResponse.json(
+          { error: 'Reward token mint is required and must be a Solana public key.' },
+          { status: 400 }
+        )
+      }
+      const resolved = await resolveSplMintOnChain(reward_mint)
+      if (!resolved.ok) {
+        return NextResponse.json({ error: resolved.error }, { status: 400 })
+      }
+      reward_mint = resolved.mint.mint
+      // Prefer on-chain decimals; ignore a mismatched client value.
+      reward_decimals = resolved.mint.decimals
+    }
+
     const application = await insertPartnerNestApplication({
       creator_wallet: session.wallet,
       collection_key: typeof body.collection_key === 'string' ? body.collection_key : '',
@@ -87,11 +112,8 @@ export async function POST(request: NextRequest) {
       reward_mode_requested,
       reward_token_symbol:
         typeof body.reward_token_symbol === 'string' ? body.reward_token_symbol : null,
-      reward_mint: typeof body.reward_mint === 'string' ? body.reward_mint : null,
-      reward_decimals:
-        body.reward_decimals !== undefined && body.reward_decimals !== null && body.reward_decimals !== ''
-          ? Number(body.reward_decimals)
-          : null,
+      reward_mint,
+      reward_decimals,
       reward_rate: body.reward_rate !== undefined ? Number(body.reward_rate) : 1,
       notes: typeof body.notes === 'string' ? body.notes : null,
     })

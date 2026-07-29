@@ -36,6 +36,42 @@ export function PartnerNestingRequestCard({ className }: Props) {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveOk, setSaveOk] = useState<string | null>(null)
+  const [mintCheck, setMintCheck] = useState<'idle' | 'checking' | 'valid' | 'invalid'>('idle')
+  const [mintCheckError, setMintCheckError] = useState<string | null>(null)
+
+  const verifyRewardMint = useCallback(async (mint: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const trimmed = mint.trim()
+    if (!trimmed) {
+      const error = 'Reward token mint is required.'
+      setMintCheck('invalid')
+      setMintCheckError(error)
+      return { ok: false, error }
+    }
+    setMintCheck('checking')
+    setMintCheckError(null)
+    try {
+      const res = await fetch(
+        `/api/partners/nest-applications/verify-mint?mint=${encodeURIComponent(trimmed)}`,
+        { credentials: 'include', cache: 'no-store' }
+      )
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json.valid !== true) {
+        const error = typeof json?.error === 'string' ? json.error : 'Token mint is not valid.'
+        setMintCheck('invalid')
+        setMintCheckError(error)
+        return { ok: false, error }
+      }
+      setMintCheck('valid')
+      setRewardMint(typeof json.mint === 'string' ? json.mint : trimmed)
+      if (typeof json.decimals === 'number') setRewardDecimals(String(json.decimals))
+      return { ok: true }
+    } catch {
+      const error = 'Could not verify token mint. Try again.'
+      setMintCheck('invalid')
+      setMintCheckError(error)
+      return { ok: false, error }
+    }
+  }, [])
 
   const fetchApps = useCallback(async () => {
     setLoading(true)
@@ -68,6 +104,13 @@ export function PartnerNestingRequestCard({ className }: Props) {
     setSaveError(null)
     setSaveOk(null)
     try {
+      if (usePartnerToken) {
+        const verified = await verifyRewardMint(rewardMint)
+        if (!verified.ok) {
+          setSaveError(verified.error)
+          return
+        }
+      }
       const res = await fetch('/api/partners/nest-applications', {
         method: 'POST',
         credentials: 'include',
@@ -102,6 +145,8 @@ export function PartnerNestingRequestCard({ className }: Props) {
       setRewardMint('')
       setRewardSymbol('')
       setNotes('')
+      setMintCheck('idle')
+      setMintCheckError(null)
       setOpen(false)
       await fetchApps()
     } finally {
@@ -197,18 +242,51 @@ export function PartnerNestingRequestCard({ className }: Props) {
                     inputMode="numeric"
                     value={rewardDecimals}
                     onChange={(e) => setRewardDecimals(e.target.value)}
+                    disabled={mintCheck === 'valid'}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Filled automatically when the mint verifies on-chain.
+                  </p>
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="pnr-mint">Reward token mint</Label>
-                  <Input
-                    id="pnr-mint"
-                    className="min-h-[44px] font-mono text-xs"
-                    spellCheck={false}
-                    placeholder="SPL mint address"
-                    value={rewardMint}
-                    onChange={(e) => setRewardMint(e.target.value)}
-                  />
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      id="pnr-mint"
+                      className="min-h-[44px] font-mono text-xs"
+                      spellCheck={false}
+                      placeholder="SPL mint address (not a wallet)"
+                      value={rewardMint}
+                      onChange={(e) => {
+                        setRewardMint(e.target.value)
+                        setMintCheck('idle')
+                        setMintCheckError(null)
+                      }}
+                      onBlur={() => {
+                        if (rewardMint.trim()) void verifyRewardMint(rewardMint)
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="min-h-[44px] shrink-0 touch-manipulation"
+                      disabled={mintCheck === 'checking' || !rewardMint.trim()}
+                      onClick={() => void verifyRewardMint(rewardMint)}
+                    >
+                      {mintCheck === 'checking' ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                      ) : null}
+                      Verify mint
+                    </Button>
+                  </div>
+                  {mintCheck === 'valid' ? (
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                      Valid on-chain SPL mint · {rewardDecimals} decimals
+                    </p>
+                  ) : null}
+                  {mintCheck === 'invalid' && mintCheckError ? (
+                    <p className="text-xs text-destructive">{mintCheckError}</p>
+                  ) : null}
                 </div>
               </div>
             ) : null}

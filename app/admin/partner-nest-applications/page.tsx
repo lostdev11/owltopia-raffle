@@ -149,14 +149,17 @@ export default function AdminPartnerNestApplicationsPage() {
           Partner Nesting requests
         </h1>
         <p className="text-sm text-muted-foreground max-w-2xl">
-          Partners submit a collection address and optional reward SPL mint from their hub. Approve creates the nest
+          Open from Owl Vision → <strong className="text-foreground">Partner Nesting requests</strong> (
+          <span className="font-mono text-xs">/admin/partner-nest-applications</span>
+          ). Partners submit a collection address and optional reward SPL mint from their hub. Approve creates the nest
           perch. Prefer <strong className="text-foreground">Approve as OWL</strong> for live payouts today;{' '}
           <strong className="text-foreground">Approve with partner token</strong> stores their mint on the pool.
           After approve, the partner funds rewards from{' '}
           <Link href="/partners/dashboard" className="text-primary underline-offset-4 hover:underline">
             /partners/dashboard
           </Link>{' '}
-          so nesters can claim.
+          so nesters can claim. Reward mints are verified on-chain as SPL / Token-2022 before submit and again on
+          approve.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button asChild variant="outline" size="sm" className="min-h-[40px]">

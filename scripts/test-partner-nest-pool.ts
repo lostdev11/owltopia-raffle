@@ -15,8 +15,9 @@ import { resolveRewardClaimRecording } from '../lib/nesting/reward-claim-record'
 import { StakingUserError } from '../lib/nesting/errors'
 import { isPartnerTokenRewardPool } from '../lib/nesting/partner-reward-vault'
 import { partnerRewardAvailableUi } from '../lib/db/staking-pools'
+import { resolveSplMintOnChain } from '../lib/solana/resolve-spl-mint'
 
-function main() {
+async function main() {
   assert.equal(partnerSlugFromLabel('Misfits DAO'), 'misfits-dao')
   assert.equal(partnerSlugFromLabel('  '), 'partner')
   assert.equal(partnerSlugFromLabel('', 'AbCdEfGh123'), 'partner-abcdefgh')
@@ -162,13 +163,25 @@ function main() {
     60
   )
 
+  const badMint = await resolveSplMintOnChain('not-a-mint')
+  assert.equal(badMint.ok, false)
+  if (!badMint.ok) {
+    assert.match(badMint.error, /public key|Solana/i)
+  }
+
   console.log(
     JSON.stringify(
-      { ok: true, partnerNestPool: true, partnerRewardToken: true, partnerRewardDeposit: true },
+      {
+        ok: true,
+        partnerNestPool: true,
+        partnerRewardToken: true,
+        partnerRewardDeposit: true,
+        rewardMintValidation: true,
+      },
       null,
       2
     )
   )
 }
 
-main()
+void main()
