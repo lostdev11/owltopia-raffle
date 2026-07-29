@@ -9,9 +9,10 @@ Wallet: connect the vanity wallet Devdad added for you, then **Sign in** (SIWS) 
 ## 1. User paid but ticket didn’t show up
 
 1. Open **Owl Vision** → **Bulk re-verify stuck tickets** → click **Re-verify pending (all, up to 60)**.
-2. Still stuck? Get the **transaction signature** from the user (Solscan link is fine).
-3. Use **Verify & Restore Transaction** — paste the sig and verify.
-4. Still failing? **Dev tasks** → add a task with wallet, raffle link, and tx sig → ping Devdad.
+2. Still stuck? Get the **transaction signature** from the user (**Solscan link is best** — Discord often truncates sigs).
+3. Use **Verify & Restore Transaction** — paste the sig or Solscan URL. Add the **raffle slug** (path after `/raffles/`, e.g. `micros-412`) when restoring so we attach to the right raffle.
+4. If the UI says the signature length is wrong, the paste was truncated — copy again from Solscan.
+5. Still failing? **Dev tasks** → add a task with wallet, raffle link, and tx sig → ping Devdad.
 
 ---
 
