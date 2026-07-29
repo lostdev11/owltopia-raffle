@@ -200,7 +200,11 @@ export function AdminPartnerNestingClient() {
           <Link href="/admin/partner-creators" className="text-primary underline-offset-4 hover:underline">
             partner creators
           </Link>{' '}
-          allowlist (2% raffle fee tier). For first-party Owltopia perches use{' '}
+          allowlist (2% raffle fee tier). Self-serve requests land in{' '}
+          <Link href="/admin/partner-nest-applications" className="text-primary underline-offset-4 hover:underline">
+            Partner Nesting requests
+          </Link>
+          . For first-party Owltopia perches use{' '}
           <Link href="/admin/nesting" className="text-primary underline-offset-4 hover:underline">
             Owl Nesting
           </Link>

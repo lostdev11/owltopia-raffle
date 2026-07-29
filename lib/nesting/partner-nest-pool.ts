@@ -1,6 +1,5 @@
 /**
- * Helpers for the admin “Partner Nesting” tool: create NFT stake perches
- * bound to a partner community creator + collection mint.
+ * Helpers for Partner Nesting: admin quick-create + approve-from-application payloads.
  */
 
 import {
@@ -11,6 +10,8 @@ import {
 } from '@/lib/nesting/admin-quick-pool'
 import type { NftLockStandard } from '@/lib/db/staking-pools'
 
+export type PartnerNestRewardMode = 'platform_owl' | 'partner_token'
+
 export type PartnerNestCreateInput = {
   partnerLabel: string
   partnerSlug?: string | null
@@ -20,6 +21,11 @@ export type PartnerNestCreateInput = {
   maxLockDays?: number
   minLockDays?: number
   nftLockStandard?: NftLockStandard
+  /** Default platform_owl (live OWL payouts). partner_token stores mint/symbol on the pool. */
+  rewardMode?: PartnerNestRewardMode
+  rewardTokenSymbol?: string | null
+  rewardMint?: string | null
+  rewardRate?: number
 }
 
 export type PartnerNestCreatePayload = {
@@ -29,8 +35,9 @@ export type PartnerNestCreatePayload = {
   asset_type: 'nft'
   token_mint: null
   collection_key: string
-  reward_token: 'OWL'
-  reward_rate: 1
+  reward_token: string
+  reward_mint: string | null
+  reward_rate: number
   reward_rate_unit: 'daily'
   lock_period_days: number
   minimum_stake: null
@@ -84,10 +91,27 @@ export function validatePartnerNestCreateInput(input: PartnerNestCreateInput): s
     return 'Partner nesting requires an on-chain freeze standard (auto, Core, or SPL) — not preview/database_only.'
   }
 
+  const mode = input.rewardMode ?? 'platform_owl'
+  if (mode === 'partner_token') {
+    const mint = input.rewardMint?.trim() ?? ''
+    if (!mint || !isProbableSolanaPubkey(mint)) {
+      return 'Partner reward token mint is required and must be a Solana public key.'
+    }
+    const symbol = input.rewardTokenSymbol?.trim() ?? ''
+    if (!symbol) return 'Partner reward token symbol is required.'
+  }
+
+  if (input.rewardRate != null) {
+    const rate = Number(input.rewardRate)
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      return 'Reward rate must be between 0 and 100 per day.'
+    }
+  }
+
   return null
 }
 
-/** Build the POST body for /api/admin/staking/pools from partner onboarding fields. */
+/** Build pool insert fields from partner onboarding / application approval. */
 export function buildPartnerNestPoolPayload(input: PartnerNestCreateInput): PartnerNestCreatePayload {
   const err = validatePartnerNestCreateInput(input)
   if (err) throw new Error(err)
@@ -103,6 +127,16 @@ export function buildPartnerNestPoolPayload(input: PartnerNestCreateInput): Part
   const minLock = locked ? (input.minLockDays ?? 30) : 0
   const nftLockStandard: NftLockStandard = input.nftLockStandard ?? 'auto'
   const onchain = nftLockStandard !== 'database_only'
+  const mode = input.rewardMode ?? 'platform_owl'
+  const rewardToken =
+    mode === 'partner_token'
+      ? (input.rewardTokenSymbol?.trim().toUpperCase() || 'TOKEN')
+      : 'OWL'
+  const rewardMint = mode === 'partner_token' ? input.rewardMint!.trim() : null
+  const rewardRate =
+    input.rewardRate != null && Number.isFinite(Number(input.rewardRate))
+      ? Number(input.rewardRate)
+      : 1
 
   return {
     name,
@@ -117,8 +151,9 @@ export function buildPartnerNestPoolPayload(input: PartnerNestCreateInput): Part
     asset_type: 'nft',
     token_mint: null,
     collection_key: coll,
-    reward_token: 'OWL',
-    reward_rate: 1,
+    reward_token: rewardToken,
+    reward_mint: rewardMint,
+    reward_rate: rewardRate,
     reward_rate_unit: 'daily',
     lock_period_days: maxLock,
     minimum_stake: null,

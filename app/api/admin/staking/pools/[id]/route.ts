@@ -136,6 +136,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         | 'hourly'
         | 'daily'
         | 'weekly',
+      partner_project_slug: (patch.partner_project_slug ?? existing.partner_project_slug) ?? null,
+      reward_mint: (patch.reward_mint ?? existing.reward_mint) ?? null,
     })
 
     const pool = await updateStakingPool(id, patch)

@@ -6,6 +6,7 @@ import { isNestingDbOnlyOwlClaimsAllowed } from '@/lib/nesting/policy'
  * Decide how to persist a claim after `tryTransferOwlRewardClaim`.
  * OWL pools: never bump `claimed_rewards` unless the SPL transfer succeeded, except when
  * `NESTING_ALLOW_DB_ONLY_OWL_CLAIMS` is set (local / explicit ledger-only mode).
+ * Non-OWL (partner token) pools: never record fake ledger claims — payouts require a real transfer.
  */
 export function resolveRewardClaimRecording(params: {
   poolRewardToken: string | null | undefined
@@ -19,11 +20,14 @@ export function resolveRewardClaimRecording(params: {
   }
 
   if (!isOwlPool) {
-    const txSig = params.transfer.kind === 'sent' ? params.transfer.signature : null
-    return {
-      txSig,
-      note: params.transfer.kind === 'sent' ? 'owl_reward_treasury_transfer' : 'mvp_db_claim',
+    if (params.transfer.kind === 'sent') {
+      return { txSig: params.transfer.signature, note: 'partner_reward_token_transfer' }
     }
+    throw new StakingUserError(
+      'Partner reward token payouts are not enabled for this nest yet. Owltopia will enable claims after the partner reward mint is funded and approved for transfer.',
+      503,
+      { skip_reason: params.transfer.kind === 'skipped' ? params.transfer.reason : 'not_ready' }
+    )
   }
 
   if (params.transfer.kind === 'sent') {

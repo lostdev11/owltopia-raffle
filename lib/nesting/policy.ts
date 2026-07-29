@@ -169,15 +169,23 @@ export function getClaimAllBatchSize(): number {
   return Math.min(Math.floor(n), 100)
 }
 
-export function validatePoolAgainstNestingEmissionPolicy(pool: Pick<
-  StakingPoolRow,
-  'asset_type' | 'reward_token' | 'reward_rate' | 'reward_rate_unit'
->): void {
+export function validatePoolAgainstNestingEmissionPolicy(
+  pool: Pick<StakingPoolRow, 'asset_type' | 'reward_token' | 'reward_rate' | 'reward_rate_unit'> & {
+    partner_project_slug?: string | null
+    reward_mint?: string | null
+  }
+): void {
   if (pool.asset_type !== 'nft') return
   const rewardToken = pool.reward_token?.trim().toUpperCase()
-  if (rewardToken !== 'OWL') {
+  const isPartnerPool = Boolean(pool.partner_project_slug?.trim())
+  const partnerCustom =
+    isPartnerPool &&
+    rewardToken !== 'OWL' &&
+    Boolean(pool.reward_mint?.trim())
+
+  if (rewardToken !== 'OWL' && !partnerCustom) {
     throw new StakingUserError(
-      'NFT nesting pools must pay rewards in OWL under current emissions policy.',
+      'NFT nesting pools must pay rewards in OWL under current emissions policy (partner pools may use a reviewed partner SPL mint).',
       400
     )
   }
@@ -189,13 +197,13 @@ export function validatePoolAgainstNestingEmissionPolicy(pool: Pick<
   }
   const actual = Number(pool.reward_rate)
   if (!Number.isFinite(actual)) {
-    throw new StakingUserError('NFT nesting pools must have a numeric OWL/day reward rate.', 400)
+    throw new StakingUserError('NFT nesting pools must have a numeric daily reward rate.', 400)
   }
   const { min, max } = getNestingDailyOwlRewardBand()
   // 1e-9 tolerance avoids float edge cases right at the band boundary (e.g. 0.1 stored as 0.0999999…).
   if (actual < min - 1e-9 || actual > max + 1e-9) {
     throw new StakingUserError(
-      `NFT nesting pools must use an OWL/day reward rate between ${min} and ${max}.`,
+      `NFT nesting pools must use a daily reward rate between ${min} and ${max}.`,
       400
     )
   }

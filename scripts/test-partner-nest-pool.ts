@@ -1,5 +1,5 @@
 /**
- * Partner Nesting pool payload + validation helpers.
+ * Partner Nesting pool payload + application validation helpers.
  * Run: npx tsx scripts/test-partner-nest-pool.ts
  */
 import assert from 'node:assert/strict'
@@ -9,6 +9,10 @@ import {
   partnerSlugFromLabel,
   validatePartnerNestCreateInput,
 } from '../lib/nesting/partner-nest-pool'
+import { validatePartnerNestApplicationInput } from '../lib/db/partner-nest-applications'
+import { validatePoolAgainstNestingEmissionPolicy } from '../lib/nesting/policy'
+import { resolveRewardClaimRecording } from '../lib/nesting/reward-claim-record'
+import { StakingUserError } from '../lib/nesting/errors'
 
 function main() {
   assert.equal(partnerSlugFromLabel('Misfits DAO'), 'misfits-dao')
@@ -55,6 +59,8 @@ function main() {
   assert.equal(payload.asset_type, 'nft')
   assert.equal(payload.collection_key, 'EZdgJQao3v33F723EsC1QqfwvuDRyVkCMsZTW8Z6JTpB')
   assert.equal(payload.partner_project_slug, 'misfits')
+  assert.equal(payload.reward_token, 'OWL')
+  assert.equal(payload.reward_mint, null)
   assert.equal(payload.reward_rate, 1)
   assert.equal(payload.reward_rate_unit, 'daily')
   assert.equal(payload.lock_period_days, 90)
@@ -64,10 +70,75 @@ function main() {
   assert.ok(payload.slug.includes('misfits'))
   assert.ok(payload.name.toLowerCase().includes('misfits'))
 
+  const partnerTokenPayload = buildPartnerNestPoolPayload({
+    partnerLabel: 'Misfits',
+    collectionMint: 'EZdgJQao3v33F723EsC1QqfwvuDRyVkCMsZTW8Z6JTpB',
+    rewardMode: 'partner_token',
+    rewardTokenSymbol: 'MISFIT',
+    rewardMint: 'So11111111111111111111111111111111111111112',
+    rewardRate: 2,
+  })
+  assert.equal(partnerTokenPayload.reward_token, 'MISFIT')
+  assert.equal(partnerTokenPayload.reward_mint, 'So11111111111111111111111111111111111111112')
+  assert.equal(partnerTokenPayload.reward_rate, 2)
+
+  validatePoolAgainstNestingEmissionPolicy({
+    asset_type: 'nft',
+    reward_token: 'MISFIT',
+    reward_rate: 2,
+    reward_rate_unit: 'daily',
+    partner_project_slug: 'misfits',
+    reward_mint: 'So11111111111111111111111111111111111111112',
+  })
+
+  let blocked = false
+  try {
+    validatePoolAgainstNestingEmissionPolicy({
+      asset_type: 'nft',
+      reward_token: 'MISFIT',
+      reward_rate: 2,
+      reward_rate_unit: 'daily',
+    })
+  } catch (e) {
+    blocked = e instanceof StakingUserError
+  }
+  assert.equal(blocked, true)
+
+  assert.equal(
+    validatePartnerNestApplicationInput({
+      collection_key: 'EZdgJQao3v33F723EsC1QqfwvuDRyVkCMsZTW8Z6JTpB',
+      reward_mode_requested: 'partner_token',
+    }),
+    'Partner reward token mint is required when requesting partner_token rewards.'
+  )
+
+  assert.equal(
+    validatePartnerNestApplicationInput({
+      collection_key: 'EZdgJQao3v33F723EsC1QqfwvuDRyVkCMsZTW8Z6JTpB',
+      reward_mode_requested: 'partner_token',
+      reward_mint: 'So11111111111111111111111111111111111111112',
+      reward_token_symbol: 'MISFIT',
+      reward_decimals: 9,
+    }),
+    null
+  )
+
+  let claimBlocked = false
+  try {
+    resolveRewardClaimRecording({
+      poolRewardToken: 'MISFIT',
+      transfer: { kind: 'skipped', reason: 'not_owl_token_rewards' },
+      claimAmountUi: 1,
+    })
+  } catch (e) {
+    claimBlocked = e instanceof StakingUserError
+  }
+  assert.equal(claimBlocked, true)
+
   assert.equal(isPartnerStakingPool({ partner_project_slug: 'misfits' }), true)
   assert.equal(isPartnerStakingPool({ partner_project_slug: null }), false)
 
-  console.log(JSON.stringify({ ok: true, partnerNestPool: true }, null, 2))
+  console.log(JSON.stringify({ ok: true, partnerNestPool: true, partnerRewardToken: true }, null, 2))
 }
 
 main()

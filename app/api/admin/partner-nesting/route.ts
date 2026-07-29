@@ -146,6 +146,8 @@ export async function POST(request: NextRequest) {
       reward_token: payload.reward_token,
       reward_rate: payload.reward_rate,
       reward_rate_unit: payload.reward_rate_unit,
+      partner_project_slug: payload.partner_project_slug,
+      reward_mint: payload.reward_mint,
     })
 
     const pool = await insertStakingPool({

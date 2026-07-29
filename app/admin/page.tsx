@@ -3687,6 +3687,19 @@ export default function AdminDashboardPage() {
                 </Link>
               </Card>
               <Card className="hover:border-primary transition-colors cursor-pointer">
+                <Link href="/admin/partner-nest-applications">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Inbox className="h-5 w-5" />
+                      Partner Nesting requests
+                    </CardTitle>
+                    <CardDescription>
+                      Accept or reject partner self-serve nest requests (collection + optional reward SPL mint).
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+              <Card className="hover:border-primary transition-colors cursor-pointer">
                 <Link href="/admin/nesting">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
