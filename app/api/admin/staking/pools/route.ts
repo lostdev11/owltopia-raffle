@@ -110,6 +110,8 @@ export async function POST(request: NextRequest) {
       reward_token: body.reward_token ?? null,
       reward_rate,
       reward_rate_unit: unit,
+      partner_project_slug: body.partner_project_slug ?? null,
+      reward_mint: body.reward_mint ?? null,
     })
 
     const pool = await insertStakingPool({

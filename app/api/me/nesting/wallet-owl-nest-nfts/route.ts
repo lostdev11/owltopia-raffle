@@ -76,7 +76,9 @@ export async function GET(request: NextRequest) {
           ? 'Set OWLTOPIA_COLLECTION_ADDRESS in the server environment so Gen 1 owl NFTs can be detected.'
           : isGen2
             ? 'Set NEXT_PUBLIC_GEN2_COLLECTION_MINT in the server environment so Gen 2 owl NFTs can be detected.'
-            : 'Set collection_key on this perch or OWLTOPIA_COLLECTION_ADDRESS / NESTING_OWLTOPIA_COIN_COLLECTION_ADDRESS so we can find Owl Nest NFTs.',
+            : pool.partner_project_slug?.trim()
+              ? 'Set collection_key on this partner perch (Admin → Partner Nesting) so holders can find their NFTs.'
+              : 'Set collection_key on this perch or OWLTOPIA_COLLECTION_ADDRESS / NESTING_OWLTOPIA_COIN_COLLECTION_ADDRESS so we can find Owl Nest NFTs.',
       })
     }
 

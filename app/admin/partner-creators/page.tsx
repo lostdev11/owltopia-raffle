@@ -260,8 +260,12 @@ export default function AdminPartnerCreatorsPage() {
         Partner program creators
       </h1>
       <p className="text-muted-foreground text-sm mb-8">
-        Wallets here get the <strong className="text-foreground">2%</strong> partner fee tier (including the $0 partner
-        program) and appear in the partner spotlight on{' '}
+        To open staking for a partner collection, use{' '}
+        <Link href="/admin/partner-nesting" className="text-primary underline-offset-4 hover:underline">
+          Partner Nesting
+        </Link>{' '}
+        after they are allowlisted here. Wallets here get the <strong className="text-foreground">2%</strong> partner
+        fee tier (including the $0 partner program) and appear in the partner spotlight on{' '}
         <Link href="/raffles?tab=partner-raffles" className="text-primary underline-offset-4 hover:underline">Raffles</Link>.
         If you set a <strong className="text-foreground">Discord partner tenant id</strong> (from{' '}
         <Link href="/admin/discord-giveaway-partners" className="text-primary underline-offset-4 hover:underline">

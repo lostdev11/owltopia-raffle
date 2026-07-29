@@ -98,7 +98,10 @@ export function NftPerchGroupedNestCard({
 
   const [expanded, setExpanded] = useState(() => needsAttention)
 
-  const assetLabels = useMemo(() => nestingNftAssetLabels(pool), [pool.slug])
+  const assetLabels = useMemo(
+    () => nestingNftAssetLabels(pool),
+    [pool.slug, pool.partner_project_slug, pool.name]
+  )
 
   useEffect(() => {
     if (needsAttention) setExpanded(true)

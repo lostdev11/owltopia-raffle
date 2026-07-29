@@ -356,6 +356,28 @@ export async function executeClaim(params: {
       )
     }
   }
+  if (rewardToken && rewardToken !== 'OWL') {
+    const { isPartnerTokenRewardPool, getPartnerNestRewardVaultKeypair } = await import(
+      '@/lib/nesting/partner-reward-vault'
+    )
+    const { partnerRewardAvailableUi } = await import('@/lib/db/staking-pools')
+    if (isPartnerTokenRewardPool(pool)) {
+      if (!getPartnerNestRewardVaultKeypair()) {
+        throw new StakingUserError(
+          'Partner reward payouts are not configured yet (Nesting reward vault keypair missing).',
+          503
+        )
+      }
+      const available = partnerRewardAvailableUi(pool)
+      if (amount > available + 1e-9) {
+        throw new StakingUserError(
+          `This nest’s partner reward pool needs more deposits before you can claim (available ${available}).`,
+          400,
+          { available, requested: amount }
+        )
+      }
+    }
+  }
 
   /** Max-claim: align DB with accrued at claim time and transfer exactly what was pending (vs client floor / clock skew). */
   const FULL_CLAIM_EPS = 1e-5

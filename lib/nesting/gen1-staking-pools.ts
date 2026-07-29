@@ -24,8 +24,14 @@ export function isGen2OwlStakingPoolSlug(slug: string | null | undefined): slug 
   return GEN2_OWL_STAKING_POOL_SLUGS.includes(s as Gen2OwlStakingPoolSlug)
 }
 
-/** User-facing NFT label for nest picker / stake copy (Gen 1 / Gen 2 owls vs Owltopia Coins). */
-export function nestingNftAssetLabels(pool: Pick<StakingPoolRow, 'slug'> | null | undefined): {
+/** User-facing NFT label for nest picker / stake copy (Gen 1 / Gen 2 owls vs Owltopia Coins vs partner). */
+export function nestingNftAssetLabels(
+  pool:
+    | (Pick<StakingPoolRow, 'slug'> &
+        Partial<Pick<StakingPoolRow, 'partner_project_slug' | 'name'>>)
+    | null
+    | undefined
+): {
   singular: string
   plural: string
 } {
@@ -34,6 +40,11 @@ export function nestingNftAssetLabels(pool: Pick<StakingPoolRow, 'slug'> | null 
   }
   if (isGen2OwlStakingPoolSlug(pool?.slug)) {
     return { singular: 'Gen 2 owl', plural: 'Gen 2 owls' }
+  }
+  const partnerSlug = pool?.partner_project_slug?.trim()
+  if (partnerSlug) {
+    const brand = pool?.name?.trim().replace(/\s+nest$/i, '').trim() || partnerSlug
+    return { singular: `${brand} NFT`, plural: `${brand} NFTs` }
   }
   return { singular: 'Owltopia coin', plural: 'Owltopia coins' }
 }

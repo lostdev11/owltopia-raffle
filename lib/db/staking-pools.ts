@@ -52,6 +52,12 @@ export interface StakingPoolRow {
   admin_only?: boolean
   /** NFT lock adapter: auto-detect, MPL Core, SPL token freeze, or DB-only (migration 188). */
   nft_lock_standard?: NftLockStandard
+  /** Cumulative partner SPL deposited for partner_token perches (migration 206). */
+  partner_reward_funded?: number
+  /** Cumulative partner SPL paid to nesters (migration 206). */
+  partner_reward_paid?: number
+  /** Decimals for reward_mint when set (migration 206). */
+  reward_decimals?: number | null
 }
 
 export async function listActiveStakingPools(options?: {
@@ -90,6 +96,12 @@ export async function listAllStakingPoolsAdmin(): Promise<StakingPoolRow[]> {
 
   if (error) throw new Error(error.message)
   return (data || []) as StakingPoolRow[]
+}
+
+/** NFT / token perches tagged with a partner_project_slug (partner staking). */
+export async function listPartnerStakingPoolsAdmin(): Promise<StakingPoolRow[]> {
+  const all = await listAllStakingPoolsAdmin()
+  return all.filter((p) => Boolean(p.partner_project_slug?.trim()))
 }
 
 export async function getStakingPoolById(id: string): Promise<StakingPoolRow | null> {
@@ -139,6 +151,7 @@ export interface InsertStakingPoolInput {
   requires_onchain_sync?: boolean
   lock_enforcement_source?: LockEnforcementSource
   nft_lock_standard?: NftLockStandard
+  reward_decimals?: number | null
 }
 
 export async function insertStakingPool(input: InsertStakingPoolInput): Promise<StakingPoolRow> {
@@ -173,6 +186,7 @@ export async function insertStakingPool(input: InsertStakingPoolInput): Promise<
       requires_onchain_sync: input.requires_onchain_sync ?? false,
       lock_enforcement_source: input.lock_enforcement_source ?? 'database',
       nft_lock_standard: input.nft_lock_standard ?? 'auto',
+      ...(input.reward_decimals !== undefined ? { reward_decimals: input.reward_decimals } : {}),
     })
     .select()
     .single()
@@ -209,6 +223,7 @@ export interface PatchStakingPoolInput {
   lock_enforcement_source?: LockEnforcementSource
   admin_only?: boolean
   nft_lock_standard?: NftLockStandard
+  reward_decimals?: number | null
 }
 
 export async function updateStakingPool(id: string, patch: PatchStakingPoolInput): Promise<StakingPoolRow> {
@@ -241,9 +256,102 @@ export async function updateStakingPool(id: string, patch: PatchStakingPoolInput
   if (patch.lock_enforcement_source !== undefined) row.lock_enforcement_source = patch.lock_enforcement_source
   if (patch.admin_only !== undefined) row.admin_only = patch.admin_only
   if (patch.nft_lock_standard !== undefined) row.nft_lock_standard = patch.nft_lock_standard
+  if (patch.reward_decimals !== undefined) row.reward_decimals = patch.reward_decimals
 
   const { data, error } = await db.from('staking_pools').update(row).eq('id', id).select().single()
 
   if (error) throw new Error(error.message)
   return data as StakingPoolRow
+}
+
+/** Available partner SPL (UI units) for claims. */
+export function partnerRewardAvailableUi(pool: Pick<StakingPoolRow, 'partner_reward_funded' | 'partner_reward_paid'>): number {
+  const funded = Number(pool.partner_reward_funded ?? 0)
+  const paid = Number(pool.partner_reward_paid ?? 0)
+  if (!Number.isFinite(funded) || !Number.isFinite(paid)) return 0
+  return Math.max(0, funded - paid)
+}
+
+/** Credit a verified partner reward deposit onto the pool ledger. */
+export async function creditPartnerRewardDeposit(
+  poolId: string,
+  amountUi: number
+): Promise<StakingPoolRow> {
+  if (!Number.isFinite(amountUi) || amountUi <= 0) throw new Error('Deposit amount must be positive')
+  const db = getSupabaseAdmin()
+  const pool = await getStakingPoolById(poolId)
+  if (!pool) throw new Error('Pool not found')
+  const next = Number(pool.partner_reward_funded ?? 0) + amountUi
+  const { data, error } = await db
+    .from('staking_pools')
+    .update({
+      partner_reward_funded: next,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', poolId)
+    .select('*')
+    .single()
+  if (error) throw new Error(error.message)
+  return data as StakingPoolRow
+}
+
+/**
+ * Reserve / mark partner SPL as paid (optimistic concurrency).
+ * Call before broadcasting the claim transfer; credit back if the send never left the vault.
+ */
+export async function debitPartnerRewardPayout(
+  poolId: string,
+  amountUi: number
+): Promise<StakingPoolRow> {
+  if (!Number.isFinite(amountUi) || amountUi <= 0) throw new Error('Payout amount must be positive')
+  const db = getSupabaseAdmin()
+  const pool = await getStakingPoolById(poolId)
+  if (!pool) throw new Error('Pool not found')
+  const funded = Number(pool.partner_reward_funded ?? 0)
+  const paid = Number(pool.partner_reward_paid ?? 0)
+  const available = Math.max(0, funded - paid)
+  if (amountUi > available + 1e-9) {
+    throw new Error(
+      `Partner reward vault has insufficient funded balance (need ${amountUi}, available ${available}). Ask the partner to deposit more rewards.`
+    )
+  }
+  const nextPaid = paid + amountUi
+  const { data, error } = await db
+    .from('staking_pools')
+    .update({
+      partner_reward_paid: nextPaid,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', poolId)
+    .eq('partner_reward_paid', paid)
+    .select('*')
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) {
+    throw new Error(
+      'Partner reward vault balance changed concurrently. Wait a moment and try claiming again.'
+    )
+  }
+  return data as StakingPoolRow
+}
+
+/** Undo a debit if the on-chain send never left the vault (clear pre-broadcast failure). */
+export async function creditBackPartnerRewardPayout(
+  poolId: string,
+  amountUi: number
+): Promise<void> {
+  if (!Number.isFinite(amountUi) || amountUi <= 0) return
+  const db = getSupabaseAdmin()
+  const pool = await getStakingPoolById(poolId)
+  if (!pool) return
+  const paid = Number(pool.partner_reward_paid ?? 0)
+  const nextPaid = Math.max(0, paid - amountUi)
+  await db
+    .from('staking_pools')
+    .update({
+      partner_reward_paid: nextPaid,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', poolId)
+    .eq('partner_reward_paid', paid)
 }
