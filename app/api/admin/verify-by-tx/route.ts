@@ -3,7 +3,11 @@ import { getEntryByTransactionSignature, updateEntryStatus, saveTransactionSigna
 import { getRaffleById, getEntriesByRaffleId, getRaffles, getRaffleBySlug } from '@/lib/db/raffles'
 import type { Entry, Raffle } from '@/lib/types'
 import { requireAdminSession } from '@/lib/auth-server'
-import { normalizeDepositTxSignatureInput } from '@/lib/raffles/verify-prize-deposit-client'
+import {
+  describeInvalidSolanaTxSignatureInput,
+  isValidSolanaTxSignatureBase58,
+  normalizeDepositTxSignatureInput,
+} from '@/lib/raffles/verify-prize-deposit-client'
 import { getPaymentTransactionDetails } from '@/lib/raffles/payment-transaction-details'
 
 // Force dynamic rendering
@@ -23,6 +27,22 @@ export async function POST(request: NextRequest) {
     if (!transactionSignature) {
       return NextResponse.json(
         { error: 'Missing required field: transactionSignature (raw signature or Solscan /tx/ link)' },
+        { status: 400 }
+      )
+    }
+
+    if (!isValidSolanaTxSignatureBase58(transactionSignature)) {
+      const detail =
+        describeInvalidSolanaTxSignatureInput(transactionSignature) ||
+        'Invalid Solana transaction signature'
+      return NextResponse.json(
+        {
+          error: 'Invalid transaction signature',
+          message: detail,
+          suggestion:
+            'Copy the full signature from Solscan, or paste the Solscan /tx/ URL. Do not use truncated Discord text or EVM 0x hashes.',
+          receivedLength: transactionSignature.length,
+        },
         { status: 400 }
       )
     }
@@ -82,9 +102,10 @@ export async function POST(request: NextRequest) {
       }
       const txDetails = txResult.data
 
-      // CRITICAL: Require raffleSlug to prevent matching wrong raffles
+      // CRITICAL: Prefer raffleSlug to prevent matching wrong raffles
       // This ensures we know which raffle the user actually participated in
-      const { raffleSlug } = body
+      const raffleSlug =
+        typeof body?.raffleSlug === 'string' ? body.raffleSlug.trim() : ''
       
       if (raffleSlug) {
         // If raffle slug is provided, use it to find/create entry

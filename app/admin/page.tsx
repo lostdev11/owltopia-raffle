@@ -41,6 +41,10 @@ import { AdminActionInboxTerminal } from '@/components/admin/AdminActionInboxTer
 import { AdminReferralPerformanceSection } from '@/components/admin/AdminReferralPerformanceSection'
 import { AdminLeaderboardSnapshotSection } from '@/components/admin/AdminLeaderboardSnapshotSection'
 import { AdminGen2MintersSection } from '@/components/admin/AdminGen2MintersSection'
+import {
+  describeInvalidSolanaTxSignatureInput,
+  normalizeDepositTxSignatureInput,
+} from '@/lib/raffles/verify-prize-deposit-client'
 
 interface DeletedEntry {
   id: string
@@ -145,6 +149,7 @@ export default function AdminDashboardPage() {
   
   // Transaction verification state
   const [txSignature, setTxSignature] = useState('')
+  const [verifyRaffleSlug, setVerifyRaffleSlug] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<any>(null)
   const [verifyError, setVerifyError] = useState<string | null>(null)
@@ -1726,13 +1731,28 @@ export default function AdminDashboardPage() {
     setVerifyErrorMessage(null)
     setVerifyErrorSuggestion(null)
 
+    const normalizedTx = normalizeDepositTxSignatureInput(txSignature)
+    const invalidTxReason = describeInvalidSolanaTxSignatureInput(txSignature)
+    if (invalidTxReason) {
+      setVerifyError('Invalid transaction signature')
+      setVerifyErrorMessage(invalidTxReason)
+      setVerifyErrorSuggestion(
+        'Copy the full signature from Solscan, or paste the Solscan /tx/ URL. Discord messages often truncate signatures.'
+      )
+      setVerifying(false)
+      return
+    }
+
+    const slug = verifyRaffleSlug.trim()
+
     try {
       const response = await fetch('/api/admin/verify-by-tx', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          transactionSignature: txSignature.trim(),
+          transactionSignature: normalizedTx,
+          ...(slug ? { raffleSlug: slug } : {}),
         }),
       })
 
@@ -1746,6 +1766,7 @@ export default function AdminDashboardPage() {
         setVerifyResult(data)
         // Clear the input on success
         setTxSignature('')
+        setVerifyRaffleSlug('')
         
         // If entry was restored, refresh the restored entries list
         if (data.restored) {
@@ -3769,16 +3790,18 @@ export default function AdminDashboardPage() {
           }
         >
           <CardDescription className="mb-4">
-            Enter a transaction signature to verify and restore a ticket entry
+            Paste a Solana transaction signature or Solscan /tx/ link to verify and restore a ticket
+            entry. Add the raffle slug when the buyer has no pending entry yet (path after{' '}
+            <code className="text-xs">/raffles/</code>).
           </CardDescription>
           <div className="space-y-4">
               <div>
                 <Label htmlFor="tx-signature">Transaction Signature</Label>
-                <div className="flex gap-2 mt-2">
+                <div className="flex flex-col gap-2 mt-2 sm:flex-row">
                   <Input
                     id="tx-signature"
                     type="text"
-                    placeholder="Enter transaction signature (e.g., 3bKYi4WMqTTFTLsEpYA15ydGfSLdsQX9oyqgp7Qstb9B2tCTms7LSXAqJRP8YrdcwVbgaBk7FBW1ner2dRFArqdn)"
+                    placeholder="Signature or https://solscan.io/tx/…"
                     value={txSignature}
                     onChange={(e) => {
                       setTxSignature(e.target.value)
@@ -3793,6 +3816,7 @@ export default function AdminDashboardPage() {
                   <Button
                     onClick={handleVerifyTransaction}
                     disabled={!txSignature.trim() || verifying}
+                    className="shrink-0 touch-manipulation min-h-[44px]"
                   >
                     {verifying ? (
                       <>
@@ -3807,6 +3831,38 @@ export default function AdminDashboardPage() {
                     )}
                   </Button>
                 </div>
+                {txSignature.trim() && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {(() => {
+                      const normalized = normalizeDepositTxSignatureInput(txSignature)
+                      const reason = describeInvalidSolanaTxSignatureInput(txSignature)
+                      if (reason) return reason
+                      return `Looks valid (${normalized.length} chars).`
+                    })()}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <Label htmlFor="verify-raffle-slug">Raffle slug (recommended for restore)</Label>
+                <Input
+                  id="verify-raffle-slug"
+                  className="mt-2 font-mono text-sm"
+                  placeholder="e.g. micros-412"
+                  value={verifyRaffleSlug}
+                  onChange={(e) => {
+                    setVerifyRaffleSlug(e.target.value)
+                    setVerifyResult(null)
+                    setVerifyError(null)
+                    setVerifyErrorMessage(null)
+                    setVerifyErrorSuggestion(null)
+                  }}
+                  disabled={verifying}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  From the raffle URL: <code className="text-xs">/raffles/&lt;slug&gt;</code>. Required
+                  when no matching pending entry exists so we create/attach to the correct raffle.
+                </p>
               </div>
 
               {verifyError && (
