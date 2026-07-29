@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { OwlTransferMultiNftPicker } from '@/components/owl-transfer/OwlTransferMultiNftPicker'
+import { WalletNftPicker } from '@/components/WalletNftPicker'
 import { fetchWalletNftsWithRetry } from '@/lib/solana/fetch-wallet-nfts-api'
 import { getWalletNfts, getWalletTokens, type WalletNft, type WalletToken } from '@/lib/solana/wallet-tokens'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
@@ -72,6 +72,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [loadingAssets, setLoadingAssets] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [selectedMints, setSelectedMints] = useState<Set<string>>(new Set())
+  const [nftSearchQuery, setNftSearchQuery] = useState('')
   const [destination, setDestination] = useState('')
   const [scatterRaw, setScatterRaw] = useState('')
   const [randomizeScatter, setRandomizeScatter] = useState(true)
@@ -518,13 +519,24 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
                       <Loader2 className="h-4 w-4 animate-spin" /> Loading NFTs…
                     </div>
                   ) : (
-                    <OwlTransferMultiNftPicker
-                      nfts={nfts}
-                      selectedMints={selectedMints}
-                      onToggle={toggleNft}
-                      onSelectMints={selectMints}
+                    <fieldset
                       disabled={batchProgress.some((b) => b.status === 'sending')}
-                    />
+                      className="min-w-0 disabled:opacity-60"
+                    >
+                      <WalletNftPicker
+                        nfts={nfts}
+                        searchQuery={nftSearchQuery}
+                        onSearchQueryChange={setNftSearchQuery}
+                        selectionMode="multi"
+                        selectedMints={selectedMints}
+                        onToggle={toggleNft}
+                        maxSelect={OWL_TRANSFER_MAX_SELECT}
+                        onSelectFilteredMints={selectMints}
+                        searchInputId="owl-transfer-nft-search"
+                        dialogTitle="Select NFTs to send"
+                        dialogDescription="Filter by collection, switch to list view, or search by name or mint — same controls as create raffle."
+                      />
+                    </fieldset>
                   )}
                 </CardContent>
               </Card>
