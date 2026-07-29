@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import type { PartnerNestApplicationRow } from '@/lib/db/partner-nest-applications'
+import type { StakingPoolRow } from '@/lib/db/staking-pools'
+import { PartnerNestRewardDepositPanel } from '@/components/partners/PartnerNestRewardDepositPanel'
 
 const CARD_SURFACE = 'rounded-2xl border border-border/60 bg-card shadow-sm'
 
@@ -20,6 +22,7 @@ export function PartnerNestingRequestCard({ className }: Props) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [applications, setApplications] = useState<PartnerNestApplicationRow[]>([])
+  const [pools, setPools] = useState<StakingPoolRow[]>([])
   const [listError, setListError] = useState<string | null>(null)
 
   const [collectionKey, setCollectionKey] = useState('')
@@ -48,6 +51,7 @@ export function PartnerNestingRequestCard({ className }: Props) {
         return
       }
       setApplications(Array.isArray(json.applications) ? json.applications : [])
+      setPools(Array.isArray(json.pools) ? json.pools : [])
     } catch {
       setListError('Could not load Nesting requests')
     } finally {
@@ -261,7 +265,18 @@ export function PartnerNestingRequestCard({ className }: Props) {
             <p className="text-sm text-muted-foreground">No Nesting requests yet.</p>
           ) : (
             <ul className="divide-y divide-border/50 rounded-xl border border-border/50">
-              {applications.map((app) => (
+              {applications.map((app) => {
+                const pool =
+                  app.approved_pool_id != null
+                    ? pools.find((p) => p.id === app.approved_pool_id) ?? null
+                    : null
+                const showFund =
+                  app.status === 'active' &&
+                  app.approved_reward_mode === 'partner_token' &&
+                  pool?.reward_mint &&
+                  pool.reward_token
+
+                return (
                 <li key={app.id} className="space-y-1 px-3 py-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-medium">{app.pool_name || 'Nest request'}</span>
@@ -288,8 +303,16 @@ export function PartnerNestingRequestCard({ className }: Props) {
                       Open Nesting
                     </Link>
                   ) : null}
+                  {showFund && pool?.reward_mint && pool.reward_token ? (
+                    <PartnerNestRewardDepositPanel
+                      poolId={pool.id}
+                      rewardToken={pool.reward_token}
+                      rewardMint={pool.reward_mint}
+                    />
+                  ) : null}
                 </li>
-              ))}
+                )
+              })}
             </ul>
           )}
         </div>

@@ -302,6 +302,7 @@ export async function approvePartnerNestApplication(params: {
     rewardTokenSymbol: app.reward_token_symbol,
     rewardMint: app.reward_mint,
     rewardRate: Number(app.reward_rate) || 1,
+    rewardDecimals: app.reward_decimals,
   }
 
   const validationError = validatePartnerNestCreateInput(createInput)

@@ -13,6 +13,8 @@ import { validatePartnerNestApplicationInput } from '../lib/db/partner-nest-appl
 import { validatePoolAgainstNestingEmissionPolicy } from '../lib/nesting/policy'
 import { resolveRewardClaimRecording } from '../lib/nesting/reward-claim-record'
 import { StakingUserError } from '../lib/nesting/errors'
+import { isPartnerTokenRewardPool } from '../lib/nesting/partner-reward-vault'
+import { partnerRewardAvailableUi } from '../lib/db/staking-pools'
 
 function main() {
   assert.equal(partnerSlugFromLabel('Misfits DAO'), 'misfits-dao')
@@ -138,7 +140,35 @@ function main() {
   assert.equal(isPartnerStakingPool({ partner_project_slug: 'misfits' }), true)
   assert.equal(isPartnerStakingPool({ partner_project_slug: null }), false)
 
-  console.log(JSON.stringify({ ok: true, partnerNestPool: true, partnerRewardToken: true }, null, 2))
+  assert.equal(
+    isPartnerTokenRewardPool({
+      reward_token: 'MISFIT',
+      reward_mint: 'So11111111111111111111111111111111111111112',
+      partner_project_slug: 'misfits',
+    }),
+    true
+  )
+  assert.equal(
+    isPartnerTokenRewardPool({
+      reward_token: 'OWL',
+      reward_mint: null,
+      partner_project_slug: 'misfits',
+    }),
+    false
+  )
+
+  assert.equal(
+    partnerRewardAvailableUi({ partner_reward_funded: 100, partner_reward_paid: 40 }),
+    60
+  )
+
+  console.log(
+    JSON.stringify(
+      { ok: true, partnerNestPool: true, partnerRewardToken: true, partnerRewardDeposit: true },
+      null,
+      2
+    )
+  )
 }
 
 main()

@@ -151,8 +151,12 @@ export default function AdminPartnerNestApplicationsPage() {
         <p className="text-sm text-muted-foreground max-w-2xl">
           Partners submit a collection address and optional reward SPL mint from their hub. Approve creates the nest
           perch. Prefer <strong className="text-foreground">Approve as OWL</strong> for live payouts today;{' '}
-          <strong className="text-foreground">Approve with partner token</strong> stores their mint on the pool
-          (holder claims wait until partner-token payouts are funded).
+          <strong className="text-foreground">Approve with partner token</strong> stores their mint on the pool.
+          After approve, the partner funds rewards from{' '}
+          <Link href="/partners/dashboard" className="text-primary underline-offset-4 hover:underline">
+            /partners/dashboard
+          </Link>{' '}
+          so nesters can claim.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button asChild variant="outline" size="sm" className="min-h-[40px]">

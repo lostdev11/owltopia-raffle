@@ -26,6 +26,7 @@ export type PartnerNestCreateInput = {
   rewardTokenSymbol?: string | null
   rewardMint?: string | null
   rewardRate?: number
+  rewardDecimals?: number | null
 }
 
 export type PartnerNestCreatePayload = {
@@ -37,6 +38,7 @@ export type PartnerNestCreatePayload = {
   collection_key: string
   reward_token: string
   reward_mint: string | null
+  reward_decimals: number | null
   reward_rate: number
   reward_rate_unit: 'daily'
   lock_period_days: number
@@ -137,6 +139,12 @@ export function buildPartnerNestPoolPayload(input: PartnerNestCreateInput): Part
     input.rewardRate != null && Number.isFinite(Number(input.rewardRate))
       ? Number(input.rewardRate)
       : 1
+  const rewardDecimals =
+    mode === 'partner_token' &&
+    input.rewardDecimals != null &&
+    Number.isInteger(Number(input.rewardDecimals))
+      ? Number(input.rewardDecimals)
+      : null
 
   return {
     name,
@@ -153,6 +161,7 @@ export function buildPartnerNestPoolPayload(input: PartnerNestCreateInput): Part
     collection_key: coll,
     reward_token: rewardToken,
     reward_mint: rewardMint,
+    reward_decimals: rewardDecimals,
     reward_rate: rewardRate,
     reward_rate_unit: 'daily',
     lock_period_days: maxLock,

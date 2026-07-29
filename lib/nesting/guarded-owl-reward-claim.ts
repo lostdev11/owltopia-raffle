@@ -7,6 +7,8 @@ import {
 } from '@/lib/db/staking-owl-reward-transfers'
 import { resolveRewardClaimRecording } from '@/lib/nesting/reward-claim-record'
 import { tryTransferOwlRewardClaim } from '@/lib/nesting/owl-reward-claim-transfer'
+import { tryTransferPartnerRewardClaim } from '@/lib/nesting/partner-reward-claim-transfer'
+import { isPartnerTokenRewardPool } from '@/lib/nesting/partner-reward-vault'
 
 export type GuardedClaimRecording = {
   txSig: string | null
@@ -40,11 +42,17 @@ export async function runGuardedOwlRewardClaim<T>(params: {
 
   let recording: GuardedClaimRecording
   try {
-    const transfer = await tryTransferOwlRewardClaim({
-      pool: params.pool,
-      recipientWallet: params.wallet,
-      claimAmountUi: params.claimAmountUi,
-    })
+    const transfer = isPartnerTokenRewardPool(params.pool)
+      ? await tryTransferPartnerRewardClaim({
+          pool: params.pool,
+          recipientWallet: params.wallet,
+          claimAmountUi: params.claimAmountUi,
+        })
+      : await tryTransferOwlRewardClaim({
+          pool: params.pool,
+          recipientWallet: params.wallet,
+          claimAmountUi: params.claimAmountUi,
+        })
     const { txSig, note } = resolveRewardClaimRecording({
       poolRewardToken: params.pool.reward_token,
       transfer,
