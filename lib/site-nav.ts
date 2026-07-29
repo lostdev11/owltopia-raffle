@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Plus,
   Rocket,
+  Send,
   Settings,
   ShoppingCart,
   Ticket,
@@ -111,6 +112,12 @@ export const COMMUNITY_NAV_GROUP: SiteNavGroup = {
       description: 'Launches, mints, and collection infrastructure',
       icon: Rocket,
     },
+    {
+      href: '/owl-transfer',
+      label: 'Owl Transfer',
+      description: 'Send NFTs & tokens — 0.001 SOL fee (admin preview)',
+      icon: Send,
+    },
   ],
 }
 
@@ -184,6 +191,14 @@ export function isPathInNavGroup(pathname: string, group: SiteNavGroup): boolean
   return group.items.some(
     (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
   )
+}
+
+/** Hide Owl Transfer from Community nav during admin-only preview. */
+export function filterCommunityNavItems(options: {
+  showOwlTransfer: boolean
+}): SiteNavItem[] {
+  if (options.showOwlTransfer) return COMMUNITY_NAV_GROUP.items
+  return COMMUNITY_NAV_GROUP.items.filter((item) => item.href !== '/owl-transfer')
 }
 
 /** Admin menu items are admin-only. Create Raffle is no longer here (see CREATE_RAFFLE_NAV_ITEM). */
