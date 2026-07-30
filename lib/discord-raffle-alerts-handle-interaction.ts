@@ -25,12 +25,7 @@ type DiscordInteraction = {
   member?: { permissions?: string; user?: { id: string } }
   data?: {
     name?: string
-    options?: Array<{
-      name: string
-      type: number
-      value?: string
-      options?: Array<{ name: string; type: number; value?: string }>
-    }>
+    options?: Array<{ name: string; type: number; value?: string; options?: unknown[] }>
   }
 }
 
@@ -42,7 +37,7 @@ function getSubcommandAndOptions(data: DiscordInteraction['data']): {
   const sub = opts.find((o) => o.type === 1)
   if (!sub) return { sub: null, strOptions: {} }
   const strOptions: Record<string, string> = {}
-  const nested = sub.options ?? []
+  const nested = (sub.options ?? []) as Array<{ name: string; type: number; value?: string }>
   for (const o of nested) {
     // 3 = STRING, 7 = CHANNEL (snowflake string)
     if ((o.type === 3 || o.type === 7) && typeof o.value === 'string') {
