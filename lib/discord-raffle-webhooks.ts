@@ -8,9 +8,12 @@
  * Partner communities: per-tenant `raffle_webhook_url_*` (see `discord_giveaway_partner_tenants`) when
  * a raffle is stamped with `discord_partner_tenant_id`. Entitled partners also receive create/draw pings on
  * their server; platform DISCORD_WEBHOOK_* feeds still run when configured (both servers get the post).
+ * Free community feed: any guild can `/owltopia-alerts enable` (migration 207); fan-out on public live
+ * via `notifyCommunityDiscordRaffleAlerts` (create if already live, publish-after-deposit, promote).
  */
 import type { CommunityGiveaway, Raffle } from '@/lib/types'
 import { resolveNftPrizeImageForDiscordEmbed } from '@/lib/discord-nft-embed-image'
+import { notifyCommunityDiscordRaffleAlerts } from '@/lib/discord-raffle-alert-fanout'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
 import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 import { parseDiscordUserSnowflake } from '@/lib/discord-webhook-user-mentions'
@@ -342,89 +345,92 @@ export async function notifyRaffleCreated(raffle: Raffle): Promise<void> {
   const partnerCreatedWebhook = entitledPartner?.raffle_webhook_url_created?.trim() || null
   const postToPartnerDiscord = !!(partnerCreatedWebhook && partnerCreatedWebhook.length > 0)
 
-  if (!postToPlatformFeed && !postToPartnerDiscord) return
+  if (postToPlatformFeed || postToPartnerDiscord) {
+    const endTs = discordTimestampUnix(raffle.end_time)
+    const endLine = endTs ? `<t:${endTs}:F> (<t:${endTs}:R>)` : raffle.end_time
+    const image = resolveDiscordEmbedImageUrl(raffle)
 
-  const endTs = discordTimestampUnix(raffle.end_time)
-  const endLine = endTs ? `<t:${endTs}:F> (<t:${endTs}:R>)` : raffle.end_time
-  const image = resolveDiscordEmbedImageUrl(raffle)
+    const creatorWallet = (
+      raffle.creator_wallet?.trim() ||
+      (typeof raffle.created_by === 'string' ? raffle.created_by.trim() : '')
+    ).trim()
+    let creatorDiscordId: string | undefined
+    if (creatorWallet) {
+      try {
+        const map = await getDiscordUserIdsByWallets([creatorWallet])
+        const id = map[creatorWallet]?.trim()
+        if (id) creatorDiscordId = id
+      } catch (e) {
+        console.error('[notifyRaffleCreated] creator Discord lookup:', e)
+      }
+    }
+    const creatorSnowflake = parseDiscordUserSnowflake(creatorDiscordId)
 
-  const creatorWallet = (
-    raffle.creator_wallet?.trim() ||
-    (typeof raffle.created_by === 'string' ? raffle.created_by.trim() : '')
-  ).trim()
-  let creatorDiscordId: string | undefined
-  if (creatorWallet) {
-    try {
-      const map = await getDiscordUserIdsByWallets([creatorWallet])
-      const id = map[creatorWallet]?.trim()
-      if (id) creatorDiscordId = id
-    } catch (e) {
-      console.error('[notifyRaffleCreated] creator Discord lookup:', e)
+    const creatorField =
+      creatorWallet && creatorSnowflake
+        ? {
+            name: 'Creator',
+            value: `<@${creatorSnowflake}>\nHost wallet:\n\`${creatorWallet}\``,
+            inline: false,
+          }
+        : {
+            name: 'Creator',
+            value: creatorWallet
+              ? `Host wallet:\n\`${creatorWallet}\``
+              : raffle.created_by
+                ? `Host wallet:\n\`${String(raffle.created_by).trim()}\``
+                : '—',
+            inline: false,
+          }
+
+    const extras: WebhookExtras | undefined = creatorSnowflake
+      ? {
+          content: `Raffle creator: <@${creatorSnowflake}>`,
+          allowed_mentions: { parse: [], users: [creatorSnowflake] },
+        }
+      : undefined
+
+    const embed: DiscordEmbed = {
+      title: 'New raffle created',
+      description: raffle.title,
+      url: rafflePageUrl(raffle),
+      color: 0x57f287,
+      fields: [
+        { name: 'Prize', value: prizeSummary(raffle), inline: true },
+        {
+          name: 'Ticket price',
+          value: formatRaffleTicketPriceSummary(raffle),
+          inline: true,
+        },
+        { name: 'Ends', value: endLine, inline: false },
+        creatorField,
+        { name: 'Status', value: raffle.status ?? 'draft', inline: true },
+        ...(raffle.list_on_platform === false
+          ? [
+              {
+                name: 'Where to enter',
+                value:
+                  'This raffle is not on the public raffles list — use the **Enter raffle** link in this post (e.g. share the button in your partner Discord).',
+                inline: false,
+              },
+            ]
+          : []),
+      ],
+      image: image ? { url: image } : undefined,
+      timestamp: new Date().toISOString(),
+    }
+
+    if (postToPlatformFeed && mainUrl) {
+      await postDiscordWebhook(mainUrl, embed, extras)
+    }
+
+    if (postToPartnerDiscord && partnerCreatedWebhook) {
+      await postDiscordWebhook(partnerCreatedWebhook, embed, extras)
     }
   }
-  const creatorSnowflake = parseDiscordUserSnowflake(creatorDiscordId)
 
-  const creatorField =
-    creatorWallet && creatorSnowflake
-      ? {
-          name: 'Creator',
-          value: `<@${creatorSnowflake}>\nHost wallet:\n\`${creatorWallet}\``,
-          inline: false,
-        }
-      : {
-          name: 'Creator',
-          value: creatorWallet
-            ? `Host wallet:\n\`${creatorWallet}\``
-            : raffle.created_by
-              ? `Host wallet:\n\`${String(raffle.created_by).trim()}\``
-              : '—',
-          inline: false,
-        }
-
-  const extras: WebhookExtras | undefined = creatorSnowflake
-    ? {
-        content: `Raffle creator: <@${creatorSnowflake}>`,
-        allowed_mentions: { parse: [], users: [creatorSnowflake] },
-      }
-    : undefined
-
-  const embed: DiscordEmbed = {
-    title: 'New raffle created',
-    description: raffle.title,
-    url: rafflePageUrl(raffle),
-    color: 0x57f287,
-    fields: [
-      { name: 'Prize', value: prizeSummary(raffle), inline: true },
-      {
-        name: 'Ticket price',
-        value: formatRaffleTicketPriceSummary(raffle),
-        inline: true,
-      },
-      { name: 'Ends', value: endLine, inline: false },
-      creatorField,
-      { name: 'Status', value: raffle.status ?? 'draft', inline: true },
-      ...(raffle.list_on_platform === false
-        ? [
-            {
-              name: 'Where to enter',
-              value:
-                'This raffle is not on the public raffles list — use the **Enter raffle** link in this post (e.g. share the button in your partner Discord).',
-              inline: false,
-            },
-          ]
-        : []),
-    ],
-    image: image ? { url: image } : undefined,
-    timestamp: new Date().toISOString(),
-  }
-
-  if (postToPlatformFeed && mainUrl) {
-    await postDiscordWebhook(mainUrl, embed, extras)
-  }
-
-  if (postToPartnerDiscord && partnerCreatedWebhook) {
-    await postDiscordWebhook(partnerCreatedWebhook, embed, extras)
-  }
+  // Free community feed (/owltopia-alerts): only when already public + live (NFT drafts wait for publish).
+  await notifyCommunityDiscordRaffleAlerts(raffle)
 }
 
 /** Logs errors, never throws. Await from selectWinner (or any serverless handler) so the outgoing webhook finishes before the invocation freezes. */
