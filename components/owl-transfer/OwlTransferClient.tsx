@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { WalletNftPicker } from '@/components/WalletNftPicker'
+import { OwlTransferSuccessBanner } from '@/components/owl-transfer/OwlTransferSuccessBanner'
 import { fetchWalletNftsWithRetry } from '@/lib/solana/fetch-wallet-nfts-api'
 import {
   getWalletNfts,
@@ -93,7 +94,9 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [tokenAmounts, setTokenAmounts] = useState<Record<string, string>>({})
   const [tokenDestination, setTokenDestination] = useState('')
   const [tokenBusy, setTokenBusy] = useState(false)
-  const [tokenMsg, setTokenMsg] = useState<string | null>(null)
+  const [tokenError, setTokenError] = useState<string | null>(null)
+  const [tokenSuccessSig, setTokenSuccessSig] = useState<string | null>(null)
+  const [tokenSuccessDetail, setTokenSuccessDetail] = useState<string | null>(null)
 
   const feeSol = getOwlTransferFeeSol()
   const showAdminPreview = viewerIsAdmin && !isPublic
@@ -322,9 +325,11 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
 
   const sendTokens = async () => {
     if (!publicKey) return
-    setTokenMsg(null)
+    setTokenError(null)
+    setTokenSuccessSig(null)
+    setTokenSuccessDetail(null)
     if (!isValidSolanaPubkey(tokenDestination)) {
-      setTokenMsg('Enter a valid destination wallet.')
+      setTokenError('Enter a valid destination wallet.')
       return
     }
     const lines = []
@@ -333,13 +338,13 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
       if (!raw) continue
       const ui = Number(raw)
       if (!Number.isFinite(ui) || ui <= 0) {
-        setTokenMsg(`Invalid amount for ${walletTokenDisplayName(t)}`)
+        setTokenError(`Invalid amount for ${walletTokenDisplayName(t)}`)
         return
       }
       const amountRaw = BigInt(Math.round(ui * 10 ** t.decimals))
       const bal = BigInt(t.balance)
       if (amountRaw > bal) {
-        setTokenMsg(`Insufficient balance for ${walletTokenDisplayName(t)}`)
+        setTokenError(`Insufficient balance for ${walletTokenDisplayName(t)}`)
         return
       }
       lines.push({
@@ -351,11 +356,11 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
       })
     }
     if (lines.length < 1) {
-      setTokenMsg('Enter an amount for at least one token.')
+      setTokenError('Enter an amount for at least one token.')
       return
     }
     if (lines.length > OWL_TRANSFER_MAX_PER_TX) {
-      setTokenMsg(`Max ${OWL_TRANSFER_MAX_PER_TX} token lines per approval — clear some amounts.`)
+      setTokenError(`Max ${OWL_TRANSFER_MAX_PER_TX} token lines per approval — clear some amounts.`)
       return
     }
 
@@ -369,11 +374,17 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
         lines,
       })
       if (result.ok) {
-        setTokenMsg(`Sent. Signature: ${result.signature}`)
+        const names = lines.map((l) => l.symbol).filter(Boolean)
+        setTokenSuccessSig(result.signature)
+        setTokenSuccessDetail(
+          names.length === 1
+            ? `Sent ${names[0]} to ${shorten(tokenDestination.trim())}.`
+            : `Sent ${lines.length} tokens to ${shorten(tokenDestination.trim())}.`
+        )
         setTokenAmounts({})
         void loadAssets()
       } else {
-        setTokenMsg(result.error)
+        setTokenError(result.error)
       }
     } finally {
       setTokenBusy(false)
@@ -674,9 +685,17 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
                               {formatOwlTransferFeeSol(feeSol * lines.length)} fee
                             </p>
                             {b.signature ? (
-                              <p className="mt-1 break-all font-mono text-[11px] text-emerald-300">
-                                {b.signature}
-                              </p>
+                              <div className="mt-2">
+                                <OwlTransferSuccessBanner
+                                  title={
+                                    b.status === 'done'
+                                      ? `Batch ${b.index + 1} sent successfully`
+                                      : 'Transaction confirmed'
+                                  }
+                                  signature={b.signature}
+                                  detail={`${lines.length} NFT${lines.length === 1 ? '' : 's'} transferred.`}
+                                />
+                              </div>
                             ) : null}
                             {b.error ? (
                               <p className="mt-1 text-xs text-red-300">{b.error}</p>
@@ -694,7 +713,8 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
 
                     {allDone ? (
                       <div className="flex items-center gap-2 text-sm text-emerald-300">
-                        <CheckCircle2 className="h-4 w-4" /> All batches confirmed.
+                        <CheckCircle2 className="h-4 w-4" /> All batches confirmed — open Solscan
+                        above for each tx.
                       </div>
                     ) : (
                       <Button
@@ -797,15 +817,15 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
                     })}
                   </ul>
                 )}
-                {tokenMsg ? (
-                  <p
-                    className={cn(
-                      'text-sm',
-                      tokenMsg.startsWith('Sent') ? 'text-emerald-300' : 'text-red-300'
-                    )}
-                  >
-                    {tokenMsg}
-                  </p>
+                {tokenSuccessSig ? (
+                  <OwlTransferSuccessBanner
+                    title="Tokens sent successfully"
+                    signature={tokenSuccessSig}
+                    detail={tokenSuccessDetail ?? undefined}
+                  />
+                ) : null}
+                {tokenError ? (
+                  <p className="text-sm text-red-300">{tokenError}</p>
                 ) : null}
                 <Button
                   type="button"
