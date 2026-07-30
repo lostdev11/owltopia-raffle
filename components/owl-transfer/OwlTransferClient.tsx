@@ -17,6 +17,10 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { WalletNftPicker } from '@/components/WalletNftPicker'
 import { OwlTransferSuccessBanner } from '@/components/owl-transfer/OwlTransferSuccessBanner'
+import {
+  OwlTransferSuccessDialog,
+  type OwlTransferSuccessState,
+} from '@/components/owl-transfer/OwlTransferSuccessDialog'
 import { fetchWalletNftsWithRetry } from '@/lib/solana/fetch-wallet-nfts-api'
 import {
   getWalletNfts,
@@ -97,6 +101,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [tokenError, setTokenError] = useState<string | null>(null)
   const [tokenSuccessSig, setTokenSuccessSig] = useState<string | null>(null)
   const [tokenSuccessDetail, setTokenSuccessDetail] = useState<string | null>(null)
+  const [successPopup, setSuccessPopup] = useState<OwlTransferSuccessState>(null)
 
   const feeSol = getOwlTransferFeeSol()
   const showAdminPreview = viewerIsAdmin && !isPublic
@@ -302,6 +307,14 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
         )
       )
       if (batchIndex + 1 < batches.length) setActiveBatch(batchIndex + 1)
+      setSuccessPopup({
+        title:
+          batches.length > 1
+            ? `Batch ${batchIndex + 1} of ${batches.length} sent`
+            : 'NFTs sent successfully',
+        detail: `${lines.length} NFT${lines.length === 1 ? '' : 's'} transferred. Fee paid to Owltopia treasury.`,
+        signature: result.signature,
+      })
       void loadAssets()
     } else {
       setBatchProgress((prev) =>
@@ -381,6 +394,14 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
             ? `Sent ${names[0]} to ${shorten(tokenDestination.trim())}.`
             : `Sent ${lines.length} tokens to ${shorten(tokenDestination.trim())}.`
         )
+        setSuccessPopup({
+          title: 'Tokens sent successfully',
+          detail:
+            names.length === 1
+              ? `Sent ${names[0]} to ${shorten(tokenDestination.trim())}. Fee paid to Owltopia treasury.`
+              : `Sent ${lines.length} tokens to ${shorten(tokenDestination.trim())}. Fee paid to Owltopia treasury.`,
+          signature: result.signature,
+        })
         setTokenAmounts({})
         void loadAssets()
       } else {
@@ -422,6 +443,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-3 py-6 sm:px-4 sm:py-10">
+      <OwlTransferSuccessDialog success={successPopup} onClose={() => setSuccessPopup(null)} />
       <header className="space-y-3">
         <div className="flex items-center gap-2 text-theme-prime">
           <Bird className="h-6 w-6" />
