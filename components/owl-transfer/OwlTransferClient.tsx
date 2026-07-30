@@ -17,7 +17,13 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { WalletNftPicker } from '@/components/WalletNftPicker'
 import { fetchWalletNftsWithRetry } from '@/lib/solana/fetch-wallet-nfts-api'
-import { getWalletNfts, getWalletTokens, type WalletNft, type WalletToken } from '@/lib/solana/wallet-tokens'
+import {
+  getWalletNfts,
+  getWalletTokens,
+  walletTokenDisplayName,
+  type WalletNft,
+  type WalletToken,
+} from '@/lib/solana/wallet-tokens'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
 import {
@@ -137,7 +143,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
       }
       setNfts(list)
       const toks = await getWalletTokens(connection, publicKey)
-      setTokens(toks.filter((t) => t.decimals > 0 || Number(t.balance) > 1))
+      setTokens(toks)
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Failed to load wallet assets')
     } finally {
@@ -327,13 +333,13 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
       if (!raw) continue
       const ui = Number(raw)
       if (!Number.isFinite(ui) || ui <= 0) {
-        setTokenMsg(`Invalid amount for ${t.symbol}`)
+        setTokenMsg(`Invalid amount for ${walletTokenDisplayName(t)}`)
         return
       }
       const amountRaw = BigInt(Math.round(ui * 10 ** t.decimals))
       const bal = BigInt(t.balance)
       if (amountRaw > bal) {
-        setTokenMsg(`Insufficient balance for ${t.symbol}`)
+        setTokenMsg(`Insufficient balance for ${walletTokenDisplayName(t)}`)
         return
       }
       lines.push({
@@ -341,7 +347,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
         tokenAccount: t.tokenAccount,
         amountRaw,
         decimals: t.decimals,
-        symbol: t.symbol,
+        symbol: walletTokenDisplayName(t),
       })
     }
     if (lines.length < 1) {
@@ -760,14 +766,20 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
                   <ul className="space-y-2">
                     {tokens.slice(0, 40).map((t) => {
                       const uiBal = Number(t.balance) / 10 ** t.decimals
+                      const label = walletTokenDisplayName(t)
+                      const showTicker =
+                        Boolean(t.symbol) &&
+                        !/^Token \(/i.test(t.symbol) &&
+                        t.symbol.trim().toLowerCase() !== label.trim().toLowerCase()
                       return (
                         <li
-                          key={t.mint}
+                          key={`${t.tokenAccount}-${t.mint}`}
                           className="flex flex-col gap-1 rounded-lg border border-white/10 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                         >
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">{t.symbol}</p>
+                            <p className="truncate text-sm font-medium">{label}</p>
                             <p className="text-xs text-muted-foreground">
+                              {showTicker ? `${t.symbol} · ` : ''}
                               Balance {uiBal.toLocaleString(undefined, { maximumFractionDigits: 6 })}
                             </p>
                           </div>

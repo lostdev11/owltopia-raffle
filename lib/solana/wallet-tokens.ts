@@ -240,10 +240,23 @@ export function minimalWalletNftForEscrowTransfer(mint: string): WalletNft {
 
 export interface WalletToken {
   mint: string
+  /** Ticker when known (Metaplex / on-chain); otherwise a short mint fallback. */
   symbol: string
+  /** Human name when Metaplex metadata exists. */
+  name: string | null
   balance: string
   decimals: number
   tokenAccount: string
+}
+
+/** Display label for UI lists — prefer name, then symbol, then short mint. */
+export function walletTokenDisplayName(token: Pick<WalletToken, 'name' | 'symbol' | 'mint'>): string {
+  const name = token.name?.trim()
+  if (name) return name
+  const symbol = token.symbol?.trim()
+  if (symbol && !/^Token \(/i.test(symbol)) return symbol
+  const m = token.mint.trim()
+  return m.length > 12 ? `${m.slice(0, 4)}…${m.slice(-4)}` : m
 }
 
 /** Parse Metaplex Token Metadata account data (on-chain buffer) to URI / name / symbol. */
@@ -437,32 +450,115 @@ export async function getWalletNfts(
   return enriched
 }
 
+function isLikelyNftTokenAccount(decimals: number, amount: string): boolean {
+  if (amount === '0') return true
+  if (decimals === 0 && (amount === '1' || Number(amount) === 1)) return true
+  return false
+}
+
+function cleanMetaplexString(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const t = raw.replace(/\0/g, '').trim()
+  return t || null
+}
+
 /**
- * Fetch all fungible (and optionally NFT) token accounts in the wallet.
- * Returns balance, symbol from mint (we don't resolve symbol for arbitrary mints; use "Unknown" or mint slice).
+ * Fetch fungible SPL / Token-2022 balances in the wallet.
+ * Resolves Metaplex name/symbol when on-chain metadata exists (so UI can show “OWL” not a mint).
  */
 export async function getWalletTokens(
   connection: Connection,
   ownerPublicKey: PublicKey
 ): Promise<WalletToken[]> {
-  const response = await connection.getParsedTokenAccountsByOwner(ownerPublicKey, {
-    programId: TOKEN_PROGRAM_ID,
-  })
-  const tokens: WalletToken[] = []
-  for (const { pubkey, account } of response.value) {
-    const info = account.data?.parsed?.info
-    if (!info) continue
-    const decimals = Number(info.tokenAmount?.decimals ?? 0)
-    const amount = String(info.tokenAmount?.amount ?? '0')
-    const mint = info.mint as string
-    const symbol = (info.tokenAmount?.uiTokenAmount?.symbol as string) ?? undefined
-    tokens.push({
-      mint,
-      symbol: symbol ?? `Token (${mint.slice(0, 4)}…)`,
-      balance: amount,
-      decimals,
-      tokenAccount: pubkey.toBase58(),
-    })
+  const programs = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID] as const
+  const raw: Array<{
+    mint: string
+    balance: string
+    decimals: number
+    tokenAccount: string
+    parsedSymbol?: string
+  }> = []
+
+  for (const programId of programs) {
+    let response: Awaited<ReturnType<Connection['getParsedTokenAccountsByOwner']>>
+    try {
+      response = await connection.getParsedTokenAccountsByOwner(ownerPublicKey, { programId })
+    } catch {
+      continue
+    }
+    for (const { pubkey, account } of response.value) {
+      const info = account.data?.parsed?.info
+      if (!info?.mint) continue
+      const decimals = Number(info.tokenAmount?.decimals ?? 0)
+      const amount = String(info.tokenAmount?.amount ?? '0')
+      if (isLikelyNftTokenAccount(decimals, amount)) continue
+      const mint = info.mint as string
+      const parsedSymbol =
+        typeof info.tokenAmount?.uiTokenAmount?.symbol === 'string'
+          ? info.tokenAmount.uiTokenAmount.symbol
+          : undefined
+      raw.push({
+        mint,
+        balance: amount,
+        decimals,
+        tokenAccount: pubkey.toBase58(),
+        parsedSymbol,
+      })
+    }
   }
-  return tokens
+
+  if (raw.length === 0) return []
+
+  // One metadata account fetch per unique mint (shared across duplicate ATAs if any).
+  const uniqueMints = [...new Set(raw.map((t) => t.mint))]
+  const mintKeys = uniqueMints.map((m) => new PublicKey(m))
+  const metas = await fetchMetaplexMetadataBatch(connection, mintKeys)
+  const metaByMint = new Map<string, { name: string | null; symbol: string | null }>()
+  uniqueMints.forEach((mint, i) => {
+    const meta = metas[i]
+    metaByMint.set(mint, {
+      name: cleanMetaplexString(meta?.name),
+      symbol: cleanMetaplexString(meta?.symbol),
+    })
+  })
+
+  const known = knownFungibleLabels()
+
+  return raw.map((t) => {
+    const meta = metaByMint.get(t.mint)
+    const knownLabel = known.get(t.mint)
+    const symbol =
+      knownLabel?.symbol ||
+      cleanMetaplexString(t.parsedSymbol) ||
+      meta?.symbol ||
+      `Token (${t.mint.slice(0, 4)}…)`
+    const name = knownLabel?.name || meta?.name || null
+    return {
+      mint: t.mint,
+      symbol,
+      name,
+      balance: t.balance,
+      decimals: t.decimals,
+      tokenAccount: t.tokenAccount,
+    }
+  })
+}
+
+/** Platform-known mints so Owl Transfer shows friendly names even without Metaplex metadata. */
+function knownFungibleLabels(): Map<string, { name: string; symbol: string }> {
+  const map = new Map<string, { name: string; symbol: string }>()
+  map.set('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', {
+    name: 'USD Coin',
+    symbol: 'USDC',
+  })
+  map.set('Cndm5E8m1EnCvduCp1EsakUjEw2jKGTUCTa3iL48dSuB', {
+    name: 'Bamboo',
+    symbol: 'BAMBOO',
+  })
+  const owl =
+    typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_OWL_MINT_ADDRESS?.trim() : undefined
+  if (owl) {
+    map.set(owl, { name: 'Owltopia', symbol: 'OWL' })
+  }
+  return map
 }
