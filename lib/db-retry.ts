@@ -9,9 +9,24 @@ interface RetryOptions {
   maxDelayMs?: number
   backoffMultiplier?: number
   onRetry?: (error: Error, attempt: number) => void
+  /**
+   * Wall-clock budget from withRetry start. Stops starting new attempts (and
+   * truncates backoff sleeps) so a hung upstream cannot burn a whole serverless
+   * invocation / client fetch timeout.
+   */
+  deadlineMs?: number
+  /** Per-attempt Promise.race timeout. Orphaned fetches may still run in the background. */
+  attemptTimeoutMs?: number
 }
 
-const DEFAULT_OPTIONS: Required<RetryOptions> = {
+type ResolvedRetryOptions = Required<
+  Omit<RetryOptions, 'deadlineMs' | 'attemptTimeoutMs'>
+> & {
+  deadlineMs?: number
+  attemptTimeoutMs?: number
+}
+
+const DEFAULT_OPTIONS: ResolvedRetryOptions = {
   maxRetries: 3,
   initialDelayMs: 100,
   maxDelayMs: 5000,
@@ -19,6 +34,31 @@ const DEFAULT_OPTIONS: Required<RetryOptions> = {
   onRetry: (error, attempt) => {
     console.warn(`Database operation failed (attempt ${attempt}), retrying...`, error.message)
   },
+}
+
+const ATTEMPT_TIMEOUT_SENTINEL = Symbol('db-retry-attempt-timeout')
+
+async function raceAttempt<T>(
+  operation: () => Promise<T>,
+  attemptTimeoutMs: number | undefined
+): Promise<T> {
+  if (!attemptTimeoutMs || attemptTimeoutMs <= 0) return operation()
+
+  let settleTimeout: ((v: typeof ATTEMPT_TIMEOUT_SENTINEL) => void) | null = null
+  const timeoutRace = new Promise<typeof ATTEMPT_TIMEOUT_SENTINEL>((resolve) => {
+    settleTimeout = resolve
+  })
+  const timeoutId = setTimeout(() => settleTimeout?.(ATTEMPT_TIMEOUT_SENTINEL), attemptTimeoutMs)
+
+  try {
+    const raced = await Promise.race([operation(), timeoutRace])
+    if (raced === ATTEMPT_TIMEOUT_SENTINEL) {
+      throw new Error(`Database operation attempt timed out after ${attemptTimeoutMs}ms`)
+    }
+    return raced
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 /**
@@ -42,13 +82,18 @@ export async function withRetry<T>(
   operation: () => Promise<T>,
   options: RetryOptions = {}
 ): Promise<T> {
-  const opts = { ...DEFAULT_OPTIONS, ...options }
+  const opts: ResolvedRetryOptions = { ...DEFAULT_OPTIONS, ...options }
   let lastError: Error | null = null
   let delay = opts.initialDelayMs
+  const started = Date.now()
 
   for (let attempt = 1; attempt <= opts.maxRetries + 1; attempt++) {
+    if (opts.deadlineMs != null && Date.now() - started >= opts.deadlineMs) {
+      break
+    }
+
     try {
-      return await operation()
+      return await raceAttempt(operation, opts.attemptTimeoutMs)
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error))
       
@@ -66,8 +111,14 @@ export async function withRetry<T>(
       // Call retry callback
       opts.onRetry(lastError, attempt)
 
-      // Wait before retrying with exponential backoff
-      await sleep(delay)
+      // Wait before retrying with exponential backoff (never past deadline)
+      let sleepMs = delay
+      if (opts.deadlineMs != null) {
+        const remaining = opts.deadlineMs - (Date.now() - started)
+        if (remaining <= 0) break
+        sleepMs = Math.min(sleepMs, remaining)
+      }
+      await sleep(sleepMs)
       delay = Math.min(delay * opts.backoffMultiplier, opts.maxDelayMs)
     }
   }

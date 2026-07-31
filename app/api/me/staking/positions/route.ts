@@ -17,12 +17,27 @@ export const maxDuration = 60
 const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 /** Wall-clock budget for on-chain heal passes (ms). Returns DB positions even if heal is partial. */
 const HEAL_WALL_CLOCK_MS = 22_000
+/**
+ * Fast nest list must finish well under the client 28s fetch timeout.
+ * Supabase connect blips are ~10s each — cap attempts so we return 503 instead of hanging into a 504.
+ */
+const LIST_DEADLINE_MS = 12_000
+const LIST_ATTEMPT_TIMEOUT_MS = 5_500
+const FALLBACK_LIST_DEADLINE_MS = 8_000
 
-async function listPositionsReliable(wallet: string) {
+const TRANSIENT_LIST_ERROR =
+  'Nest data is temporarily slow to load. Tap Retry — your nests are safe.'
+
+async function listPositionsReliable(
+  wallet: string,
+  opts?: { deadlineMs?: number; attemptTimeoutMs?: number }
+) {
   return withRetry(() => listStakingPositionsByWallet(wallet), {
-    maxRetries: 2,
-    initialDelayMs: 200,
-    maxDelayMs: 1500,
+    maxRetries: 1,
+    initialDelayMs: 150,
+    maxDelayMs: 400,
+    deadlineMs: opts?.deadlineMs ?? LIST_DEADLINE_MS,
+    attemptTimeoutMs: opts?.attemptTimeoutMs ?? LIST_ATTEMPT_TIMEOUT_MS,
   })
 }
 
@@ -52,9 +67,11 @@ async function runHealStep<T>(
  * SIWS session required — returns staking rows for the session wallet (DB-backed).
  */
 export async function GET(request: NextRequest) {
+  let sessionWallet: string | null = null
   try {
     const session = await requireSession(request)
     if (session instanceof NextResponse) return session
+    sessionWallet = session.wallet
 
     const connectedWallet = request.headers.get(CONNECTED_WALLET_HEADER)?.trim()
     if (connectedWallet && connectedWallet !== session.wallet) {
@@ -66,8 +83,13 @@ export async function GET(request: NextRequest) {
 
     const healDisabled = request.nextUrl.searchParams.get('heal') === '0'
     if (healDisabled) {
-      const positions = await listPositionsReliable(session.wallet)
-      return NextResponse.json({ wallet: session.wallet, positions })
+      try {
+        const positions = await listPositionsReliable(session.wallet)
+        return NextResponse.json({ wallet: session.wallet, positions })
+      } catch (listErr) {
+        console.error('[me/staking/positions] fast list failed:', listErr)
+        return NextResponse.json({ error: TRANSIENT_LIST_ERROR, retryable: true }, { status: 503 })
+      }
     }
 
     const healStarted = Date.now()
@@ -103,7 +125,7 @@ export async function GET(request: NextRequest) {
 
     const { cleared_count, results: clear_results } = await runHealStep(
       'clearOrphanedPending',
-      () => false,
+      healBudgetExceeded,
       emptyClearPending,
       () => clearOrphanedPendingNftNestsForWallet(session.wallet),
       markPartial
@@ -137,7 +159,14 @@ export async function GET(request: NextRequest) {
     const afterHeal =
       pendingHeal.results.length > 0 || pendingHeal.positions.length > 0
         ? pendingHeal.positions
-        : await listPositionsReliable(session.wallet)
+        : await listPositionsReliable(session.wallet).catch((listErr) => {
+            markPartial()
+            console.warn(
+              '[me/staking/positions] list after heal skipped:',
+              listErr instanceof Error ? listErr.message : listErr
+            )
+            return [] as Awaited<ReturnType<typeof listStakingPositionsByWallet>>
+          })
     const heal_results = pendingHeal.results
 
     const { results: reconcile_results } = await runHealStep(
@@ -158,7 +187,14 @@ export async function GET(request: NextRequest) {
 
     const positions = healBudgetExceeded()
       ? afterHeal
-      : await listPositionsReliable(session.wallet)
+      : await listPositionsReliable(session.wallet).catch((listErr) => {
+          markPartial()
+          console.warn(
+            '[me/staking/positions] final list skipped:',
+            listErr instanceof Error ? listErr.message : listErr
+          )
+          return afterHeal
+        })
 
     if (healBudgetExceeded()) markPartial()
 
@@ -197,20 +233,23 @@ export async function GET(request: NextRequest) {
   } catch (e) {
     console.error('[me/staking/positions]', e)
     // Last resort: still try to return DB nests so mobile does not only see "Internal server error".
-    try {
-      const session = await requireSession(request)
-      if (!(session instanceof NextResponse)) {
-        const positions = await listPositionsReliable(session.wallet)
+    // Reuse the session wallet already resolved — do not spend another round-trip on requireSession.
+    if (sessionWallet) {
+      try {
+        const positions = await listPositionsReliable(sessionWallet, {
+          deadlineMs: FALLBACK_LIST_DEADLINE_MS,
+          attemptTimeoutMs: 4_000,
+        })
         return NextResponse.json({
-          wallet: session.wallet,
+          wallet: sessionWallet,
           positions,
           heal_partial: true,
           heal_error: true,
         })
+      } catch (fallbackErr) {
+        console.error('[me/staking/positions] fallback list failed', fallbackErr)
       }
-    } catch (fallbackErr) {
-      console.error('[me/staking/positions] fallback list failed', fallbackErr)
     }
-    return NextResponse.json({ error: safeErrorMessage(e) }, { status: 500 })
+    return NextResponse.json({ error: safeErrorMessage(e), retryable: true }, { status: 500 })
   }
 }

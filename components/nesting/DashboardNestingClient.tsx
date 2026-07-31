@@ -168,6 +168,15 @@ const MOBILE_VISIBILITY_REFRESH_MS = 350
  * "taking longer than usual" while the positions request was still in flight.
  */
 const NESTING_LOADING_ESCAPE_MS = NESTING_POSITIONS_FETCH_TIMEOUT_MS + 5_000
+/**
+ * Mobile refreshAll can run up to 4 positions attempts + short delays. A 33s hatch
+ * painted the soft-timeout banner while retries were still in flight.
+ */
+const NESTING_LOADING_ESCAPE_MOBILE_MS =
+  NESTING_POSITIONS_FETCH_TIMEOUT_MS * 4 +
+  MOBILE_401_RETRY_MS +
+  MOBILE_NETWORK_RETRY_MS +
+  8_000
 const NESTING_ADMIN_SELLOUT_BYPASS_STORAGE_KEY = 'owl_nesting_admin_bypass_sellout_v1'
 
 function rpcEndpointLooksDevnet(endpoint: string | undefined): boolean {
@@ -209,6 +218,8 @@ export function DashboardNestingClient() {
   const [claimLedgerEvents, setClaimLedgerEvents] = useState<StakingRewardEventRow[]>([])
   const [loading, setLoading] = useState(true)
   const refreshGenRef = useRef(0)
+  /** True while refreshAll is still retrying positions — escape hatch must not paint a false timeout. */
+  const refreshInFlightRef = useRef(false)
   const [walletReady, setWalletReady] = useState(() =>
     typeof window !== 'undefined' ? !isMobileDevice() : true
   )
@@ -457,22 +468,24 @@ export function DashboardNestingClient() {
       return
     }
     const gen = ++refreshGenRef.current
+    refreshInFlightRef.current = true
     setLoading(true)
     setError(null)
     const mobileVisible =
       typeof window !== 'undefined' && isMobileDevice() && document.visibilityState === 'visible'
     let ok = false
     try {
-      // On mobile, keep the first attempt silent — wallet WebViews often drop once;
-      // surface an error only after retries are exhausted.
+      // Keep early attempts silent — wallet WebViews and brief Supabase blips often
+      // recover on the next try; surface an error only after retries are exhausted.
       const [, positionsLoaded] = await Promise.all([
         loadPools(),
-        loadPositions({ heal: false, silent: mobileVisible }),
+        loadPositions({ heal: false, silent: true }),
       ])
       if (gen !== refreshGenRef.current) return
       ok = positionsLoaded
-      if (!ok && mobileVisible) {
-        await new Promise((r) => setTimeout(r, MOBILE_401_RETRY_MS))
+      // One quick retry for everyone (covers 503/DB connect blips without a red banner).
+      if (!ok) {
+        await new Promise((r) => setTimeout(r, mobileVisible ? MOBILE_401_RETRY_MS : 500))
         if (gen !== refreshGenRef.current) return
         ok = await loadPositions({ heal: false, silent: true })
       }
@@ -481,8 +494,8 @@ export function DashboardNestingClient() {
         if (gen !== refreshGenRef.current) return
         ok = await loadPositions({ heal: false, silent: true })
       }
-      // Mobile kept earlier attempts silent — one last pass that may surface the banner.
-      if (!ok && mobileVisible && gen === refreshGenRef.current) {
+      // Final pass may surface the banner if nests still will not load.
+      if (!ok && gen === refreshGenRef.current) {
         ok = await loadPositions({ heal: false })
       }
     } catch (e) {
@@ -492,6 +505,7 @@ export function DashboardNestingClient() {
     } finally {
       if (gen === refreshGenRef.current) {
         setLoading(false)
+        refreshInFlightRef.current = false
       }
     }
     if (ok && gen === refreshGenRef.current) {
@@ -532,12 +546,25 @@ export function DashboardNestingClient() {
   /** Escape hatch — never leave the page stuck on "Warming up your nest". */
   useEffect(() => {
     if (!loading) return
-    const t = window.setTimeout(() => {
+    const hardEscapeMs =
+      typeof window !== 'undefined' && isMobileDevice()
+        ? NESTING_LOADING_ESCAPE_MOBILE_MS
+        : NESTING_LOADING_ESCAPE_MS * 2
+    // Soft: unstick the spinner while retries may still be running (no red banner yet).
+    const softUnstick = window.setTimeout(() => {
       setLoading(false)
-      // Only show the soft timeout if fetchNestingJson / refreshAll did not already report.
-      setError((prev) => prev ?? nestingFetchTimeoutMessage('positions'))
     }, NESTING_LOADING_ESCAPE_MS)
-    return () => window.clearTimeout(t)
+    // Hard: only if refreshAll is still stuck past the full retry budget.
+    const hardEscape = window.setTimeout(() => {
+      setLoading(false)
+      if (refreshInFlightRef.current) {
+        setError((prev) => prev ?? nestingFetchTimeoutMessage('positions'))
+      }
+    }, hardEscapeMs)
+    return () => {
+      window.clearTimeout(softUnstick)
+      window.clearTimeout(hardEscape)
+    }
   }, [loading])
 
   useEffect(() => {
