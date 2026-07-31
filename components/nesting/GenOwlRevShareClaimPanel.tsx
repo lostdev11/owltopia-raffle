@@ -14,6 +14,7 @@ import {
   GEN_OWL_REV_SHARE_SHORT_BLURB,
   genOwlRevShareDistributionSummary,
 } from '@/lib/nesting/gen-owl-rev-share-copy'
+import { nestingClaimReadyButtonClass } from '@/lib/nesting/ui-classes'
 import { cn } from '@/lib/utils'
 
 type Props = {
@@ -22,11 +23,40 @@ type Props = {
   className?: string
 }
 
+type MonthGroup = {
+  period_month: string
+  period_label: string
+  nest_count: number
+  amount_sol: number
+  amount_usdc: number
+}
+
+function groupByMonth(rows: GenOwlRevShareClaimableRow[]): MonthGroup[] {
+  const map = new Map<string, MonthGroup>()
+  for (const row of rows) {
+    const existing = map.get(row.period_month)
+    if (existing) {
+      existing.nest_count += 1
+      existing.amount_sol += row.amount_sol
+      existing.amount_usdc += row.amount_usdc
+      continue
+    }
+    map.set(row.period_month, {
+      period_month: row.period_month,
+      period_label: row.period_label,
+      nest_count: 1,
+      amount_sol: row.amount_sol,
+      amount_usdc: row.amount_usdc,
+    })
+  }
+  return Array.from(map.values())
+}
+
 export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: Props) {
   const [loading, setLoading] = useState(false)
   const [claimsEnabled, setClaimsEnabled] = useState(true)
   const [claimable, setClaimable] = useState<GenOwlRevShareClaimableRow[]>([])
-  const [busyId, setBusyId] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -64,10 +94,7 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
   }, [load])
 
   const claimAllCount = claimable.length
-  const monthCount = useMemo(
-    () => new Set(claimable.map((r) => r.period_month)).size,
-    [claimable]
-  )
+  const monthGroups = useMemo(() => groupByMonth(claimable), [claimable])
   const totals = useMemo(() => {
     let sol = 0
     let usdc = 0
@@ -78,38 +105,14 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
     return { sol, usdc }
   }, [claimable])
 
-  const claimOne = async (row: GenOwlRevShareClaimableRow) => {
-    setBusyId(row.position_id)
-    setError(null)
-    setMessage(null)
-    try {
-      const res = await fetch('/api/me/nesting/gen-owl-rev-share/claim', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ period_month: row.period_month, position_id: row.position_id }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setError(typeof data.error === 'string' ? data.error : 'Claim failed.')
-        return
-      }
-      const parts: string[] = []
-      if (data.amount_sol > 0) parts.push(`${formatGenOwlRevShareSol(data.amount_sol)} SOL`)
-      if (data.amount_usdc > 0) parts.push(`${formatGenOwlRevShareUsdc(data.amount_usdc)} USDC`)
-      setMessage(`Rev share sent: ${parts.join(' · ')}`)
-      await load()
-    } catch {
-      setError('Network error during claim.')
-    } finally {
-      setBusyId(null)
-    }
-  }
-
   const claimAll = async () => {
-    setBusyId('all')
+    if (claimable.length === 0) return
+    setBusy(true)
     setError(null)
     setMessage(null)
+    let claimedSol = 0
+    let claimedUsdc = 0
+    let claimedCount = 0
     for (const row of claimable) {
       try {
         const res = await fetch('/api/me/nesting/gen-owl-rev-share/claim', {
@@ -123,12 +126,23 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
           setError(typeof data.error === 'string' ? data.error : 'Claim failed.')
           break
         }
+        claimedSol += Number(data.amount_sol) || 0
+        claimedUsdc += Number(data.amount_usdc) || 0
+        claimedCount += 1
       } catch {
         setError('Network error during claim.')
         break
       }
     }
-    setBusyId(null)
+    if (claimedCount > 0) {
+      const parts: string[] = []
+      if (claimedSol > 0) parts.push(`${formatGenOwlRevShareSol(claimedSol)} SOL`)
+      if (claimedUsdc > 0) parts.push(`${formatGenOwlRevShareUsdc(claimedUsdc)} USDC`)
+      setMessage(
+        `Rev share sent${claimedCount > 1 ? ` for ${claimedCount} nests` : ''}: ${parts.join(' · ')}`
+      )
+    }
+    setBusy(false)
     await load()
   }
 
@@ -176,8 +190,8 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
       ) : (
         <div className="mt-3 space-y-3">
           <p className="text-xs text-foreground/90">
-            Stacked
-            {monthCount > 1 ? ` across ${monthCount} months` : ''}
+            Ready to claim
+            {monthGroups.length > 1 ? ` across ${monthGroups.length} months` : ''}
             :{' '}
             {totals.sol > 0 ? (
               <span className="font-semibold tabular-nums text-theme-prime">
@@ -190,56 +204,51 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
                 {formatGenOwlRevShareUsdc(totals.usdc)} USDC
               </span>
             ) : null}{' '}
-            across {claimAllCount} nest{claimAllCount === 1 ? '' : 's'} — claim now or leave it stacked.
+            from {claimAllCount} nest{claimAllCount === 1 ? '' : 's'}.
           </p>
-          <ul className="space-y-2">
-            {claimable.map((row) => (
-              <li
-                key={`${row.period_month}-${row.position_id}`}
-                className="flex flex-col gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0 text-xs">
-                  <p className="font-medium text-foreground">{row.period_label}</p>
-                  <p className="text-muted-foreground truncate">
-                    {row.group === 'gen1-owl' ? 'Gen 1 owl' : 'Gen 2 owl'}
-                    {row.asset_identifier ? ` · ${row.asset_identifier.slice(0, 8)}…` : ''}
-                  </p>
-                  <p className="tabular-nums text-theme-prime/95">
-                    {row.amount_sol > 0 ? `${formatGenOwlRevShareSol(row.amount_sol)} SOL` : null}
-                    {row.amount_sol > 0 && row.amount_usdc > 0 ? ' · ' : null}
-                    {row.amount_usdc > 0 ? `${formatGenOwlRevShareUsdc(row.amount_usdc)} USDC` : null}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="min-h-[44px] shrink-0 touch-manipulation"
-                  disabled={busyId != null}
-                  onClick={() => void claimOne(row)}
+          {monthGroups.length > 1 ? (
+            <ul className="space-y-1.5">
+              {monthGroups.map((g) => (
+                <li
+                  key={g.period_month}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-black/15 px-2.5 py-2 text-xs"
                 >
-                  {busyId === row.position_id ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />
-                      Claiming…
-                    </>
-                  ) : (
-                    'Claim'
-                  )}
-                </Button>
-              </li>
-            ))}
-          </ul>
-          {claimAllCount > 1 ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="min-h-[44px] w-full touch-manipulation"
-              disabled={busyId != null}
-              onClick={() => void claimAll()}
-            >
-              Claim all ({claimAllCount})
-            </Button>
+                  <span className="min-w-0 text-muted-foreground">
+                    {g.period_label}
+                    <span className="text-muted-foreground/80">
+                      {' '}
+                      · {g.nest_count} nest{g.nest_count === 1 ? '' : 's'}
+                    </span>
+                  </span>
+                  <span className="shrink-0 tabular-nums font-medium text-theme-prime/95">
+                    {g.amount_sol > 0 ? `${formatGenOwlRevShareSol(g.amount_sol)} SOL` : null}
+                    {g.amount_sol > 0 && g.amount_usdc > 0 ? ' · ' : null}
+                    {g.amount_usdc > 0 ? `${formatGenOwlRevShareUsdc(g.amount_usdc)} USDC` : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
           ) : null}
+          <Button
+            type="button"
+            className={cn(nestingClaimReadyButtonClass, 'min-h-[48px] w-full touch-manipulation text-base')}
+            disabled={busy}
+            onClick={() => void claimAll()}
+          >
+            {busy ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />
+                Claiming…
+              </>
+            ) : (
+              <>
+                Claim
+                {totals.sol > 0 ? ` ${formatGenOwlRevShareSol(totals.sol)} SOL` : ''}
+                {totals.sol > 0 && totals.usdc > 0 ? ' ·' : ''}
+                {totals.usdc > 0 ? ` ${formatGenOwlRevShareUsdc(totals.usdc)} USDC` : ''}
+              </>
+            )}
+          </Button>
         </div>
       )}
 
