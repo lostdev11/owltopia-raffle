@@ -72,14 +72,22 @@ export async function countOpenStakingPositionsForPools(poolIds: string[]): Prom
 
 export async function listStakingPositionsByWallet(wallet: string): Promise<StakingPositionRow[]> {
   const db = getSupabaseAdmin()
-  const { data, error } = await db
-    .from('staking_positions')
-    .select('*')
-    .eq('wallet_address', wallet.trim())
-    .order('staked_at', { ascending: false })
-
-  if (error) throw new Error(error.message)
-  return (data || []) as StakingPositionRow[]
+  const pageSize = 1000
+  const rows: StakingPositionRow[] = []
+  const walletAddress = wallet.trim()
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await db
+      .from('staking_positions')
+      .select('*')
+      .eq('wallet_address', walletAddress)
+      .order('staked_at', { ascending: false })
+      .range(offset, offset + pageSize - 1)
+    if (error) throw new Error(error.message)
+    const page = (data || []) as StakingPositionRow[]
+    rows.push(...page)
+    if (page.length < pageSize) break
+  }
+  return rows
 }
 
 /** Server-only lookup by id (no wallet filter). */

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { forceRefinalizeGenOwlRevSharePeriod } from '@/lib/nesting/gen-owl-rev-share-finalize'
 import { formatPeriodMonthUtc } from '@/lib/nesting/gen-owl-rev-share-month'
+import { StakingUserError } from '@/lib/nesting/errors'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            'Could not refinalize. Claims must be in the open window for that month, and the period needs deposit totals.',
+            'Could not refinalize. Claims must be in the open window for that month, and the period needs deposit totals. If counts look wrong, check server logs for under-count refusal.',
           period_month: periodMonth,
         },
         { status: 400 }
@@ -46,6 +47,9 @@ export async function POST(request: NextRequest) {
       finalized_at: period.finalized_at,
     })
   } catch (e) {
+    if (e instanceof StakingUserError) {
+      return NextResponse.json({ error: e.message }, { status: e.status })
+    }
     console.error('[admin/gen-owl-rev-share/refinalize]', e)
     return NextResponse.json({ error: safeErrorMessage(e) }, { status: 500 })
   }

@@ -162,8 +162,8 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
         </p>
       ) : claimable.length === 0 ? (
         <p className="mt-2 text-xs text-muted-foreground">
-          Nothing to claim right now. When a month opens, unclaimed rev share stays stacked here — claim anytime,
-          same as OWL.
+          Nothing to claim right now. When a month opens, unclaimed Gen 1 / Gen 2 rev share stays stacked here until
+          you claim.
         </p>
       ) : (
         <div className="mt-3 space-y-3">

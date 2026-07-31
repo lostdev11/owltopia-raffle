@@ -74,8 +74,7 @@ import {
 import { filterPoolsForPublicNestingCatalog } from '@/lib/nesting/perch-catalog'
 import { NestingLockTierPicker } from '@/components/nesting/NestingLockTierPicker'
 import { GenOwlRevShareNotice } from '@/components/nesting/GenOwlRevShareNotice'
-import { GenOwlRevShareClaimPanel } from '@/components/nesting/GenOwlRevShareClaimPanel'
-import { GenOwlRevShareEstimatePanel } from '@/components/nesting/GenOwlRevShareEstimatePanel'
+import { NestingClaimsSection } from '@/components/nesting/NestingClaimsSection'
 import { nestGalleryAnchorId } from '@/lib/nesting/nest-position-anchor'
 import { NestingStakedAssetThumb } from '@/components/nesting/NestingStakedAssetThumb'
 import { SectionHeader } from '@/components/council/SectionHeader'
@@ -3289,16 +3288,6 @@ export function DashboardNestingClient() {
             }}
             className="mt-3 max-w-md rounded-xl border border-emerald-500/20 bg-black/30 px-3 py-3"
           />
-          <GenOwlRevShareEstimatePanel
-            connected={connected}
-            needsSignIn={needsSignIn}
-            className="mt-3 max-w-md"
-          />
-          <GenOwlRevShareClaimPanel
-            connected={connected}
-            needsSignIn={needsSignIn}
-            className="mt-3 max-w-md"
-          />
         </div>
         <Button
           type="button"
@@ -3312,16 +3301,18 @@ export function DashboardNestingClient() {
         </Button>
       </div>
 
-      <NestingClaimAllPanel
+      <NestingClaimsSection
+        connected={connected}
+        needsSignIn={needsSignIn}
         activeOwlNestCount={activeOwlNestCount}
         claimableNestCount={claimableNestCount}
         totalOwl={claimAllPreview.totalOwl}
         platformFeeLabel={claimAllPlatformFeeLabel}
-        busy={claimAllBusy}
-        disabled={claimAllButtonDisabled}
-        disabledReason={claimAllDisabledReason}
-        phase={claimAllTxPhase}
-        onClaimAll={() => void handleClaimAll()}
+        claimAllBusy={claimAllBusy}
+        claimAllDisabled={claimAllButtonDisabled}
+        claimAllDisabledReason={claimAllDisabledReason}
+        claimAllPhase={claimAllTxPhase}
+        onClaimAllOwl={() => void handleClaimAll()}
       />
 
       {claimableNestCount < 1 && nestsPendingOnly && stakeTxPhase === 'idle' ? (
@@ -4372,7 +4363,7 @@ export function DashboardNestingClient() {
       <section id="nesting-your-nests" className="scroll-mt-24">
         <SectionHeader
           title="Your nests"
-          description="Claim OWL anytime—use it in raffles right away or let it stack. Many nests on the same perch show in one card—tap the header to expand or collapse."
+          description="Claim OWL anytime from Claims above or here—use it in raffles or leave it stacked. Many nests on the same perch show in one card—tap the header to expand or collapse."
         />
         <NestingClaimAllPanel
           id="nesting-claim-all-inline"

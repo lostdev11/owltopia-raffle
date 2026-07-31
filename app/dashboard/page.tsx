@@ -3657,12 +3657,11 @@ export default function DashboardPage() {
               Nest rev share
             </h2>
             <p className="text-xs text-muted-foreground leading-relaxed sm:text-sm">
-              Monthly SOL/USDC for nested Gen 1 / Gen 2 owls. Same claim flow as Nesting — paid from the rev-share
-              pool.
+              Monthly SOL/USDC for nested Gen 1 / Gen 2 owls. Full Claims hub (rev share + separate OWL) is on Nesting.
             </p>
           </div>
           <Button asChild variant="outline" size="sm" className="min-h-[44px] touch-manipulation shrink-0">
-            <Link href="/dashboard/nesting">Open Nesting</Link>
+            <Link href="/dashboard/nesting#nesting-claims">Open Claims</Link>
           </Button>
         </div>
         <GenOwlRevShareEstimatePanel connected={connected} needsSignIn={needsSignIn} />
