@@ -54,6 +54,8 @@ export async function PATCH(request: NextRequest) {
       body.gen2_total_sol !== undefined ? (body.gen2_total_sol == null ? null : Number(body.gen2_total_sol)) : undefined
     const gen2_total_usdc =
       body.gen2_total_usdc !== undefined ? (body.gen2_total_usdc == null ? null : Number(body.gen2_total_usdc)) : undefined
+    const claims_enabled =
+      body.claims_enabled !== undefined ? Boolean(body.claims_enabled) : undefined
 
     // Keep legacy next_date in sync with Gen 1 when Gen 1 date is saved and next_date was not sent.
     const resolvedNextDate =
@@ -71,6 +73,7 @@ export async function PATCH(request: NextRequest) {
       gen1_total_usdc,
       gen2_total_sol,
       gen2_total_usdc,
+      claims_enabled,
     })
 
     return NextResponse.json(

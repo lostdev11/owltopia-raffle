@@ -31,6 +31,7 @@ import { DEV_TASK_SCREENSHOT_MAX_BYTES, DEV_TASK_SCREENSHOT_MAX_FILES } from '@/
 import { AdminCreatorBlacklist } from '@/components/AdminCreatorBlacklist'
 import { GenOwlRevShareAdminPreview } from '@/components/nesting/GenOwlRevShareNotice'
 import { GenOwlRevShareAdminDepositPanel } from '@/components/nesting/GenOwlRevShareAdminDepositPanel'
+import { Switch } from '@/components/ui/switch'
 import { genOwlStakingGroupLabel } from '@/lib/nesting/gen-owl-staking-groups'
 import {
   buildGenOwlRevSharePreview,
@@ -276,8 +277,10 @@ export default function AdminDashboardPage() {
     gen1_total_usdc: number | null
     gen2_total_sol: number | null
     gen2_total_usdc: number | null
+    claims_enabled?: boolean
   } | null>(null)
   const [revShareScheduleSaving, setRevShareScheduleSaving] = useState(false)
+  const [revShareClaimsToggling, setRevShareClaimsToggling] = useState(false)
   const [revShareScheduleEdit, setRevShareScheduleEdit] = useState({
     gen1_next_date: '',
     gen2_next_date: '',
@@ -1234,6 +1237,27 @@ export default function AdminDashboardPage() {
       console.error('Error saving rev share schedule:', e)
     } finally {
       setRevShareScheduleSaving(false)
+    }
+  }
+
+  const setRevShareClaimsEnabled = async (enabled: boolean) => {
+    if (!publicKey) return
+    setRevShareClaimsToggling(true)
+    try {
+      const res = await fetch('/api/admin/rev-share-schedule', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claims_enabled: enabled }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setRevShareSchedule(data)
+      }
+    } catch (e) {
+      console.error('Error toggling rev share claims:', e)
+    } finally {
+      setRevShareClaimsToggling(false)
     }
   }
 
@@ -2800,6 +2824,30 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
               <GenOwlRevShareAdminPreview preview={gen2RevSharePreview} />
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-3 max-w-2xl rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
+              <Switch
+                id="rev-share-claims-enabled"
+                ariaLabel="Allow nest rev share claims"
+                checked={revShareSchedule?.claims_enabled !== false}
+                disabled={revShareClaimsToggling || revShareScheduleSaving}
+                onCheckedChange={(checked) => void setRevShareClaimsEnabled(checked)}
+              />
+              <div className="min-w-0 text-xs leading-relaxed">
+                <p className="font-medium text-foreground">
+                  Nest rev share claims{' '}
+                  {revShareSchedule?.claims_enabled === false ? (
+                    <span className="text-amber-500">off</span>
+                  ) : (
+                    <span className="text-emerald-400">on</span>
+                  )}
+                  {revShareClaimsToggling ? '…' : null}
+                </p>
+                <p className="text-muted-foreground">
+                  Off hides Claim buttons and blocks payouts. Unclaimed shares stay stacked until you turn this back on.
+                </p>
+              </div>
             </div>
 
             <Button

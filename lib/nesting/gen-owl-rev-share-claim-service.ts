@@ -15,6 +15,7 @@ import { claimsOpenForPeriod, groupKeyForPoolSlug } from '@/lib/nesting/gen-owl-
 import { payoutGenOwlRevShareClaim } from '@/lib/nesting/gen-owl-rev-share-payout'
 import { resolveGen1PerNestAmounts } from '@/lib/nesting/gen-owl-rev-share'
 import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
+import { areGenOwlRevShareClaimsEnabled } from '@/lib/db/rev-share-schedule'
 
 async function perNestAmountsForPosition(
   period: GenOwlRevSharePeriodRow,
@@ -52,6 +53,13 @@ export async function executeGenOwlRevShareClaim(params: {
   const periodMonth = params.period_month.trim()
   const positionId = params.position_id.trim()
   const wallet = params.wallet.trim()
+
+  if (!(await areGenOwlRevShareClaimsEnabled())) {
+    throw new StakingUserError(
+      'Rev share claims are temporarily paused by an admin. Your share stays stacked — try again later.',
+      503
+    )
+  }
 
   if (!claimsOpenForPeriod(periodMonth)) {
     throw new StakingUserError(

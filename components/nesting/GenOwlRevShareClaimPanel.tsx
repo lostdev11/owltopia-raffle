@@ -23,6 +23,7 @@ type Props = {
 
 export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: Props) {
   const [loading, setLoading] = useState(false)
+  const [claimsEnabled, setClaimsEnabled] = useState(true)
   const [claimable, setClaimable] = useState<GenOwlRevShareClaimableRow[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -31,6 +32,7 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
   const load = useCallback(async () => {
     if (!connected || needsSignIn) {
       setClaimable([])
+      setClaimsEnabled(true)
       return
     }
     setLoading(true)
@@ -46,6 +48,7 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
         setClaimable([])
         return
       }
+      setClaimsEnabled(data.claims_enabled !== false)
       setClaimable(Array.isArray(data.claimable) ? data.claimable : [])
     } catch {
       setError('Network error loading rev share.')
@@ -152,6 +155,10 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
         <p className="mt-3 inline-flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
           Checking claimable rev share…
+        </p>
+      ) : !claimsEnabled ? (
+        <p className="mt-2 text-xs text-amber-400/95">
+          Claims are temporarily paused. Your rev share stays stacked — check back soon.
         </p>
       ) : claimable.length === 0 ? (
         <p className="mt-2 text-xs text-muted-foreground">

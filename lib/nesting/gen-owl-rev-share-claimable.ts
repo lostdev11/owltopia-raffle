@@ -1,5 +1,6 @@
 import { getGenOwlRevShareClaimForPosition } from '@/lib/db/gen-owl-rev-share-claims'
 import { listGenOwlRevSharePeriods, getGenOwlRevSharePeriod } from '@/lib/db/gen-owl-rev-share-periods'
+import { areGenOwlRevShareClaimsEnabled } from '@/lib/db/rev-share-schedule'
 import { listStakingPositionsByWallet } from '@/lib/db/staking-positions'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import { classifyGen1OneOfOneMints } from '@/lib/nesting/gen1-one-of-one'
@@ -64,10 +65,15 @@ function recentPeriodMonths(count: number, now = new Date()): string[] {
 
 /**
  * Unclaimed rev share across every open month (stacks until claimed — same idea as OWL).
+ * Returns [] when the admin claims kill switch is off (shares stay stacked).
  */
 export async function listGenOwlRevShareClaimableForWallet(
   wallet: string
 ): Promise<GenOwlRevShareClaimableRow[]> {
+  if (!(await areGenOwlRevShareClaimsEnabled())) {
+    return []
+  }
+
   const positions = await listStakingPositionsByWallet(wallet)
   if (positions.length === 0) return []
 

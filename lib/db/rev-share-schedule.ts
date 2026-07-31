@@ -12,13 +12,15 @@ export interface RevShareSchedule {
   gen1_total_usdc: number | null
   gen2_total_sol: number | null
   gen2_total_usdc: number | null
+  /** When false, Gen nest rev-share claim buttons / payouts are off (admin kill switch). */
+  claims_enabled: boolean
   updated_at: string
 }
 
 const ROW_ID = 'default'
 
 const SELECT_COLUMNS =
-  'next_date, gen1_next_date, gen2_next_date, total_sol, total_usdc, gen1_total_sol, gen1_total_usdc, gen2_total_sol, gen2_total_usdc, updated_at'
+  'next_date, gen1_next_date, gen2_next_date, total_sol, total_usdc, gen1_total_sol, gen1_total_usdc, gen2_total_sol, gen2_total_usdc, claims_enabled, updated_at'
 
 function mapRow(data: Record<string, unknown>): RevShareSchedule {
   const num = (v: unknown) => (v != null ? Number(v) : null)
@@ -34,6 +36,8 @@ function mapRow(data: Record<string, unknown>): RevShareSchedule {
     gen1_total_usdc: num(data.gen1_total_usdc),
     gen2_total_sol: num(data.gen2_total_sol),
     gen2_total_usdc: num(data.gen2_total_usdc),
+    // Default on if column missing / null (older rows before migration).
+    claims_enabled: data.claims_enabled !== false,
     updated_at: typeof data.updated_at === 'string' ? data.updated_at : new Date().toISOString(),
   }
 }
@@ -53,6 +57,12 @@ export async function getRevShareSchedule(): Promise<RevShareSchedule | null> {
   return mapRow(data as Record<string, unknown>)
 }
 
+/** Admin kill switch — false means claim APIs must reject. Missing schedule → treat as enabled. */
+export async function areGenOwlRevShareClaimsEnabled(): Promise<boolean> {
+  const schedule = await getRevShareSchedule()
+  return schedule?.claims_enabled !== false
+}
+
 /**
  * Update the rev share schedule (admin only; use service role).
  */
@@ -66,6 +76,7 @@ export async function updateRevShareSchedule(updates: {
   gen1_total_usdc?: number | null
   gen2_total_sol?: number | null
   gen2_total_usdc?: number | null
+  claims_enabled?: boolean
 }): Promise<RevShareSchedule | null> {
   const db = getSupabaseAdmin()
   const payload: Record<string, unknown> = {}
@@ -78,6 +89,7 @@ export async function updateRevShareSchedule(updates: {
   if (updates.gen1_total_usdc !== undefined) payload.gen1_total_usdc = updates.gen1_total_usdc
   if (updates.gen2_total_sol !== undefined) payload.gen2_total_sol = updates.gen2_total_sol
   if (updates.gen2_total_usdc !== undefined) payload.gen2_total_usdc = updates.gen2_total_usdc
+  if (updates.claims_enabled !== undefined) payload.claims_enabled = updates.claims_enabled
 
   const { data, error } = await db
     .from('rev_share_schedule')
