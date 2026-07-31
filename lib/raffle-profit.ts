@@ -387,13 +387,13 @@ export function revenueInCurrency(revenue: RaffleRevenue, currency: RaffleCurren
 }
 
 /**
- * Compute profitability for a raffle from its entries.
- * `isProfitable` is true when rounded display revenue (in threshold currency) is **strictly greater** than
- * the rounded threshold — avoids IEEE float glitches vs {@link getRaffleThreshold}’s `minTickets * ticket_price`.
- * Claims and draws do not read this; see {@link getRaffleThreshold}.
+ * Compute profitability from pre-aggregated revenue (list/carousel SQL summaries).
+ * Same rules as {@link getRaffleProfitInfo}.
  */
-export function getRaffleProfitInfo(raffle: Raffle, entries: Entry[]): RaffleProfitInfo {
-  const revenue = getRaffleRevenue(entries)
+export function getRaffleProfitInfoFromRevenue(
+  raffle: Raffle,
+  revenue: RaffleRevenue
+): RaffleProfitInfo {
   const floorPart = computeFloorComparisonProfit(raffle, revenue)
   const th = getRaffleThreshold(raffle)
   if (!th) {
@@ -422,6 +422,16 @@ export function getRaffleProfitInfo(raffle: Raffle, entries: Entry[]): RafflePro
     surplusOverThreshold,
     ...floorPart,
   }
+}
+
+/**
+ * Compute profitability for a raffle from its entries.
+ * `isProfitable` is true when rounded display revenue (in threshold currency) is **strictly greater** than
+ * the rounded threshold — avoids IEEE float glitches vs {@link getRaffleThreshold}’s `minTickets * ticket_price`.
+ * Claims and draws do not read this; see {@link getRaffleThreshold}.
+ */
+export function getRaffleProfitInfo(raffle: Raffle, entries: Entry[]): RaffleProfitInfo {
+  return getRaffleProfitInfoFromRevenue(raffle, getRaffleRevenue(entries))
 }
 
 export interface RevShareAmounts {

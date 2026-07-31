@@ -24,14 +24,18 @@ export const revalidate = 0
 
 /**
  * GET entries for a specific raffle
- * Query params: raffleId - the ID of the raffle
- * 
- * Automatically verifies pending entries with transaction signatures in the background
+ * Query params:
+ *   raffleId — required
+ *   verifyPending=1 — opt-in background verify of pending rows with tx signatures
+ *                     (off by default; list/detail polls must not amplify writes/Disk IO)
  */
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const raffleId = searchParams.get('raffleId')
+    const verifyPending =
+      searchParams.get('verifyPending') === '1' ||
+      searchParams.get('verifyPending') === 'true'
 
     if (!raffleId) {
       return NextResponse.json(
@@ -51,17 +55,15 @@ export async function GET(request: NextRequest) {
 
     const entries = await getEntriesByRaffleId(raffleId.trim())
 
-    // Automatically verify pending entries with transaction signatures in the background
-    // This runs asynchronously so it doesn't block the response
-    const pendingWithSignatures = entries.filter(
-      e => e.status === 'pending' && e.transaction_signature
-    )
-    
-    if (pendingWithSignatures.length > 0) {
-      // Run verification in background (don't await)
-      verifyPendingEntries(raffleId, pendingWithSignatures).catch(error => {
-        console.error('Error in background verification:', error)
-      })
+    if (verifyPending) {
+      const pendingWithSignatures = entries.filter(
+        (e) => e.status === 'pending' && e.transaction_signature
+      )
+      if (pendingWithSignatures.length > 0) {
+        verifyPendingEntries(raffleId, pendingWithSignatures).catch((error) => {
+          console.error('Error in background verification:', error)
+        })
+      }
     }
 
     // Return response with no-cache headers to ensure fresh data
@@ -84,8 +86,7 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Verify pending entries in the background
- * This runs automatically when entries are fetched, providing retry mechanism
+ * Verify pending entries in the background (opt-in via verifyPending=1 only).
  */
 async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
   const raffle = await getRaffleById(raffleId)

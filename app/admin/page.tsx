@@ -363,8 +363,9 @@ export default function AdminDashboardPage() {
   const devTaskAppendTaskIdRef = useRef<string | null>(null)
 
   // Keep dashboard data live while open and force a refresh each new day.
+  // 5 min (was 60s): Owl Vision panels scan large entry samples — frequent refresh burns Disk IO.
   useEffect(() => {
-    const intervalMs = 60 * 1000
+    const intervalMs = 5 * 60 * 1000
     const intervalId = setInterval(() => {
       setAutoRefreshTick((t) => t + 1)
     }, intervalMs)

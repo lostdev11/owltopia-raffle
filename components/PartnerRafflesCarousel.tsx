@@ -5,12 +5,19 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import type { Raffle, Entry } from '@/lib/types'
 import { RaffleCard } from '@/components/RaffleCard'
 import { Users } from 'lucide-react'
+import { useWallet } from '@solana/wallet-adapter-react'
 import { RAFFLES_LIST_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import {
   PURCHASE_COMPLETED_EVENT,
   type PurchaseCompletedDetail,
 } from '@/lib/cart/purchase-complete-events'
-import { fetchEntriesByRaffleIdsClient } from '@/lib/raffles/fetch-entries-bulk-client'
+import { fetchEntrySummariesByRaffleIdsClient } from '@/lib/raffles/fetch-entry-summaries-client'
+import {
+  profitInfoFromEntryStats,
+  stubEntriesFromListStats,
+} from '@/lib/raffles/entry-list-stats'
+import type { RaffleEntryListStats } from '@/lib/db/entry-summaries'
+import type { RaffleProfitInfo } from '@/lib/raffle-profit'
 import {
   getPartnerSpotlightLogo,
   mergePartnerSpotlightBrands,
@@ -19,7 +26,12 @@ import {
   type PartnerLogo,
 } from '@/lib/partner-logos'
 
-type Item = { raffle: Raffle; entries: Entry[] }
+type Item = {
+  raffle: Raffle
+  entries: Entry[]
+  entryStats?: RaffleEntryListStats | null
+  profitInfo?: RaffleProfitInfo
+}
 
 /** Horizontal speed for Partner Spotlight without rendering duplicate logos. */
 const SPOTLIGHT_MARQUEE_PX_PER_SEC = 28
@@ -69,10 +81,15 @@ function mergeCarouselProps(prev: Item[], next: Item[]): Item[] {
   const prevById = new Map(prev.map((x) => [x.raffle.id, x]))
   return next.map((item) => {
     const prevItem = prevById.get(item.raffle.id)
-    const nextEmpty = !item.entries?.length
-    const prevHas = !!(prevItem?.entries?.length)
+    const nextEmpty = !item.entries?.length && !item.entryStats
+    const prevHas = !!(prevItem?.entries?.length || prevItem?.entryStats)
     if (nextEmpty && prevHas && prevItem) {
-      return { raffle: item.raffle, entries: prevItem.entries }
+      return {
+        raffle: item.raffle,
+        entries: prevItem.entries,
+        entryStats: prevItem.entryStats,
+        profitInfo: prevItem.profitInfo,
+      }
     }
     return item
   })
@@ -92,6 +109,9 @@ export function PartnerRafflesCarousel({
 }) {
   const [displayItems, setDisplayItems] = useState<Item[]>(items)
   const itemsRef = useRef(items)
+  const { publicKey } = useWallet()
+  const viewerWalletRef = useRef(publicKey?.toBase58() ?? null)
+  viewerWalletRef.current = publicKey?.toBase58() ?? null
   const [marqueePaused, setMarqueePaused] = useState(false)
   const [partnerMarqueeLoop, setPartnerMarqueeLoop] = useState(false)
   const partnerMarqueeOuterRef = useRef<HTMLDivElement>(null)
@@ -153,41 +173,36 @@ export function PartnerRafflesCarousel({
     const loadEntries = async () => {
       const batch = itemsRef.current
       if (batch.length === 0 || cancelled) return
-      const apiBase = typeof window !== 'undefined' ? window.location.origin : ''
-
-      type FetchOk = { id: string; entries: Entry[]; ok: true }
-      type FetchFail = { id: string; ok: false }
-      const results = await Promise.all(
-        batch.map(async ({ raffle }): Promise<FetchOk | FetchFail> => {
-          try {
-            const url = `${apiBase}/api/entries?raffleId=${encodeURIComponent(raffle.id)}&t=${Date.now()}`
-            const response = await fetch(url)
-            if (!response.ok) return { id: raffle.id, ok: false }
-            const data = await response.json()
-            const entries = Array.isArray(data) ? (data as Entry[]) : []
-            return { id: raffle.id, entries, ok: true }
-          } catch {
-            return { id: raffle.id, ok: false }
-          }
-        })
+      const summaries = await fetchEntrySummariesByRaffleIdsClient(
+        batch.map(({ raffle }) => raffle.id),
+        viewerWalletRef.current
       )
-
-      if (cancelled) return
+      if (cancelled || summaries.size === 0) return
 
       setDisplayItems((prev) => {
         const prevById = new Map(prev.map((x) => [x.raffle.id, x]))
         const mergedProps = mergeCarouselProps(prev, itemsRef.current)
         const mergedById = new Map(mergedProps.map((x) => [x.raffle.id, x]))
-        for (const r of results) {
-          if (r.ok) {
-            const row = mergedById.get(r.id)
-            if (row) mergedById.set(r.id, { raffle: row.raffle, entries: r.entries })
-          }
+        for (const { raffle } of batch) {
+          const stats = summaries.get(raffle.id)
+          if (!stats) continue
+          const wallet = viewerWalletRef.current
+          mergedById.set(raffle.id, {
+            raffle,
+            entries: stubEntriesFromListStats(raffle.id, stats, wallet),
+            entryStats: stats,
+            profitInfo: profitInfoFromEntryStats(raffle, stats),
+          })
         }
         return itemsRef.current.map(({ raffle }) => {
           const updated = mergedById.get(raffle.id)
           if (updated) return updated
-          return { raffle, entries: prevById.get(raffle.id)?.entries ?? [] }
+          return {
+            raffle,
+            entries: prevById.get(raffle.id)?.entries ?? [],
+            entryStats: prevById.get(raffle.id)?.entryStats,
+            profitInfo: prevById.get(raffle.id)?.profitInfo,
+          }
         })
       })
     }
@@ -208,21 +223,37 @@ export function PartnerRafflesCarousel({
       const carouselIds = itemsRef.current.filter(({ raffle }) => idSet.has(raffle.id)).map((x) => x.raffle.id)
       if (carouselIds.length === 0) return
       void (async () => {
-        const fetched = await fetchEntriesByRaffleIdsClient(carouselIds)
-        if (fetched.size === 0) return
+        const summaries = await fetchEntrySummariesByRaffleIdsClient(
+          carouselIds,
+          viewerWalletRef.current
+        )
+        if (summaries.size === 0) return
         setDisplayItems((prev) => {
           const prevById = new Map(prev.map((x) => [x.raffle.id, x]))
           const mergedProps = mergeCarouselProps(prev, itemsRef.current)
           const mergedById = new Map(mergedProps.map((x) => [x.raffle.id, x]))
           for (const id of carouselIds) {
-            const entries = fetched.get(id)
+            const stats = summaries.get(id)
             const row = mergedById.get(id)
-            if (entries && row) mergedById.set(id, { raffle: row.raffle, entries })
+            if (stats && row) {
+              const wallet = viewerWalletRef.current
+              mergedById.set(id, {
+                raffle: row.raffle,
+                entries: stubEntriesFromListStats(id, stats, wallet),
+                entryStats: stats,
+                profitInfo: profitInfoFromEntryStats(row.raffle, stats),
+              })
+            }
           }
           return itemsRef.current.map(({ raffle }) => {
             const updated = mergedById.get(raffle.id)
             if (updated) return updated
-            return { raffle, entries: prevById.get(raffle.id)?.entries ?? [] }
+            return {
+              raffle,
+              entries: prevById.get(raffle.id)?.entries ?? [],
+              entryStats: prevById.get(raffle.id)?.entryStats,
+              profitInfo: prevById.get(raffle.id)?.profitInfo,
+            }
           })
         })
       })()
@@ -514,7 +545,7 @@ export function PartnerRafflesCarousel({
             } as CSSProperties
           }
         >
-          {loopItems.map(({ raffle, entries }, i) => (
+          {loopItems.map(({ raffle, entries, entryStats, profitInfo }, i) => (
             <div
               key={`${raffle.id}-${i}`}
               className="flex min-h-0 w-[calc(100vw-2rem)] max-w-[min(92vw,36rem)] shrink-0 self-stretch min-w-0 sm:max-w-[34rem]"
@@ -523,6 +554,8 @@ export function PartnerRafflesCarousel({
                 <RaffleCard
                   raffle={raffle}
                   entries={entries}
+                  entryStats={entryStats}
+                  profitInfo={profitInfo}
                   size="small"
                   section="active"
                   serverNow={serverNow}
