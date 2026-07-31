@@ -64,8 +64,12 @@ export function GenOwlRevShareAdminDepositPanel({
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [periodMonth, setPeriodMonth] = useState<string | null>(null)
+  const [gen1PeriodMonth, setGen1PeriodMonth] = useState<string | null>(null)
+  const [gen2PeriodMonth, setGen2PeriodMonth] = useState<string | null>(null)
   const [claimsOpen, setClaimsOpen] = useState(false)
   const [period, setPeriod] = useState<PeriodTotals | null>(null)
+  const [gen1Period, setGen1Period] = useState<PeriodTotals | null>(null)
+  const [gen2Period, setGen2Period] = useState<PeriodTotals | null>(null)
 
   const refreshPeriod = useCallback(async () => {
     try {
@@ -76,8 +80,12 @@ export function GenOwlRevShareAdminDepositPanel({
       const data = await res.json().catch(() => ({}))
       if (!res.ok) return
       setPeriodMonth(typeof data.period_month === 'string' ? data.period_month : null)
+      setGen1PeriodMonth(typeof data.gen1_period_month === 'string' ? data.gen1_period_month : null)
+      setGen2PeriodMonth(typeof data.gen2_period_month === 'string' ? data.gen2_period_month : null)
       setClaimsOpen(Boolean(data.claims_open))
       setPeriod(data.period ?? null)
+      setGen1Period(data.gen1_period ?? data.period ?? null)
+      setGen2Period(data.gen2_period ?? data.period ?? null)
     } catch {
       // Non-blocking status
     }
@@ -126,8 +134,16 @@ export function GenOwlRevShareAdminDepositPanel({
         }
         const poolWallet = poolData.address as string
         setPeriodMonth(typeof poolData.period_month === 'string' ? poolData.period_month : null)
+        setGen1PeriodMonth(
+          typeof poolData.gen1_period_month === 'string' ? poolData.gen1_period_month : null
+        )
+        setGen2PeriodMonth(
+          typeof poolData.gen2_period_month === 'string' ? poolData.gen2_period_month : null
+        )
         setClaimsOpen(Boolean(poolData.claims_open))
         setPeriod(poolData.period ?? null)
+        setGen1Period(poolData.gen1_period ?? poolData.period ?? null)
+        setGen2Period(poolData.gen2_period ?? poolData.period ?? null)
 
         let solSignature: string | null = null
         let usdcSignature: string | null = null
@@ -211,6 +227,10 @@ export function GenOwlRevShareAdminDepositPanel({
   )
 
   const busy = busyTarget != null
+  const gen1MonthLabel = gen1PeriodMonth ?? periodMonth
+  const gen2MonthLabel = gen2PeriodMonth ?? periodMonth
+  const gen1Totals = gen1Period ?? period
+  const gen2Totals = gen2Period ?? period
 
   return (
     <div className="mt-4 max-w-2xl space-y-2 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.05] p-3">
@@ -218,27 +238,36 @@ export function GenOwlRevShareAdminDepositPanel({
         Deposit from your <span className="font-medium text-foreground/90">connected wallet</span> into the
         dedicated rev-share pool. Funds escrow is not used. Only verified on-chain deposits credit claimable
         totals (homepage Save is display-only). Use the Gen 1 or Gen 2 button to fund that pool alone —
-        amounts in the fields above are <span className="font-medium text-foreground/90">added</span> to this
-        month&apos;s claimable totals.
+        amounts are <span className="font-medium text-foreground/90">added</span> to the month on that
+        gen&apos;s next-date field (so Gen 2 set to August credits August, not July).
       </p>
-      {periodMonth ? (
-        <p className="text-xs text-foreground/90 tabular-nums">
-          Claimable {periodMonth}
-          {claimsOpen ? (
-            <span className="ml-1 font-medium text-emerald-400">· claims open</span>
-          ) : (
-            <span className="ml-1 text-muted-foreground">· claims open on last day of month (UTC)</span>
-          )}
-          : Gen 1 {formatPoolAmount(period?.gen1_total_sol, 'SOL')}
-          {period?.gen1_total_usdc != null && period.gen1_total_usdc > 0
-            ? ` / ${formatPoolAmount(period.gen1_total_usdc, 'USDC')}`
-            : ''}
-          {' · '}
-          Gen 2 {formatPoolAmount(period?.gen2_total_sol, 'SOL')}
-          {period?.gen2_total_usdc != null && period.gen2_total_usdc > 0
-            ? ` / ${formatPoolAmount(period.gen2_total_usdc, 'USDC')}`
-            : ''}
-        </p>
+      {gen1MonthLabel || gen2MonthLabel ? (
+        <div className="space-y-1 text-xs text-foreground/90 tabular-nums">
+          <p>
+            Gen 1 → {gen1MonthLabel ?? '—'}
+            {gen1MonthLabel && claimsOpen && gen1MonthLabel === periodMonth ? (
+              <span className="ml-1 font-medium text-emerald-400">· claims open</span>
+            ) : (
+              <span className="ml-1 text-muted-foreground">· claims open on last day (UTC)</span>
+            )}
+            : {formatPoolAmount(gen1Totals?.gen1_total_sol, 'SOL')}
+            {gen1Totals?.gen1_total_usdc != null && gen1Totals.gen1_total_usdc > 0
+              ? ` / ${formatPoolAmount(gen1Totals.gen1_total_usdc, 'USDC')}`
+              : ''}
+          </p>
+          <p>
+            Gen 2 → {gen2MonthLabel ?? '—'}
+            {gen2MonthLabel && claimsOpen && gen2MonthLabel === periodMonth ? (
+              <span className="ml-1 font-medium text-emerald-400">· claims open</span>
+            ) : (
+              <span className="ml-1 text-muted-foreground">· claims open on last day (UTC)</span>
+            )}
+            : {formatPoolAmount(gen2Totals?.gen2_total_sol, 'SOL')}
+            {gen2Totals?.gen2_total_usdc != null && gen2Totals.gen2_total_usdc > 0
+              ? ` / ${formatPoolAmount(gen2Totals.gen2_total_usdc, 'USDC')}`
+              : ''}
+          </p>
+        </div>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button

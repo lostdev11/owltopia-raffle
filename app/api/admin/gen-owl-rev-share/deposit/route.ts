@@ -5,10 +5,33 @@ import { confirmGenOwlRevSharePoolDeposit } from '@/lib/nesting/gen-owl-rev-shar
 import { StakingUserError } from '@/lib/nesting/errors'
 import { getRevShareSchedule } from '@/lib/db/rev-share-schedule'
 import { getGenOwlRevSharePeriod } from '@/lib/db/gen-owl-rev-share-periods'
-import { formatPeriodMonthUtc, claimsOpenForPeriod } from '@/lib/nesting/gen-owl-rev-share-month'
+import {
+  formatPeriodMonthUtc,
+  claimsOpenForPeriod,
+  periodMonthFromScheduleDate,
+} from '@/lib/nesting/gen-owl-rev-share-month'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
+
+function periodSummary(
+  period: Awaited<ReturnType<typeof getGenOwlRevSharePeriod>>
+): {
+  gen1_total_sol: number | null
+  gen1_total_usdc: number | null
+  gen2_total_sol: number | null
+  gen2_total_usdc: number | null
+  finalized_at: string | null
+} | null {
+  if (!period) return null
+  return {
+    gen1_total_sol: period.gen1_total_sol,
+    gen1_total_usdc: period.gen1_total_usdc,
+    gen2_total_sol: period.gen2_total_sol,
+    gen2_total_usdc: period.gen2_total_usdc,
+    finalized_at: period.finalized_at,
+  }
+}
 
 /**
  * GET /api/admin/gen-owl-rev-share/deposit
@@ -27,21 +50,27 @@ export async function GET(request: NextRequest) {
       { status: 503 }
     )
   }
-  const periodMonth = formatPeriodMonthUtc(new Date())
-  const period = await getGenOwlRevSharePeriod(periodMonth)
+  const schedule = await getRevShareSchedule()
+  const currentMonth = formatPeriodMonthUtc(new Date())
+  const gen1PeriodMonth =
+    periodMonthFromScheduleDate(schedule?.gen1_next_date ?? schedule?.next_date) ?? currentMonth
+  const gen2PeriodMonth =
+    periodMonthFromScheduleDate(schedule?.gen2_next_date ?? schedule?.next_date) ?? currentMonth
+  const periodMonth = currentMonth
+  const [period, gen1Period, gen2Period] = await Promise.all([
+    getGenOwlRevSharePeriod(periodMonth),
+    getGenOwlRevSharePeriod(gen1PeriodMonth),
+    getGenOwlRevSharePeriod(gen2PeriodMonth),
+  ])
   return NextResponse.json({
     address,
     period_month: periodMonth,
+    gen1_period_month: gen1PeriodMonth,
+    gen2_period_month: gen2PeriodMonth,
     claims_open: claimsOpenForPeriod(periodMonth),
-    period: period
-      ? {
-          gen1_total_sol: period.gen1_total_sol,
-          gen1_total_usdc: period.gen1_total_usdc,
-          gen2_total_sol: period.gen2_total_sol,
-          gen2_total_usdc: period.gen2_total_usdc,
-          finalized_at: period.finalized_at,
-        }
-      : null,
+    period: periodSummary(period),
+    gen1_period: periodSummary(gen1Period),
+    gen2_period: periodSummary(gen2Period),
   })
 }
 
