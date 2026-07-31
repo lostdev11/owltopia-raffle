@@ -55,7 +55,7 @@ export async function executeGenOwlRevShareClaim(params: {
 
   if (!claimsOpenForPeriod(periodMonth)) {
     throw new StakingUserError(
-      'Rev share for this month is not open yet. Claims open on the 1st of the next month (UTC).',
+      'Rev share for this month is not open yet. Claims open on the last day of the month (UTC).',
       400
     )
   }

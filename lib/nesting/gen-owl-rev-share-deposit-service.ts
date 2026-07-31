@@ -42,6 +42,8 @@ export async function confirmGenOwlRevSharePoolDeposit(params: {
   usdc_signature?: string | null
   gen1_next_date?: string | null
   gen2_next_date?: string | null
+  /** Admin replay of an already-broadcast deposit (Solscan / delayed confirm). */
+  allow_older_tx?: boolean
 }): Promise<GenOwlRevShareDepositConfirmResult> {
   const poolWallet = getGenOwlRevSharePoolPublicKey()
   if (!poolWallet) {
@@ -122,6 +124,7 @@ export async function confirmGenOwlRevSharePoolDeposit(params: {
         poolWallet,
         expectedAmount: totalSol,
         currency: 'SOL',
+        allowOlderThanHour: Boolean(params.allow_older_tx),
       })
       if (!verified.valid) {
         throw new StakingUserError(verified.error || 'SOL deposit verification failed.', 400)
@@ -154,6 +157,7 @@ export async function confirmGenOwlRevSharePoolDeposit(params: {
         poolWallet,
         expectedAmount: totalUsdc,
         currency: 'USDC',
+        allowOlderThanHour: Boolean(params.allow_older_tx),
       })
       if (!verified.valid) {
         throw new StakingUserError(verified.error || 'USDC deposit verification failed.', 400)

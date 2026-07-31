@@ -4,13 +4,15 @@ import { getGenOwlRevSharePoolPublicKey } from '@/lib/nesting/gen-owl-rev-share-
 import { confirmGenOwlRevSharePoolDeposit } from '@/lib/nesting/gen-owl-rev-share-deposit-service'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { getRevShareSchedule } from '@/lib/db/rev-share-schedule'
+import { getGenOwlRevSharePeriod } from '@/lib/db/gen-owl-rev-share-periods'
+import { formatPeriodMonthUtc, claimsOpenForPeriod } from '@/lib/nesting/gen-owl-rev-share-month'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/admin/gen-owl-rev-share/deposit
- * Full admin — pool address for connected-wallet deposits.
+ * Full admin — pool address for connected-wallet deposits + current period claimable totals.
  */
 export async function GET(request: NextRequest) {
   const session = await requireFullAdminSession(request)
@@ -25,7 +27,22 @@ export async function GET(request: NextRequest) {
       { status: 503 }
     )
   }
-  return NextResponse.json({ address })
+  const periodMonth = formatPeriodMonthUtc(new Date())
+  const period = await getGenOwlRevSharePeriod(periodMonth)
+  return NextResponse.json({
+    address,
+    period_month: periodMonth,
+    claims_open: claimsOpenForPeriod(periodMonth),
+    period: period
+      ? {
+          gen1_total_sol: period.gen1_total_sol,
+          gen1_total_usdc: period.gen1_total_usdc,
+          gen2_total_sol: period.gen2_total_sol,
+          gen2_total_usdc: period.gen2_total_usdc,
+          finalized_at: period.finalized_at,
+        }
+      : null,
+  })
 }
 
 /**
@@ -46,6 +63,7 @@ export async function POST(request: NextRequest) {
       gen2_total_usdc: body.gen2_total_usdc != null ? Number(body.gen2_total_usdc) : null,
       sol_signature: typeof body.sol_signature === 'string' ? body.sol_signature : null,
       usdc_signature: typeof body.usdc_signature === 'string' ? body.usdc_signature : null,
+      allow_older_tx: body.allow_older_tx === true,
       gen1_next_date:
         body.gen1_next_date !== undefined
           ? body.gen1_next_date == null

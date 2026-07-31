@@ -25,11 +25,16 @@ export function endOfPeriodMonthUtc(periodMonth: string): Date | null {
   return new Date(Date.UTC(parsed.year, parsed.month, 0, 23, 59, 59, 999))
 }
 
-/** Claims open at 00:00:00 UTC on the 1st of the month after `periodMonth`. */
+/**
+ * Claims open at 00:00:00 UTC on the last calendar day of `periodMonth`
+ * (e.g. July period → 31 July 00:00 UTC), matching the homepage payout date.
+ */
 export function claimsOpenAtUtc(periodMonth: string): Date | null {
   const parsed = parsePeriodMonth(periodMonth)
   if (!parsed) return null
-  return new Date(Date.UTC(parsed.year, parsed.month, 1, 0, 0, 0, 0))
+  // Day 0 of next month = last day of period month
+  const lastDay = new Date(Date.UTC(parsed.year, parsed.month, 0)).getUTCDate()
+  return new Date(Date.UTC(parsed.year, parsed.month - 1, lastDay, 0, 0, 0, 0))
 }
 
 export function claimsOpenForPeriod(periodMonth: string, now = new Date()): boolean {
@@ -37,9 +42,10 @@ export function claimsOpenForPeriod(periodMonth: string, now = new Date()): bool
   return openAt != null && now.getTime() >= openAt.getTime()
 }
 
-/** Most recently completed month whose claim window is open (if any). */
+/** Most recently completed (or currently claimable) month whose claim window is open. */
 export function latestOpenClaimPeriodMonth(now = new Date()): string | null {
   const current = formatPeriodMonthUtc(now)
+  if (claimsOpenForPeriod(current, now)) return current
   const parsed = parsePeriodMonth(current)
   if (!parsed) return null
   const prevMonthDate = new Date(Date.UTC(parsed.year, parsed.month - 1, 1))

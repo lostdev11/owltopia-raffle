@@ -60,6 +60,10 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
   }, [load])
 
   const claimAllCount = claimable.length
+  const monthCount = useMemo(
+    () => new Set(claimable.map((r) => r.period_month)).size,
+    [claimable]
+  )
   const totals = useMemo(() => {
     let sol = 0
     let usdc = 0
@@ -150,11 +154,16 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
           Checking claimable rev share…
         </p>
       ) : claimable.length === 0 ? (
-        <p className="mt-2 text-xs text-muted-foreground">Nothing to claim right now.</p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Nothing to claim right now. When a month opens, unclaimed rev share stays stacked here — claim anytime,
+          same as OWL.
+        </p>
       ) : (
         <div className="mt-3 space-y-3">
           <p className="text-xs text-foreground/90">
-            Ready:{' '}
+            Stacked
+            {monthCount > 1 ? ` across ${monthCount} months` : ''}
+            :{' '}
             {totals.sol > 0 ? (
               <span className="font-semibold tabular-nums text-theme-prime">
                 {formatGenOwlRevShareSol(totals.sol)} SOL
@@ -166,7 +175,7 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
                 {formatGenOwlRevShareUsdc(totals.usdc)} USDC
               </span>
             ) : null}{' '}
-            across {claimAllCount} nest{claimAllCount === 1 ? '' : 's'}
+            across {claimAllCount} nest{claimAllCount === 1 ? '' : 's'} — claim now or leave it stacked.
           </p>
           <ul className="space-y-2">
             {claimable.map((row) => (

@@ -8,14 +8,14 @@ export const GEN1_REV_SHARE_ONE_OF_ONE_POOL_FRACTION = 0.1
 
 export function genOwlRevShareDistributionHeadline(group: GenOwlStakingGroupKey): string {
   if (group === 'gen1-owl') {
-    return '90% all staked · 10% 1/1 · claim after month ends'
+    return '90% all staked · 10% 1/1 · claim anytime after open'
   }
-  return 'Even split · claim after month ends'
+  return 'Even split · claim anytime after open'
 }
 
 /** Short blurb for estimate / claim panels (mobile-first). */
 export const GEN_OWL_REV_SHARE_SHORT_BLURB =
-  'Estimate from this month’s pool. Finals lock at month-end; claim opens the 1st (UTC).'
+  'Pool estimates update during the month. Claims open on the last day (UTC) — leave unclaimed months stacked and grab them whenever you are ready.'
 
 export function genOwlRevShareDistributionSummary(group: GenOwlStakingGroupKey): string {
   if (group === 'gen1-owl') {
@@ -26,9 +26,9 @@ export function genOwlRevShareDistributionSummary(group: GenOwlStakingGroupKey):
 
 export function genOwlRevShareDistributionDetail(group: GenOwlStakingGroupKey): string {
   if (group === 'gen1-owl') {
-    return 'Gen 1 pool: 90% split evenly across all staked Gen 1 owls; 10% split evenly across staked Gen 1 1/1s. Claim opens on the 1st of the next month (UTC).'
+    return 'Gen 1 pool: 90% split evenly across all staked Gen 1 owls; 10% split evenly across staked Gen 1 1/1s. Claims open on the last day of the month (UTC) and stack until you claim.'
   }
-  return 'Split evenly across eligible nests at month-end. Claim opens on the 1st of the next month (UTC).'
+  return 'Split evenly across eligible nests at month-end. Claims open on the last day of the month (UTC) and stack until you claim.'
 }
 
 export function genOwlRevShareAdminDistributionNote(group: GenOwlStakingGroupKey): string {

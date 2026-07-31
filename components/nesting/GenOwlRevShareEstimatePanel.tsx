@@ -121,10 +121,10 @@ export function GenOwlRevShareEstimatePanel({ connected, needsSignIn, className 
         <Coins className="h-4 w-4 text-emerald-400/90 shrink-0" aria-hidden />
         <h3 className="text-sm font-semibold text-foreground">Your rev share this month</h3>
       </div>
-      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-        {GEN_OWL_REV_SHARE_SHORT_BLURB}
-        {splitNotes.length > 0 ? ` ${splitNotes.join(' ')}` : null}
-      </p>
+        <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+          {GEN_OWL_REV_SHARE_SHORT_BLURB}
+          {splitNotes.length > 0 ? ` ${splitNotes.join(' ')}` : null} Unclaimed months stack — claim when ready.
+        </p>
 
       {needsSignIn ? (
         <p className="mt-2 text-xs text-amber-400/95">Sign in to see your projected rev share.</p>
