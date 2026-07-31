@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 export type StakingPlatformFeePaymentRow = {
   tx_signature: string
   wallet_address: string
-  action: 'stake' | 'unstake' | 'claim'
+  action: 'stake' | 'unstake' | 'claim' | 'rev_share_claim'
   units: number
   lamports: number
   position_ids: string[]
@@ -60,7 +60,7 @@ export async function stakingPositionHasPlatformFeeLinked(
 export async function insertStakingPlatformFeePayment(row: {
   tx_signature: string
   wallet_address: string
-  action: 'stake' | 'unstake' | 'claim'
+  action: 'stake' | 'unstake' | 'claim' | 'rev_share_claim'
   units: number
   lamports: number
   position_ids: string[]

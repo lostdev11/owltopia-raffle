@@ -56,7 +56,8 @@ export function NestingClaimsSection({
           <h3 className="text-sm font-semibold text-foreground">Monthly rev share (SOL / USDC)</h3>
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Gen 1 and Gen 2 nest rev share for every open month — one tap claims the full stacked total.
+          Gen 1 and Gen 2 nest rev share for every open month — one tap claims the full stacked total
+          (0.001 SOL fee per nest when fees are on).
         </p>
         <GenOwlRevShareEstimatePanel connected={connected} needsSignIn={needsSignIn} />
         <GenOwlRevShareClaimPanel connected={connected} needsSignIn={needsSignIn} />

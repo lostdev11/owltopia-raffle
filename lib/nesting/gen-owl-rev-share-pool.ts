@@ -10,6 +10,7 @@ import {
   PublicKey,
   SystemProgram,
   Transaction,
+  TransactionInstruction,
   LAMPORTS_PER_SOL,
   sendAndConfirmTransaction,
 } from '@solana/web3.js'
@@ -111,6 +112,75 @@ export type GenOwlRevSharePoolPayoutResult =
   | { ok: true; signature: string }
   | { ok: false; error: string }
 
+async function buildUsdcTransferIxs(params: {
+  poolPubkey: PublicKey
+  recipientPk: PublicKey
+  amount: number
+}): Promise<{ ok: true; ixs: TransactionInstruction[] } | { ok: false; error: string }> {
+  const readConn = getSolanaReadConnection()
+  const tokenInfo = getTokenInfo('USDC')
+  if (!tokenInfo.mintAddress) {
+    return { ok: false, error: 'USDC mint not configured.' }
+  }
+  const mint = new PublicKey(tokenInfo.mintAddress)
+  const decimals = tokenInfo.decimals
+  const programId = await getPoolTokenProgramForMint(mint, params.poolPubkey)
+  if (!programId) {
+    return { ok: false, error: 'Rev share pool has no USDC token account for this mint. Deposit USDC first.' }
+  }
+
+  const raw = BigInt(Math.round(params.amount * Math.pow(10, decimals)))
+  if (raw <= 0n) return { ok: false, error: 'Nothing to pay.' }
+
+  const fromAta = await getAssociatedTokenAddress(
+    mint,
+    params.poolPubkey,
+    false,
+    programId,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )
+  const toAta = await getAssociatedTokenAddress(
+    mint,
+    params.recipientPk,
+    false,
+    programId,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )
+
+  try {
+    const acct = await getAccount(readConn, fromAta, 'confirmed', programId)
+    if (acct.amount < raw) {
+      return {
+        ok: false,
+        error:
+          `Rev share pool is short of USDC for this payout: it needs ` +
+          `${formatRawTokenAmount(raw, decimals)} USDC but holds ` +
+          `${formatRawTokenAmount(acct.amount, decimals)}. Ask an admin to deposit into the rev-share pool.`,
+      }
+    }
+  } catch {
+    // send still validates
+  }
+
+  const ixs: TransactionInstruction[] = []
+  try {
+    await getAccount(readConn, toAta, 'confirmed', programId)
+  } catch {
+    ixs.push(
+      createAssociatedTokenAccountInstruction(
+        params.poolPubkey,
+        toAta,
+        params.recipientPk,
+        mint,
+        programId,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+    )
+  }
+  ixs.push(createTransferInstruction(fromAta, toAta, params.poolPubkey, raw, [], programId))
+  return { ok: true, ixs }
+}
+
 /** Send SOL or USDC from the dedicated rev-share pool to a claimer. */
 export async function payoutCryptoFromGenOwlRevSharePool(params: {
   recipientWallet: string
@@ -171,67 +241,11 @@ export async function payoutCryptoFromGenOwlRevSharePool(params: {
       return { ok: true, signature: sig }
     }
 
-    const readConn = getSolanaReadConnection()
-    const tokenInfo = getTokenInfo('USDC')
-    if (!tokenInfo.mintAddress) {
-      return { ok: false, error: 'USDC mint not configured.' }
-    }
-    const mint = new PublicKey(tokenInfo.mintAddress)
-    const decimals = tokenInfo.decimals
-    const programId = await getPoolTokenProgramForMint(mint, poolPubkey)
-    if (!programId) {
-      return { ok: false, error: 'Rev share pool has no USDC token account for this mint. Deposit USDC first.' }
-    }
-
-    const raw = BigInt(Math.round(amount * Math.pow(10, decimals)))
-    if (raw <= 0n) return { ok: false, error: 'Nothing to pay.' }
-
-    const fromAta = await getAssociatedTokenAddress(
-      mint,
-      poolPubkey,
-      false,
-      programId,
-      ASSOCIATED_TOKEN_PROGRAM_ID
-    )
-    const toAta = await getAssociatedTokenAddress(
-      mint,
-      recipientPk,
-      false,
-      programId,
-      ASSOCIATED_TOKEN_PROGRAM_ID
-    )
-
-    try {
-      const acct = await getAccount(readConn, fromAta, 'confirmed', programId)
-      if (acct.amount < raw) {
-        return {
-          ok: false,
-          error:
-            `Rev share pool is short of USDC for this payout: it needs ` +
-            `${formatRawTokenAmount(raw, decimals)} USDC but holds ` +
-            `${formatRawTokenAmount(acct.amount, decimals)}. Ask an admin to deposit into the rev-share pool.`,
-        }
-      }
-    } catch {
-      // send still validates
-    }
+    const built = await buildUsdcTransferIxs({ poolPubkey, recipientPk, amount })
+    if (!built.ok) return built
 
     const tx = new Transaction()
-    try {
-      await getAccount(readConn, toAta, 'confirmed', programId)
-    } catch {
-      tx.add(
-        createAssociatedTokenAccountInstruction(
-          poolPubkey,
-          toAta,
-          recipientPk,
-          mint,
-          programId,
-          ASSOCIATED_TOKEN_PROGRAM_ID
-        )
-      )
-    }
-    tx.add(createTransferInstruction(fromAta, toAta, poolPubkey, raw, [], programId))
+    for (const ix of built.ixs) tx.add(ix)
 
     const sig = await sendAndConfirmTransaction(connection, tx, [kp], {
       commitment: 'confirmed',
@@ -246,5 +260,141 @@ export async function payoutCryptoFromGenOwlRevSharePool(params: {
     )
     const msg = e instanceof Error ? e.message : String(e)
     return { ok: false, error: msg }
+  }
+}
+
+/**
+ * Prefer one pool-signed transaction for SOL + USDC totals (batch claim).
+ * Falls back to separate currency payouts when only one currency is needed.
+ */
+export async function payoutCombinedCryptoFromGenOwlRevSharePool(params: {
+  recipientWallet: string
+  amount_sol: number
+  amount_usdc: number
+}): Promise<{
+  sol_signature: string | null
+  usdc_signature: string | null
+  payout_errors: string[]
+}> {
+  const amountSol = Number(params.amount_sol) || 0
+  const amountUsdc = Number(params.amount_usdc) || 0
+  const needSol = amountSol > 0
+  const needUsdc = amountUsdc > 0
+
+  if (!needSol && !needUsdc) {
+    return { sol_signature: null, usdc_signature: null, payout_errors: ['Nothing to pay.'] }
+  }
+
+  // Single-currency: reuse existing path.
+  if (needSol !== needUsdc) {
+    const res = await payoutCryptoFromGenOwlRevSharePool({
+      recipientWallet: params.recipientWallet,
+      amount: needSol ? amountSol : amountUsdc,
+      currency: needSol ? 'SOL' : 'USDC',
+    })
+    if (!res.ok) {
+      return {
+        sol_signature: null,
+        usdc_signature: null,
+        payout_errors: [res.error],
+      }
+    }
+    return {
+      sol_signature: needSol ? res.signature : null,
+      usdc_signature: needUsdc ? res.signature : null,
+      payout_errors: [],
+    }
+  }
+
+  const kp = getGenOwlRevSharePoolKeypair()
+  if (!kp) {
+    return {
+      sol_signature: null,
+      usdc_signature: null,
+      payout_errors: [
+        'Rev share pool is not configured. Set GEN_OWL_REV_SHARE_POOL_SECRET_KEY (and matching GEN_OWL_REV_SHARE_POOL_WALLET if used).',
+      ],
+    }
+  }
+
+  const poolPubkey = kp.publicKey
+  const recipientPk = new PublicKey(params.recipientWallet.trim())
+  const lamports = Math.round(amountSol * LAMPORTS_PER_SOL)
+  if (lamports <= 0) {
+    return { sol_signature: null, usdc_signature: null, payout_errors: ['Invalid SOL payout amount.'] }
+  }
+
+  try {
+    let balance: number
+    try {
+      balance = await getSolanaReadConnection().getBalance(poolPubkey, 'confirmed')
+    } catch {
+      balance = Number.POSITIVE_INFINITY
+    }
+    const needed = lamports + SOL_FEE_BUFFER_LAMPORTS * 2
+    if (Number.isFinite(balance) && balance < needed) {
+      return {
+        sol_signature: null,
+        usdc_signature: null,
+        payout_errors: [
+          `Rev share pool is short of SOL for this payout: it needs about ` +
+            `${(needed / LAMPORTS_PER_SOL).toFixed(5)} SOL (incl. network fee) but holds ` +
+            `${(balance / LAMPORTS_PER_SOL).toFixed(5)}. Ask an admin to deposit into the rev-share pool.`,
+        ],
+      }
+    }
+
+    const usdcBuilt = await buildUsdcTransferIxs({
+      poolPubkey,
+      recipientPk,
+      amount: amountUsdc,
+    })
+    if (!usdcBuilt.ok) {
+      return { sol_signature: null, usdc_signature: null, payout_errors: [usdcBuilt.error] }
+    }
+
+    const tx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: poolPubkey,
+        toPubkey: recipientPk,
+        lamports,
+      })
+    )
+    for (const ix of usdcBuilt.ixs) tx.add(ix)
+
+    const sig = await sendAndConfirmTransaction(getSolanaConnection(), tx, [kp], {
+      commitment: 'confirmed',
+      maxRetries: 3,
+    })
+    return { sol_signature: sig, usdc_signature: sig, payout_errors: [] }
+  } catch (e) {
+    console.error(
+      '[gen-owl-rev-share-pool] combined payout failed',
+      { pool: poolPubkey.toBase58(), amountSol, amountUsdc },
+      e
+    )
+    // Fallback: try separate currency txs so a combined-tx size/ix issue does not block claims.
+    const errors: string[] = []
+    let solSig: string | null = null
+    let usdcSig: string | null = null
+    const solRes = await payoutCryptoFromGenOwlRevSharePool({
+      recipientWallet: params.recipientWallet,
+      amount: amountSol,
+      currency: 'SOL',
+    })
+    if (solRes.ok) solSig = solRes.signature
+    else errors.push(solRes.error)
+    const usdcRes = await payoutCryptoFromGenOwlRevSharePool({
+      recipientWallet: params.recipientWallet,
+      amount: amountUsdc,
+      currency: 'USDC',
+    })
+    if (usdcRes.ok) usdcSig = usdcRes.signature
+    else errors.push(usdcRes.error)
+    if (!solSig && !usdcSig) {
+      const msg = e instanceof Error ? e.message : String(e)
+      errors.unshift(msg)
+    }
+    return { sol_signature: solSig, usdc_signature: usdcSig, payout_errors: errors }
   }
 }

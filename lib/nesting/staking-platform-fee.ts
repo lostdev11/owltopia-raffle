@@ -7,7 +7,7 @@ import {
 
 const DEFAULT_FEE_SOL = 0.001
 
-export type StakingPlatformFeeAction = 'stake' | 'unstake' | 'claim'
+export type StakingPlatformFeeAction = 'stake' | 'unstake' | 'claim' | 'rev_share_claim'
 
 function readFeeSolFromEnv(raw: string | undefined, fallback: number): number {
   if (!raw) return fallback

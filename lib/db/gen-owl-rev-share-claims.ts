@@ -120,12 +120,48 @@ export async function updateGenOwlRevShareClaimSignatures(params: {
   return mapClaimRow(data as Record<string, unknown>)
 }
 
+/** Stamp the same payout signatures onto every reserved claim in a batch. */
+export async function updateGenOwlRevShareClaimSignaturesForIds(params: {
+  ids: string[]
+  sol_transaction_signature: string | null
+  usdc_transaction_signature: string | null
+}): Promise<number> {
+  const ids = [...new Set(params.ids.map((id) => id.trim()).filter(Boolean))]
+  if (ids.length === 0) return 0
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('gen_owl_rev_share_claims')
+    .update({
+      sol_transaction_signature: params.sol_transaction_signature?.trim() || null,
+      usdc_transaction_signature: params.usdc_transaction_signature?.trim() || null,
+    })
+    .in('id', ids)
+    .select('id')
+  if (error) {
+    console.error('[gen-owl-rev-share-claims] update sigs batch:', error.message)
+    return 0
+  }
+  return data?.length ?? 0
+}
+
 /** Only for failed reserved claims with no on-chain payout yet. */
 export async function deleteGenOwlRevShareClaim(id: string): Promise<boolean> {
   const db = getSupabaseAdmin()
   const { error } = await db.from('gen_owl_rev_share_claims').delete().eq('id', id)
   if (error) {
     console.error('[gen-owl-rev-share-claims] delete:', error.message)
+    return false
+  }
+  return true
+}
+
+export async function deleteGenOwlRevShareClaims(ids: string[]): Promise<boolean> {
+  const cleaned = [...new Set(ids.map((id) => id.trim()).filter(Boolean))]
+  if (cleaned.length === 0) return true
+  const db = getSupabaseAdmin()
+  const { error } = await db.from('gen_owl_rev_share_claims').delete().in('id', cleaned)
+  if (error) {
+    console.error('[gen-owl-rev-share-claims] delete batch:', error.message)
     return false
   }
   return true

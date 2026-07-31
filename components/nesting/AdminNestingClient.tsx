@@ -21,6 +21,7 @@ import { getCachedAdmin, setCachedAdmin, type AdminRole } from '@/lib/admin-chec
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import { StakingPoolCard } from '@/components/nesting/StakingPoolCard'
 import { AdminGenOwlNestRosterSection } from '@/components/nesting/AdminGenOwlNestRosterSection'
+import { AdminClaimsStatsSection } from '@/components/admin/AdminClaimsStatsSection'
 import { SupportNestFamilyBreakdown } from '@/components/nesting/SupportNestFamilyBreakdown'
 import { AdminWalletNestAssetsPanel } from '@/components/nesting/AdminWalletNestAssetsPanel'
 import type { NestingWalletNestAsset } from '@/lib/nesting/admin-wallet-diagnostics'
@@ -1394,6 +1395,8 @@ export function AdminNestingClient() {
       </section>
 
       <AdminGenOwlNestRosterSection />
+
+      <AdminClaimsStatsSection enabled={!!isAdmin && sessionReady === true} />
 
       <section className="space-y-4">
         <SectionHeader

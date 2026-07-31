@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Coins, Loader2 } from 'lucide-react'
+import { useConnection, useWallet } from '@solana/wallet-adapter-react'
+import { CheckCircle2, Coins, Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -14,6 +15,18 @@ import {
   GEN_OWL_REV_SHARE_SHORT_BLURB,
   genOwlRevShareDistributionSummary,
 } from '@/lib/nesting/gen-owl-rev-share-copy'
+import {
+  formatPeriodMonthLabel,
+  latestOpenClaimPeriodMonth,
+} from '@/lib/nesting/gen-owl-rev-share-month'
+import { sendStakingPlatformFeeTransaction } from '@/lib/nesting/client/staking-platform-fee-tx'
+import type { StakingPlatformFeeTxConfig } from '@/lib/nesting/client/staking-platform-fee-tx'
+import {
+  formatStakingPlatformFeeTotalLabel,
+  getStakingPlatformFeeLamports,
+  getStakingPlatformFeeSol,
+  isStakingPlatformFeeEnabledClient,
+} from '@/lib/nesting/staking-platform-fee'
 import { nestingClaimReadyButtonClass } from '@/lib/nesting/ui-classes'
 import { cn } from '@/lib/utils'
 
@@ -29,6 +42,12 @@ type MonthGroup = {
   nest_count: number
   amount_sol: number
   amount_usdc: number
+}
+
+type ClaimSuccessState = {
+  amount_sol: number
+  amount_usdc: number
+  claim_count: number
 }
 
 function groupByMonth(rows: GenOwlRevShareClaimableRow[]): MonthGroup[] {
@@ -53,16 +72,22 @@ function groupByMonth(rows: GenOwlRevShareClaimableRow[]): MonthGroup[] {
 }
 
 export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: Props) {
+  const { connection } = useConnection()
+  const { publicKey, sendTransaction } = useWallet()
   const [loading, setLoading] = useState(false)
   const [claimsEnabled, setClaimsEnabled] = useState(true)
   const [claimable, setClaimable] = useState<GenOwlRevShareClaimableRow[]>([])
+  const [history, setHistory] = useState<GenOwlRevShareClaimableRow[]>([])
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
+  const [phaseHint, setPhaseHint] = useState<string | null>(null)
+  const [success, setSuccess] = useState<ClaimSuccessState | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [feeConfig, setFeeConfig] = useState<StakingPlatformFeeTxConfig | null>(null)
 
   const load = useCallback(async () => {
     if (!connected || needsSignIn) {
       setClaimable([])
+      setHistory([])
       setClaimsEnabled(true)
       return
     }
@@ -77,13 +102,16 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
       if (!res.ok) {
         setError(typeof data.error === 'string' ? data.error : 'Could not load rev share claims.')
         setClaimable([])
+        setHistory([])
         return
       }
       setClaimsEnabled(data.claims_enabled !== false)
       setClaimable(Array.isArray(data.claimable) ? data.claimable : [])
+      setHistory(Array.isArray(data.history) ? data.history : [])
     } catch {
       setError('Network error loading rev share.')
       setClaimable([])
+      setHistory([])
     } finally {
       setLoading(false)
     }
@@ -92,6 +120,36 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    let cancelled = false
+    void fetch('/api/staking/pools', { cache: 'no-store' })
+      .then((res) => res.json().catch(() => ({})))
+      .then((data) => {
+        if (cancelled) return
+        const treasury =
+          typeof data.nesting_platform_fee_treasury === 'string'
+            ? data.nesting_platform_fee_treasury.trim()
+            : ''
+        const unitLamports = Number(data.nesting_platform_fee_lamports) || 0
+        if (treasury && unitLamports > 0) {
+          setFeeConfig({ treasury, unitLamports })
+        } else if (isStakingPlatformFeeEnabledClient()) {
+          setFeeConfig({
+            treasury: '',
+            unitLamports: getStakingPlatformFeeLamports(),
+          })
+        } else {
+          setFeeConfig(null)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFeeConfig(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const claimAllCount = claimable.length
   const monthGroups = useMemo(() => groupByMonth(claimable), [claimable])
@@ -105,45 +163,63 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
     return { sol, usdc }
   }, [claimable])
 
+  const feeActive = Boolean(feeConfig && (feeConfig.unitLamports > 0 || getStakingPlatformFeeSol() > 0))
+  const feeLabel = feeActive ? formatStakingPlatformFeeTotalLabel(claimAllCount) : null
+
+  const openPeriodMonth = useMemo(() => latestOpenClaimPeriodMonth(), [])
+  const claimedOpenPeriodLabel = useMemo(() => {
+    if (!openPeriodMonth) return null
+    const hasHistory = history.some((r) => r.period_month === openPeriodMonth)
+    if (!hasHistory) return null
+    return formatPeriodMonthLabel(openPeriodMonth)
+  }, [history, openPeriodMonth])
+
   const claimAll = async () => {
-    if (claimable.length === 0) return
+    if (claimable.length === 0 || !publicKey) return
     setBusy(true)
     setError(null)
-    setMessage(null)
-    let claimedSol = 0
-    let claimedUsdc = 0
-    let claimedCount = 0
-    for (const row of claimable) {
-      try {
-        const res = await fetch('/api/me/nesting/gen-owl-rev-share/claim', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ period_month: row.period_month, position_id: row.position_id }),
+    setPhaseHint(null)
+    try {
+      let platformFeeSignature: string | undefined
+      if (feeActive) {
+        setPhaseHint('Approve the SOL platform fee in your wallet — rev share is sent right after.')
+        platformFeeSignature = await sendStakingPlatformFeeTransaction({
+          connection,
+          sendTransaction,
+          publicKey,
+          units: claimable.length,
+          feeConfig,
         })
-        const data = await res.json().catch(() => ({}))
-        if (!res.ok) {
-          setError(typeof data.error === 'string' ? data.error : 'Claim failed.')
-          break
-        }
-        claimedSol += Number(data.amount_sol) || 0
-        claimedUsdc += Number(data.amount_usdc) || 0
-        claimedCount += 1
-      } catch {
-        setError('Network error during claim.')
-        break
       }
+
+      setPhaseHint('Sending rev share to your wallet…')
+      const res = await fetch('/api/me/nesting/gen-owl-rev-share/claim-all', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          platformFeeSignature ? { platform_fee_signature: platformFeeSignature } : {}
+        ),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(typeof data.error === 'string' ? data.error : 'Claim failed.')
+        return
+      }
+
+      setSuccess({
+        amount_sol: Number(data.amount_sol) || totals.sol,
+        amount_usdc: Number(data.amount_usdc) || totals.usdc,
+        claim_count: Number(data.claim_count) || claimable.length,
+      })
+      await load()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Network error during claim.'
+      setError(msg)
+    } finally {
+      setPhaseHint(null)
+      setBusy(false)
     }
-    if (claimedCount > 0) {
-      const parts: string[] = []
-      if (claimedSol > 0) parts.push(`${formatGenOwlRevShareSol(claimedSol)} SOL`)
-      if (claimedUsdc > 0) parts.push(`${formatGenOwlRevShareUsdc(claimedUsdc)} USDC`)
-      setMessage(
-        `Rev share sent${claimedCount > 1 ? ` for ${claimedCount} nests` : ''}: ${parts.join(' · ')}`
-      )
-    }
-    setBusy(false)
-    await load()
   }
 
   return (
@@ -161,6 +237,37 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
         {GEN_OWL_REV_SHARE_SHORT_BLURB} {genOwlRevShareDistributionSummary('gen1-owl')}{' '}
         {genOwlRevShareDistributionSummary('gen2-owl')}
       </p>
+
+      {success ? (
+        <div
+          className="mt-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-3"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-start gap-2">
+            <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400 mt-0.5" aria-hidden />
+            <div className="min-w-0 space-y-1">
+              <p className="text-sm font-semibold text-emerald-300">Claim successful</p>
+              <p className="text-xs text-foreground/90 leading-relaxed">
+                Sent{' '}
+                {success.amount_sol > 0 ? (
+                  <span className="font-semibold tabular-nums text-theme-prime">
+                    {formatGenOwlRevShareSol(success.amount_sol)} SOL
+                  </span>
+                ) : null}
+                {success.amount_sol > 0 && success.amount_usdc > 0 ? ' · ' : null}
+                {success.amount_usdc > 0 ? (
+                  <span className="font-semibold tabular-nums text-theme-prime">
+                    {formatGenOwlRevShareUsdc(success.amount_usdc)} USDC
+                  </span>
+                ) : null}{' '}
+                to your wallet
+                {success.claim_count > 1 ? ` for ${success.claim_count} nests` : ''}.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {!connected ? (
         <div className="mt-3 space-y-2">
@@ -183,10 +290,17 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
           Claims are temporarily paused. Your rev share stays stacked — check back soon.
         </p>
       ) : claimable.length === 0 ? (
-        <p className="mt-2 text-xs text-muted-foreground">
-          Nothing to claim right now. When a month opens, unclaimed Gen 1 / Gen 2 rev share stays stacked here until
-          you claim.
-        </p>
+        claimedOpenPeriodLabel ? (
+          <p className="mt-2 text-xs text-foreground/90 leading-relaxed" role="status">
+            Claimed rev share for <span className="font-medium">{claimedOpenPeriodLabel}</span>. Check back
+            next month when claims open.
+          </p>
+        ) : (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Nothing to claim right now. When a month opens, unclaimed Gen 1 / Gen 2 rev share stays stacked here until
+            you claim.
+          </p>
+        )
       ) : (
         <div className="mt-3 space-y-3">
           <p className="text-xs text-foreground/90">
@@ -206,6 +320,11 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
             ) : null}{' '}
             from {claimAllCount} nest{claimAllCount === 1 ? '' : 's'}.
           </p>
+          {feeLabel ? (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Platform fee: {feeLabel}. Approve once in your wallet, then payout runs automatically.
+            </p>
+          ) : null}
           {monthGroups.length > 1 ? (
             <ul className="space-y-1.5">
               {monthGroups.map((g) => (
@@ -229,10 +348,16 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
               ))}
             </ul>
           ) : null}
+          {phaseHint ? (
+            <p className="inline-flex items-center gap-2 text-xs text-muted-foreground" role="status">
+              <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" aria-hidden />
+              {phaseHint}
+            </p>
+          ) : null}
           <Button
             type="button"
             className={cn(nestingClaimReadyButtonClass, 'min-h-[48px] w-full touch-manipulation text-base')}
-            disabled={busy}
+            disabled={busy || !publicKey}
             onClick={() => void claimAll()}
           >
             {busy ? (
@@ -246,13 +371,15 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
                 {totals.sol > 0 ? ` ${formatGenOwlRevShareSol(totals.sol)} SOL` : ''}
                 {totals.sol > 0 && totals.usdc > 0 ? ' ·' : ''}
                 {totals.usdc > 0 ? ` ${formatGenOwlRevShareUsdc(totals.usdc)} USDC` : ''}
+                {feeActive && claimAllCount > 0
+                  ? ` · ${(getStakingPlatformFeeSol() * claimAllCount).toFixed(3)} SOL fee`
+                  : ''}
               </>
             )}
           </Button>
         </div>
       )}
 
-      {message ? <p className="mt-2 text-xs text-emerald-400/95">{message}</p> : null}
       {error ? <p className="mt-2 text-xs text-amber-400/95">{error}</p> : null}
     </div>
   )

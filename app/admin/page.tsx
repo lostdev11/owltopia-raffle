@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, DollarSign, Coins, Ticket, TrendingUp, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot, ShieldAlert, Rocket, Trophy, Store } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, Coins, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot, ShieldAlert, Rocket, Trophy, Store } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -42,6 +42,7 @@ import { AdminActionInboxTerminal } from '@/components/admin/AdminActionInboxTer
 import { AdminReferralPerformanceSection } from '@/components/admin/AdminReferralPerformanceSection'
 import { AdminLeaderboardSnapshotSection } from '@/components/admin/AdminLeaderboardSnapshotSection'
 import { AdminGen2MintersSection } from '@/components/admin/AdminGen2MintersSection'
+import { AdminPlatformFinanceSection } from '@/components/admin/AdminPlatformFinanceSection'
 import {
   describeInvalidSolanaTxSignatureInput,
   normalizeDepositTxSignatureInput,
@@ -263,10 +264,6 @@ export default function AdminDashboardPage() {
   const [pendingCancellationRaffles, setPendingCancellationRaffles] = useState<PendingCancellationRow[]>([])
   const [loadingPendingCancellations, setLoadingPendingCancellations] = useState(false)
 
-  // Projected revenue (confirmed entries; includes 7d/30d and threshold breakdown)
-  const [revenue, setRevenue] = useState<import('@/app/api/admin/projected-revenue/route').ProjectedRevenueResponse | null>(null)
-  const [revenueLoadError, setRevenueLoadError] = useState<string | null>(null)
-  const revenueHasDataRef = useRef(false)
   const [revShareSchedule, setRevShareSchedule] = useState<{
     next_date: string | null
     gen1_next_date: string | null
@@ -297,7 +294,6 @@ export default function AdminDashboardPage() {
   const [gen1RevShareBucketPreview, setGen1RevShareBucketPreview] = useState<Gen1RevShareBucketPreview | null>(
     null
   )
-  const [loadingRevenue, setLoadingRevenue] = useState(false)
   const [autoRefreshTick, setAutoRefreshTick] = useState(0)
 
   const [creatorHealth, setCreatorHealth] = useState<CreatorHealthRow[]>([])
@@ -683,48 +679,6 @@ export default function AdminDashboardPage() {
       void fetchDevTasks()
     }
   }, [connected, publicKey, isAdmin, sessionReady, visibilityTick, autoRefreshTick])
-
-  useEffect(() => {
-    if (!connected || !publicKey || !isAdmin || !sessionReady || !isFullAdmin) {
-      revenueHasDataRef.current = false
-      setRevenue(null)
-      setRevenueLoadError(null)
-      setLoadingRevenue(false)
-      return
-    }
-    const fetchRevenue = async () => {
-      const isInitialLoad = !revenueHasDataRef.current
-      if (isInitialLoad) setLoadingRevenue(true)
-      try {
-        const res = await fetch(
-          `/api/admin/projected-revenue?wallet=${publicKey.toBase58()}`,
-          { credentials: 'include', cache: 'no-store' }
-        )
-        const data = await res.json().catch(() => ({}))
-        if (!res.ok) {
-          const msg =
-            (typeof data?.error === 'string' && data.error) || 'Failed to load projected revenue'
-          if (!revenueHasDataRef.current) {
-            setRevenue(null)
-            setRevenueLoadError(msg)
-          }
-          return
-        }
-        setRevenue(data as import('@/app/api/admin/projected-revenue/route').ProjectedRevenueResponse)
-        setRevenueLoadError(null)
-        revenueHasDataRef.current = true
-      } catch (e) {
-        console.error('Error fetching projected revenue:', e)
-        if (!revenueHasDataRef.current) {
-          setRevenue(null)
-          setRevenueLoadError('Network error while loading projected revenue.')
-        }
-      } finally {
-        if (isInitialLoad) setLoadingRevenue(false)
-      }
-    }
-    void fetchRevenue()
-  }, [connected, publicKey, isAdmin, sessionReady, isFullAdmin, visibilityTick, autoRefreshTick])
 
   useEffect(() => {
     if (!connected || !publicKey || !isAdmin || !sessionReady || !canUseModTools) return
@@ -2501,207 +2455,12 @@ export default function AdminDashboardPage() {
         </OwlVisionDisclosure>
         </div>
 
-        {/* Projected Revenue - confirmed entries only */}
         {isFullAdmin && (
         <>
-        <OwlVisionDisclosure
-          className="mb-8"
-          variant="default"
-          title={
-            <span className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-              <DollarSign className="h-5 w-5 shrink-0" />
-              Projected Revenue
-            </span>
-          }
-        >
-          <CardDescription className="mb-4">
-            Revenue is the total amount from tickets sold (confirmed entries). Any amount over the threshold (from raffle prizes/floors) is profit. Thresholds update automatically from your raffles.
-          </CardDescription>
-          <div>
-            {revenueLoadError && revenue === null ? (
-              <div className="space-y-3">
-                <p className="text-sm text-destructive">{revenueLoadError}</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="min-h-11 touch-manipulation"
-                  onClick={() => setAutoRefreshTick((t) => t + 1)}
-                >
-                  Retry
-                </Button>
-              </div>
-            ) : loadingRevenue || revenue === null ? (
-              <p className="text-muted-foreground flex items-center gap-2 min-h-[44px]">
-                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                Loading projected revenue…
-              </p>
-            ) : (
-              <div className="space-y-6">
-                {/* All-time totals */}
-                <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground mb-3">All time</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="rounded-lg border bg-muted/30 p-4">
-                      <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                        <DollarSign className="h-4 w-4" />
-                        USDC
-                      </div>
-                      <p className="text-2xl font-bold tabular-nums">
-                        {revenue.allTime.usdc.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border bg-muted/30 p-4">
-                      <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                        <Coins className="h-4 w-4" />
-                        SOL
-                      </div>
-                      <p className="text-2xl font-bold tabular-nums">
-                        {revenue.allTime.sol.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border bg-muted/30 p-4">
-                      <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                        <Ticket className="h-4 w-4" />
-                        Tickets sold
-                      </div>
-                      <p className="text-2xl font-bold tabular-nums">
-                        {revenue.allTime.ticketsSold.toLocaleString()}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border bg-muted/30 p-4">
-                      <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
-                        <Users className="h-4 w-4" />
-                        Confirmed entries
-                      </div>
-                      <p className="text-2xl font-bold tabular-nums">
-                        {revenue.allTime.confirmedEntries.toLocaleString()}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 7-day and 30-day averages */}
-                <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
-                    <TrendingUp className="h-4 w-4" />
-                    7-day and 30-day
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="rounded-lg border p-4 space-y-3">
-                      <p className="text-sm font-medium">Last 7 days</p>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">USDC</span>
-                          <p className="font-semibold tabular-nums">{revenue.last7Days.usdc.toFixed(2)}</p>
-                          <p className="text-xs text-muted-foreground">avg {revenue.avgPerDay7.usdc.toFixed(2)}/day</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">SOL</span>
-                          <p className="font-semibold tabular-nums">{revenue.last7Days.sol.toFixed(4)}</p>
-                          <p className="text-xs text-muted-foreground">avg {revenue.avgPerDay7.sol.toFixed(4)}/day</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">OWL</span>
-                          <p className="font-semibold tabular-nums">{revenue.last7Days.owl.toFixed(4)}</p>
-                          <p className="text-xs text-muted-foreground">avg {revenue.avgPerDay7.owl.toFixed(4)}/day</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Tickets</span>
-                          <p className="font-semibold tabular-nums">{revenue.last7Days.ticketsSold}</p>
-                          <p className="text-xs text-muted-foreground">avg {(revenue.avgPerDay7.ticketsSold).toFixed(1)}/day</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border p-4 space-y-3">
-                      <p className="text-sm font-medium">Last 30 days</p>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">USDC</span>
-                          <p className="font-semibold tabular-nums">{revenue.last30Days.usdc.toFixed(2)}</p>
-                          <p className="text-xs text-muted-foreground">avg {revenue.avgPerDay30.usdc.toFixed(2)}/day</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">SOL</span>
-                          <p className="font-semibold tabular-nums">{revenue.last30Days.sol.toFixed(4)}</p>
-                          <p className="text-xs text-muted-foreground">avg {revenue.avgPerDay30.sol.toFixed(4)}/day</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">OWL</span>
-                          <p className="font-semibold tabular-nums">{revenue.last30Days.owl.toFixed(4)}</p>
-                          <p className="text-xs text-muted-foreground">avg {revenue.avgPerDay30.owl.toFixed(4)}/day</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Tickets</span>
-                          <p className="font-semibold tabular-nums">{revenue.last30Days.ticketsSold}</p>
-                          <p className="text-xs text-muted-foreground">avg {(revenue.avgPerDay30.ticketsSold).toFixed(1)}/day</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Revenue (tickets sold) and profit (amount over threshold) by currency */}
-                {revenue.thresholds && revenue.byCurrency && (revenue.thresholds.usdc != null || revenue.thresholds.sol != null || revenue.thresholds.owl != null) && (
-                  <div>
-                    <h3 className="text-sm font-semibold text-muted-foreground mb-3">Revenue (tickets sold) &amp; profit</h3>
-                    <p className="text-xs text-muted-foreground mb-3">Revenue is total from tickets sold. Profit is the amount over the threshold.</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      {revenue.byCurrency.usdc != null && revenue.thresholds.usdc != null && (
-                        <div className="rounded-lg border p-4 space-y-2 bg-muted/20">
-                          <p className="text-sm font-medium text-muted-foreground">USDC</p>
-                          <p className="text-sm">Revenue (tickets sold): <span className="font-semibold tabular-nums">{revenue.allTime.usdc.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></p>
-                          <p className="text-sm">Threshold: <span className="font-semibold tabular-nums">{revenue.thresholds.usdc.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></p>
-                          <p className="text-sm text-emerald-600 dark:text-emerald-400">Profit (over threshold): <span className="font-semibold tabular-nums">{revenue.byCurrency.usdc.profit.toFixed(2)}</span></p>
-                        </div>
-                      )}
-                      {revenue.byCurrency.sol != null && revenue.thresholds.sol != null && (
-                        <div className="rounded-lg border p-4 space-y-2 bg-muted/20">
-                          <p className="text-sm font-medium text-muted-foreground">SOL</p>
-                          <p className="text-sm">Revenue (tickets sold): <span className="font-semibold tabular-nums">{revenue.allTime.sol.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</span></p>
-                          <p className="text-sm">Threshold: <span className="font-semibold tabular-nums">{revenue.thresholds.sol.toLocaleString(undefined, { minimumFractionDigits: 4 })}</span></p>
-                          <p className="text-sm text-emerald-600 dark:text-emerald-400">Profit (over threshold): <span className="font-semibold tabular-nums">{revenue.byCurrency.sol.profit.toFixed(4)}</span></p>
-                        </div>
-                      )}
-                      {revenue.byCurrency.owl != null && revenue.thresholds.owl != null && (
-                        <div className="rounded-lg border p-4 space-y-2 bg-muted/20">
-                          <p className="text-sm font-medium text-muted-foreground">OWL</p>
-                          <p className="text-sm">Revenue (tickets sold): <span className="font-semibold tabular-nums">{revenue.allTime.owl.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</span></p>
-                          <p className="text-sm">Threshold: <span className="font-semibold tabular-nums">{revenue.thresholds.owl.toLocaleString(undefined, { minimumFractionDigits: 4 })}</span></p>
-                          <p className="text-sm text-emerald-600 dark:text-emerald-400">Profit (over threshold): <span className="font-semibold tabular-nums">{revenue.byCurrency.owl.profit.toFixed(4)}</span></p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Rev Share: 50% of site fee revenue goes to holders */}
-                    <div className="mt-4 rounded-lg border border-green-500/30 bg-green-500/5 p-4">
-                      <h3 className="text-sm font-semibold text-muted-foreground mb-2">Rev Share (50% to holders)</h3>
-                      <p className="text-xs text-muted-foreground mb-3">Calculated from site fee revenue: 6% on non-holder creator tickets and 3% on holder creator tickets.</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <p className="font-medium text-muted-foreground mb-1">Site fee revenue</p>
-                          <p className="tabular-nums">
-                            <span><span className="font-semibold">{(revenue.platformFees?.sol != null ? revenue.platformFees.sol.toFixed(4) : '0.0000')}</span> SOL</span>
-                            {' · '}
-                            <span><span className="font-semibold">{(revenue.platformFees?.usdc != null ? revenue.platformFees.usdc.toFixed(2) : '0.00')}</span> USDC</span>
-                          </p>
-                        </div>
-                        <div>
-                          <p className="font-medium text-muted-foreground mb-1">Holders share (50%)</p>
-                          <p className="tabular-nums">
-                            <span><span className="font-semibold">{(revenue.platformFees?.sol != null ? (revenue.platformFees.sol * 0.5).toFixed(4) : '0.0000')}</span> SOL</span>
-                            {' · '}
-                            <span><span className="font-semibold">{(revenue.platformFees?.usdc != null ? (revenue.platformFees.usdc * 0.5).toFixed(2) : '0.00')}</span> USDC</span>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </OwlVisionDisclosure>
+        <AdminPlatformFinanceSection
+          wallet={publicKey && isFullAdmin ? publicKey.toBase58() : null}
+          refreshTick={autoRefreshTick}
+        />
 
         {/* Next Rev Share — founder-editable date and total SOL/USDC for homepage */}
         <OwlVisionDisclosure

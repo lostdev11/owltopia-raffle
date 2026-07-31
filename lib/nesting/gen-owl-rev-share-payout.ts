@@ -1,4 +1,4 @@
-import { payoutCryptoFromGenOwlRevSharePool } from '@/lib/nesting/gen-owl-rev-share-pool'
+import { payoutCombinedCryptoFromGenOwlRevSharePool } from '@/lib/nesting/gen-owl-rev-share-pool'
 
 export type GenOwlRevSharePayoutResult = {
   sol_signature: string | null
@@ -12,29 +12,9 @@ export async function payoutGenOwlRevShareClaim(params: {
   amount_sol: number
   amount_usdc: number
 }): Promise<GenOwlRevSharePayoutResult> {
-  const errors: string[] = []
-  let solSig: string | null = null
-  let usdcSig: string | null = null
-
-  if (params.amount_sol > 0) {
-    const res = await payoutCryptoFromGenOwlRevSharePool({
-      recipientWallet: params.wallet,
-      amount: params.amount_sol,
-      currency: 'SOL',
-    })
-    if (res.ok && res.signature) solSig = res.signature
-    else errors.push(!res.ok ? res.error : 'SOL payout failed')
-  }
-
-  if (params.amount_usdc > 0) {
-    const res = await payoutCryptoFromGenOwlRevSharePool({
-      recipientWallet: params.wallet,
-      amount: params.amount_usdc,
-      currency: 'USDC',
-    })
-    if (res.ok && res.signature) usdcSig = res.signature
-    else errors.push(!res.ok ? res.error : 'USDC payout failed')
-  }
-
-  return { sol_signature: solSig, usdc_signature: usdcSig, payout_errors: errors }
+  return payoutCombinedCryptoFromGenOwlRevSharePool({
+    recipientWallet: params.wallet,
+    amount_sol: params.amount_sol,
+    amount_usdc: params.amount_usdc,
+  })
 }
