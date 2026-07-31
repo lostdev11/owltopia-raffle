@@ -148,6 +148,16 @@ export function NestingLandingClient({
     }
   }, [connected, publicKey])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const hash = window.location.hash.replace(/^#/, '')
+    if (hash !== 'perches') return
+    const frame = requestAnimationFrame(() => {
+      document.getElementById('perches')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [])
+
   return (
     <div className="container mx-auto px-3 sm:px-4 py-6 sm:py-10 pb-16 max-w-6xl space-y-12 sm:space-y-16">
       <Link
@@ -200,17 +210,6 @@ export function NestingLandingClient({
         </div>
       ) : null}
 
-      <div className="space-y-4">
-        <NestingGlobalOwlNestProgress initialStats={initialOwlNest365Stats} />
-        {visibleGenGroups.map((groupKey) => (
-          <NestingGlobalGenOwlNestProgress
-            key={groupKey}
-            groupKey={groupKey}
-            initialStats={initialGenOwlNestStats[groupKey] ?? null}
-          />
-        ))}
-      </div>
-
       <NestingHero />
 
       <section id="perches" className="scroll-mt-24">
@@ -243,6 +242,17 @@ export function NestingLandingClient({
           </ul>
         )}
       </section>
+
+      <div className="space-y-4">
+        <NestingGlobalOwlNestProgress initialStats={initialOwlNest365Stats} />
+        {visibleGenGroups.map((groupKey) => (
+          <NestingGlobalGenOwlNestProgress
+            key={groupKey}
+            groupKey={groupKey}
+            initialStats={initialGenOwlNestStats[groupKey] ?? null}
+          />
+        ))}
+      </div>
 
       <section className="space-y-4" aria-labelledby="nesting-steps-heading">
         <div>
@@ -338,6 +348,10 @@ export function NestingLandingClient({
             {
               q: 'When can I claim OWL rewards?',
               a: 'OWL accrues daily while nested, but you claim it yourself from My nest when you are ready — at least 1 OWL per nest claim, or use Claim all on mobile when multiple nests are ready.',
+            },
+            {
+              q: 'Where do I claim Gen 1 / Gen 2 rev share (SOL / USDC)?',
+              a: 'Open My nest → Claims at the top. Monthly rev share is separate from OWL: claim SOL/USDC there (or from Dashboard → Winnings). Claims open on the last day of the month (UTC) and stack until you grab them.',
             },
             {
               q: 'Why does nesting take so long?',

@@ -1,7 +1,18 @@
+'use client'
+
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { nestingClaimReadyButtonClass } from '@/lib/nesting/ui-classes'
 import { cn } from '@/lib/utils'
+
+function scrollToPerches() {
+  const el = document.getElementById('perches')
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  if (typeof history !== 'undefined' && history.replaceState) {
+    history.replaceState(null, '', '#perches')
+  }
+}
 
 export function NestingHero() {
   return (
@@ -19,20 +30,21 @@ export function NestingHero() {
           Chill, nest, rack up OWL—with one quick wallet hello.
         </p>
         <p className="text-sm text-muted-foreground max-w-lg mx-auto leading-relaxed">
-          Pick a perch, settle in for the countdown, then grab rewards whenever you want. Signing in costs no gas—you
-          just prove it is still you.
+          Pick a perch, settle in for the countdown, then grab OWL and monthly SOL/USDC rev share whenever you want.
+          Signing in costs no gas—you just prove it is still you.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
           <Button
-            asChild
+            type="button"
             variant="default"
             size="lg"
             className={cn(
               nestingClaimReadyButtonClass,
               'min-h-[48px] touch-manipulation text-base font-semibold'
             )}
+            onClick={scrollToPerches}
           >
-            <Link href="#perches">See perches</Link>
+            See perches
           </Button>
           <Button
             asChild
@@ -48,6 +60,16 @@ export function NestingHero() {
             <Link href="/dashboard/nesting">My nest</Link>
           </Button>
         </div>
+        <p className="pt-1 text-xs text-muted-foreground leading-relaxed">
+          Already nested Gen 1 / Gen 2?{' '}
+          <Link
+            href="/dashboard/nesting#nesting-claims"
+            className="font-medium text-theme-prime underline-offset-4 hover:underline touch-manipulation"
+          >
+            Claim rev share on My nest
+          </Link>
+          .
+        </p>
       </div>
     </section>
   )

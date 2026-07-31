@@ -511,6 +511,17 @@ export function DashboardNestingClient() {
     void refreshAll()
   }, [refreshAll, walletReady])
 
+  /** Deep-link to Claims / Claim all from landing or dashboard Winnings. */
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const hash = window.location.hash.replace(/^#/, '')
+    if (hash !== 'nesting-claims' && hash !== 'nesting-claim-all-banner') return
+    const t = window.setTimeout(() => {
+      document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 120)
+    return () => window.clearTimeout(t)
+  }, [])
+
   /** Escape hatch — never leave the page stuck on "Warming up your nest". */
   useEffect(() => {
     if (!loading) return
@@ -3256,7 +3267,7 @@ export function DashboardNestingClient() {
           </div>
           <h1 className="text-2xl sm:text-3xl font-display tracking-wide text-theme-prime">My nest</h1>
           <p className="text-sm text-muted-foreground">
-            Rewards quietly stack while you roam—grab OWL whenever you are ready.
+            Claims at the top: monthly SOL/USDC rev share, then OWL whenever you are ready.
           </p>
           <p className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
             <Wallet className="h-4 w-4 shrink-0 opacity-70" aria-hidden />

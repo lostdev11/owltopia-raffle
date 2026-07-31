@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { Coins, Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -131,8 +132,6 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
     await load()
   }
 
-  if (!connected) return null
-
   return (
     <div
       className={cn(
@@ -149,7 +148,16 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
         {genOwlRevShareDistributionSummary('gen2-owl')}
       </p>
 
-      {needsSignIn ? (
+      {!connected ? (
+        <div className="mt-3 space-y-2">
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Connect your wallet in the header, then open Claims on My nest to view and claim SOL/USDC.
+          </p>
+          <Button asChild variant="outline" className="min-h-[44px] w-full touch-manipulation sm:w-auto">
+            <Link href="/dashboard/nesting#nesting-claims">Open Claims</Link>
+          </Button>
+        </div>
+      ) : needsSignIn ? (
         <p className="mt-2 text-xs text-amber-400/95">Sign in with your wallet to view and claim rev share.</p>
       ) : loading ? (
         <p className="mt-3 inline-flex items-center gap-2 text-xs text-muted-foreground">
