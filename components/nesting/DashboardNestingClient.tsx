@@ -3267,7 +3267,7 @@ export function DashboardNestingClient() {
           </div>
           <h1 className="text-2xl sm:text-3xl font-display tracking-wide text-theme-prime">My nest</h1>
           <p className="text-sm text-muted-foreground">
-            Claims at the top: monthly SOL/USDC rev share, then OWL whenever you are ready.
+            Rewards quietly stack while you roam—grab OWL whenever you are ready.
           </p>
           <p className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
             <Wallet className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
