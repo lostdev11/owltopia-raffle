@@ -1,4 +1,5 @@
 import {
+  clearGenOwlRevSharePeriodFinalization,
   finalizeGenOwlRevSharePeriod,
   getGenOwlRevSharePeriod,
   type GenOwlRevSharePeriodRow,
@@ -31,18 +32,8 @@ export async function ensureGenOwlRevSharePeriodRow(periodMonth: string): Promis
   return getGenOwlRevSharePeriod(periodMonth)
 }
 
-/** Snapshot eligible nest counts and per-nest amounts when claims open. */
-export async function ensureGenOwlRevSharePeriodFinalized(
-  periodMonth: string
-): Promise<GenOwlRevSharePeriodRow | null> {
-  if (!claimsOpenForPeriod(periodMonth)) return null
-
-  let period = await ensureGenOwlRevSharePeriodRow(periodMonth)
-  if (!period || !periodHasDepositTotals(period)) return null
-
-  if (period.finalized_at) return period
-
-  const nests = await listEligibleGenOwlNestsForPeriod(periodMonth)
+async function computeAndWriteFinalize(period: GenOwlRevSharePeriodRow): Promise<GenOwlRevSharePeriodRow | null> {
+  const nests = await listEligibleGenOwlNestsForPeriod(period.period_month)
   const counts = countEligibleByGroup(nests)
   const gen1Buckets = await countGen1EligibleByRevShareBucket(nests)
   const gen1Amounts = computeGen1RevShareBucketAmounts({
@@ -52,8 +43,8 @@ export async function ensureGenOwlRevSharePeriodFinalized(
     oneOfOneCount: gen1Buckets.one_of_one,
   })
 
-  period = await finalizeGenOwlRevSharePeriod({
-    period_month: periodMonth,
+  return finalizeGenOwlRevSharePeriod({
+    period_month: period.period_month,
     gen1_eligible_count: counts['gen1-owl'],
     gen2_eligible_count: counts['gen2-owl'],
     gen1_standard_eligible_count: gen1Amounts.standard_count,
@@ -67,6 +58,41 @@ export async function ensureGenOwlRevSharePeriodFinalized(
     gen2_per_nest_sol: computeEvenRevSharePerNest(period.gen2_total_sol, counts['gen2-owl']),
     gen2_per_nest_usdc: computeEvenRevSharePerNest(period.gen2_total_usdc, counts['gen2-owl']),
   })
+}
 
-  return period
+/** Snapshot eligible nest counts and per-nest amounts when claims open. */
+export async function ensureGenOwlRevSharePeriodFinalized(
+  periodMonth: string
+): Promise<GenOwlRevSharePeriodRow | null> {
+  if (!claimsOpenForPeriod(periodMonth)) return null
+
+  let period = await ensureGenOwlRevSharePeriodRow(periodMonth)
+  if (!period || !periodHasDepositTotals(period)) return null
+
+  if (period.finalized_at) return period
+
+  return computeAndWriteFinalize(period)
+}
+
+/**
+ * Admin repair: clear a bad finalize snapshot and recompute with current eligibility
+ * (e.g. after fixing PostgREST pagination that under-counted nests).
+ * Allowed even while the claims kill switch is off.
+ */
+export async function forceRefinalizeGenOwlRevSharePeriod(
+  periodMonth: string
+): Promise<GenOwlRevSharePeriodRow | null> {
+  if (!claimsOpenForPeriod(periodMonth)) {
+    return null
+  }
+
+  let period = await ensureGenOwlRevSharePeriodRow(periodMonth)
+  if (!period || !periodHasDepositTotals(period)) return null
+
+  if (period.finalized_at) {
+    period = await clearGenOwlRevSharePeriodFinalization(periodMonth)
+    if (!period) return null
+  }
+
+  return computeAndWriteFinalize(period)
 }

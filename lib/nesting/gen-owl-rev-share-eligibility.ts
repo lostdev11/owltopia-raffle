@@ -9,6 +9,9 @@ import {
 import { classifyGen1OneOfOneMints } from '@/lib/nesting/gen1-one-of-one'
 import { endOfPeriodMonthUtc, groupKeyForPoolSlug } from '@/lib/nesting/gen-owl-rev-share-month'
 
+/** PostgREST caps each response at 1000 rows — paginate or Gen1 180d nests get dropped. */
+const POSITIONS_PAGE_SIZE = 1000
+
 const GROUP_SLUGS: Record<GenOwlStakingGroupKey, readonly string[]> = {
   'gen1-owl': GEN1_OWL_STAKING_POOL_SLUGS,
   'gen2-owl': GEN2_OWL_STAKING_POOL_SLUGS,
@@ -53,16 +56,29 @@ export async function listEligibleGenOwlNestsForPeriod(
   const poolById = new Map(pools.map((p) => [p.id, p]))
   const poolIds = pools.map((p) => p.id)
 
-  const { data: positions, error: posError } = await db
-    .from('staking_positions')
-    .select('*')
-    .in('pool_id', poolIds)
-    .in('status', ['active', 'unstaked'])
+  const positions: StakingPositionRow[] = []
+  for (let offset = 0; ; offset += POSITIONS_PAGE_SIZE) {
+    const { data, error: posError } = await db
+      .from('staking_positions')
+      .select('*')
+      .in('pool_id', poolIds)
+      .in('status', ['active', 'unstaked'])
+      .order('staked_at', { ascending: true })
+      .range(offset, offset + POSITIONS_PAGE_SIZE - 1)
 
-  if (posError || !positions?.length) return []
+    if (posError) {
+      console.error('[gen-owl-rev-share] eligible positions page:', posError.message)
+      return []
+    }
+    const page = (data ?? []) as StakingPositionRow[]
+    positions.push(...page)
+    if (page.length < POSITIONS_PAGE_SIZE) break
+  }
+
+  if (!positions.length) return []
 
   const out: GenOwlEligibleNest[] = []
-  for (const row of positions as StakingPositionRow[]) {
+  for (const row of positions) {
     if (!isPositionEligibleForRevSharePeriod(row, periodMonth)) continue
     const pool = poolById.get(row.pool_id)
     if (!pool) continue

@@ -281,6 +281,8 @@ export default function AdminDashboardPage() {
   } | null>(null)
   const [revShareScheduleSaving, setRevShareScheduleSaving] = useState(false)
   const [revShareClaimsToggling, setRevShareClaimsToggling] = useState(false)
+  const [revShareRefinalizing, setRevShareRefinalizing] = useState(false)
+  const [revShareRefinalizeMsg, setRevShareRefinalizeMsg] = useState<string | null>(null)
   const [revShareScheduleEdit, setRevShareScheduleEdit] = useState({
     gen1_next_date: '',
     gen2_next_date: '',
@@ -1258,6 +1260,38 @@ export default function AdminDashboardPage() {
       console.error('Error toggling rev share claims:', e)
     } finally {
       setRevShareClaimsToggling(false)
+    }
+  }
+
+  const refinalizeRevSharePeriod = async () => {
+    if (!publicKey) return
+    setRevShareRefinalizing(true)
+    setRevShareRefinalizeMsg(null)
+    try {
+      const res = await fetch('/api/admin/gen-owl-rev-share/refinalize', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setRevShareRefinalizeMsg(
+          typeof data.error === 'string' ? data.error : 'Could not recompute claim amounts.'
+        )
+        return
+      }
+      setRevShareRefinalizeMsg(
+        `Recomputed ${data.period_month}: Gen1 standard ${data.gen1_standard_eligible_count} × ${data.gen1_standard_per_nest_sol ?? '—'} SOL` +
+          (data.gen1_one_of_one_eligible_count
+            ? ` · 1/1 ${data.gen1_one_of_one_eligible_count} × ${data.gen1_one_of_one_per_nest_sol ?? '—'} SOL`
+            : '')
+      )
+    } catch (e) {
+      console.error('Error refinalizing rev share:', e)
+      setRevShareRefinalizeMsg('Network error recomputing claim amounts.')
+    } finally {
+      setRevShareRefinalizing(false)
     }
   }
 
@@ -2848,7 +2882,27 @@ export default function AdminDashboardPage() {
                   Off hides Claim buttons and blocks payouts. Unclaimed shares stay stacked until you turn this back on.
                 </p>
               </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-h-[40px] touch-manipulation"
+                disabled={revShareRefinalizing || revShareScheduleSaving}
+                onClick={() => void refinalizeRevSharePeriod()}
+              >
+                {revShareRefinalizing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                    Recomputing…
+                  </>
+                ) : (
+                  'Recompute claim amounts'
+                )}
+              </Button>
             </div>
+            {revShareRefinalizeMsg ? (
+              <p className="mt-2 max-w-2xl text-xs text-muted-foreground">{revShareRefinalizeMsg}</p>
+            ) : null}
 
             <Button
               onClick={saveRevShareSchedule}

@@ -147,3 +147,36 @@ export async function finalizeGenOwlRevSharePeriod(input: {
   }
   return mapPeriodRow(data as Record<string, unknown>)
 }
+
+/** Clear finalize snapshot so the period can be recomputed (admin repair). */
+export async function clearGenOwlRevSharePeriodFinalization(
+  periodMonth: string
+): Promise<GenOwlRevSharePeriodRow | null> {
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('gen_owl_rev_share_periods')
+    .update({
+      gen1_eligible_count: null,
+      gen2_eligible_count: null,
+      gen1_standard_eligible_count: null,
+      gen1_one_of_one_eligible_count: null,
+      gen1_per_nest_sol: null,
+      gen1_per_nest_usdc: null,
+      gen1_standard_per_nest_sol: null,
+      gen1_standard_per_nest_usdc: null,
+      gen1_one_of_one_per_nest_sol: null,
+      gen1_one_of_one_per_nest_usdc: null,
+      gen2_per_nest_sol: null,
+      gen2_per_nest_usdc: null,
+      finalized_at: null,
+    })
+    .eq('period_month', periodMonth.trim())
+    .select('*')
+    .single()
+
+  if (error) {
+    console.error('[gen-owl-rev-share-periods] clear finalize:', error.message)
+    return null
+  }
+  return mapPeriodRow(data as Record<string, unknown>)
+}

@@ -7,6 +7,9 @@ const GROUP_SLUGS: Record<GenOwlStakingGroupKey, readonly string[]> = {
   'gen2-owl': GEN2_OWL_STAKING_POOL_SLUGS,
 }
 
+/** PostgREST caps each response at 1000 rows. */
+const MINTS_PAGE_SIZE = 1000
+
 /** Active nests across all lock tiers in a Gen 1 / Gen 2 group (one row per nested NFT). */
 export async function countActiveGenOwlNests(group: GenOwlStakingGroupKey): Promise<number> {
   const slugs = [...GROUP_SLUGS[group]]
@@ -58,22 +61,28 @@ export async function listActiveGenOwlNestMintsByGroup(
   const poolIds = (pools ?? []).map((p) => p.id).filter(Boolean)
   if (poolIds.length === 0) return []
 
-  const { data, error } = await db
-    .from('staking_positions')
-    .select('asset_identifier')
-    .in('pool_id', poolIds)
-    .eq('status', 'active')
-    .not('asset_identifier', 'is', null)
-
-  if (error) {
-    console.error('[gen-owl-rev-share] nest mints:', error.message)
-    return []
-  }
-
   const mints: string[] = []
-  for (const row of data ?? []) {
-    const mint = String((row as { asset_identifier?: string }).asset_identifier ?? '').trim()
-    if (mint) mints.push(mint)
+  for (let offset = 0; ; offset += MINTS_PAGE_SIZE) {
+    const { data, error } = await db
+      .from('staking_positions')
+      .select('asset_identifier')
+      .in('pool_id', poolIds)
+      .eq('status', 'active')
+      .not('asset_identifier', 'is', null)
+      .order('staked_at', { ascending: true })
+      .range(offset, offset + MINTS_PAGE_SIZE - 1)
+
+    if (error) {
+      console.error('[gen-owl-rev-share] nest mints:', error.message)
+      return mints
+    }
+
+    const page = data ?? []
+    for (const row of page) {
+      const mint = String((row as { asset_identifier?: string }).asset_identifier ?? '').trim()
+      if (mint) mints.push(mint)
+    }
+    if (page.length < MINTS_PAGE_SIZE) break
   }
   return mints
 }
