@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
-import { CheckCircle2, Coins, Loader2 } from 'lucide-react'
+import { CheckCircle2, Coins, ExternalLink, Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -28,6 +28,7 @@ import {
   isStakingPlatformFeeEnabledClient,
 } from '@/lib/nesting/staking-platform-fee'
 import { nestingClaimReadyButtonClass } from '@/lib/nesting/ui-classes'
+import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { cn } from '@/lib/utils'
 
 type Props = {
@@ -48,6 +49,40 @@ type ClaimSuccessState = {
   amount_sol: number
   amount_usdc: number
   claim_count: number
+  fee_signature: string | null
+  sol_transaction_signature: string | null
+  usdc_transaction_signature: string | null
+}
+
+function solscanTxUrl(signature: string): string {
+  const sig = signature.trim()
+  if (!sig) return ''
+  const cluster = /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''
+  return `https://solscan.io/tx/${encodeURIComponent(sig)}${cluster}`
+}
+
+function SolscanTxLink({
+  signature,
+  label,
+}: {
+  signature: string | null | undefined
+  label: string
+}) {
+  const sig = signature?.trim()
+  if (!sig) return null
+  const href = solscanTxUrl(sig)
+  if (!href) return null
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex min-h-[44px] items-center gap-1 touch-manipulation text-xs font-medium text-theme-prime underline-offset-4 hover:underline"
+    >
+      {label}
+      <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+    </a>
+  )
 }
 
 function groupByMonth(rows: GenOwlRevShareClaimableRow[]): MonthGroup[] {
@@ -167,11 +202,17 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
   const feeLabel = feeActive ? formatStakingPlatformFeeTotalLabel(claimAllCount) : null
 
   const openPeriodMonth = useMemo(() => latestOpenClaimPeriodMonth(), [])
-  const claimedOpenPeriodLabel = useMemo(() => {
+  const claimedOpenPeriod = useMemo(() => {
     if (!openPeriodMonth) return null
-    const hasHistory = history.some((r) => r.period_month === openPeriodMonth)
-    if (!hasHistory) return null
-    return formatPeriodMonthLabel(openPeriodMonth)
+    const rows = history.filter((r) => r.period_month === openPeriodMonth)
+    if (rows.length === 0) return null
+    const withSig =
+      rows.find((r) => r.sol_transaction_signature || r.usdc_transaction_signature) ?? rows[0]!
+    return {
+      label: formatPeriodMonthLabel(openPeriodMonth),
+      sol_signature: withSig.sol_transaction_signature ?? null,
+      usdc_signature: withSig.usdc_transaction_signature ?? null,
+    }
   }, [history, openPeriodMonth])
 
   const claimAll = async () => {
@@ -211,6 +252,11 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
         amount_sol: Number(data.amount_sol) || totals.sol,
         amount_usdc: Number(data.amount_usdc) || totals.usdc,
         claim_count: Number(data.claim_count) || claimable.length,
+        fee_signature: platformFeeSignature ?? null,
+        sol_transaction_signature:
+          typeof data.sol_transaction_signature === 'string' ? data.sol_transaction_signature : null,
+        usdc_transaction_signature:
+          typeof data.usdc_transaction_signature === 'string' ? data.usdc_transaction_signature : null,
       })
       await load()
     } catch (e) {
@@ -221,6 +267,21 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
       setBusy(false)
     }
   }
+
+  const successPayoutLinks = useMemo(() => {
+    if (!success) return null
+    const sol = success.sol_transaction_signature?.trim() || null
+    const usdc = success.usdc_transaction_signature?.trim() || null
+    if (sol && usdc && sol === usdc) {
+      return <SolscanTxLink signature={sol} label="View payout on Solscan" />
+    }
+    return (
+      <>
+        <SolscanTxLink signature={sol} label="View SOL payout on Solscan" />
+        <SolscanTxLink signature={usdc} label="View USDC payout on Solscan" />
+      </>
+    )
+  }, [success])
 
   return (
     <div
@@ -246,7 +307,7 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
         >
           <div className="flex items-start gap-2">
             <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400 mt-0.5" aria-hidden />
-            <div className="min-w-0 space-y-1">
+            <div className="min-w-0 space-y-1.5">
               <p className="text-sm font-semibold text-emerald-300">Claim successful</p>
               <p className="text-xs text-foreground/90 leading-relaxed">
                 Sent{' '}
@@ -264,6 +325,10 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
                 to your wallet
                 {success.claim_count > 1 ? ` for ${success.claim_count} nests` : ''}.
               </p>
+              <div className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3">
+                {successPayoutLinks}
+                <SolscanTxLink signature={success.fee_signature} label="View fee on Solscan" />
+              </div>
             </div>
           </div>
         </div>
@@ -290,11 +355,31 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
           Claims are temporarily paused. Your rev share stays stacked — check back soon.
         </p>
       ) : claimable.length === 0 ? (
-        claimedOpenPeriodLabel ? (
-          <p className="mt-2 text-xs text-foreground/90 leading-relaxed" role="status">
-            Claimed rev share for <span className="font-medium">{claimedOpenPeriodLabel}</span>. Check back
-            next month when claims open.
-          </p>
+        claimedOpenPeriod ? (
+          <div className="mt-2 space-y-1" role="status">
+            <p className="text-xs text-foreground/90 leading-relaxed">
+              Claimed rev share for <span className="font-medium">{claimedOpenPeriod.label}</span>. Check back
+              next month when claims open.
+            </p>
+            <div className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:gap-x-3">
+              {claimedOpenPeriod.sol_signature &&
+              claimedOpenPeriod.usdc_signature &&
+              claimedOpenPeriod.sol_signature === claimedOpenPeriod.usdc_signature ? (
+                <SolscanTxLink signature={claimedOpenPeriod.sol_signature} label="View on Solscan" />
+              ) : (
+                <>
+                  <SolscanTxLink
+                    signature={claimedOpenPeriod.sol_signature}
+                    label="View SOL on Solscan"
+                  />
+                  <SolscanTxLink
+                    signature={claimedOpenPeriod.usdc_signature}
+                    label="View USDC on Solscan"
+                  />
+                </>
+              )}
+            </div>
+          </div>
         ) : (
           <p className="mt-2 text-xs text-muted-foreground">
             Nothing to claim right now. When a month opens, unclaimed Gen 1 / Gen 2 rev share stays stacked here until

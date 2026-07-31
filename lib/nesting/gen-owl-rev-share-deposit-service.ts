@@ -6,7 +6,10 @@ import {
 } from '@/lib/db/gen-owl-rev-share-periods'
 import { getRevShareSchedule, updateRevShareSchedule } from '@/lib/db/rev-share-schedule'
 import { getGenOwlRevSharePoolPublicKey } from '@/lib/nesting/gen-owl-rev-share-pool'
-import { formatPeriodMonthUtc } from '@/lib/nesting/gen-owl-rev-share-month'
+import {
+  formatPeriodMonthUtc,
+  periodMonthFromScheduleDate,
+} from '@/lib/nesting/gen-owl-rev-share-month'
 import { verifyGenOwlRevSharePoolDepositTx } from '@/lib/nesting/verify-gen-owl-rev-share-deposit'
 import { StakingUserError } from '@/lib/nesting/errors'
 
@@ -18,6 +21,42 @@ function numOrZero(n: number | null | undefined): number {
 /** Fat-finger / abuse ceiling for a single deposit credit. */
 const MAX_DEPOSIT_SOL = 1_000
 const MAX_DEPOSIT_USDC = 1_000_000
+
+/**
+ * Prefer explicit period_month; otherwise map single-gen deposits to that gen's
+ * schedule next-date month (so Gen 2 August funding is not forced into July).
+ */
+export function resolveGenOwlRevShareDepositPeriodMonth(params: {
+  period_month?: string | null
+  gen1_total_sol?: number | null
+  gen1_total_usdc?: number | null
+  gen2_total_sol?: number | null
+  gen2_total_usdc?: number | null
+  gen1_next_date?: string | null
+  gen2_next_date?: string | null
+  now?: Date
+}): string {
+  const explicit = params.period_month?.trim()
+  if (explicit) return explicit
+
+  const gen1Sol = numOrZero(params.gen1_total_sol)
+  const gen2Sol = numOrZero(params.gen2_total_sol)
+  const gen1Usdc = numOrZero(params.gen1_total_usdc)
+  const gen2Usdc = numOrZero(params.gen2_total_usdc)
+  const hasGen1 = gen1Sol > 0 || gen1Usdc > 0
+  const hasGen2 = gen2Sol > 0 || gen2Usdc > 0
+
+  if (hasGen2 && !hasGen1) {
+    const fromGen2 = periodMonthFromScheduleDate(params.gen2_next_date)
+    if (fromGen2) return fromGen2
+  }
+  if (hasGen1 && !hasGen2) {
+    const fromGen1 = periodMonthFromScheduleDate(params.gen1_next_date)
+    if (fromGen1) return fromGen1
+  }
+
+  return formatPeriodMonthUtc(params.now ?? new Date())
+}
 
 export type GenOwlRevShareDepositConfirmResult = {
   period_month: string
@@ -53,7 +92,15 @@ export async function confirmGenOwlRevSharePoolDeposit(params: {
     )
   }
 
-  const periodMonth = (params.period_month?.trim() || formatPeriodMonthUtc(new Date())).trim()
+  const periodMonth = resolveGenOwlRevShareDepositPeriodMonth({
+    period_month: params.period_month,
+    gen1_total_sol: params.gen1_total_sol,
+    gen1_total_usdc: params.gen1_total_usdc,
+    gen2_total_sol: params.gen2_total_sol,
+    gen2_total_usdc: params.gen2_total_usdc,
+    gen1_next_date: params.gen1_next_date,
+    gen2_next_date: params.gen2_next_date,
+  })
   const depositor = params.depositorWallet.trim()
 
   const gen1Sol = numOrZero(params.gen1_total_sol)

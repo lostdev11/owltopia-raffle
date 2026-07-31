@@ -27,6 +27,8 @@ export type GenOwlRevShareClaimableRow = {
   amount_sol: number
   amount_usdc: number
   already_claimed: boolean
+  sol_transaction_signature?: string | null
+  usdc_transaction_signature?: string | null
 }
 
 function perNestForGroup(
@@ -141,6 +143,8 @@ export async function listGenOwlRevShareClaimableForWallet(
         amount_sol: amounts.sol,
         amount_usdc: amounts.usdc,
         already_claimed: Boolean(claimed),
+        sol_transaction_signature: claimed?.sol_transaction_signature ?? null,
+        usdc_transaction_signature: claimed?.usdc_transaction_signature ?? null,
       })
     }
   }

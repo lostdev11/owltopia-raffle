@@ -64,6 +64,75 @@ export function formatPeriodMonthLabel(periodMonth: string): string {
   })
 }
 
+/**
+ * Map homepage schedule date strings (e.g. "31 August 2026", "31 Aug 2026", "2026-08")
+ * to a period month key. Returns null when unparseable.
+ */
+export function periodMonthFromScheduleDate(raw: string | null | undefined): string | null {
+  const s = raw?.trim()
+  if (!s) return null
+  if (PERIOD_RE.test(s)) return s
+
+  // "31 August 2026" / "31 Aug 2026" / "August 31, 2026"
+  const named = s.match(
+    /^(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s+(\d{4})$/i
+  )
+  if (named) {
+    const day = Number(named[1])
+    const year = Number(named[3])
+    const monthToken = named[2].toLowerCase()
+    const monthMap: Record<string, number> = {
+      january: 1,
+      jan: 1,
+      february: 2,
+      feb: 2,
+      march: 3,
+      mar: 3,
+      april: 4,
+      apr: 4,
+      may: 5,
+      june: 6,
+      jun: 6,
+      july: 7,
+      jul: 7,
+      august: 8,
+      aug: 8,
+      september: 9,
+      sept: 9,
+      sep: 9,
+      october: 10,
+      oct: 10,
+      november: 11,
+      nov: 11,
+      december: 12,
+      dec: 12,
+    }
+    const month = monthMap[monthToken]
+    if (month && day >= 1 && day <= 31 && year >= 2000) {
+      return `${year}-${String(month).padStart(2, '0')}`
+    }
+  }
+
+  const parsed = Date.parse(s)
+  if (!Number.isNaN(parsed)) {
+    return formatPeriodMonthUtc(new Date(parsed))
+  }
+  return null
+}
+
+/**
+ * Whether homepage schedule pool totals for a gen should feed the given period's estimate.
+ * Future-month schedule amounts (e.g. Gen 2 → August) must not appear under the current month.
+ */
+export function scheduleTotalsApplyToPeriod(
+  nextDate: string | null | undefined,
+  periodMonth: string
+): boolean {
+  const fromDate = periodMonthFromScheduleDate(nextDate)
+  if (!fromDate) return true
+  return fromDate === periodMonth
+}
+
 export function groupKeyForPoolSlug(slug: string | null | undefined): GenOwlStakingGroupKey | null {
   const s = slug?.trim().toLowerCase() ?? ''
   if (s.startsWith('gen1-owl')) return 'gen1-owl'

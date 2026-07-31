@@ -15,6 +15,7 @@ import {
   formatPeriodMonthLabel,
   formatPeriodMonthUtc,
   groupKeyForPoolSlug,
+  scheduleTotalsApplyToPeriod,
 } from '@/lib/nesting/gen-owl-rev-share-month'
 import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
 
@@ -58,10 +59,27 @@ export async function getGenOwlRevShareEstimateForWallet(
   const period = await getGenOwlRevSharePeriod(periodMonth)
   const schedule = await getRevShareSchedule()
 
-  const pool_gen1_sol = positive(period?.gen1_total_sol ?? schedule?.gen1_total_sol)
-  const pool_gen1_usdc = positive(period?.gen1_total_usdc ?? schedule?.gen1_total_usdc)
-  const pool_gen2_sol = positive(period?.gen2_total_sol ?? schedule?.gen2_total_sol)
-  const pool_gen2_usdc = positive(period?.gen2_total_usdc ?? schedule?.gen2_total_usdc)
+  // After finalize, only deposited period totals count. Before finalize, schedule
+  // display amounts may preview — but only when that gen's next date is this month
+  // (so Gen 2 August pool does not show under July).
+  const finalized = Boolean(period?.finalized_at)
+  const useGen1Schedule =
+    !finalized && scheduleTotalsApplyToPeriod(schedule?.gen1_next_date ?? schedule?.next_date, periodMonth)
+  const useGen2Schedule =
+    !finalized && scheduleTotalsApplyToPeriod(schedule?.gen2_next_date ?? schedule?.next_date, periodMonth)
+
+  const pool_gen1_sol = positive(
+    period?.gen1_total_sol ?? (useGen1Schedule ? schedule?.gen1_total_sol : null)
+  )
+  const pool_gen1_usdc = positive(
+    period?.gen1_total_usdc ?? (useGen1Schedule ? schedule?.gen1_total_usdc : null)
+  )
+  const pool_gen2_sol = positive(
+    period?.gen2_total_sol ?? (useGen2Schedule ? schedule?.gen2_total_sol : null)
+  )
+  const pool_gen2_usdc = positive(
+    period?.gen2_total_usdc ?? (useGen2Schedule ? schedule?.gen2_total_usdc : null)
+  )
 
   if (pool_gen1_sol <= 0 && pool_gen1_usdc <= 0 && pool_gen2_sol <= 0 && pool_gen2_usdc <= 0) {
     return null
