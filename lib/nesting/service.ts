@@ -487,12 +487,29 @@ export async function executeClaimAll(params: {
     }
   }
 
-  const result = await executeChunkedBatchOwlClaims({
-    wallet: params.wallet,
-    pool,
-    plans,
-  })
+  try {
+    const result = await executeChunkedBatchOwlClaims({
+      wallet: params.wallet,
+      pool,
+      plans,
+    })
 
-  await commitStakingPlatformFeeLinked(feeParams)
-  return result
+    await commitStakingPlatformFeeLinked(feeParams)
+    return result
+  } catch (e) {
+    // Partial Claim-all already sent OWL for some batches: still record the fee for completed
+    // nests so a retry can append remaining ids to the same payment instead of charging again.
+    if (e instanceof StakingUserError && e.extra?.code === 'claim_all_partial_batch') {
+      const completed = Array.isArray(e.extra.completed_position_ids)
+        ? e.extra.completed_position_ids.filter((id): id is string => typeof id === 'string')
+        : []
+      if (completed.length > 0) {
+        await commitStakingPlatformFeeLinked({
+          ...feeParams,
+          positionIds: completed,
+        }).catch(() => {})
+      }
+    }
+    throw e
+  }
 }

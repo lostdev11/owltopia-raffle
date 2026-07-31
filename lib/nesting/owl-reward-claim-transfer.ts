@@ -109,51 +109,69 @@ export async function tryTransferOwlRewardClaim(params: {
     }
   }
 
-  const tx = new Transaction()
-  const [{ blockhash, lastValidBlockHeight }, fromAtaExists, toAtaExists] = await Promise.all([
-    connection.getLatestBlockhash('confirmed'),
+  const [fromAtaExists, toAtaExists] = await Promise.all([
     splAtaExists(fromAta),
     splAtaExists(toAta),
   ])
 
-  if (!fromAtaExists) {
-    tx.add(
-      createAssociatedTokenAccountInstruction(
-        treasuryPk,
-        fromAta,
-        treasuryPk,
-        mint,
-        programId,
-        ASSOCIATED_TOKEN_PROGRAM_ID
+  const buildTransferTx = (): Transaction => {
+    const tx = new Transaction()
+    if (!fromAtaExists) {
+      tx.add(
+        createAssociatedTokenAccountInstruction(
+          treasuryPk,
+          fromAta,
+          treasuryPk,
+          mint,
+          programId,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
       )
-    )
-  }
-  if (!toAtaExists) {
-    tx.add(
-      createAssociatedTokenAccountInstruction(
-        treasuryPk,
-        toAta,
-        recipient,
-        mint,
-        programId,
-        ASSOCIATED_TOKEN_PROGRAM_ID
+    }
+    if (!toAtaExists) {
+      tx.add(
+        createAssociatedTokenAccountInstruction(
+          treasuryPk,
+          toAta,
+          recipient,
+          mint,
+          programId,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
       )
-    )
-  }
-  tx.add(createTransferInstruction(fromAta, toAta, treasuryPk, amountRaw, [], programId))
-
-  try {
-    tx.recentBlockhash = blockhash
+    }
+    tx.add(createTransferInstruction(fromAta, toAta, treasuryPk, amountRaw, [], programId))
     tx.feePayer = treasuryPk
-    const signature = await connection.sendTransaction(tx, [treasury], {
-      skipPreflight: false,
-      preflightCommitment: 'processed',
-      maxRetries: 3,
-    })
-    // Processed is enough for treasury→user SPL payouts; avoids an extra confirmed round-trip.
-    await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'processed')
-    return { kind: 'sent', signature }
-  } catch (e) {
-    return { kind: 'failed', error: e instanceof Error ? e.message : 'OWL reward transfer failed' }
+    return tx
   }
+
+  const isBlockhashExpiryError = (message: string): boolean => {
+    const m = message.toLowerCase()
+    return m.includes('block height exceeded') || m.includes('blockhash not found')
+  }
+
+  /** Fresh blockhash + rebroadcast when confirmation times out; never double-send a landed sig. */
+  const maxAttempts = 3
+  let lastError = 'OWL reward transfer failed'
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
+      const tx = buildTransferTx()
+      tx.recentBlockhash = blockhash
+      const signature = await connection.sendTransaction(tx, [treasury], {
+        skipPreflight: false,
+        preflightCommitment: 'processed',
+        maxRetries: 3,
+      })
+      // Processed is enough for treasury→user SPL payouts; avoids an extra confirmed round-trip.
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'processed')
+      return { kind: 'sent', signature }
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : 'OWL reward transfer failed'
+      const canRetry = isBlockhashExpiryError(lastError) && attempt < maxAttempts
+      if (!canRetry) break
+      // Signature never landed (null status / expiry) — safe to rebuild with a new blockhash.
+    }
+  }
+  return { kind: 'failed', error: lastError }
 }

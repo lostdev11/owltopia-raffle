@@ -67,7 +67,7 @@ export async function executeChunkedBatchOwlClaims(params: {
     } catch (e) {
       if (totalClaimed > 0) {
         throw new StakingUserError(
-          `OWL was sent for ${i} of ${chunks.length} batches (${totalClaimed.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL total). Refresh your wallet and dashboard — do not Claim all again until balances update. Contact support if any nests still show claimable OWL.`,
+          `OWL was sent for ${i} of ${chunks.length} batches (${totalClaimed.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL total). Refresh your wallet and dashboard — Claim all again only for remaining nests; your prior platform fee can be reused if the app still has it. Contact support if any nests still show claimable OWL after a successful payout.`,
           503,
           {
             code: 'claim_all_partial_batch',
@@ -75,6 +75,8 @@ export async function executeChunkedBatchOwlClaims(params: {
             batch_count: chunks.length,
             total_claimed: totalClaimed,
             transaction_signatures: transactionSignatures,
+            completed_position_ids: claims.map((c) => c.position_id),
+            claims,
           }
         )
       }
