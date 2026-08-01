@@ -26,7 +26,11 @@ export async function GET(request: NextRequest) {
     const viewerWallet = session?.wallet ?? null
     const viewerIsAdmin = viewerWallet ? (await getAdminRole(viewerWallet)) !== null : false
 
-    await promoteDraftRafflesToLive()
+    // Best-effort; never let a stuck Supabase connect burn the whole serverless budget.
+    await Promise.race([
+      promoteDraftRafflesToLive(),
+      new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
+    ])
 
     const { data: raffles, error } = viewerIsAdmin
       ? await getRaffles(activeOnly, activeOnly ? undefined : { includeDraft: true })
@@ -60,11 +64,13 @@ export async function GET(request: NextRequest) {
     }
 
     const filtered = filterRafflesByPendingVisibility(raffles ?? [], viewerWallet, viewerIsAdmin)
-    // Cart browse (`active=true`) only needs purchasability fields — skip Helius holder enrichment (timeouts).
+    // Cart browse (`active=true`) / live activity (`lite=true`) skip Helius — otherwise keep a short
+    // budget so admin-role + DB + enrich stay under Vercel maxDuration (60s). A 45s enrich budget
+    // plus upstream connect timeouts was causing widespread 504s.
     const skipHolderEnrich = activeOnly || searchParams.get('lite') === 'true'
     const enriched = skipHolderEnrich
       ? filtered
-      : await enrichRafflesWithCreatorHolder(filtered, { budgetMs: 45_000 })
+      : await enrichRafflesWithCreatorHolder(filtered, { budgetMs: 8_000 })
     return NextResponse.json(enriched, { status: 200 })
   } catch (err) {
     console.error('[GET /api/raffles] unexpected error:', err)

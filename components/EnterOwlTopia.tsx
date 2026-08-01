@@ -48,7 +48,8 @@ export function EnterOwlTopia() {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    fetch('/api/raffles', { cache: 'no-store' }).catch(() => {})
+    // lite=true warms DB path without Helius enrichment (avoids burning serverless budget).
+    fetch('/api/raffles?lite=true', { cache: 'no-store' }).catch(() => {})
   }, [])
 
   // Scroll-driven animation: update progress for parallax / reveal

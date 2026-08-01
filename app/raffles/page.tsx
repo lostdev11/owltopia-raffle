@@ -98,8 +98,12 @@ export default async function RafflesPage() {
 
     const requestStartedAt = Date.now()
 
-    // Promote any draft raffles whose start_time has passed to live (so they show as active)
-    await promoteDraftRafflesToLive()
+    // Promote any draft raffles whose start_time has passed to live (so they show as active).
+    // Cap wait so a stuck Supabase connect cannot consume the whole serverless budget.
+    await Promise.race([
+      promoteDraftRafflesToLive(),
+      new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
+    ])
 
     // Single path: REST only. Fail fast so client fallback (API + direct Supabase) takes over.
     const SERVER_FETCH_TIMEOUT_MS = 15_000
@@ -177,8 +181,8 @@ export default async function RafflesPage() {
     // Pending raffles should only be visible to admins and the creator.
     allRaffles = filterRafflesByPendingVisibility(allRaffles, viewerWallet, viewerIsAdmin)
 
-    // Enrich with creator Owl holder status — reserve wall clock under maxDuration.
-    const holderBudgetMs = Math.max(8_000, 58_000 - (Date.now() - requestStartedAt))
+    // Enrich with creator Owl holder status — keep headroom under maxDuration for response serialization.
+    const holderBudgetMs = Math.max(5_000, Math.min(20_000, 45_000 - (Date.now() - requestStartedAt)))
     allRaffles = await enrichRafflesWithCreatorHolder(allRaffles, { budgetMs: holderBudgetMs })
 
     const now = new Date()

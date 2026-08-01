@@ -648,8 +648,8 @@ export function RafflesPageClient({
     serverFuture.length === 0 &&
     serverPast.length === 0
 
-  // Fallback: when server returned no raffles OR an error, fetch from API + direct Supabase in parallel
-  // Use serverTime (always a Date; may be client time until /api/time syncs) so we don't block on sync
+  // Fallback: when server returned no raffles OR an error, fetch from API + direct Supabase in parallel.
+  // Do NOT depend on serverTime — useServerTime ticks every 1s and would retrigger this into a 504 storm.
   useEffect(() => {
     if (typeof window === 'undefined') return
     // Connected wallet: visibility merge effect loads the list with the adapter address.
@@ -688,7 +688,7 @@ export function RafflesPageClient({
             sol_domains_hub: r.sol_domains_hub === true,
             })) as Raffle[]
             const filtered = filterRafflesByPendingVisibility(normalized, wallet || null, viewerIsAdmin)
-            setClientBuckets(bucketRaffles(filtered, serverTime))
+            setClientBuckets(bucketRaffles(filtered, serverTimeRef.current))
           setClientFetchError(null)
         }
       } catch {
@@ -699,7 +699,8 @@ export function RafflesPageClient({
     // When server already failed, try direct Supabase only if error doesn't suggest Supabase is down
     if (initialError && !isLikelySupabaseDown(initialError.message)) tryDirectSupabase()
 
-    fetch('/api/raffles')
+    // lite=true skips Helius holder enrichment so this stays under Vercel maxDuration
+    fetch('/api/raffles?lite=true')
       .then(async (res) => {
         if (cancelled) return null
         const data = await res.json().catch(() => ({}))
@@ -734,7 +735,7 @@ export function RafflesPageClient({
         const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : [])
         if (list.length > 0) {
           const filtered = filterRafflesByPendingVisibility(list as Raffle[], wallet || null, viewerIsAdmin)
-          setClientBuckets(bucketRaffles(filtered, serverTime))
+          setClientBuckets(bucketRaffles(filtered, serverTimeRef.current))
         } else {
           tryDirectSupabase()
         }
@@ -748,7 +749,7 @@ export function RafflesPageClient({
     return () => {
       cancelled = true
     }
-  }, [initialError, isEmptyFromServer, viewerIsAdmin, wallet, connected, serverTime])
+  }, [initialError, isEmptyFromServer, viewerIsAdmin, wallet, connected])
 
   const useWalletVisibilityBuckets = Boolean(!viewerIsAdmin && connected && wallet && clientBuckets)
   const active = useWalletVisibilityBuckets
