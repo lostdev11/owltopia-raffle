@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Plus,
   Rocket,
+  Send,
   Settings,
   ShoppingCart,
   Ticket,
@@ -111,6 +112,12 @@ export const COMMUNITY_NAV_GROUP: SiteNavGroup = {
       description: 'Launches, mints, and collection infrastructure',
       icon: Rocket,
     },
+    {
+      href: '/owl-send',
+      label: 'OwlSend',
+      description: 'Send NFTs & tokens — 0.001 SOL fee (admin preview)',
+      icon: Send,
+    },
   ],
 }
 
@@ -177,6 +184,12 @@ export const ADMIN_NAV_GROUP: SiteNavGroup = {
       description: 'Manage community giveaways',
       icon: Gift,
     },
+    {
+      href: '/admin/owl-send',
+      label: 'OwlSend',
+      description: 'Admin test bench for NFT/token sends',
+      icon: Send,
+    },
   ],
 }
 
@@ -184,6 +197,14 @@ export function isPathInNavGroup(pathname: string, group: SiteNavGroup): boolean
   return group.items.some(
     (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
   )
+}
+
+/** Hide OwlSend from Community nav during admin-only preview. */
+export function filterCommunityNavItems(options: {
+  showOwlSend: boolean
+}): SiteNavItem[] {
+  if (options.showOwlSend) return COMMUNITY_NAV_GROUP.items
+  return COMMUNITY_NAV_GROUP.items.filter((item) => item.href !== '/owl-send')
 }
 
 /** Admin menu items are admin-only. Create Raffle is no longer here (see CREATE_RAFFLE_NAV_ITEM). */

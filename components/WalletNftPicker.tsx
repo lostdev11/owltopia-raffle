@@ -32,8 +32,9 @@ const MOBILE_PAGE_SIZE = 16
 
 export interface WalletNftPickerProps {
   nfts: WalletNft[]
-  selectedMint: string | null
-  onSelect: (nft: WalletNft) => void
+  /** Single-select (create raffle). Ignored when `selectionMode="multi"`. */
+  selectedMint?: string | null
+  onSelect?: (nft: WalletNft) => void
   searchQuery: string
   onSearchQueryChange: (query: string) => void
   /** Optional mint / asset id field for Core, compressed, or copy-paste from explorer. */
@@ -43,6 +44,18 @@ export interface WalletNftPickerProps {
   pageSize?: number
   searchInputId?: string
   mintInputId?: string
+  /**
+   * `multi` = toggle many NFTs (OwlSend). Same collection / sort / grid-list filters
+   * as create raffle’s “Choose prize NFT” picker.
+   */
+  selectionMode?: 'single' | 'multi'
+  selectedMints?: Set<string>
+  onToggle?: (nft: WalletNft) => void
+  maxSelect?: number
+  /** Replace selection with the first N from the current filtered list. */
+  onSelectFilteredMints?: (mints: string[]) => void
+  dialogTitle?: string
+  dialogDescription?: string
 }
 
 /** Picker tiles are ≤160px; NFT art can be a 5–8MB original, so prefer the server-downscaled proxy. */
@@ -135,6 +148,11 @@ function WalletNftPickerBody({
   pageSize,
   searchInputId,
   defaultViewMode,
+  selectionMode = 'single',
+  selectedMints,
+  onToggle,
+  maxSelect,
+  onSelectFilteredMints,
 }: {
   nfts: WalletNft[]
   selectedMint: string | null
@@ -144,11 +162,18 @@ function WalletNftPickerBody({
   pageSize: number
   searchInputId: string
   defaultViewMode: WalletNftViewMode
+  selectionMode?: 'single' | 'multi'
+  selectedMints?: Set<string>
+  onToggle?: (nft: WalletNft) => void
+  maxSelect?: number
+  onSelectFilteredMints?: (mints: string[]) => void
 }) {
   const [collectionKey, setCollectionKey] = useState<string | 'all'>('all')
   const [viewMode, setViewMode] = useState<WalletNftViewMode>(defaultViewMode)
   const [sort, setSort] = useState<WalletNftSort>('name')
   const [page, setPage] = useState(0)
+  const multi = selectionMode === 'multi'
+  const selectedCount = selectedMints?.size ?? 0
 
   const collections = useMemo(() => groupWalletNftsByCollection(nfts), [nfts])
 
@@ -174,7 +199,16 @@ function WalletNftPickerBody({
     }
   }, [page, totalPages])
 
+  const isSelected = (mint: string) => {
+    if (multi) return selectedMints?.has(mint) ?? false
+    return Boolean(selectedMint && walletNftMintMatches(selectedMint, mint))
+  }
+
   const handleSelect = (nft: WalletNft) => {
+    if (multi) {
+      onToggle?.(nft)
+      return
+    }
     onSelect(nft)
   }
 
@@ -204,11 +238,11 @@ function WalletNftPickerBody({
         </div>
         <div className="flex gap-2">
           <div className="space-y-1 min-w-[8.5rem] flex-1 sm:flex-none">
-            <Label htmlFor="nft-sort" className="text-xs">
+            <Label htmlFor={`${searchInputId}-sort`} className="text-xs">
               Sort
             </Label>
             <select
-              id="nft-sort"
+              id={`${searchInputId}-sort`}
               value={sort}
               onChange={(e) => setSort(e.target.value as WalletNftSort)}
               className="flex h-11 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm touch-manipulation"
@@ -249,11 +283,11 @@ function WalletNftPickerBody({
 
       {collections.length > 0 && (
         <div className="space-y-1.5">
-          <Label htmlFor="nft-collection-filter" className="text-xs">
+          <Label htmlFor={`${searchInputId}-collection`} className="text-xs">
             Collection
           </Label>
           <select
-            id="nft-collection-filter"
+            id={`${searchInputId}-collection`}
             value={collectionKey}
             onChange={(e) => setCollectionKey(e.target.value)}
             className="flex h-11 w-full min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm touch-manipulation"
@@ -273,36 +307,52 @@ function WalletNftPickerBody({
           {filtered.length === 0
             ? 'No NFTs match your filters.'
             : `Showing ${safePage * pageSize + 1}–${Math.min((safePage + 1) * pageSize, filtered.length)} of ${filtered.length}`}
+          {multi && maxSelect != null ? ` · ${selectedCount} / ${maxSelect} selected` : ''}
         </span>
-        {totalPages > 1 && (
-          <div className="flex items-center gap-1">
-            <Button
+        <div className="flex items-center gap-2">
+          {multi && onSelectFilteredMints && maxSelect != null ? (
+            <button
               type="button"
-              variant="outline"
-              size="sm"
-              className="h-10 px-3 touch-manipulation"
-              disabled={safePage <= 0}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              aria-label="Previous page"
+              className="font-semibold text-primary hover:underline disabled:opacity-40"
+              disabled={filtered.length === 0}
+              onClick={() =>
+                onSelectFilteredMints(filtered.slice(0, maxSelect).map((nft) => nft.mint))
+              }
             >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="px-1 tabular-nums">
-              {safePage + 1} / {totalPages}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-10 px-3 touch-manipulation"
-              disabled={safePage >= totalPages - 1}
-              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-              aria-label="Next page"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
+              Select up to {maxSelect}
+              {collectionKey !== 'all' ? ' in filter' : ''}
+            </button>
+          ) : null}
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-10 px-3 touch-manipulation"
+                disabled={safePage <= 0}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="px-1 tabular-nums">
+                {safePage + 1} / {totalPages}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-10 px-3 touch-manipulation"
+                disabled={safePage >= totalPages - 1}
+                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                aria-label="Next page"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -311,42 +361,49 @@ function WalletNftPickerBody({
         </p>
       ) : viewMode === 'grid' ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-          {pageItems.map((nft) => (
-            <button
-              key={`${nft.tokenAccount}-${nft.mint}`}
-              type="button"
-              onClick={() => handleSelect(nft)}
-              className={`rounded-lg border-2 p-2 text-left transition-colors touch-manipulation ${
-                selectedMint && walletNftMintMatches(selectedMint, nft.mint)
-                  ? 'border-primary bg-primary/10'
-                  : 'border-border hover:border-muted-foreground/50'
-              }`}
-            >
-              <div className="aspect-square rounded overflow-hidden bg-muted mb-2">
-                <NftThumb nft={nft} className="w-full h-full object-cover" />
-              </div>
-              <p className="text-xs font-medium truncate" title={nft.name ?? nft.mint}>
-                {nft.name ?? `${nft.mint.slice(0, 4)}…`}
-              </p>
-              <p
-                className="text-[10px] text-muted-foreground truncate"
-                title={walletNftCollectionDisplayLabel(nft)}
+          {pageItems.map((nft) => {
+            const selected = isSelected(nft.mint)
+            const atCap = multi && !selected && maxSelect != null && selectedCount >= maxSelect
+            return (
+              <button
+                key={`${nft.tokenAccount}-${nft.mint}`}
+                type="button"
+                disabled={atCap}
+                onClick={() => handleSelect(nft)}
+                className={`rounded-lg border-2 p-2 text-left transition-colors touch-manipulation disabled:opacity-40 ${
+                  selected
+                    ? 'border-primary bg-primary/10'
+                    : 'border-border hover:border-muted-foreground/50'
+                }`}
               >
-                {walletNftCollectionDisplayLabel(nft)}
-              </p>
-            </button>
-          ))}
+                <div className="aspect-square rounded overflow-hidden bg-muted mb-2">
+                  <NftThumb nft={nft} className="w-full h-full object-cover" />
+                </div>
+                <p className="text-xs font-medium truncate" title={nft.name ?? nft.mint}>
+                  {nft.name ?? `${nft.mint.slice(0, 4)}…`}
+                </p>
+                <p
+                  className="text-[10px] text-muted-foreground truncate"
+                  title={walletNftCollectionDisplayLabel(nft)}
+                >
+                  {walletNftCollectionDisplayLabel(nft)}
+                </p>
+              </button>
+            )
+          })}
         </div>
       ) : (
         <ul className="divide-y divide-border rounded-md border">
           {pageItems.map((nft) => {
-            const selected = selectedMint && walletNftMintMatches(selectedMint, nft.mint)
+            const selected = isSelected(nft.mint)
+            const atCap = multi && !selected && maxSelect != null && selectedCount >= maxSelect
             return (
               <li key={`${nft.tokenAccount}-${nft.mint}`}>
                 <button
                   type="button"
+                  disabled={atCap}
                   onClick={() => handleSelect(nft)}
-                  className={`flex w-full items-center gap-3 p-3 text-left transition-colors touch-manipulation min-h-[64px] ${
+                  className={`flex w-full items-center gap-3 p-3 text-left transition-colors touch-manipulation min-h-[64px] disabled:opacity-40 ${
                     selected ? 'bg-primary/10' : 'hover:bg-muted/60 active:bg-muted'
                   }`}
                 >
@@ -378,7 +435,7 @@ function WalletNftPickerBody({
 
 export function WalletNftPicker({
   nfts,
-  selectedMint,
+  selectedMint = null,
   onSelect,
   searchQuery,
   onSearchQueryChange,
@@ -388,11 +445,19 @@ export function WalletNftPicker({
   pageSize = DEFAULT_PAGE_SIZE,
   searchInputId = 'nft-search',
   mintInputId = 'nft-mint-paste',
+  selectionMode = 'single',
+  selectedMints,
+  onToggle,
+  maxSelect,
+  onSelectFilteredMints,
+  dialogTitle,
+  dialogDescription,
 }: WalletNftPickerProps) {
   const coarsePointer = useCoarsePointer()
   const [browseOpen, setBrowseOpen] = useState(false)
   const mobilePageSize = Math.min(pageSize, MOBILE_PAGE_SIZE)
   const defaultViewMode: WalletNftViewMode = coarsePointer ? 'list' : 'grid'
+  const multi = selectionMode === 'multi'
 
   const collections = useMemo(() => groupWalletNftsByCollection(nfts), [nfts])
   const collectionSummary = useMemo(() => {
@@ -410,9 +475,28 @@ export function WalletNftPicker({
     [nfts, selectedMint]
   )
 
+  const selectedMultiNfts = useMemo(() => {
+    if (!multi || !selectedMints?.size) return []
+    return nfts.filter((nft) => selectedMints.has(nft.mint))
+  }, [multi, nfts, selectedMints])
+
   const handleSelect = (nft: WalletNft) => {
-    onSelect(nft)
+    onSelect?.(nft)
     onMintInputChange?.(nft.mint)
+  }
+
+  const bodyProps = {
+    nfts,
+    selectedMint,
+    onSelect: handleSelect,
+    searchQuery,
+    onSearchQueryChange,
+    selectionMode,
+    selectedMints,
+    onToggle,
+    maxSelect,
+    onSelectFilteredMints,
+    defaultViewMode,
   }
 
   const mintPaste =
@@ -426,11 +510,42 @@ export function WalletNftPicker({
       />
     ) : null
 
+  const title = dialogTitle ?? (multi ? 'Select NFTs' : 'Choose prize NFT')
+  const description =
+    dialogDescription ??
+    'Filter by collection, switch to list view, or search by name or mint.'
+
   if (coarsePointer && nfts.length > 0) {
     return (
       <div className="space-y-3">
         {mintPaste}
-        {selectedNft ? (
+        {multi ? (
+          selectedMultiNfts.length > 0 ? (
+            <div className="rounded-lg border border-primary/40 bg-primary/5 p-3 space-y-2">
+              <p className="text-sm font-medium">
+                {selectedMultiNfts.length} NFT{selectedMultiNfts.length === 1 ? '' : 's'} selected
+                {maxSelect != null ? ` (max ${maxSelect})` : ''}
+              </p>
+              <ul className="space-y-1.5 max-h-36 overflow-y-auto">
+                {selectedMultiNfts.slice(0, 8).map((nft) => (
+                  <li key={nft.mint} className="flex items-center gap-2 text-xs">
+                    <div className="h-8 w-8 shrink-0 overflow-hidden rounded">
+                      <NftThumb nft={nft} className="h-full w-full object-cover" />
+                    </div>
+                    <span className="truncate">{nft.name ?? shortenMint(nft.mint)}</span>
+                  </li>
+                ))}
+                {selectedMultiNfts.length > 8 ? (
+                  <li className="text-muted-foreground">+{selectedMultiNfts.length - 8} more</li>
+                ) : null}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Browse your wallet NFTs — filter by collection, then tap to select.
+            </p>
+          )
+        ) : selectedNft ? (
           <div className="flex items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
             <div className="h-14 w-14 shrink-0 rounded overflow-hidden">
               <NftThumb nft={selectedNft} className="w-full h-full object-cover" />
@@ -466,21 +581,14 @@ export function WalletNftPicker({
         <Dialog open={browseOpen} onOpenChange={setBrowseOpen}>
           <DialogContent className="left-0 top-0 flex h-[100dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-0 p-0 sm:left-[50%] sm:top-[50%] sm:h-auto sm:max-h-[90vh] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:border sm:p-4">
             <DialogHeader className="shrink-0 border-b px-4 py-3 text-left sm:border-0 sm:px-0 sm:pt-0">
-              <DialogTitle>Choose prize NFT</DialogTitle>
-              <DialogDescription>
-                Filter by collection, switch to list view, or search by name or mint.
-              </DialogDescription>
+              <DialogTitle>{title}</DialogTitle>
+              <DialogDescription>{description}</DialogDescription>
             </DialogHeader>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-0">
               <WalletNftPickerBody
-                nfts={nfts}
-                selectedMint={selectedMint}
-                onSelect={handleSelect}
-                searchQuery={searchQuery}
-                onSearchQueryChange={onSearchQueryChange}
+                {...bodyProps}
                 pageSize={mobilePageSize}
                 searchInputId={`${searchInputId}-dialog`}
-                defaultViewMode={defaultViewMode}
               />
             </div>
             <div className="shrink-0 border-t p-4 sm:border-0 sm:px-0 sm:pb-0">
@@ -489,7 +597,11 @@ export function WalletNftPicker({
                 className="w-full min-h-[48px] touch-manipulation text-base"
                 onClick={() => setBrowseOpen(false)}
               >
-                {selectedMint ? 'Done' : 'Close'}
+                {multi
+                  ? selectedCountLabel(selectedMints?.size ?? 0)
+                  : selectedMint
+                    ? 'Done'
+                    : 'Close'}
               </Button>
             </div>
           </DialogContent>
@@ -502,15 +614,19 @@ export function WalletNftPicker({
     <div className="space-y-3">
       {mintPaste}
       <WalletNftPickerBody
-        nfts={nfts}
-        selectedMint={selectedMint}
-        onSelect={handleSelect}
-        searchQuery={searchQuery}
-        onSearchQueryChange={onSearchQueryChange}
+        {...bodyProps}
         pageSize={pageSize}
         searchInputId={searchInputId}
-        defaultViewMode={defaultViewMode}
       />
     </div>
   )
+}
+
+function shortenMint(mint: string): string {
+  return mint.length > 12 ? `${mint.slice(0, 4)}…${mint.slice(-4)}` : mint
+}
+
+function selectedCountLabel(count: number): string {
+  if (count <= 0) return 'Close'
+  return `Done · ${count} selected`
 }

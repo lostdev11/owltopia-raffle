@@ -27,8 +27,10 @@ import {
   NESTING_NAV_ITEM,
   OWLS_NAV_GROUP,
   filterAdminNavItems,
+  filterCommunityNavItems,
   type SiteNavGroup,
 } from '@/lib/site-nav'
+import { isOwlSendPublicClient } from '@/lib/owl-send/access'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
@@ -119,10 +121,19 @@ export function Header() {
     [showOwlVision, adminRole]
   )
 
+  const showOwlSendNav = isOwlSendPublicClient() || showOwlVision
+  const communityNavGroup = useMemo<SiteNavGroup>(
+    () => ({
+      ...COMMUNITY_NAV_GROUP,
+      items: filterCommunityNavItems({ showOwlSend: showOwlSendNav }),
+    }),
+    [showOwlSendNav]
+  )
+
   const mobileNavGroups = useMemo(
     () =>
-      [COMMUNITY_NAV_GROUP, OWLS_NAV_GROUP, ...(adminNavGroup.items.length > 0 ? [adminNavGroup] : [])],
-    [adminNavGroup]
+      [communityNavGroup, OWLS_NAV_GROUP, ...(adminNavGroup.items.length > 0 ? [adminNavGroup] : [])],
+    [adminNavGroup, communityNavGroup]
   )
 
   const dashboardActive =
@@ -153,7 +164,7 @@ export function Header() {
           <div className="flex items-center gap-2 lg:gap-4 flex-shrink-0">
             <div className="hidden md:flex items-center gap-2 lg:gap-4">
               <HeaderRafflesMenuDesktop buttonClassName={desktopNavButtonClass} />
-              <HeaderNavGroupMenuDesktop group={COMMUNITY_NAV_GROUP} buttonClassName={desktopNavButtonClass} />
+              <HeaderNavGroupMenuDesktop group={communityNavGroup} buttonClassName={desktopNavButtonClass} />
               <HeaderNavGroupMenuDesktop group={OWLS_NAV_GROUP} buttonClassName={desktopNavButtonClass} />
               <Link href={NESTING_NAV_ITEM.href}>
                 <Button

@@ -48,6 +48,7 @@
     "test:siws-ledger-message": "npx --yes tsx scripts/test-siws-ledger-message-size.ts",
     "test:raffle-draw-verify": "npx --yes tsx scripts/test-raffle-draw-verify.ts",
     "test:nesting-batch-size-error": "npx --yes tsx scripts/test-nesting-batch-size-error.ts",
+    "test:owl-send-batch": "npx --yes tsx scripts/test-owl-send-batch.ts",
     "test:partner-nest-pool": "npx --yes tsx scripts/test-partner-nest-pool.ts",
     "test:if-chain-rarity": "npx --yes tsx scripts/verify-if-chain-rarity.ts",
     "test:if-chain-cycle": "npx --yes tsx scripts/verify-if-chain-cycle.ts",
