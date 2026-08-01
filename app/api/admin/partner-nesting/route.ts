@@ -104,13 +104,17 @@ export async function POST(request: NextRequest) {
       partner.display_label?.trim() || profile || creatorWallet.slice(0, 8)
 
     const nftLockStandardRaw = body?.nft_lock_standard
-    const nftLockStandard: NftLockStandard | undefined =
+    const nftLockStandard: NftLockStandard =
       nftLockStandardRaw !== undefined && isNftLockStandard(nftLockStandardRaw)
         ? nftLockStandardRaw
-        : undefined
+        : 'database_only'
 
     const locked =
-      body?.locked === undefined ? true : body.locked === true || body.locked === 'true'
+      nftLockStandard === 'database_only'
+        ? false
+        : body?.locked === undefined
+          ? false
+          : body.locked === true || body.locked === 'true'
     const maxLockDays =
       body?.max_lock_days !== undefined && body?.max_lock_days !== null && body?.max_lock_days !== ''
         ? Number(body.max_lock_days)
@@ -162,11 +166,18 @@ export async function POST(request: NextRequest) {
         display_label: partner.display_label,
         partner_tier: partner.partner_tier,
       },
-      next_steps: [
-        'Confirm freeze authority / lock standard matches this collection (Core vs SPL).',
-        'Run nesting freeze-readiness for a sample mint from the collection.',
-        'Ask a holder to open Nesting and verify their NFTs appear for this perch.',
-      ],
+      next_steps:
+        nftLockStandard === 'database_only'
+          ? [
+              'Soft nest: no freeze — holders keep transferable NFTs; rewards require continued ownership.',
+              'Ask a holder to open Nesting and verify their NFTs appear for this perch.',
+              'Confirm stake / claim / unstake with the 0.001 SOL platform fee when enabled.',
+            ]
+          : [
+              'Confirm freeze authority / lock standard matches this collection (Core vs SPL).',
+              'Run nesting freeze-readiness for a sample mint from the collection.',
+              'Ask a holder to open Nesting and verify their NFTs appear for this perch.',
+            ],
     })
   } catch (e) {
     console.error('[admin/partner-nesting POST]', e)

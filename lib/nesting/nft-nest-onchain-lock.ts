@@ -1,14 +1,17 @@
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
+import { markPositionUnstaked } from '@/lib/db/staking-positions'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { nestingNftAssetLabels } from '@/lib/nesting/gen1-staking-pools'
 import {
   assertWalletNftFrozenForNesting,
+  assertNftAssetOwnedByWallet,
   readOwlClaimNftNestLockEligibilityWithRetry,
 } from '@/lib/nesting/nft-freeze'
 import {
   readNestLockEligibilityForPoolWithRetry,
   assertWalletNftFrozenForPool,
+  poolConfiguredNftLockStandard,
 } from '@/lib/nesting/nft-lock-service'
 
 /** NFT perches that use MPL Core FreezeDelegate (holder wallet, non-transferable while nested). */
@@ -18,11 +21,29 @@ export function poolUsesOnChainNftFreezeLock(
   return pool.asset_type === 'nft' && pool.adapter_mode === 'onchain_enabled'
 }
 
+/** Soft nest: no on-chain freeze; NFT stays transferable; rewards gated by ownership. */
+export function poolUsesSoftNftNest(
+  pool: Pick<StakingPoolRow, 'asset_type' | 'nft_lock_standard' | 'adapter_mode'>
+): boolean {
+  if (pool.asset_type !== 'nft') return false
+  if (poolUsesOnChainNftFreezeLock(pool)) return false
+  return poolConfiguredNftLockStandard(pool) === 'database_only'
+}
+
 export function positionRequiresOnChainNftFreezeLock(
   position: Pick<StakingPositionRow, 'status' | 'asset_identifier'>,
   pool: Pick<StakingPoolRow, 'asset_type' | 'adapter_mode'>
 ): boolean {
   if (!poolUsesOnChainNftFreezeLock(pool)) return false
+  if (position.status !== 'active') return false
+  return Boolean(position.asset_identifier?.trim())
+}
+
+export function positionRequiresSoftNestOwnership(
+  position: Pick<StakingPositionRow, 'status' | 'asset_identifier'>,
+  pool: Pick<StakingPoolRow, 'asset_type' | 'nft_lock_standard' | 'adapter_mode'>
+): boolean {
+  if (!poolUsesSoftNftNest(pool)) return false
   if (position.status !== 'active') return false
   return Boolean(position.asset_identifier?.trim())
 }
@@ -100,8 +121,42 @@ export async function assertNftNestOnChainLockHeld(params: {
 export async function assertActiveNftNestOnChainLock(
   position: StakingPositionRow,
   pool: StakingPoolRow,
-  options?: { repairMissingFreeze?: boolean; allowOwnerThawedForClaim?: boolean }
+  options?: {
+    repairMissingFreeze?: boolean
+    allowOwnerThawedForClaim?: boolean
+    /** Soft nests: require NFT still in wallet (default true). Pass false when closing/unstaking. */
+    requireSoftOwnership?: boolean
+    /** When soft nest NFT was transferred, close the DB position and rethrow. */
+    closeSoftNestIfSold?: boolean
+  }
 ): Promise<void> {
+  const requireSoft = options?.requireSoftOwnership !== false
+  if (requireSoft && positionRequiresSoftNestOwnership(position, pool)) {
+    try {
+      await assertNftAssetOwnedByWallet({
+        assetId: position.asset_identifier!,
+        ownerWallet: position.wallet_address,
+        collectionMint: pool.collection_key,
+      })
+    } catch (e) {
+      if (
+        options?.closeSoftNestIfSold &&
+        e instanceof StakingUserError &&
+        e.extra?.code === 'soft_nest_ownership_lost'
+      ) {
+        try {
+          await markPositionUnstaked(position.id, position.wallet_address, {
+            external_reference: 'soft_nest_closed_ownership_lost',
+          })
+        } catch {
+          /* best-effort close; still surface ownership error */
+        }
+      }
+      throw e
+    }
+    return
+  }
+
   if (!positionRequiresOnChainNftFreezeLock(position, pool)) return
   await assertNftNestOnChainLockHeld({
     ownerWallet: position.wallet_address,
@@ -151,7 +206,10 @@ export async function verifyActiveNestLocksForClaimAll(
 ): Promise<void> {
   const rowsToVerify = positions.filter((row) => {
     const pool = poolById.get(row.pool_id)
-    return pool && positionRequiresOnChainNftFreezeLock(row, pool)
+    return (
+      pool &&
+      (positionRequiresOnChainNftFreezeLock(row, pool) || positionRequiresSoftNestOwnership(row, pool))
+    )
   })
 
   const concurrency = claimAllLockVerifyConcurrency(rowsToVerify.length)
@@ -166,7 +224,10 @@ export async function verifyActiveNestLocksForClaimAll(
         if (!rowPool) {
           throw new StakingUserError('Pool not found', 400)
         }
-        await assertActiveNftNestOnChainLock(row, rowPool, { allowOwnerThawedForClaim: true })
+        await assertActiveNftNestOnChainLock(row, rowPool, {
+          allowOwnerThawedForClaim: true,
+          closeSoftNestIfSold: true,
+        })
       })
     )
   }

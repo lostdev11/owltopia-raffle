@@ -28,6 +28,8 @@ export function PartnerNestingRequestCard({ className }: Props) {
   const [collectionKey, setCollectionKey] = useState('')
   const [poolName, setPoolName] = useState('')
   const [usePartnerToken, setUsePartnerToken] = useState(false)
+  /** Soft nest (default): transferable. Freeze lock: on-chain freeze while nested. */
+  const [useFreezeLock, setUseFreezeLock] = useState(false)
   const [rewardSymbol, setRewardSymbol] = useState('')
   const [rewardMint, setRewardMint] = useState('')
   const [rewardDecimals, setRewardDecimals] = useState('9')
@@ -124,10 +126,10 @@ export function PartnerNestingRequestCard({ className }: Props) {
           reward_decimals: usePartnerToken ? Number(rewardDecimals) : undefined,
           reward_rate: Number(rewardRate) || 1,
           notes: notes.trim() || undefined,
-          locked: true,
-          max_lock_days: 90,
-          min_lock_days: 30,
-          nft_lock_standard: 'auto',
+          locked: useFreezeLock,
+          max_lock_days: useFreezeLock ? 90 : 0,
+          min_lock_days: useFreezeLock ? 30 : 0,
+          nft_lock_standard: useFreezeLock ? 'auto' : 'database_only',
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -137,14 +139,15 @@ export function PartnerNestingRequestCard({ className }: Props) {
       }
       setSaveOk(
         usePartnerToken
-          ? 'Request submitted. Owltopia will review your collection and partner reward token.'
-          : 'Request submitted. Owltopia will review your collection (OWL rewards).'
+          ? 'Application submitted. Owltopia will review your collection and partner reward token.'
+          : 'Application submitted. Owltopia will review your collection (OWL rewards).'
       )
       setCollectionKey('')
       setPoolName('')
       setRewardMint('')
       setRewardSymbol('')
       setNotes('')
+      setUseFreezeLock(false)
       setMintCheck('idle')
       setMintCheckError(null)
       setOpen(false)
@@ -165,8 +168,9 @@ export function PartnerNestingRequestCard({ className }: Props) {
             <div className="min-w-0">
               <p className="font-semibold text-foreground">Partner Nesting</p>
               <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                Request a stake perch for your NFT collection. Optionally propose your own SPL reward token for
-                holders — Owltopia admins accept or reject each request.
+                Apply for Nesting for your NFT collection. Soft nesting (default) keeps NFTs transferable; freeze lock
+                is optional. Propose your own SPL reward token or use platform OWL — Owltopia admins accept or reject
+                each request.
               </p>
             </div>
           </div>
@@ -179,7 +183,7 @@ export function PartnerNestingRequestCard({ className }: Props) {
             }}
           >
             <Plus className="mr-2 h-4 w-4" aria-hidden />
-            {open ? 'Close form' : 'Request nest'}
+            {open ? 'Close form' : 'Apply for Nesting'}
           </Button>
         </div>
 
@@ -204,6 +208,22 @@ export function PartnerNestingRequestCard({ className }: Props) {
                 placeholder="e.g. Misfits Nest"
                 value={poolName}
                 onChange={(e) => setPoolName(e.target.value)}
+              />
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-border/50 bg-background/70 px-3 py-3">
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm font-medium">Freeze lock (optional)</p>
+                <p className="text-xs text-muted-foreground">
+                  Off = soft nest — NFTs stay transferable; rewards require continued ownership. On = on-chain freeze
+                  while nested (cannot send the NFT until unstaked).
+                </p>
+              </div>
+              <Switch
+                id="pnr-freeze"
+                ariaLabel="Use freeze lock"
+                checked={useFreezeLock}
+                onCheckedChange={setUseFreezeLock}
               />
             </div>
 
@@ -362,6 +382,12 @@ export function PartnerNestingRequestCard({ className }: Props) {
                   </div>
                   <p className="break-all font-mono text-xs text-muted-foreground">{app.collection_key}</p>
                   <p className="text-xs text-muted-foreground">
+                    Mode:{' '}
+                    {app.nft_lock_standard === 'database_only'
+                      ? 'Soft nest (transferable)'
+                      : `Freeze (${app.nft_lock_standard})`}
+                    {app.locked ? ` · lock ${app.min_lock_days}–${app.max_lock_days}d` : ' · no lock period'}
+                    {' · '}
                     Rewards:{' '}
                     {app.reward_mode_requested === 'partner_token'
                       ? `${app.reward_token_symbol || 'TOKEN'} (${app.reward_mint?.slice(0, 8)}…)`

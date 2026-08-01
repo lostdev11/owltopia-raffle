@@ -73,7 +73,13 @@ export function validatePartnerNestCreateInput(input: PartnerNestCreateInput): s
     return 'Collection address does not look like a Solana public key.'
   }
 
-  const locked = input.locked !== false
+  const standard = input.nftLockStandard ?? 'database_only'
+  const locked = standard === 'database_only' ? false : input.locked === true
+
+  if (standard === 'database_only' && input.locked === true) {
+    return 'Soft nests (database_only) cannot use a freeze lock period.'
+  }
+
   if (locked) {
     const maxLock = input.maxLockDays ?? 365
     const minLock = input.minLockDays ?? 30
@@ -88,9 +94,12 @@ export function validatePartnerNestCreateInput(input: PartnerNestCreateInput): s
     }
   }
 
-  const standard = input.nftLockStandard ?? 'auto'
-  if (standard === 'database_only') {
-    return 'Partner nesting requires an on-chain freeze standard (auto, Core, or SPL) — not preview/database_only.'
+  if (
+    !['auto', 'mpl_core_freeze_delegate', 'spl_token_account_freeze', 'database_only'].includes(
+      standard
+    )
+  ) {
+    return 'Invalid NFT lock standard.'
   }
 
   const mode = input.rewardMode ?? 'platform_owl'
@@ -124,10 +133,10 @@ export function buildPartnerNestPoolPayload(input: PartnerNestCreateInput): Part
     (input.partnerSlug?.trim() && slugifyPoolSegment(input.partnerSlug)) ||
     partnerSlugFromLabel(label)
   const name = (input.poolName?.trim() || `${label} Nest`).slice(0, 80)
-  const locked = input.locked !== false
+  const nftLockStandard: NftLockStandard = input.nftLockStandard ?? 'database_only'
+  const locked = nftLockStandard === 'database_only' ? false : input.locked === true
   const maxLock = locked ? (input.maxLockDays ?? 365) : 0
   const minLock = locked ? (input.minLockDays ?? 30) : 0
-  const nftLockStandard: NftLockStandard = input.nftLockStandard ?? 'auto'
   const onchain = nftLockStandard !== 'database_only'
   const mode = input.rewardMode ?? 'platform_owl'
   const rewardToken =

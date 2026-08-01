@@ -30,7 +30,7 @@ const TIER_OPTIONS = [
   { value: '$0_partner', label: '$0 Partner (2% fee + Discord support)' },
   {
     value: 'partner_pro',
-    label: `Partner Pro ($${PARTNER_PRO_SETUP_USD} setup + $${PARTNER_PRO_STANDARD_MONTHLY_USD}/mo)`,
+    label: `Partner Pro ($${PARTNER_PRO_SETUP_USD} setup + 2% raffle fee)`,
   },
   { value: 'white_label', label: 'White-label (custom)' },
 ] as const
@@ -273,10 +273,11 @@ export default function AdminPartnerCreatorsPage() {
         </Link>
         ), new ticket raffles from that wallet can mirror Owltopia-style announcements in their server (created + winner
         webhooks they configure; claims stay on the user dashboard).{' '}
-        <strong className="text-foreground">Discord Partner Pro renewal</strong> uses{' '}
-        <span className="font-mono text-xs">partner_pro_monthly_quote_usdc</span> when linked (grandfathered partners{' '}
-        {PARTNER_PRO_GRANDFATHER_MONTHLY_USD} USDC); otherwise the catalog standard ({PARTNER_PRO_STANDARD_MONTHLY_USD}{' '}
-        USDC, <span className="font-mono text-xs">DISCORD_PARTNER_USDC_PRICE</span>). On raffle cards we show the creator&apos;s{' '}
+        Optional <strong className="text-foreground">Discord Partner Pro renewal</strong> quotes use{' '}
+        <span className="font-mono text-xs">partner_pro_monthly_quote_usdc</span> when linked (not part of the public
+        Partner Pro catalog — that is ${PARTNER_PRO_SETUP_USD} setup only). Bot fallback defaults:{' '}
+        {PARTNER_PRO_GRANDFATHER_MONTHLY_USD}/{PARTNER_PRO_STANDARD_MONTHLY_USD} USDC or{' '}
+        <span className="font-mono text-xs">DISCORD_PARTNER_USDC_PRICE</span>. On raffle cards we show the creator&apos;s{' '}
         <strong className="text-foreground">dashboard display name</strong> from{' '}
         <Link href="/dashboard" className="text-primary underline-offset-4 hover:underline">wallet profile</Link> when set;
         otherwise the optional allowlist label below. Public site reads active rows only; you can deactivate without
@@ -427,12 +428,13 @@ export default function AdminPartnerCreatorsPage() {
                     <span className="font-medium text-foreground">
                       {r.partner_pro_monthly_quote_usdc != null
                         ? `${r.partner_pro_monthly_quote_usdc} USDC`
-                        : `standard ${PARTNER_PRO_STANDARD_MONTHLY_USD} USDC`}
+                        : `bot default ${PARTNER_PRO_STANDARD_MONTHLY_USD} USDC`}
                     </span>
                     <span className="text-muted-foreground">
                       {' '}
-                      (per <span className="font-mono text-xs">/owltopia-partner subscribe</span> when this wallet links the tenant above;
-                      grandfathered partners typically {PARTNER_PRO_GRANDFATHER_MONTHLY_USD} USDC)
+                      (optional Discord bot billing via{' '}
+                      <span className="font-mono text-xs">/owltopia-partner subscribe</span>; public Partner Pro is $
+                      {PARTNER_PRO_SETUP_USD} setup only)
                     </span>
                   </p>
                   <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">

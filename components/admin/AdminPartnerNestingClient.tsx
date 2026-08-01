@@ -37,10 +37,10 @@ export function AdminPartnerNestingClient() {
   const [collectionKey, setCollectionKey] = useState('')
   const [poolName, setPoolName] = useState('')
   const [partnerSlug, setPartnerSlug] = useState('')
-  const [locked, setLocked] = useState(true)
+  const [locked, setLocked] = useState(false)
   const [maxLockDays, setMaxLockDays] = useState('90')
   const [minLockDays, setMinLockDays] = useState('30')
-  const [lockStandard, setLockStandard] = useState<NftLockStandard>('auto')
+  const [lockStandard, setLockStandard] = useState<NftLockStandard>('database_only')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveOk, setSaveOk] = useState<string | null>(null)
@@ -131,9 +131,9 @@ export function AdminPartnerNestingClient() {
           collection_key: collectionKey,
           pool_name: poolName.trim() || undefined,
           partner_slug: partnerSlug.trim() || undefined,
-          locked,
-          max_lock_days: locked ? Number(maxLockDays) : 0,
-          min_lock_days: locked ? Number(minLockDays) : 0,
+          locked: lockStandard === 'database_only' ? false : locked,
+          max_lock_days: lockStandard === 'database_only' || !locked ? 0 : Number(maxLockDays),
+          min_lock_days: lockStandard === 'database_only' || !locked ? 0 : Number(minLockDays),
           nft_lock_standard: lockStandard,
         }),
       })
@@ -143,7 +143,11 @@ export function AdminPartnerNestingClient() {
         return
       }
       const name = typeof json?.pool?.name === 'string' ? json.pool.name : 'Partner nest'
-      setSaveOk(`Created “${name}”. Holders can stake once freeze-readiness checks out.`)
+      setSaveOk(
+        lockStandard === 'database_only'
+          ? `Created “${name}”. Soft nest — holders keep transferable NFTs; rewards require ownership.`
+          : `Created “${name}”. Holders can stake once freeze-readiness checks out.`
+      )
       setNextSteps(Array.isArray(json?.next_steps) ? json.next_steps : [])
       setCollectionKey('')
       await fetchData()
@@ -310,18 +314,28 @@ export function AdminPartnerNestingClient() {
             <div className="space-y-1 min-w-0">
               <p className="text-sm font-medium">Locked staking</p>
               <p className="text-xs text-muted-foreground">
-                On = unstaking waits for max lock days. Off = no lock period on this perch.
+                On = unstaking waits for max lock days (freeze perches). Off = no lock period. Soft nests
+                (database_only) always use no lock.
               </p>
             </div>
             <div className="flex items-center justify-end gap-3 min-h-[44px] shrink-0">
-              <Switch id="pn-locked" ariaLabel="Locked staking" checked={locked} onCheckedChange={setLocked} />
+              <Switch
+                id="pn-locked"
+                ariaLabel="Locked staking"
+                checked={locked && lockStandard !== 'database_only'}
+                disabled={lockStandard === 'database_only'}
+                onCheckedChange={(v) => {
+                  setLocked(v)
+                  if (v && lockStandard === 'database_only') setLockStandard('auto')
+                }}
+              />
               <Label htmlFor="pn-locked" className="text-sm cursor-pointer">
-                {locked ? 'Lock enabled' : 'No lock'}
+                {locked && lockStandard !== 'database_only' ? 'Lock enabled' : 'No lock'}
               </Label>
             </div>
           </div>
 
-          {locked ? (
+          {locked && lockStandard !== 'database_only' ? (
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="pn-max-lock">Maximum lock (days)</Label>
@@ -351,16 +365,21 @@ export function AdminPartnerNestingClient() {
             <select
               id="pn-lock-standard"
               value={lockStandard}
-              onChange={(e) => setLockStandard(e.target.value as NftLockStandard)}
+              onChange={(e) => {
+                const next = e.target.value as NftLockStandard
+                setLockStandard(next)
+                if (next === 'database_only') setLocked(false)
+              }}
               className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-sm touch-manipulation"
             >
-              <option value="auto">Auto-detect (Helius)</option>
+              <option value="database_only">Soft nest (no freeze — transferable)</option>
+              <option value="auto">Auto-detect freeze (Helius)</option>
               <option value="mpl_core_freeze_delegate">Metaplex Core freeze</option>
               <option value="spl_token_account_freeze">SPL token account freeze</option>
             </select>
             <p className="text-xs text-muted-foreground">
-              Partner collections must use Core or SPL freeze (or auto). After create, run freeze-readiness on a sample
-              mint.
+              Soft nest is the default for partners: NFTs stay transferable; claim/stake require ownership. Freeze
+              standards lock the NFT on-chain while nested.
             </p>
           </div>
 

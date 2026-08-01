@@ -99,16 +99,26 @@ export async function POST(request: NextRequest) {
       reward_decimals = resolved.mint.decimals
     }
 
+    const nftLockStandard =
+      typeof body.nft_lock_standard === 'string' ? body.nft_lock_standard : 'database_only'
+    const locked =
+      nftLockStandard === 'database_only'
+        ? false
+        : body.locked === undefined
+          ? false
+          : Boolean(body.locked)
+
     const application = await insertPartnerNestApplication({
       creator_wallet: session.wallet,
       collection_key: typeof body.collection_key === 'string' ? body.collection_key : '',
       pool_name: typeof body.pool_name === 'string' ? body.pool_name : null,
       partner_slug: typeof body.partner_slug === 'string' ? body.partner_slug : null,
-      locked: body.locked === undefined ? true : Boolean(body.locked),
-      max_lock_days: body.max_lock_days !== undefined ? Number(body.max_lock_days) : 90,
-      min_lock_days: body.min_lock_days !== undefined ? Number(body.min_lock_days) : 30,
-      nft_lock_standard:
-        typeof body.nft_lock_standard === 'string' ? body.nft_lock_standard : 'auto',
+      locked,
+      max_lock_days:
+        locked && body.max_lock_days !== undefined ? Number(body.max_lock_days) : locked ? 90 : 0,
+      min_lock_days:
+        locked && body.min_lock_days !== undefined ? Number(body.min_lock_days) : locked ? 30 : 0,
+      nft_lock_standard: nftLockStandard,
       reward_mode_requested,
       reward_token_symbol:
         typeof body.reward_token_symbol === 'string' ? body.reward_token_symbol : null,

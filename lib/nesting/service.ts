@@ -103,35 +103,33 @@ export async function executeStake(params: {
   if (pool.asset_type === 'nft' && !asset_identifier) {
     throw new StakingUserError('asset_identifier is required for NFT staking.', 400)
   }
-  if (pool.asset_type === 'nft' && asset_identifier) {
-    await tryClearCrossWalletBlockerForMint({
-      holderWallet: params.wallet,
-      poolId: pool.id,
-      assetMint: asset_identifier,
-    })
-    const existing = await getActivePositionByAssetIdentifier(pool.id, asset_identifier)
-    if (existing) {
-      const nftFreezeConfirmed = Boolean(existing.external_reference?.startsWith('nft_freeze_confirmed:'))
-      const resumeNftFreezeLock =
-        existing.status === 'pending' &&
-        !nftFreezeConfirmed &&
-        existing.wallet_address.trim() === params.wallet.trim() &&
-        (pool.adapter_mode === 'onchain_enabled' ||
-          (existing.external_reference ?? '').trim() === 'awaiting_nft_freeze')
+    if (pool.asset_type === 'nft' && asset_identifier) {
+      await tryClearCrossWalletBlockerForMint({
+        holderWallet: params.wallet,
+        poolId: pool.id,
+        assetMint: asset_identifier,
+      })
+      const existing = await getActivePositionByAssetIdentifier(pool.id, asset_identifier)
+      if (existing) {
+        const nftFreezeConfirmed = Boolean(existing.external_reference?.startsWith('nft_freeze_confirmed:'))
+        const resumeNftFreezeLock =
+          existing.status === 'pending' &&
+          !nftFreezeConfirmed &&
+          existing.wallet_address.trim() === params.wallet.trim() &&
+          (pool.adapter_mode === 'onchain_enabled' ||
+            (existing.external_reference ?? '').trim() === 'awaiting_nft_freeze')
 
-      if (resumeNftFreezeLock) {
-        return { position: existing, pool }
+        if (resumeNftFreezeLock) {
+          return { position: existing, pool }
+        }
+        throw new StakingUserError('This NFT is already in an open staking position.', 400)
       }
-      throw new StakingUserError('This NFT is already in an open staking position.', 400)
-    }
-    if (pool.adapter_mode === 'onchain_enabled') {
       await assertNftEligibleForPoolStake({
         pool,
         assetId: asset_identifier,
         ownerWallet: params.wallet,
       })
     }
-  }
 
   await assertNestingOperationsAllowed()
   if (!params.bypassSelloutGate) {
@@ -199,7 +197,10 @@ export async function executeUnstake(params: {
   }
 
   if (existing.status === 'active') {
-    await assertActiveNftNestOnChainLock(existing, pool, { repairMissingFreeze: true })
+    await assertActiveNftNestOnChainLock(existing, pool, {
+      repairMissingFreeze: true,
+      requireSoftOwnership: false,
+    })
   }
 
   if (existing.status === 'active' && existing.unlock_at) {
@@ -307,7 +308,10 @@ export async function executeClaim(params: {
   if (!pool) {
     throw new StakingUserError('Pool not found', 400)
   }
-  await assertActiveNftNestOnChainLock(row, pool, { allowOwnerThawedForClaim: true })
+  await assertActiveNftNestOnChainLock(row, pool, {
+    allowOwnerThawedForClaim: true,
+    closeSoftNestIfSold: true,
+  })
 
   const stakedAtMs = new Date(row.staked_at).getTime()
   const asOfMs = Date.now()

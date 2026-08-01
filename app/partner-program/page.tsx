@@ -4,6 +4,7 @@ import Link from 'next/link'
 import {
   ArrowLeft,
   BarChart3,
+  Bird,
   Bot,
   Coins,
   Headphones,
@@ -26,11 +27,8 @@ import {
   getDefaultOgImageAbsoluteUrl,
 } from '@/lib/site-config'
 import { PARTNER_COMMUNITY_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
-import {
-  PARTNER_PRO_GRANDFATHER_MONTHLY_USD,
-  PARTNER_PRO_SETUP_USD,
-  PARTNER_PRO_STANDARD_MONTHLY_USD,
-} from '@/lib/config/partner-program-pricing'
+import { PARTNER_PRO_SETUP_USD } from '@/lib/config/partner-program-pricing'
+import { getStakingPlatformFeeSol } from '@/lib/nesting/staking-platform-fee'
 
 const SITE_URL = getSiteBaseUrl()
 const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
@@ -38,23 +36,24 @@ const DISCORD_URL = 'https://discord.gg/nRD2wyg2vq'
 
 const partnerFeePercent = PARTNER_COMMUNITY_FEE_BPS / 100
 const standardFeePercent = STANDARD_FEE_BPS / 100
+const nestingPlatformFeeSol = getStakingPlatformFeeSol()
 
 export const metadata: Metadata = {
   title: `Partner Program | ${PLATFORM_NAME}`,
-  description: `Owltopia Partner Program: collaborate with ${PLATFORM_NAME}, reduced platform fees, partner spotlight, Discord integration, and Partner Pro custom SPL ticket currency for your raffles only.`,
+  description: `Owltopia Partner Program: collaborate with ${PLATFORM_NAME}, reduced platform fees, partner spotlight, Discord integration, Partner Nesting, and Partner Pro custom SPL ticket currency for your raffles only.`,
   alternates: { canonical: `${SITE_URL}/partner-program` },
   openGraph: {
     type: 'website',
     url: `${SITE_URL}/partner-program`,
     siteName: PLATFORM_NAME,
     title: `Partner Program | ${PLATFORM_NAME}`,
-    description: `Owltopia Partner Program — reduced fees, visibility, tooling, and optional Partner Pro SPL ticket currency (your wallet only).`,
+    description: `Owltopia Partner Program — reduced fees, Partner Nesting, visibility, tooling, and optional Partner Pro SPL ticket currency (your wallet only).`,
     images: [{ url: OG_IMAGE, ...DEFAULT_OG_IMAGE_DIMS, alt: OG_ALT, type: DEFAULT_OG_IMAGE_TYPE }],
   },
   twitter: {
     card: 'summary_large_image',
     title: `Partner Program | ${PLATFORM_NAME}`,
-    description: `Owltopia Partner Program — reduced fees, visibility, tooling, and optional Partner Pro SPL ticket currency (your wallet only).`,
+    description: `Owltopia Partner Program — reduced fees, Partner Nesting, visibility, tooling, and optional Partner Pro SPL ticket currency (your wallet only).`,
     images: [{ url: OG_IMAGE, alt: OG_ALT, ...DEFAULT_OG_IMAGE_DIMS }],
   },
 }
@@ -69,6 +68,11 @@ const benefits: { icon: ReactNode; title: string; body: string }[] = [
     icon: <Ticket className="h-5 w-5 text-violet-400" aria-hidden />,
     title: 'No raffle creation fees',
     body: `Listings do not carry a separate creation or listing fee — only network costs when you deposit a prize or sign on-chain steps. The platform earns from ticket fees.`,
+  },
+  {
+    icon: <Bird className="h-5 w-5 text-violet-400" aria-hidden />,
+    title: 'Partner Nesting (free for partners)',
+    body: `Approved partners can apply for a stake perch for their NFT collection at no setup or monthly cost. Soft nesting keeps NFTs in the holder wallet and transferable; freeze lock is optional. Holders pay ${nestingPlatformFeeSol} SOL per NFT on stake, unstake, and claim.`,
   },
   {
     icon: <LayoutGrid className="h-5 w-5 text-violet-400" aria-hidden />,
@@ -114,18 +118,19 @@ const tiers = [
     bullets: [
       'Host with your wallet on Owltopia at the 2% partner fee tier.',
       'Discord support from our team for rollout and ops questions.',
-      'No separate monthly subscription for this tier.',
+      'Apply for Nesting at no extra partner cost after approval.',
     ],
     notIncluded: 'Not white-label and not a separate branded standalone app.',
   },
   {
     name: 'Partner Pro',
-    price: `$${PARTNER_PRO_SETUP_USD} setup + $${PARTNER_PRO_STANDARD_MONTHLY_USD}/month`,
+    price: `$${PARTNER_PRO_SETUP_USD} setup + 2% raffle fee`,
     bullets: [
       'Everything in $0 Partner, plus custom onboarding and partner server setup.',
       'Discord partner tenant linking for raffle create/winner webhooks.',
       'Option to run direct-link / Discord-only raffles (hide from main public list).',
       'Optional: your SPL token as ticket payment on your raffles only — allowlisted to your partner creator wallet, not available site-wide.',
+      'No monthly Partner Pro subscription — one-time setup only.',
     ],
     notIncluded: 'Not full white-label; still runs on Owltopia core infrastructure.',
   },
@@ -163,7 +168,8 @@ export default function PartnerProgramPage() {
               We collaborate with established projects so you can host raffles on {PLATFORM_NAME} with better economics,
               visibility, and support — without changing how players connect their wallets on mobile or desktop. Partner Pro
               can include a custom SPL token for ticket sales on your raffles only (not site-wide); fees use the same
-              partner rate on those sales after onboarding.
+              partner rate on those sales after onboarding. Approved partners can also Apply for Nesting at no partner
+              setup or monthly cost.
             </p>
           </div>
         </div>
@@ -188,14 +194,8 @@ export default function PartnerProgramPage() {
         <section className="mb-10">
           <h2 className="text-2xl font-semibold">Program tiers</h2>
           <p className="text-muted-foreground mb-4">
-            To keep partnerships clear, we scope every partner into one tier before payment and onboarding.
-          </p>
-          <p className="text-muted-foreground mb-4 text-sm leading-relaxed">
-            <strong className="text-foreground/90">Grandfathered Partner Pro rate:</strong> active partners who were on the
-            program before this pricing update — including current Partner Pro accounts and existing $0 Partner accounts
-            that upgrade to Partner Pro — keep <strong className="text-foreground/90">${PARTNER_PRO_GRANDFATHER_MONTHLY_USD}/month</strong>{' '}
-            after the one-time setup (billing is confirmed in onboarding). New Partner Pro subscriptions are{' '}
-            <strong className="text-foreground/90">${PARTNER_PRO_STANDARD_MONTHLY_USD}/month</strong>.
+            To keep partnerships clear, we scope every partner into one tier before payment and onboarding. Partner Pro is
+            a one-time ${PARTNER_PRO_SETUP_USD} setup — no monthly subscription on the public catalog.
           </p>
           <div className="not-prose grid gap-4 md:grid-cols-3">
             {tiers.map((tier) => (
@@ -214,6 +214,59 @@ export default function PartnerProgramPage() {
               </div>
             ))}
           </div>
+        </section>
+
+        <section className="mb-10 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.05] p-4 sm:p-6">
+          <h2 className="mb-2 mt-0 text-xl font-semibold sm:text-2xl">Partner Nesting</h2>
+          <p className="text-muted-foreground mb-4 text-sm sm:text-base">
+            Give holders a stake perch for your NFT collection. Nesting is free for approved partners — no setup fee and
+            no monthly fee for the perch itself.
+          </p>
+          <ul className="m-0 mb-4 list-none space-y-2 p-0 text-sm text-muted-foreground">
+            <li className="flex gap-2">
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+              <span>
+                <strong className="text-foreground/90">Partner cost:</strong> $0 (included once you are an approved
+                partner).
+              </span>
+            </li>
+            <li className="flex gap-2">
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+              <span>
+                <strong className="text-foreground/90">Holder action fee:</strong> {nestingPlatformFeeSol} SOL per NFT on
+                stake, unstake, and claim (network fees separate).
+              </span>
+            </li>
+            <li className="flex gap-2">
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+              <span>
+                <strong className="text-foreground/90">Soft nesting (default):</strong> NFTs stay in the holder wallet and
+                remain transferable while nested. Rewards require continued ownership. Freeze lock is optional if you
+                want an on-chain lock.
+              </span>
+            </li>
+            <li className="flex gap-2">
+              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+              <span>
+                Optional partner SPL reward token (you fund the reward vault) or platform OWL rewards where enabled.
+              </span>
+            </li>
+          </ul>
+          <div className="not-prose flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+            <Button asChild className="min-h-[44px] w-full touch-manipulation sm:w-auto">
+              <Link href="/partners/dashboard">Apply for Nesting</Link>
+            </Button>
+            <Button asChild variant="outline" className="min-h-[44px] w-full touch-manipulation sm:w-auto">
+              <Link href="/nesting">See Nesting</Link>
+            </Button>
+            <Button asChild variant="outline" className="min-h-[44px] w-full touch-manipulation sm:w-auto">
+              <a href="#partner-apply">Become a partner first</a>
+            </Button>
+          </div>
+          <p className="mb-0 mt-3 text-xs text-muted-foreground">
+            Apply for Nesting is on the partner host hub after your partner wallet is approved. New projects: submit the
+            partner application below first.
+          </p>
         </section>
 
         <section className="mb-10">
@@ -238,7 +291,10 @@ export default function PartnerProgramPage() {
           </div>
         </section>
 
-        <section className="mb-8 rounded-lg border border-green-500/25 bg-green-500/[0.04] p-4 sm:p-6">
+        <section
+          id="partner-apply"
+          className="mb-8 scroll-mt-24 rounded-lg border border-green-500/25 bg-green-500/[0.04] p-4 sm:p-6"
+        >
           <h2 className="mt-0 text-xl font-semibold sm:text-2xl">Apply or ask a question</h2>
           <p className="text-muted-foreground mb-4 text-sm sm:text-base">
             Tell us about your project and audience. We review fit, tier, wallet setup, and Discord flow. You can submit

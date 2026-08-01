@@ -90,7 +90,20 @@ export function validatePartnerNestApplicationInput(input: {
     }
   }
 
-  const locked = input.locked !== false
+  const standard = (input.nft_lock_standard ?? 'database_only').trim()
+  if (
+    !['auto', 'mpl_core_freeze_delegate', 'spl_token_account_freeze', 'database_only'].includes(
+      standard
+    )
+  ) {
+    return 'Invalid NFT lock standard.'
+  }
+
+  const locked = standard === 'database_only' ? false : input.locked === true
+  if (standard === 'database_only' && input.locked === true) {
+    return 'Soft nests (database_only) cannot use a freeze lock period.'
+  }
+
   if (locked) {
     const maxLock = input.max_lock_days ?? 90
     const minLock = input.min_lock_days ?? 30
@@ -98,11 +111,6 @@ export function validatePartnerNestApplicationInput(input: {
       return 'Lock days must be whole numbers of at least 1.'
     }
     if (minLock > maxLock) return 'Minimum lock days cannot be greater than maximum lock days.'
-  }
-
-  const standard = (input.nft_lock_standard ?? 'auto').trim()
-  if (!['auto', 'mpl_core_freeze_delegate', 'spl_token_account_freeze'].includes(standard)) {
-    return 'Invalid NFT lock standard.'
   }
 
   const rate = input.reward_rate ?? 1
@@ -161,10 +169,19 @@ export async function insertPartnerNestApplication(input: {
       collection_key: input.collection_key.trim(),
       pool_name: input.pool_name?.trim() || null,
       partner_slug: input.partner_slug?.trim() || null,
-      locked: input.locked !== false,
-      max_lock_days: input.max_lock_days ?? 90,
-      min_lock_days: input.min_lock_days ?? 30,
-      nft_lock_standard: input.nft_lock_standard ?? 'auto',
+      locked:
+        (input.nft_lock_standard ?? 'database_only') === 'database_only'
+          ? false
+          : input.locked === true,
+      max_lock_days:
+        (input.nft_lock_standard ?? 'database_only') === 'database_only' || input.locked !== true
+          ? 0
+          : (input.max_lock_days ?? 90),
+      min_lock_days:
+        (input.nft_lock_standard ?? 'database_only') === 'database_only' || input.locked !== true
+          ? 0
+          : (input.min_lock_days ?? 30),
+      nft_lock_standard: input.nft_lock_standard ?? 'database_only',
       reward_mode_requested: mode,
       reward_token_symbol:
         mode === 'partner_token' ? input.reward_token_symbol?.trim().toUpperCase() || null : null,

@@ -35,9 +35,31 @@ async function main() {
       partnerLabel: 'Misfits',
       collectionMint: 'EZdgJQao3v33F723EsC1QqfwvuDRyVkCMsZTW8Z6JTpB',
       nftLockStandard: 'database_only',
+      locked: true,
     }),
-    'Partner nesting requires an on-chain freeze standard (auto, Core, or SPL) — not preview/database_only.'
+    'Soft nests (database_only) cannot use a freeze lock period.'
   )
+
+  assert.equal(
+    validatePartnerNestCreateInput({
+      partnerLabel: 'Misfits',
+      collectionMint: 'EZdgJQao3v33F723EsC1QqfwvuDRyVkCMsZTW8Z6JTpB',
+      nftLockStandard: 'database_only',
+    }),
+    null
+  )
+
+  const softPayload = buildPartnerNestPoolPayload({
+    partnerLabel: 'Undead Sols',
+    collectionMint: 'EZdgJQao3v33F723EsC1QqfwvuDRyVkCMsZTW8Z6JTpB',
+    nftLockStandard: 'database_only',
+    locked: false,
+  })
+  assert.equal(softPayload.nft_lock_standard, 'database_only')
+  assert.equal(softPayload.lock_period_days, 0)
+  assert.equal(softPayload.adapter_mode, 'mock')
+  assert.equal(softPayload.lock_enforcement_source, 'database')
+  assert.equal(softPayload.is_onchain_enabled, false)
 
   assert.equal(
     validatePartnerNestCreateInput({
@@ -46,6 +68,7 @@ async function main() {
       locked: true,
       minLockDays: 90,
       maxLockDays: 30,
+      nftLockStandard: 'auto',
     }),
     'Minimum lock days cannot be greater than maximum lock days.'
   )
@@ -80,6 +103,10 @@ async function main() {
     rewardTokenSymbol: 'MISFIT',
     rewardMint: 'So11111111111111111111111111111111111111112',
     rewardRate: 2,
+    nftLockStandard: 'mpl_core_freeze_delegate',
+    locked: true,
+    maxLockDays: 90,
+    minLockDays: 30,
   })
   assert.equal(partnerTokenPayload.reward_token, 'MISFIT')
   assert.equal(partnerTokenPayload.reward_mint, 'So11111111111111111111111111111111111111112')
@@ -174,6 +201,7 @@ async function main() {
       {
         ok: true,
         partnerNestPool: true,
+        partnerSoftNest: true,
         partnerRewardToken: true,
         partnerRewardDeposit: true,
         rewardMintValidation: true,

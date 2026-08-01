@@ -151,8 +151,9 @@ export default function AdminPartnerNestApplicationsPage() {
         <p className="text-sm text-muted-foreground max-w-2xl">
           Open from Owl Vision → <strong className="text-foreground">Partner Nesting requests</strong> (
           <span className="font-mono text-xs">/admin/partner-nest-applications</span>
-          ). Partners submit a collection address and optional reward SPL mint from their hub. Approve creates the nest
-          perch. Prefer <strong className="text-foreground">Approve as OWL</strong> for live payouts today;{' '}
+          ). Partners submit a collection address and optional reward SPL mint from their hub (Apply for Nesting). Soft
+          nest is the default (transferable NFTs); freeze lock is optional. Approve creates the nest perch. Prefer{' '}
+          <strong className="text-foreground">Approve as OWL</strong> for live payouts today;{' '}
           <strong className="text-foreground">Approve with partner token</strong> stores their mint on the pool.
           After approve, the partner funds rewards from{' '}
           <Link href="/partners/dashboard" className="text-primary underline-offset-4 hover:underline">
@@ -199,6 +200,13 @@ export default function AdminPartnerNestApplicationsPage() {
                   <p className="break-all font-mono text-xs text-muted-foreground">{row.creator_wallet}</p>
                   <p className="break-all font-mono text-xs">
                     Collection: {row.collection_key}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Lock:{' '}
+                    {row.nft_lock_standard === 'database_only'
+                      ? 'Soft nest (transferable, no freeze)'
+                      : `Freeze · ${row.nft_lock_standard}`}
+                    {row.locked ? ` · ${row.min_lock_days}–${row.max_lock_days} days` : ' · no lock period'}
                   </p>
                   <p className="text-sm">
                     Requested rewards:{' '}

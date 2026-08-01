@@ -6,11 +6,7 @@ import { ImagePlus, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  PARTNER_PRO_STANDARD_MONTHLY_USD,
-  PARTNER_PRO_SETUP_USD,
-  PARTNER_PRO_GRANDFATHER_MONTHLY_USD,
-} from '@/lib/config/partner-program-pricing'
+import { PARTNER_PRO_SETUP_USD } from '@/lib/config/partner-program-pricing'
 
 type TierOption = {
   id: '$0_partner' | 'partner_pro' | 'white_label'
@@ -21,7 +17,7 @@ const TIERS: TierOption[] = [
   { id: '$0_partner', label: '$0 Partner (2% fee + Discord support)' },
   {
     id: 'partner_pro',
-    label: `Partner Pro ($${PARTNER_PRO_SETUP_USD} setup + $${PARTNER_PRO_STANDARD_MONTHLY_USD}/mo)`,
+    label: `Partner Pro ($${PARTNER_PRO_SETUP_USD} setup + 2% raffle fee)`,
   },
   { id: 'white_label', label: 'White-label (custom quote)' },
 ]
@@ -163,11 +159,8 @@ export function PartnerProgramApplyForm() {
               payment option on <strong className="text-foreground/90">your</strong> raffles only (allowlisted creator
               wallet; not shown to other hosts). Mention the mint, symbol, and decimals in Notes if you want that scoped in
               onboarding.{' '}
-              <strong className="text-foreground/90">Pricing:</strong> new Partner Pro is $
-              {PARTNER_PRO_STANDARD_MONTHLY_USD}/mo after the one-time $
-              {PARTNER_PRO_SETUP_USD} setup; partners already on the program (including $0 Partner upgrades) typically
-              keep $
-              {PARTNER_PRO_GRANDFATHER_MONTHLY_USD}/mo — we confirm in onboarding. Details on the{' '}
+              <strong className="text-foreground/90">Pricing:</strong> one-time $
+              {PARTNER_PRO_SETUP_USD} setup + the same 2% partner raffle fee — no monthly subscription. Details on the{' '}
               <Link href="/partner-program" className="font-medium text-primary underline-offset-2 hover:underline">
                 partner program
               </Link>{' '}

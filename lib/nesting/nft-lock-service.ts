@@ -14,6 +14,7 @@ import {
 } from '@/lib/nesting/nft-lock/types'
 import {
   assertWalletNftFrozenForNesting as assertMplCoreWalletNftFrozen,
+  assertNftAssetOwnedByWallet,
   getNestingNftFreezeDelegateAddress,
   isWalletNftFrozenForNestingDelegate as isMplCoreWalletNftFrozen,
   readOwlClaimNftNestLockEligibility,
@@ -157,7 +158,8 @@ async function readSplStakeEligibility(params: {
 }
 
 export async function readNftStakeEligibilityForPool(params: {
-  pool: Pick<StakingPoolRow, 'nft_lock_standard' | 'asset_type'>
+  pool: Pick<StakingPoolRow, 'nft_lock_standard' | 'asset_type'> &
+    Partial<Pick<StakingPoolRow, 'collection_key'>>
   assetId: string
   ownerWallet: string
   nestingDelegateAddress?: string | null
@@ -165,7 +167,24 @@ export async function readNftStakeEligibilityForPool(params: {
 }): Promise<NftStakeEligibility & { resolved_standard: ResolvedNftLockStandard }> {
   const resolved = await resolveEffectiveNftLockStandard(params.pool, params.assetId)
   if (resolved === 'database_only') {
-    return { eligible: true, resolved_standard: resolved }
+    try {
+      await assertNftAssetOwnedByWallet({
+        assetId: params.assetId,
+        ownerWallet: params.ownerWallet,
+        collectionMint: params.pool.collection_key ?? null,
+      })
+      return { eligible: true, resolved_standard: resolved }
+    } catch (e) {
+      if (e instanceof StakingUserError) {
+        return {
+          eligible: false,
+          reason: e.message,
+          code: 'wrong_owner',
+          resolved_standard: resolved,
+        }
+      }
+      throw e
+    }
   }
   if (resolved === 'spl_token_account_freeze') {
     const result = await readSplStakeEligibility({
@@ -242,7 +261,8 @@ function walletNestRowFromEligibility(
 }
 
 export async function enrichWalletNestMintsForPool(
-  pool: Pick<StakingPoolRow, 'nft_lock_standard' | 'asset_type'>,
+  pool: Pick<StakingPoolRow, 'nft_lock_standard' | 'asset_type'> &
+    Partial<Pick<StakingPoolRow, 'collection_key'>>,
   mints: Array<{ mint: string; name: string | null; image: string | null }>,
   ownerWallet: string
 ): Promise<WalletNestMintRow[]> {

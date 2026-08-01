@@ -138,6 +138,74 @@ async function assertAssetOwnedByWalletInCollection(params: {
   }
 }
 
+/**
+ * Soft-nest ownership check: NFT must still be in the nest wallet (no freeze).
+ * When `collectionMint` is set, also requires the asset belongs to that collection.
+ */
+export async function assertNftAssetOwnedByWallet(params: {
+  assetId: string
+  ownerWallet: string
+  collectionMint?: string | null
+}): Promise<void> {
+  const heliusUrl = getHeliusMainnetRpcUrl()
+  if (!heliusUrl) {
+    throw new StakingUserError('HELIUS_API_KEY is required for soft nest ownership checks.', 503)
+  }
+
+  const assetId = params.assetId.trim()
+  const ownerWallet = params.ownerWallet.trim()
+  if (!assetId) throw new StakingUserError('asset_identifier is required for NFT staking.', 400)
+  if (!ownerWallet) throw new StakingUserError('Wallet is required for NFT staking.', 400)
+
+  const collectionKey = params.collectionMint?.trim() || ''
+  if (collectionKey && assetId === collectionKey) {
+    throw new StakingUserError(
+      'That address is the collection mint, not an individual NFT.',
+      400
+    )
+  }
+
+  const res = await fetch(heliusUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'nesting-soft-ownership-check',
+      method: 'getAsset',
+      params: { id: assetId },
+    }),
+    cache: 'no-store',
+  })
+
+  if (!res.ok) {
+    throw new StakingUserError(`Unable to verify NFT ownership (Helius status ${res.status}).`, 502)
+  }
+
+  const json = (await res.json().catch(() => null)) as
+    | { result?: HeliusAssetResult; error?: { message?: string } }
+    | null
+
+  if (!json || json.error || !json.result) {
+    throw new StakingUserError(
+      `Unable to read NFT ownership${json?.error?.message ? `: ${json.error.message}` : ''}.`,
+      502
+    )
+  }
+
+  const owner = json.result.ownership?.owner?.trim() || ''
+  if (!owner || owner !== ownerWallet) {
+    throw new StakingUserError(
+      'NFT is no longer in this wallet. Soft nests stop earning when the NFT is transferred — unstake to close the nest.',
+      400,
+      { code: 'soft_nest_ownership_lost', asset_id: assetId }
+    )
+  }
+
+  if (collectionKey && !dasAssetBelongsToCollection(json.result, collectionKey)) {
+    throw new StakingUserError('NFT is not part of this nest perch collection.', 400)
+  }
+}
+
 /** MPL Core on-chain ownership only (no Helius / collection grouping). */
 async function assertMplCoreAssetOwnedByWalletOnChain(params: { assetId: string; ownerWallet: string }): Promise<void> {
   try {
