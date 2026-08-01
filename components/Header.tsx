@@ -30,7 +30,7 @@ import {
   filterCommunityNavItems,
   type SiteNavGroup,
 } from '@/lib/site-nav'
-import { isOwlTransferPublicClient } from '@/lib/owl-transfer/access'
+import { isOwlSendPublicClient } from '@/lib/owl-send/access'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
@@ -121,13 +121,13 @@ export function Header() {
     [showOwlVision, adminRole]
   )
 
-  const showOwlTransferNav = isOwlTransferPublicClient() || showOwlVision
+  const showOwlSendNav = isOwlSendPublicClient() || showOwlVision
   const communityNavGroup = useMemo<SiteNavGroup>(
     () => ({
       ...COMMUNITY_NAV_GROUP,
-      items: filterCommunityNavItems({ showOwlTransfer: showOwlTransferNav }),
+      items: filterCommunityNavItems({ showOwlSend: showOwlSendNav }),
     }),
-    [showOwlTransferNav]
+    [showOwlSendNav]
   )
 
   const mobileNavGroups = useMemo(

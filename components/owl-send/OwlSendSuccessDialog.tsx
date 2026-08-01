@@ -10,23 +10,23 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { owlTransferSolscanTxUrl } from '@/lib/owl-transfer/explorer'
+import { OwlSendSolscanTxUrl } from '@/lib/owl-send/explorer'
 
-export type OwlTransferSuccessState = {
+export type OwlSendSuccessState = {
   title: string
   detail?: string
   signature: string
 } | null
 
 type Props = {
-  success: OwlTransferSuccessState
+  success: OwlSendSuccessState
   onClose: () => void
 }
 
 /** Centered success popup after NFT/token send — Solscan link + Done. */
-export function OwlTransferSuccessDialog({ success, onClose }: Props) {
+export function OwlSendSuccessDialog({ success, onClose }: Props) {
   const open = Boolean(success?.signature)
-  const href = success?.signature ? owlTransferSolscanTxUrl(success.signature) : '#'
+  const href = success?.signature ? OwlSendSolscanTxUrl(success.signature) : '#'
 
   return (
     <Dialog

@@ -3,25 +3,25 @@
 import type { Connection, PublicKey } from '@solana/web3.js'
 import type { WalletAdapter } from '@solana/wallet-adapter-base'
 import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
-import type { OwlTransferLine } from '@/lib/owl-transfer/batch'
+import type { OwlSendLine } from '@/lib/owl-send/batch'
 import {
-  sendOwlTransferSplNftBatch,
-  type OwlTransferBatchResult,
-} from '@/lib/owl-transfer/send-spl-nft-batch'
-import { sendOwlTransferSpecialNft } from '@/lib/owl-transfer/send-special-nft'
+  sendOwlSendSplNftBatch,
+  type OwlSendBatchResult,
+} from '@/lib/owl-send/send-spl-nft-batch'
+import { sendOwlSendSpecialNft } from '@/lib/owl-send/send-special-nft'
 
 /**
  * Prefer one SPL multi-transfer + fee. If that fails because assets are not simple SPL,
  * fall back to single-NFT special paths (only when the batch has 1 line).
  */
-export async function sendOwlTransferNftBatch(params: {
+export async function sendOwlSendNftBatch(params: {
   connection: Connection
   owner: PublicKey
   walletAdapter: WalletAdapter | null
   sendTransaction: WalletSendTransactionFn
-  lines: OwlTransferLine[]
-}): Promise<OwlTransferBatchResult> {
-  const spl = await sendOwlTransferSplNftBatch({
+  lines: OwlSendLine[]
+}): Promise<OwlSendBatchResult> {
+  const spl = await sendOwlSendSplNftBatch({
     connection: params.connection,
     owner: params.owner,
     sendTransaction: params.sendTransaction,
@@ -34,7 +34,7 @@ export async function sendOwlTransferNftBatch(params: {
     (spl.failedMints?.length ?? 0) > 0
 
   if (needsSpecial && params.lines.length === 1) {
-    return sendOwlTransferSpecialNft({
+    return sendOwlSendSpecialNft({
       connection: params.connection,
       owner: params.owner,
       walletAdapter: params.walletAdapter,

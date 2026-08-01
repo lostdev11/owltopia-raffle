@@ -20,11 +20,11 @@ import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
 import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
 import { getPlatformFeeTreasuryWalletAddressClient } from '@/lib/solana/platform-fee-treasury-wallet'
-import { getOwlTransferFeeLamportsForCount } from '@/lib/owl-transfer/fee'
-import { OWL_TRANSFER_MAX_PER_TX } from '@/lib/owl-transfer/constants'
-import type { OwlTransferLine } from '@/lib/owl-transfer/batch'
+import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
+import { OWL_SEND_MAX_PER_TX } from '@/lib/owl-send/constants'
+import type { OwlSendLine } from '@/lib/owl-send/batch'
 
-export type OwlTransferBatchResult =
+export type OwlSendBatchResult =
   | { ok: true; signature: string; newAtaCount: number }
   | { ok: false; error: string; failedMints?: string[] }
 
@@ -86,27 +86,27 @@ async function resolveHolder(
  * Send up to 5 classic SPL / Token-2022 NFTs + Owl fee in one wallet approval.
  * Returns an error if any asset is not a simple SPL hold (pNFT/Core/cNFT need the special path).
  */
-export async function sendOwlTransferSplNftBatch(params: {
+export async function sendOwlSendSplNftBatch(params: {
   connection: Connection
   owner: PublicKey
   sendTransaction: WalletSendTransactionFn
-  lines: OwlTransferLine[]
-}): Promise<OwlTransferBatchResult> {
+  lines: OwlSendLine[]
+}): Promise<OwlSendBatchResult> {
   const { connection, owner, sendTransaction, lines } = params
   if (lines.length < 1) return { ok: false, error: 'Nothing to send in this batch.' }
-  if (lines.length > OWL_TRANSFER_MAX_PER_TX) {
+  if (lines.length > OWL_SEND_MAX_PER_TX) {
     return {
       ok: false,
-      error: `This batch has ${lines.length} NFTs — max ${OWL_TRANSFER_MAX_PER_TX} per approval.`,
+      error: `This batch has ${lines.length} NFTs — max ${OWL_SEND_MAX_PER_TX} per approval.`,
     }
   }
 
   const treasury = getPlatformFeeTreasuryWalletAddressClient()
-  const feeLamports = getOwlTransferFeeLamportsForCount(lines.length)
+  const feeLamports = getOwlSendFeeLamportsForCount(lines.length)
   if (feeLamports > 0 && !treasury) {
     return {
       ok: false,
-      error: 'Owl Transfer fee treasury is not configured (NEXT_PUBLIC_OWL_PLATFORM_FEE_TREASURY_WALLET).',
+      error: 'OwlSend fee treasury is not configured (NEXT_PUBLIC_OWL_PLATFORM_FEE_TREASURY_WALLET).',
     }
   }
 

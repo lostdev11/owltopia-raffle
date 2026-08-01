@@ -13,9 +13,9 @@ import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
 import { getPlatformFeeTreasuryWalletAddressClient } from '@/lib/solana/platform-fee-treasury-wallet'
-import { getOwlTransferFeeLamportsForCount } from '@/lib/owl-transfer/fee'
-import type { OwlTransferLine } from '@/lib/owl-transfer/batch'
-import type { OwlTransferBatchResult } from '@/lib/owl-transfer/send-spl-nft-batch'
+import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
+import type { OwlSendLine } from '@/lib/owl-send/batch'
+import type { OwlSendBatchResult } from '@/lib/owl-send/send-spl-nft-batch'
 
 async function sendFeeOnlyTx(params: {
   connection: Connection
@@ -23,10 +23,10 @@ async function sendFeeOnlyTx(params: {
   sendTransaction: WalletSendTransactionFn
 }): Promise<{ ok: true; signature: string } | { ok: false; error: string }> {
   const treasury = getPlatformFeeTreasuryWalletAddressClient()
-  const feeLamports = getOwlTransferFeeLamportsForCount(1)
+  const feeLamports = getOwlSendFeeLamportsForCount(1)
   if (feeLamports <= 0) return { ok: true, signature: '' }
   if (!treasury) {
-    return { ok: false, error: 'Owl Transfer fee treasury is not configured.' }
+    return { ok: false, error: 'OwlSend fee treasury is not configured.' }
   }
   const tx = new Transaction().add(
     SystemProgram.transfer({
@@ -52,18 +52,18 @@ async function sendFeeOnlyTx(params: {
  * Try TM (with fee via sol milestone to treasury) → Core (fee in-tx) → cNFT (fee in-tx).
  * Fee uses the same `transferSol` append pattern as escrow deposits when the UMI path supports it.
  */
-export async function sendOwlTransferSpecialNft(params: {
+export async function sendOwlSendSpecialNft(params: {
   connection: Connection
   owner: PublicKey
   walletAdapter: WalletAdapter | null
   sendTransaction: WalletSendTransactionFn
-  line: OwlTransferLine
-}): Promise<OwlTransferBatchResult> {
+  line: OwlSendLine
+}): Promise<OwlSendBatchResult> {
   const { connection, owner, walletAdapter, sendTransaction, line } = params
   const recipient = line.recipient.trim()
   const mint = line.mint.trim()
   const treasury = getPlatformFeeTreasuryWalletAddressClient()
-  const feeLamports = getOwlTransferFeeLamportsForCount(1)
+  const feeLamports = getOwlSendFeeLamportsForCount(1)
 
   if (!walletAdapter) {
     return { ok: false, error: 'Wallet adapter not ready for this NFT type.', failedMints: [mint] }

@@ -45,7 +45,7 @@ export interface WalletNftPickerProps {
   searchInputId?: string
   mintInputId?: string
   /**
-   * `multi` = toggle many NFTs (Owl Transfer). Same collection / sort / grid-list filters
+   * `multi` = toggle many NFTs (OwlSend). Same collection / sort / grid-list filters
    * as create raffle’s “Choose prize NFT” picker.
    */
   selectionMode?: 'single' | 'multi'

@@ -16,11 +16,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { WalletNftPicker } from '@/components/WalletNftPicker'
-import { OwlTransferSuccessBanner } from '@/components/owl-transfer/OwlTransferSuccessBanner'
+import { OwlSendSuccessBanner } from '@/components/owl-send/OwlSendSuccessBanner'
 import {
-  OwlTransferSuccessDialog,
-  type OwlTransferSuccessState,
-} from '@/components/owl-transfer/OwlTransferSuccessDialog'
+  OwlSendSuccessDialog,
+  type OwlSendSuccessState,
+} from '@/components/owl-send/OwlSendSuccessDialog'
 import { fetchWalletNftsWithRetry } from '@/lib/solana/fetch-wallet-nfts-api'
 import {
   getWalletNfts,
@@ -32,21 +32,21 @@ import {
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
 import {
-  chunkOwlTransferBatches,
+  chunkOwlSendBatches,
   pairScatterLines,
   parseRecipientAddresses,
-  type OwlTransferLine,
-} from '@/lib/owl-transfer/batch'
+  type OwlSendLine,
+} from '@/lib/owl-send/batch'
 import {
-  OWL_TRANSFER_MAX_PER_TX,
-  OWL_TRANSFER_MAX_SELECT,
-  type OwlTransferAssetTab,
-  type OwlTransferMode,
-} from '@/lib/owl-transfer/constants'
-import { buildOwlTransferCostEstimate } from '@/lib/owl-transfer/cost-estimate'
-import { formatOwlTransferFeeSol, getOwlTransferFeeSol } from '@/lib/owl-transfer/fee'
-import { sendOwlTransferNftBatch } from '@/lib/owl-transfer/send-batch'
-import { sendOwlTransferTokensToOne } from '@/lib/owl-transfer/send-tokens'
+  OWL_SEND_MAX_PER_TX,
+  OWL_SEND_MAX_SELECT,
+  type OwlSendAssetTab,
+  type OwlSendMode,
+} from '@/lib/owl-send/constants'
+import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
+import { formatOwlSendFeeSol, getOwlSendFeeSol } from '@/lib/owl-send/fee'
+import { sendOwlSendNftBatch } from '@/lib/owl-send/send-batch'
+import { sendOwlSendTokensToOne } from '@/lib/owl-send/send-tokens'
 import { cn } from '@/lib/utils'
 
 type Props = {
@@ -69,15 +69,15 @@ function shorten(addr: string): string {
   return `${addr.slice(0, 4)}…${addr.slice(-4)}`
 }
 
-export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
+export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const { connection } = useConnection()
   const { publicKey, connected, wallet } = useWallet()
   const sendTransaction = useSendTransactionForWallet()
 
   const [viewerIsAdmin, setViewerIsAdmin] = useState(initialViewerIsAdmin)
   const [accessChecked, setAccessChecked] = useState(isPublic || initialViewerIsAdmin)
-  const [assetTab, setAssetTab] = useState<OwlTransferAssetTab>('nfts')
-  const [mode, setMode] = useState<OwlTransferMode>('send_to_one')
+  const [assetTab, setAssetTab] = useState<OwlSendAssetTab>('nfts')
+  const [mode, setMode] = useState<OwlSendMode>('send_to_one')
   const [nfts, setNfts] = useState<WalletNft[]>([])
   const [tokens, setTokens] = useState<WalletToken[]>([])
   const [loadingAssets, setLoadingAssets] = useState(false)
@@ -87,8 +87,8 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [destination, setDestination] = useState('')
   const [scatterRaw, setScatterRaw] = useState('')
   const [randomizeScatter, setRandomizeScatter] = useState(true)
-  const [preparedLines, setPreparedLines] = useState<OwlTransferLine[] | null>(null)
-  const [batches, setBatches] = useState<OwlTransferLine[][]>([])
+  const [preparedLines, setPreparedLines] = useState<OwlSendLine[] | null>(null)
+  const [batches, setBatches] = useState<OwlSendLine[][]>([])
   const [batchProgress, setBatchProgress] = useState<BatchProgress[]>([])
   const [activeBatch, setActiveBatch] = useState(0)
   const [retryMints, setRetryMints] = useState<string[]>([])
@@ -101,9 +101,9 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [tokenError, setTokenError] = useState<string | null>(null)
   const [tokenSuccessSig, setTokenSuccessSig] = useState<string | null>(null)
   const [tokenSuccessDetail, setTokenSuccessDetail] = useState<string | null>(null)
-  const [successPopup, setSuccessPopup] = useState<OwlTransferSuccessState>(null)
+  const [successPopup, setSuccessPopup] = useState<OwlSendSuccessState>(null)
 
-  const feeSol = getOwlTransferFeeSol()
+  const feeSol = getOwlSendFeeSol()
   const showAdminPreview = viewerIsAdmin && !isPublic
   const allowed = isPublic || viewerIsAdmin
 
@@ -177,16 +177,16 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
 
   const cost = useMemo(() => {
     if (preparedLines && preparedLines.length > 0) {
-      return buildOwlTransferCostEstimate({
+      return buildOwlSendCostEstimate({
         nftCount: preparedLines.length,
         batchCount: Math.max(1, batches.length),
       })
     }
     const count = selectedNfts.length
     if (count < 1) return null
-    return buildOwlTransferCostEstimate({
+    return buildOwlSendCostEstimate({
       nftCount: count,
-      batchCount: Math.ceil(count / OWL_TRANSFER_MAX_PER_TX),
+      batchCount: Math.ceil(count / OWL_SEND_MAX_PER_TX),
     })
   }, [preparedLines, batches.length, selectedNfts.length])
 
@@ -198,7 +198,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
     setSelectedMints((prev) => {
       const next = new Set(prev)
       if (next.has(nft.mint)) next.delete(nft.mint)
-      else if (next.size < OWL_TRANSFER_MAX_SELECT) next.add(nft.mint)
+      else if (next.size < OWL_SEND_MAX_SELECT) next.add(nft.mint)
       return next
     })
   }
@@ -208,7 +208,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
     setBatches([])
     setBatchProgress([])
     setSessionError(null)
-    setSelectedMints(new Set(mints.slice(0, OWL_TRANSFER_MAX_SELECT)))
+    setSelectedMints(new Set(mints.slice(0, OWL_SEND_MAX_SELECT)))
   }
 
   const prepareNftSend = () => {
@@ -218,12 +218,12 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
       setSessionError('Select at least one NFT.')
       return
     }
-    if (selectedNfts.length > OWL_TRANSFER_MAX_SELECT) {
-      setSessionError(`Select at most ${OWL_TRANSFER_MAX_SELECT} NFTs.`)
+    if (selectedNfts.length > OWL_SEND_MAX_SELECT) {
+      setSessionError(`Select at most ${OWL_SEND_MAX_SELECT} NFTs.`)
       return
     }
 
-    let lines: OwlTransferLine[]
+    let lines: OwlSendLine[]
     if (mode === 'send_to_one') {
       const dest = destination.trim()
       if (!isValidSolanaPubkey(dest)) {
@@ -265,7 +265,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
       lines = paired.lines
     }
 
-    const chunked = chunkOwlTransferBatches(lines)
+    const chunked = chunkOwlSendBatches(lines)
     setPreparedLines(lines)
     setBatches(chunked)
     setBatchProgress(
@@ -288,7 +288,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
     )
     setSessionError(null)
 
-    const result = await sendOwlTransferNftBatch({
+    const result = await sendOwlSendNftBatch({
       connection,
       owner: publicKey,
       walletAdapter: wallet?.adapter ?? null,
@@ -372,14 +372,14 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
       setTokenError('Enter an amount for at least one token.')
       return
     }
-    if (lines.length > OWL_TRANSFER_MAX_PER_TX) {
-      setTokenError(`Max ${OWL_TRANSFER_MAX_PER_TX} token lines per approval — clear some amounts.`)
+    if (lines.length > OWL_SEND_MAX_PER_TX) {
+      setTokenError(`Max ${OWL_SEND_MAX_PER_TX} token lines per approval — clear some amounts.`)
       return
     }
 
     setTokenBusy(true)
     try {
-      const result = await sendOwlTransferTokensToOne({
+      const result = await sendOwlSendTokensToOne({
         connection,
         owner: publicKey,
         recipient: tokenDestination.trim(),
@@ -415,7 +415,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
   const currentBatchCost = useMemo(() => {
     const lines = batches[activeBatch]
     if (!lines?.length) return null
-    return buildOwlTransferCostEstimate({ nftCount: lines.length, batchCount: 1 })
+    return buildOwlSendCostEstimate({ nftCount: lines.length, batchCount: 1 })
   }, [batches, activeBatch])
 
   const doneCount = batchProgress.filter((b) => b.status === 'done').length
@@ -433,7 +433,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
     return (
       <div className="mx-auto flex min-h-[50vh] max-w-lg flex-col items-center justify-center gap-4 px-4 py-16 text-center">
         <Bird className="h-10 w-10 text-theme-prime" />
-        <h1 className="font-display text-3xl tracking-wide text-white">Owl Transfer</h1>
+        <h1 className="font-display text-3xl tracking-wide text-white">OwlSend</h1>
         <p className="text-sm text-muted-foreground">
           Coming soon. Admins can connect an admin wallet to preview before public launch.
         </p>
@@ -443,15 +443,15 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-3 py-6 sm:px-4 sm:py-10">
-      <OwlTransferSuccessDialog success={successPopup} onClose={() => setSuccessPopup(null)} />
+      <OwlSendSuccessDialog success={successPopup} onClose={() => setSuccessPopup(null)} />
       <header className="space-y-3">
         <div className="flex items-center gap-2 text-theme-prime">
           <Bird className="h-6 w-6" />
-          <p className="font-display text-3xl tracking-wide text-white sm:text-4xl">Owl Transfer</p>
+          <p className="font-display text-3xl tracking-wide text-white sm:text-4xl">OwlSend</p>
         </div>
         <p className="max-w-xl text-sm text-muted-foreground sm:text-base">
           Send NFTs and tokens for{' '}
-          <span className="font-semibold text-theme-prime">{formatOwlTransferFeeSol(feeSol)}</span> Owl
+          <span className="font-semibold text-theme-prime">{formatOwlSendFeeSol(feeSol)}</span> Owl
           fee each — cheaper than FoxySend. Solana rent is shown separately when a recipient needs a
           new token account.
         </p>
@@ -460,7 +460,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
             <Shield className="mt-0.5 h-4 w-4 shrink-0" />
             <p>
               <span className="font-semibold">Admin preview</span> — not live for everyone yet. Test
-              here, then set <code className="text-xs">OWL_TRANSFER_PUBLIC=true</code> to open it up.
+              here, then set <code className="text-xs">OWL_SEND_PUBLIC=true</code> to open it up.
             </p>
           </div>
         ) : null}
@@ -545,7 +545,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
                     </Button>
                   </div>
                   <CardDescription>
-                    Up to {OWL_TRANSFER_MAX_SELECT} NFTs · {OWL_TRANSFER_MAX_PER_TX} per wallet
+                    Up to {OWL_SEND_MAX_SELECT} NFTs · {OWL_SEND_MAX_PER_TX} per wallet
                     approval · you start each next batch
                   </CardDescription>
                 </CardHeader>
@@ -569,9 +569,9 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
                         selectionMode="multi"
                         selectedMints={selectedMints}
                         onToggle={toggleNft}
-                        maxSelect={OWL_TRANSFER_MAX_SELECT}
+                        maxSelect={OWL_SEND_MAX_SELECT}
                         onSelectFilteredMints={selectMints}
-                        searchInputId="owl-transfer-nft-search"
+                        searchInputId="owl-send-nft-search"
                         dialogTitle="Select NFTs to send"
                         dialogDescription="Filter by collection, switch to list view, or search by name or mint — same controls as create raffle."
                       />
@@ -594,9 +594,9 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
                 <CardContent className="space-y-3">
                   {mode === 'send_to_one' ? (
                     <div className="space-y-1.5">
-                      <Label htmlFor="owl-transfer-dest">Wallet address</Label>
+                      <Label htmlFor="owl-send-dest">Wallet address</Label>
                       <Input
-                        id="owl-transfer-dest"
+                        id="owl-send-dest"
                         value={destination}
                         onChange={(e) => {
                           setDestination(e.target.value)
@@ -609,9 +609,9 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
                   ) : (
                     <div className="space-y-3">
                       <div className="space-y-1.5">
-                        <Label htmlFor="owl-transfer-scatter">Recipient wallets</Label>
+                        <Label htmlFor="owl-send-scatter">Recipient wallets</Label>
                         <textarea
-                          id="owl-transfer-scatter"
+                          id="owl-send-scatter"
                           value={scatterRaw}
                           onChange={(e) => {
                             setScatterRaw(e.target.value)
@@ -647,7 +647,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
                       <p className="pt-1 font-semibold text-white">Total {cost.totalLabel}</p>
                       {cost.batchCount > 1 ? (
                         <p className="text-xs text-muted-foreground">
-                          {cost.batchCount} batches · {OWL_TRANSFER_MAX_PER_TX} NFTs per approval
+                          {cost.batchCount} batches · {OWL_SEND_MAX_PER_TX} NFTs per approval
                         </p>
                       ) : null}
                     </div>
@@ -704,11 +704,11 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
                                 ? ` → ${lines.length} wallet${lines.length === 1 ? '' : 's'}`
                                 : ` → ${shorten(lines[0]?.recipient ?? '')}`}
                               {' · '}
-                              {formatOwlTransferFeeSol(feeSol * lines.length)} fee
+                              {formatOwlSendFeeSol(feeSol * lines.length)} fee
                             </p>
                             {b.signature ? (
                               <div className="mt-2">
-                                <OwlTransferSuccessBanner
+                                <OwlSendSuccessBanner
                                   title={
                                     b.status === 'done'
                                       ? `Batch ${b.index + 1} sent successfully`
@@ -785,15 +785,15 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
               <CardHeader>
                 <CardTitle className="text-base">Tokens — Send to one</CardTitle>
                 <CardDescription>
-                  Up to {OWL_TRANSFER_MAX_PER_TX} token lines per approval ·{' '}
-                  {formatOwlTransferFeeSol(feeSol)} each · rent shown by Solana when ATAs are created
+                  Up to {OWL_SEND_MAX_PER_TX} token lines per approval ·{' '}
+                  {formatOwlSendFeeSol(feeSol)} each · rent shown by Solana when ATAs are created
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="owl-transfer-token-dest">Destination</Label>
+                  <Label htmlFor="owl-send-token-dest">Destination</Label>
                   <Input
-                    id="owl-transfer-token-dest"
+                    id="owl-send-token-dest"
                     value={tokenDestination}
                     onChange={(e) => setTokenDestination(e.target.value)}
                     placeholder="Recipient Solana address"
@@ -840,7 +840,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
                   </ul>
                 )}
                 {tokenSuccessSig ? (
-                  <OwlTransferSuccessBanner
+                  <OwlSendSuccessBanner
                     title="Tokens sent successfully"
                     signature={tokenSuccessSig}
                     detail={tokenSuccessDetail ?? undefined}
@@ -873,7 +873,7 @@ export function OwlTransferClient({ initialViewerIsAdmin, isPublic }: Props) {
               {assetTab === 'nfts'
                 ? selectedNfts.length === 0
                   ? 'No NFT(s) selected.'
-                  : `${selectedNfts.length} NFT(s) selected · ${formatOwlTransferFeeSol(feeSol * selectedNfts.length)} Owl fee`
+                  : `${selectedNfts.length} NFT(s) selected · ${formatOwlSendFeeSol(feeSol * selectedNfts.length)} Owl fee`
                 : 'Token send to one wallet.'}
             </p>
           </footer>

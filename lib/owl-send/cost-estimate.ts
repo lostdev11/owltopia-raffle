@@ -1,10 +1,10 @@
 import {
-  OWL_TRANSFER_ATA_RENT_SOL,
-  OWL_TRANSFER_NETWORK_FEE_SOL_PER_APPROVAL,
-} from '@/lib/owl-transfer/constants'
-import { formatOwlTransferFeeSol, getOwlTransferFeeSol } from '@/lib/owl-transfer/fee'
+  OWL_SEND_ATA_RENT_SOL,
+  OWL_SEND_NETWORK_FEE_SOL_PER_APPROVAL,
+} from '@/lib/owl-send/constants'
+import { formatOwlSendFeeSol, getOwlSendFeeSol } from '@/lib/owl-send/fee'
 
-export type OwlTransferCostEstimate = {
+export type OwlSendCostEstimate = {
   nftCount: number
   batchCount: number
   feePerNftSol: number
@@ -24,25 +24,25 @@ export type OwlTransferCostEstimate = {
   perNftFeeLabel: string
 }
 
-export function buildOwlTransferCostEstimate(params: {
+export function buildOwlSendCostEstimate(params: {
   nftCount: number
   batchCount: number
   /** When known from preflight; null = show max (assume all need ATA). */
   newAtaCount?: number | null
-}): OwlTransferCostEstimate | null {
+}): OwlSendCostEstimate | null {
   const nftCount = Math.max(0, Math.floor(params.nftCount))
   if (nftCount < 1) return null
   const batchCount = Math.max(1, Math.floor(params.batchCount))
-  const feePerNftSol = getOwlTransferFeeSol()
+  const feePerNftSol = getOwlSendFeeSol()
   const platformFeeSol = feePerNftSol * nftCount
-  const rentSolMax = OWL_TRANSFER_ATA_RENT_SOL * nftCount
+  const rentSolMax = OWL_SEND_ATA_RENT_SOL * nftCount
   const newAtaCountKnown =
     typeof params.newAtaCount === 'number' && Number.isFinite(params.newAtaCount)
       ? Math.max(0, Math.floor(params.newAtaCount))
       : null
   const rentSolKnown =
-    newAtaCountKnown != null ? OWL_TRANSFER_ATA_RENT_SOL * newAtaCountKnown : null
-  const networkFeeSol = OWL_TRANSFER_NETWORK_FEE_SOL_PER_APPROVAL * batchCount
+    newAtaCountKnown != null ? OWL_SEND_ATA_RENT_SOL * newAtaCountKnown : null
+  const networkFeeSol = OWL_SEND_NETWORK_FEE_SOL_PER_APPROVAL * batchCount
   const totalSolMax = platformFeeSol + rentSolMax + networkFeeSol
   const totalSolKnown =
     rentSolKnown != null ? platformFeeSol + rentSolKnown + networkFeeSol : null
@@ -51,13 +51,13 @@ export function buildOwlTransferCostEstimate(params: {
     rentSolKnown != null
       ? rentSolKnown <= 0
         ? 'No new token accounts (rent $0)'
-        : `${formatOwlTransferFeeSol(rentSolKnown)} Solana rent (${newAtaCountKnown} new account${newAtaCountKnown === 1 ? '' : 's'})`
-      : `Up to ${formatOwlTransferFeeSol(rentSolMax)} Solana rent if recipients need new accounts`
+        : `${formatOwlSendFeeSol(rentSolKnown)} Solana rent (${newAtaCountKnown} new account${newAtaCountKnown === 1 ? '' : 's'})`
+      : `Up to ${formatOwlSendFeeSol(rentSolMax)} Solana rent if recipients need new accounts`
 
   const totalLabel =
     totalSolKnown != null
-      ? `~${formatOwlTransferFeeSol(totalSolKnown)}`
-      : `~${formatOwlTransferFeeSol(platformFeeSol + networkFeeSol)} + rent if needed`
+      ? `~${formatOwlSendFeeSol(totalSolKnown)}`
+      : `~${formatOwlSendFeeSol(platformFeeSol + networkFeeSol)} + rent if needed`
 
   return {
     nftCount,
@@ -70,19 +70,19 @@ export function buildOwlTransferCostEstimate(params: {
     networkFeeSol,
     totalSolKnown,
     totalSolMax,
-    feeLabel: `${formatOwlTransferFeeSol(platformFeeSol)} Owl fee (${nftCount} × ${formatOwlTransferFeeSol(feePerNftSol)})`,
+    feeLabel: `${formatOwlSendFeeSol(platformFeeSol)} Owl fee (${nftCount} × ${formatOwlSendFeeSol(feePerNftSol)})`,
     rentLabel,
-    networkLabel: `~${formatOwlTransferFeeSol(networkFeeSol)} network`,
+    networkLabel: `~${formatOwlSendFeeSol(networkFeeSol)} network`,
     totalLabel,
-    perNftFeeLabel: formatOwlTransferFeeSol(feePerNftSol),
+    perNftFeeLabel: formatOwlSendFeeSol(feePerNftSol),
   }
 }
 
 export function buildBatchCostEstimate(params: {
   nftCountInBatch: number
   newAtaCount?: number | null
-}): OwlTransferCostEstimate | null {
-  return buildOwlTransferCostEstimate({
+}): OwlSendCostEstimate | null {
+  return buildOwlSendCostEstimate({
     nftCount: params.nftCountInBatch,
     batchCount: 1,
     newAtaCount: params.newAtaCount,

@@ -1,6 +1,6 @@
-import { OWL_TRANSFER_MAX_PER_TX, OWL_TRANSFER_MAX_SELECT } from '@/lib/owl-transfer/constants'
+import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
 
-export type OwlTransferLine = {
+export type OwlSendLine = {
   mint: string
   recipient: string
   /** Optional display name */
@@ -10,14 +10,14 @@ export type OwlTransferLine = {
 }
 
 /** Cap selection to product max (20). */
-export function capOwlTransferSelection<T>(items: T[]): T[] {
-  return items.slice(0, OWL_TRANSFER_MAX_SELECT)
+export function capOwlSendSelection<T>(items: T[]): T[] {
+  return items.slice(0, OWL_SEND_MAX_SELECT)
 }
 
 /** Split lines into wallet-approval batches of ≤5. */
-export function chunkOwlTransferBatches<T>(
+export function chunkOwlSendBatches<T>(
   items: T[],
-  maxPerTx: number = OWL_TRANSFER_MAX_PER_TX
+  maxPerTx: number = OWL_SEND_MAX_PER_TX
 ): T[][] {
   const chunks: T[][] = []
   const size = Math.max(1, Math.floor(maxPerTx))
@@ -35,7 +35,7 @@ export function pairScatterLines(params: {
   mints: Array<{ mint: string; name?: string | null; tokenAccount?: string | null; image?: string | null }>
   recipients: string[]
   randomize?: boolean
-}): { ok: true; lines: OwlTransferLine[] } | { ok: false; error: string } {
+}): { ok: true; lines: OwlSendLine[] } | { ok: false; error: string } {
   const recipients = params.recipients.map((r) => r.trim()).filter(Boolean)
   const mints = [...params.mints]
   if (mints.length === 0) return { ok: false, error: 'Select at least one NFT.' }
@@ -46,8 +46,8 @@ export function pairScatterLines(params: {
       error: `Scatter needs the same number of NFTs and wallets (${mints.length} NFT${mints.length === 1 ? '' : 's'}, ${recipients.length} wallet${recipients.length === 1 ? '' : 's'}).`,
     }
   }
-  if (mints.length > OWL_TRANSFER_MAX_SELECT) {
-    return { ok: false, error: `Select at most ${OWL_TRANSFER_MAX_SELECT} NFTs per send.` }
+  if (mints.length > OWL_SEND_MAX_SELECT) {
+    return { ok: false, error: `Select at most ${OWL_SEND_MAX_SELECT} NFTs per send.` }
   }
 
   if (params.randomize !== false) {
@@ -59,7 +59,7 @@ export function pairScatterLines(params: {
     }
   }
 
-  const lines: OwlTransferLine[] = mints.map((m, i) => ({
+  const lines: OwlSendLine[] = mints.map((m, i) => ({
     mint: m.mint,
     name: m.name,
     tokenAccount: m.tokenAccount,

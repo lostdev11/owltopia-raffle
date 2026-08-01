@@ -544,7 +544,7 @@ export async function getWalletTokens(
   })
 }
 
-/** Platform-known mints so Owl Transfer shows friendly names even without Metaplex metadata. */
+/** Platform-known mints so OwlSend shows friendly names even without Metaplex metadata. */
 function knownFungibleLabels(): Map<string, { name: string; symbol: string }> {
   const map = new Map<string, { name: string; symbol: string }>()
   map.set('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', {

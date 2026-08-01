@@ -1,7 +1,7 @@
 'use client'
 
 import { CheckCircle2, ExternalLink } from 'lucide-react'
-import { owlTransferSolscanTxUrl } from '@/lib/owl-transfer/explorer'
+import { OwlSendSolscanTxUrl } from '@/lib/owl-send/explorer'
 
 type Props = {
   title: string
@@ -9,8 +9,8 @@ type Props = {
   detail?: string
 }
 
-export function OwlTransferSuccessBanner({ title, signature, detail }: Props) {
-  const href = owlTransferSolscanTxUrl(signature)
+export function OwlSendSuccessBanner({ title, signature, detail }: Props) {
+  const href = OwlSendSolscanTxUrl(signature)
   return (
     <div className="flex items-start gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-sm text-emerald-100">
       <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />

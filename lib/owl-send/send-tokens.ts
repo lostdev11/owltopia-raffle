@@ -17,11 +17,11 @@ import {
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
 import { getPlatformFeeTreasuryWalletAddressClient } from '@/lib/solana/platform-fee-treasury-wallet'
-import { getOwlTransferFeeLamportsForCount } from '@/lib/owl-transfer/fee'
-import { OWL_TRANSFER_MAX_PER_TX } from '@/lib/owl-transfer/constants'
-import type { OwlTransferBatchResult } from '@/lib/owl-transfer/send-spl-nft-batch'
+import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
+import { OWL_SEND_MAX_PER_TX } from '@/lib/owl-send/constants'
+import type { OwlSendBatchResult } from '@/lib/owl-send/send-spl-nft-batch'
 
-export type OwlTransferTokenLine = {
+export type OwlSendTokenLine = {
   mint: string
   tokenAccount: string
   /** Raw amount in base units */
@@ -31,19 +31,19 @@ export type OwlTransferTokenLine = {
 }
 
 /** Send up to 5 fungible token lines to one recipient + Owl fee in one approval. */
-export async function sendOwlTransferTokensToOne(params: {
+export async function sendOwlSendTokensToOne(params: {
   connection: Connection
   owner: PublicKey
   recipient: string
   sendTransaction: WalletSendTransactionFn
-  lines: OwlTransferTokenLine[]
-}): Promise<OwlTransferBatchResult> {
+  lines: OwlSendTokenLine[]
+}): Promise<OwlSendBatchResult> {
   const { connection, owner, sendTransaction, lines } = params
   if (lines.length < 1) return { ok: false, error: 'Select at least one token amount to send.' }
-  if (lines.length > OWL_TRANSFER_MAX_PER_TX) {
+  if (lines.length > OWL_SEND_MAX_PER_TX) {
     return {
       ok: false,
-      error: `Max ${OWL_TRANSFER_MAX_PER_TX} token lines per approval.`,
+      error: `Max ${OWL_SEND_MAX_PER_TX} token lines per approval.`,
     }
   }
 
@@ -55,9 +55,9 @@ export async function sendOwlTransferTokensToOne(params: {
   }
 
   const treasury = getPlatformFeeTreasuryWalletAddressClient()
-  const feeLamports = getOwlTransferFeeLamportsForCount(lines.length)
+  const feeLamports = getOwlSendFeeLamportsForCount(lines.length)
   if (feeLamports > 0 && !treasury) {
-    return { ok: false, error: 'Owl Transfer fee treasury is not configured.' }
+    return { ok: false, error: 'OwlSend fee treasury is not configured.' }
   }
 
   const tx = new Transaction()
