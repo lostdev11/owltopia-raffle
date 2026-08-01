@@ -184,6 +184,12 @@ export const ADMIN_NAV_GROUP: SiteNavGroup = {
       description: 'Manage community giveaways',
       icon: Gift,
     },
+    {
+      href: '/admin/owl-send',
+      label: 'OwlSend',
+      description: 'Admin test bench for NFT/token sends',
+      icon: Send,
+    },
   ],
 }
 

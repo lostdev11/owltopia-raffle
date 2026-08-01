@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, Coins, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot, ShieldAlert, Rocket, Trophy, Store } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, Coins, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot, ShieldAlert, Rocket, Trophy, Store, Send } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -3630,6 +3630,20 @@ export default function AdminDashboardPage() {
                     <CardDescription>
                       Nest perches (coins, Gen 1, Gen 2), public landing toggle, rev-share roster, and support playbook
                       for holder wallet diagnostics / heal.
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+              <Card className="hover:border-primary transition-colors cursor-pointer border-primary/40">
+                <Link href="/admin/owl-send">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Send className="h-5 w-5" />
+                      OwlSend
+                    </CardTitle>
+                    <CardDescription>
+                      Admin test bench for NFT/token sends (0.001 SOL fee). Same UI as /owl-send — try Send to one,
+                      Scatter, and Tokens before flipping OWL_SEND_PUBLIC.
                     </CardDescription>
                   </CardHeader>
                 </Link>
