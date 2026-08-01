@@ -42,7 +42,8 @@ export async function GET(request: NextRequest) {
       {
         status: 200,
         headers: {
-          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          // Short shared cache — many tabs poll this when Realtime is blocked.
+          'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
         },
       }
     )

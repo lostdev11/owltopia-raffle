@@ -24,7 +24,8 @@ export function GlobalLiveActivity() {
     let lastErr: unknown
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
-        const res = await fetch('/api/raffles', { cache: 'no-store' })
+        // lite=true skips Helius holder enrichment (titles only needed for popups).
+        const res = await fetch('/api/raffles?lite=true', { cache: 'no-store' })
         const data = await res.json().catch(() => ({}))
         if (res.ok && Array.isArray(data)) {
           return data as Raffle[]

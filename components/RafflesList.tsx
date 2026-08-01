@@ -7,19 +7,24 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
  import type { Raffle, Entry } from '@/lib/types'
  import type { RaffleProfitInfo } from '@/lib/raffle-profit'
 import {
-  getRaffleProfitInfo,
   normalizeRaffleTicketCurrency,
   revenueInCurrency,
   shouldShowRevenueFlexPublic,
 } from '@/lib/raffle-profit'
 import { Flame } from 'lucide-react'
 import Link from 'next/link'
+import { useWallet } from '@solana/wallet-adapter-react'
 import { RAFFLES_LIST_ENTRIES_POLL_MS } from '@/lib/dev-budget'
 import {
   PURCHASE_COMPLETED_EVENT,
   type PurchaseCompletedDetail,
 } from '@/lib/cart/purchase-complete-events'
-import { fetchEntriesByRaffleIdsClient } from '@/lib/raffles/fetch-entries-bulk-client'
+import { fetchEntrySummariesByRaffleIdsClient } from '@/lib/raffles/fetch-entry-summaries-client'
+import {
+  profitInfoFromEntryStats,
+  stubEntriesFromListStats,
+} from '@/lib/raffles/entry-list-stats'
+import type { RaffleEntryListStats } from '@/lib/db/entry-summaries'
 import { fetchMintNftMetadata } from '@/lib/client/nft-metadata-client'
 import { isMobileDevice } from '@/lib/utils'
 
@@ -31,6 +36,7 @@ interface RaffleWithEntriesItem {
   raffle: Raffle
   entries: Entry[]
   profitInfo?: RaffleProfitInfo
+  entryStats?: RaffleEntryListStats | null
 }
 
 interface RafflesListProps {
@@ -89,13 +95,18 @@ function mergeRafflesListProps(
   const prevById = new Map(prev.map((x) => [x.raffle.id, x]))
   return next.map((item) => {
     const prevItem = prevById.get(item.raffle.id)
-    const nextEmpty = !item.entries?.length
-    const prevHas = !!(prevItem?.entries?.length)
+    const nextEmpty = !item.entries?.length && !item.entryStats
+    const prevHas = !!(prevItem?.entries?.length || prevItem?.entryStats)
     if (nextEmpty && prevHas && prevItem) {
       return {
         raffle: item.raffle,
         entries: prevItem.entries,
-        profitInfo: getRaffleProfitInfo(item.raffle, prevItem.entries),
+        profitInfo:
+          prevItem.profitInfo ??
+          (prevItem.entryStats
+            ? profitInfoFromEntryStats(item.raffle, prevItem.entryStats)
+            : undefined),
+        entryStats: prevItem.entryStats ?? null,
       }
     }
     return item
@@ -122,6 +133,10 @@ export function RafflesList({
   const [isMobile, setIsMobile] = useState(false)
   // Always use 'small' size as the only option
   const size: CardSize = 'small'
+  const { publicKey } = useWallet()
+  const viewerWallet = publicKey?.toBase58() ?? null
+  const viewerWalletRef = useRef(viewerWallet)
+  viewerWalletRef.current = viewerWallet
 
   useEffect(() => {
     setIsMobile(isMobileDevice())
@@ -129,8 +144,8 @@ export function RafflesList({
 
   // Use ref to track current raffles without causing re-renders
   const rafflesRef = useRef(list)
-  const pendingRequestsRef = useRef<Set<string>>(new Set())
   const abortControllerRef = useRef<AbortController | null>(null)
+  const pollInFlightRef = useRef(false)
   const now = serverNow ?? new Date()
   const nowRef = useRef(now)
   nowRef.current = now
@@ -219,108 +234,60 @@ export function RafflesList({
     rafflesRef.current = filteredRaffles
   }, [filteredRaffles])
 
-  // Function to fetch updated entries for all active raffles (uses server time when available)
+  // One SQL-aggregate request for all active raffles (avoids N× full entry dumps → Disk IO).
   const fetchEntriesForActiveRaffles = useCallback(async () => {
-    // Get current raffles from ref (doesn't trigger re-renders)
     const currentRaffles = rafflesRef.current
-    
-    // Get all active raffles (those that are still active)
     const activeRaffles = currentRaffles.filter(({ raffle }) => {
       const endTime = new Date(raffle.end_time)
-      return endTime > now && raffle.is_active
+      return endTime > nowRef.current && raffle.is_active
     })
 
-    if (activeRaffles.length === 0) {
-      return // No active raffles to poll
-    }
+    if (activeRaffles.length === 0 || pollInFlightRef.current) return
 
-    // Cancel any previous pending requests
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
     }
-    
-    // Create new AbortController for this batch of requests
     const abortController = new AbortController()
     abortControllerRef.current = abortController
-
-    // Filter out raffles that already have pending requests to prevent duplicates
-    const rafflesToFetch = activeRaffles.filter(({ raffle }) => {
-      if (pendingRequestsRef.current.has(raffle.id)) {
-        return false
-      }
-      pendingRequestsRef.current.add(raffle.id)
-      return true
-    })
-
-    if (rafflesToFetch.length === 0) {
-      return // All raffles already have pending requests
-    }
-
-    // Use same-origin URL so fetch never fails due to wrong base (e.g. SSR or odd env)
-    const apiBase = typeof window !== 'undefined' ? window.location.origin : ''
+    pollInFlightRef.current = true
 
     try {
-      // Fetch entries for all active raffles in parallel
-      const results = await Promise.all(
-        rafflesToFetch.map(async ({ raffle }) => {
-          try {
-            const url = `${apiBase}/api/entries?raffleId=${encodeURIComponent(raffle.id)}&t=${Date.now()}`
-            const doFetch = () =>
-              fetch(url, { signal: abortController.signal })
-            // Retry once on "Failed to fetch" (e.g. dev server cold start / Turbopack)
-            let response: Response
-            try {
-              response = await doFetch()
-            } catch (err: any) {
-              if (err?.name === 'AbortError') throw err
-              const isNetworkFailure =
-                err?.message === 'Failed to fetch' || err?.name === 'TypeError'
-              if (isNetworkFailure) response = await doFetch()
-              else throw err
-            }
-            if (response.ok) {
-              const entries = await response.json()
-              return { raffleId: raffle.id, entries, raffle }
-            }
-            return null
-          } catch (error: any) {
-            // Don't log AbortError as it's expected when cancelling
-            if (error.name !== 'AbortError') {
-              console.error(`Error fetching entries for raffle ${raffle.id}:`, error)
-            }
-            return null
-          } finally {
-            // Remove from pending set when request completes
-            pendingRequestsRef.current.delete(raffle.id)
-          }
-        })
+      const ids = activeRaffles.map(({ raffle }) => raffle.id)
+      let summaries = await fetchEntrySummariesByRaffleIdsClient(
+        ids,
+        viewerWalletRef.current,
+        abortController.signal
       )
+      // Retry once on empty map (cold start / transient) without hammering per-raffle endpoints
+      if (summaries.size === 0 && !abortController.signal.aborted) {
+        summaries = await fetchEntrySummariesByRaffleIdsClient(
+          ids,
+          viewerWalletRef.current,
+          abortController.signal
+        )
+      }
+      if (summaries.size === 0 || abortController.signal.aborted) return
 
-      // Filter out null results (failed fetches)
-      const updates = results.filter((r): r is { raffleId: string; entries: Entry[]; raffle: Raffle } => r !== null)
-      
-      if (updates.length > 0 && !abortController.signal.aborted) {
-        // Update state with all fetched entries at once
-        setFilteredRaffles(current => {
-          // Create a map for efficient lookup
-          const updatedMap = new Map(current.map(r => [r.raffle.id, r]))
-          
-          // Apply all updates (recompute profit info from fresh entries)
-          updates.forEach(({ raffleId, entries, raffle }) => {
-            const profitInfo = getRaffleProfitInfo(raffle, entries)
-            updatedMap.set(raffleId, { raffle, entries, profitInfo })
-          })
-          
-          const updated = Array.from(updatedMap.values())
-          // Update ref to match state
-          rafflesRef.current = updated
-          return updated
-        })
+      setFilteredRaffles((current) => {
+        const updatedMap = new Map(current.map((r) => [r.raffle.id, r]))
+        for (const { raffle } of activeRaffles) {
+          const stats = summaries.get(raffle.id)
+          if (!stats) continue
+          const wallet = viewerWalletRef.current
+          const entries = stubEntriesFromListStats(raffle.id, stats, wallet)
+          const profitInfo = profitInfoFromEntryStats(raffle, stats)
+          updatedMap.set(raffle.id, { raffle, entries, profitInfo, entryStats: stats })
+        }
+        const updated = Array.from(updatedMap.values())
+        rafflesRef.current = updated
+        return updated
+      })
+    } catch (error: unknown) {
+      if ((error as Error)?.name !== 'AbortError') {
+        console.error('Error fetching entry summaries for active raffles:', error)
       }
-    } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        console.error('Error fetching entries for active raffles:', error)
-      }
+    } finally {
+      pollInFlightRef.current = false
     }
   }, [])
 
@@ -385,12 +352,10 @@ export function RafflesList({
       if (pollInterval) {
         clearInterval(pollInterval)
       }
-      // Cancel any pending requests
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
       }
-      // Clear pending requests set
-      pendingRequestsRef.current.clear()
+      pollInFlightRef.current = false
     }
   }, [fetchEntriesForActiveRaffles, rafflesWithEntries])
 
@@ -403,15 +368,20 @@ export function RafflesList({
       const targets = rafflesRef.current.filter(({ raffle }) => idSet.has(raffle.id))
       if (targets.length === 0) return
       void (async () => {
-        const fetched = await fetchEntriesByRaffleIdsClient(targets.map((t) => t.raffle.id))
-        if (fetched.size === 0) return
+        const summaries = await fetchEntrySummariesByRaffleIdsClient(
+          targets.map((t) => t.raffle.id),
+          viewerWalletRef.current
+        )
+        if (summaries.size === 0) return
         setFilteredRaffles((current) => {
           const updatedMap = new Map(current.map((r) => [r.raffle.id, r]))
           for (const { raffle } of targets) {
-            const entries = fetched.get(raffle.id)
-            if (!entries) continue
-            const profitInfo = getRaffleProfitInfo(raffle, entries)
-            updatedMap.set(raffle.id, { raffle, entries, profitInfo })
+            const stats = summaries.get(raffle.id)
+            if (!stats) continue
+            const wallet = viewerWalletRef.current
+            const entries = stubEntriesFromListStats(raffle.id, stats, wallet)
+            const profitInfo = profitInfoFromEntryStats(raffle, stats)
+            updatedMap.set(raffle.id, { raffle, entries, profitInfo, entryStats: stats })
           }
           const updated = Array.from(updatedMap.values())
           rafflesRef.current = updated
@@ -448,7 +418,7 @@ export function RafflesList({
     otherRaffles.length + heatingUpRaffles.length + profitableRaffles.length > 1
 
   const renderRaffleCard = (
-    { raffle, entries, profitInfo }: RaffleWithEntriesItem,
+    { raffle, entries, profitInfo, entryStats }: RaffleWithEntriesItem,
     flatIndex: number
   ) => {
     const creator = (raffle.creator_wallet || raffle.created_by || '').trim()
@@ -466,6 +436,7 @@ export function RafflesList({
           size={size}
           section={section}
           profitInfo={profitInfo}
+          entryStats={entryStats}
           onDeleted={handleRaffleDeleted}
           priority={flatIndex < (isMobile ? 3 : 6)}
           serverNow={serverNow}

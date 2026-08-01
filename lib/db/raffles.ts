@@ -1319,6 +1319,10 @@ export async function getCreatorTicketSalesGrossByWallet(
   return { totalGross, byCurrency }
 }
 
+/** Columns needed for detail UI, draws, profit, and refunds — avoid SELECT * Disk IO. */
+const ENTRY_LIST_COLUMNS =
+  'id, raffle_id, wallet_address, ticket_quantity, transaction_signature, status, amount_paid, currency, created_at, verified_at, restored_at, restored_by, refunded_at, refund_transaction_signature, refund_lock_started_at, referrer_wallet, referral_code_used, referral_complimentary, complimentary_confirm_token, complimentary_token_expires_at, reward_mode_at_issue, reward_issued_at, reward_confirmed_at, reward_status, referral_reward_id'
+
 export async function getEntriesByRaffleId(raffleId: string) {
   // Fetch all entries using pagination to handle any Supabase row limits
   // Supabase defaults to 1000 rows per query, but projects can have custom limits
@@ -1331,7 +1335,7 @@ export async function getEntriesByRaffleId(raffleId: string) {
     const result = await withQueryRetry(
       getSupabaseForRead()
         .from('entries')
-        .select('*')
+        .select(ENTRY_LIST_COLUMNS)
         .eq('raffle_id', raffleId)
         .order('created_at', { ascending: false })
         .range(offset, offset + pageSize - 1),

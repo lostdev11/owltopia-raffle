@@ -43,12 +43,12 @@ export function getSupabaseAdmin(): SupabaseClient {
     )
   }
 
-  // Recreate client if health check indicates connection issues
+  // Recreate client if health check indicates connection issues.
+  // Use a tiny point lookup — never COUNT(*) (exact counts scan the table and burn Disk IO).
   const now = Date.now()
   if (adminClient && now - lastHealthCheck > HEALTH_CHECK_INTERVAL) {
     lastHealthCheck = now
-    // Perform a lightweight health check
-    adminClient.from('raffles').select('count', { count: 'exact', head: true }).then(
+    adminClient.from('raffles').select('id').limit(1).then(
       () => {
         // Connection is healthy
       },

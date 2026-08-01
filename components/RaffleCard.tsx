@@ -26,6 +26,8 @@ import {
 } from '@/lib/raffle-profit'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { isRaffleEligibleToDraw, calculateTicketsSold, getRaffleMinimum } from '@/lib/db/raffles'
+import type { RaffleEntryListStats } from '@/lib/db/entry-summaries'
+import { owlVisionFromEntryStats } from '@/lib/raffles/entry-list-stats'
 import {
   getThemeAccentBorderStyle,
   getThemeAccentClasses,
@@ -90,6 +92,11 @@ interface RaffleCardProps {
   section?: SectionType
   /** When set (e.g. admin list), show profitable vs not and revenue vs threshold */
   profitInfo?: RaffleProfitInfo
+  /**
+   * SQL aggregates from list/carousel polls. When set, ticket totals + Owl Vision use these
+   * instead of scanning a full Entry[] dump.
+   */
+  entryStats?: RaffleEntryListStats | null
   onDeleted?: (raffleId: string) => void
   priority?: boolean
   /** Server time for consistent "Starts in X" / "Starts X ago" (avoids wrong PC clock) */
@@ -106,6 +113,7 @@ export function RaffleCard({
   size = 'medium',
   section,
   profitInfo,
+  entryStats = null,
   onDeleted,
   priority = false,
   serverNow,
@@ -333,7 +341,9 @@ export function RaffleCard({
     size === 'small' ? 4000 : 8000
   )
 
-  const owlVisionScore = calculateOwlVisionScore(raffle, entries)
+  const owlVisionScore = entryStats
+    ? owlVisionFromEntryStats(raffle, entryStats)
+    : calculateOwlVisionScore(raffle, entries)
   const startTime = new Date(raffle.start_time)
   const endTime = new Date(raffle.end_time)
   const refNow = serverNow ?? now
@@ -352,7 +362,12 @@ export function RaffleCard({
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
   const creatorModerationFlag = raffle.creator_restricted_listing === true
   const isWinner = mounted && !isActive && !!raffle.winner_wallet && publicKey?.toBase58() === raffle.winner_wallet
-  const userHasEntered = mounted && !!wallet && entries.some(e => e.wallet_address === wallet && e.status === 'confirmed')
+  const userHasEntered =
+    mounted &&
+    !!wallet &&
+    (entryStats
+      ? entryStats.viewerConfirmedTickets > 0
+      : entries.some((e) => e.wallet_address === wallet && e.status === 'confirmed'))
   
   // Use red for future, blue for past, theme accent for active (section-based when available = no hydration mismatch)
   const baseBorderStyle = getThemeAccentBorderStyle(raffle.theme_accent)
@@ -388,7 +403,9 @@ export function RaffleCard({
     : (isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'))
   
   // Calculate available tickets
-  const totalTicketsSold = calculateTicketsSold(entries)
+  const totalTicketsSold = entryStats
+    ? Math.max(0, Math.floor(entryStats.ticketsSold))
+    : calculateTicketsSold(entries)
   const availableTickets = raffle.max_tickets 
     ? raffle.max_tickets - totalTicketsSold 
     : null
@@ -399,7 +416,11 @@ export function RaffleCard({
   
   // Calculate minimum eligibility
   const minTickets = getRaffleMinimum(raffle)
-  const isEligibleToDraw = minTickets ? isRaffleEligibleToDraw(raffle, entries) : true
+  const isEligibleToDraw = minTickets
+    ? entryStats
+      ? totalTicketsSold >= minTickets
+      : isRaffleEligibleToDraw(raffle, entries)
+    : true
 
   // Owl holder verification: show on card when creator is Owltopia (Owl NFT) holder
   const showHolderBadge = isOwlEnabled() && raffle.creator_is_holder === true
