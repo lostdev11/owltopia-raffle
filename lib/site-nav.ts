@@ -10,7 +10,6 @@ import {
   Rocket,
   Settings,
   ShoppingCart,
-  Sparkles,
   Ticket,
   Trophy,
 } from 'lucide-react'
@@ -118,8 +117,8 @@ export const COMMUNITY_NAV_GROUP: SiteNavGroup = {
 export const OWLS_NAV_GROUP: SiteNavGroup = {
   id: 'owls',
   label: 'Owls',
-  menuAriaLabel: 'Owls and presale',
-  mobileSectionLabel: 'Owls & presale',
+  menuAriaLabel: 'Owls',
+  mobileSectionLabel: 'Owls',
   triggerIcon: Bird,
   iconAccentClass: 'text-violet-400/90',
   items: [
@@ -128,12 +127,6 @@ export const OWLS_NAV_GROUP: SiteNavGroup = {
       label: 'Gen2 Mint',
       description: 'Check allocation and mint Owltopia Gen2',
       icon: Rocket,
-    },
-    {
-      href: '/gen2-presale',
-      label: 'Gen2 Presale',
-      description: 'Buy presale spots before mint',
-      icon: Sparkles,
     },
   ],
 }
