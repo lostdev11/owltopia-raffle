@@ -53,7 +53,7 @@ import {
 } from '@/components/RaffleOverThresholdPngButton'
 import { formatDistance, formatDistanceToNow } from 'date-fns'
 import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
-import { Trophy, Share2, BadgeCheck, Loader2, Users, ShoppingCart } from 'lucide-react'
+import { Trophy, Share2, Loader2, Users, ShoppingCart } from 'lucide-react'
 import Image from 'next/image'
 import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import {
@@ -67,6 +67,7 @@ import { isRaffleCreatorWallet } from '@/lib/cart/validate-raffle-checkout'
 import { shareRaffleFromBrowser } from '@/lib/client/raffle-share'
 import { useImageAttemptTimeout } from '@/lib/use-image-attempt-timeout'
 import { fetchMintNftMetadata } from '@/lib/client/nft-metadata-client'
+import { getRaffleDisplayTitle } from '@/lib/raffles/nft-prize-raffle-title'
 import { useNearViewportOnce } from '@/hooks/use-near-viewport-once'
 
 /** GIF/animated WebP: avoid Next image optimizer for proxy URLs (matches RaffleDetailClient). */
@@ -188,6 +189,11 @@ export function RaffleCard({
   const [modalImgIdx, setModalImgIdx] = useState(0)
   const [listMintThumbSrc, setListMintThumbSrc] = useState<string | null>(null)
   const [listMintThumbLoading, setListMintThumbLoading] = useState(false)
+  const displayTitle = useMemo(() => getRaffleDisplayTitle(raffle), [
+    raffle.title,
+    raffle.nft_mint_address,
+    raffle.nft_collection_name,
+  ])
   // Mobile: distinguish scroll from tap so scrolling doesn't open the raffle
   const touchStartRef = useRef({ x: 0, y: 0 })
   const scrollDetectedRef = useRef(false)
@@ -422,8 +428,6 @@ export function RaffleCard({
       : isRaffleEligibleToDraw(raffle, entries)
     : true
 
-  // Owl holder verification: show on card when creator is Owltopia (Owl NFT) holder
-  const showHolderBadge = isOwlEnabled() && raffle.creator_is_holder === true
   const showPartnerBadge = isPartnerCommunity
   const partnerDisplayName = raffle.creator_partner_display_name?.trim() ?? ''
   const partnerBadgeTitle = partnerDisplayName
@@ -700,19 +704,9 @@ export function RaffleCard({
                 <LinkifiedTextInsideLinkProvider>
               <div className="flex items-center justify-between gap-1.5 mb-0.5 sm:mb-1 min-w-0">
                 <CardTitle className="raffle-card-title !text-[0.8125rem] sm:!text-[0.875rem] !leading-snug line-clamp-3 sm:line-clamp-4 flex-1 min-w-0 overflow-hidden text-foreground pr-0.5 break-words">
-                  {raffle.title}
+                  {displayTitle}
                 </CardTitle>
                 <div className="flex items-center gap-0.5 sm:gap-1 group/owlvision flex-shrink-0 self-center">
-                  {showHolderBadge && (
-                    <span
-                      className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-0.5"
-                      title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
-                      role="img"
-                      aria-label="Owl holder"
-                    >
-                      <BadgeCheck className="h-2.5 w-2.5 sm:h-3 sm:w-3 flex-shrink-0" />
-                    </span>
-                  )}
                   {showPartnerBadge && (
                     <span
                       className="inline-flex items-center justify-center rounded-full bg-violet-500/15 border border-violet-500/50 text-violet-200 p-0.5"
@@ -859,7 +853,7 @@ export function RaffleCard({
                   <Image
                     key={`modal-${modalImgIdx}-${imageAttemptChain[modalImgIdx]}`}
                     src={imageAttemptChain[modalImgIdx]}
-                    alt={raffle.title}
+                    alt={displayTitle}
                     fill
                     sizes="100vw"
                     className="object-contain"
@@ -952,7 +946,7 @@ export function RaffleCard({
                 <img
                   key={`card-${thumbIdx}-${listThumbSrc}`}
                   src={listThumbSrc}
-                  alt={raffle.title}
+                  alt={displayTitle}
                   loading={priority ? 'eager' : 'lazy'}
                   decoding="async"
                   className={`absolute inset-0 h-full w-full ${listThumbUseContain ? 'object-contain p-2' : 'object-cover object-center'}`}
@@ -972,16 +966,6 @@ export function RaffleCard({
                 <div className="absolute bottom-0 left-0 right-0 p-4">
                   <div className="flex justify-end mb-2">
                     <div className="group/owlvision flex items-center gap-2 flex-shrink-0">
-                      {showHolderBadge && (
-                        <span
-                          className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-0.5"
-                          title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
-                          role="img"
-                          aria-label="Owl holder"
-                        >
-                          <BadgeCheck className="h-3.5 w-3.5 flex-shrink-0" />
-                        </span>
-                      )}
                       {showPartnerBadge && (
                         <span
                           className="inline-flex items-center justify-center rounded-full bg-violet-500/15 border border-violet-500/50 text-violet-200 p-0.5"
@@ -1001,7 +985,7 @@ export function RaffleCard({
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/70 to-transparent p-2 sm:p-3 z-10 pointer-events-none">
                 <div className="mb-1 sm:mb-2">
                   <CardTitle className={`raffle-card-title-soft ${classes.title} text-white line-clamp-2 mb-1 !text-sm sm:!text-base md:!text-lg !leading-tight break-words`}>
-                    {raffle.title}
+                    {displayTitle}
                   </CardTitle>
                 </div>
                 <div className="flex items-center justify-between mb-1">
@@ -1076,19 +1060,9 @@ export function RaffleCard({
               <CardHeader className="p-3 sm:p-4 z-10 relative">
                 <div className="flex items-start justify-between gap-2">
                   <CardTitle className={`raffle-card-title-soft ${classes.title} line-clamp-2 flex-1 min-w-0 overflow-hidden !text-base sm:!text-lg md:!text-xl break-words`}>
-                    {raffle.title}
+                    {displayTitle}
                   </CardTitle>
                   <div className="group/owlvision flex items-center gap-1 sm:gap-2 flex-shrink-0">
-                    {showHolderBadge && (
-                      <span
-                        className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-0.5"
-                        title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
-                        role="img"
-                        aria-label="Owl holder"
-                      >
-                        <BadgeCheck className="h-3 w-3 flex-shrink-0" />
-                      </span>
-                    )}
                     {showPartnerBadge && (
                       <span
                         className="inline-flex items-center justify-center rounded-full bg-violet-500/15 border border-violet-500/50 text-violet-200 p-0.5"
@@ -1238,7 +1212,7 @@ export function RaffleCard({
                       Share
                     </Button>
                     <RafflePromoPngButton
-                      title={raffle.title}
+                      title={displayTitle}
                       slug={raffle.slug}
                       ticketPrice={raffle.ticket_price}
                       currency={raffle.currency}
@@ -1270,7 +1244,7 @@ export function RaffleCard({
                   onClick={(e) => e.stopPropagation()}
                 >
                   <RaffleOverThresholdPngButton
-                    title={raffle.title}
+                    title={displayTitle}
                     slug={raffle.slug}
                     ticketPrice={raffle.ticket_price}
                     currency={raffle.currency}
@@ -1410,7 +1384,7 @@ export function RaffleCard({
                 <Image
                   key={`modal-lg-${modalImgIdx}-${imageAttemptChain[modalImgIdx]}`}
                   src={imageAttemptChain[modalImgIdx]}
-                  alt={raffle.title}
+                  alt={displayTitle}
                   fill
                   sizes="100vw"
                   className="object-contain"

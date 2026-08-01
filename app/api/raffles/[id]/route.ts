@@ -656,7 +656,8 @@ export async function PATCH(
       if (prizeMint) {
         const titleCandidates = await resolveNftPrizeRaffleTitleCandidatesFromMint(
           getSolanaReadConnection(),
-          prizeMint
+          prizeMint,
+          { metadataUriHint: existingRaffle.nft_metadata_uri }
         )
         nftRaffleTitle = titleCandidates[0]!
         if (!nftPrizeRaffleTitleMatchesAnyCandidate(String(body.title), titleCandidates)) {

@@ -74,13 +74,20 @@ async function resolveMetaplexNftTitleCandidates(
   return candidates
 }
 
+export type ResolveNftPrizeRaffleTitleOptions = {
+  /** Client-provided metadata JSON URI (e.g. from wallet picker) when on-chain/Helius name lookup fails. */
+  metadataUriHint?: string | null
+}
+
 /**
  * All display titles accepted for an NFT mint.
- * Helius DAS first (matches /api/wallet/nfts), then Metaplex on-chain + JSON, then mint.
+ * Helius DAS first (matches /api/wallet/nfts), then Metaplex on-chain + JSON,
+ * then optional metadata URI hint, then mint.
  */
 export async function resolveNftPrizeRaffleTitleCandidatesFromMint(
   connection: Connection,
-  mintAddress: string
+  mintAddress: string,
+  options?: ResolveNftPrizeRaffleTitleOptions
 ): Promise<string[]> {
   const mintTrim = mintAddress.trim()
   const candidates: string[] = []
@@ -97,20 +104,64 @@ export async function resolveNftPrizeRaffleTitleCandidatesFromMint(
     pushUniqueTitleCandidate(candidates, title)
   }
 
+  const uriHint = options?.metadataUriHint?.trim()
+  if (uriHint) {
+    const jsonName = await fetchMetadataJsonName(uriHint)
+    if (jsonName) {
+      pushUniqueTitleCandidate(
+        candidates,
+        nftPrizeRaffleTitleFromWalletSelection(jsonName, mintTrim)
+      )
+    }
+  }
+
   pushUniqueTitleCandidate(candidates, nftPrizeRaffleTitleFromWalletSelection(null, mintTrim))
 
   return candidates
 }
 
-/** Primary display title — prefers Helius DAS (wallet picker), then Metaplex, then mint. */
+/** Primary display title — prefers Helius DAS (wallet picker), then Metaplex, then URI hint, then mint. */
 export async function resolveNftPrizeRaffleTitleFromMint(
   connection: Connection,
-  mintAddress: string
+  mintAddress: string,
+  options?: ResolveNftPrizeRaffleTitleOptions
 ): Promise<string> {
-  const candidates = await resolveNftPrizeRaffleTitleCandidatesFromMint(connection, mintAddress)
+  const candidates = await resolveNftPrizeRaffleTitleCandidatesFromMint(
+    connection,
+    mintAddress,
+    options
+  )
   return (
     candidates[0] ?? nftPrizeRaffleTitleFromWalletSelection(null, mintAddress.trim())
   )
+}
+
+/** True when the stored raffle title is just the prize mint (metadata name never resolved). */
+export function raffleStoredTitleLooksLikeMint(
+  title: string,
+  nftMintAddress: string | null | undefined
+): boolean {
+  const t = normalizeWalletNftDisplayName(title)
+  const mint = (nftMintAddress ?? '').trim()
+  return !!t && !!mint && t.toLowerCase() === mint.toLowerCase()
+}
+
+/**
+ * UI title for cards/detail when create-time metadata resolution fell back to the mint.
+ * Prefers collection name, otherwise a shortened mint.
+ */
+export function getRaffleDisplayTitle(raffle: {
+  title: string
+  nft_mint_address?: string | null
+  nft_collection_name?: string | null
+}): string {
+  if (!raffleStoredTitleLooksLikeMint(raffle.title, raffle.nft_mint_address)) {
+    return raffle.title
+  }
+  const collection = normalizeWalletNftDisplayName(raffle.nft_collection_name)
+  if (collection) return collection
+  const mint = (raffle.nft_mint_address ?? raffle.title).trim()
+  return mint.length > 12 ? `${mint.slice(0, 4)}…${mint.slice(-4)}` : mint
 }
 
 export function nftPrizeRaffleTitleMatchesSubmitted(

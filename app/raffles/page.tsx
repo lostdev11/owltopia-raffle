@@ -96,8 +96,6 @@ export default async function RafflesPage() {
       partnerCreatorWallets = []
     }
 
-    const requestStartedAt = Date.now()
-
     // Promote any draft raffles whose start_time has passed to live (so they show as active).
     // Cap wait so a stuck Supabase connect cannot consume the whole serverless budget.
     await Promise.race([
@@ -181,9 +179,8 @@ export default async function RafflesPage() {
     // Pending raffles should only be visible to admins and the creator.
     allRaffles = filterRafflesByPendingVisibility(allRaffles, viewerWallet, viewerIsAdmin)
 
-    // Enrich with creator Owl holder status — keep headroom under maxDuration for response serialization.
-    const holderBudgetMs = Math.max(5_000, Math.min(20_000, 45_000 - (Date.now() - requestStartedAt)))
-    allRaffles = await enrichRafflesWithCreatorHolder(allRaffles, { budgetMs: holderBudgetMs })
+    // Partner / admin display fields only (no Helius holder lookups).
+    allRaffles = await enrichRafflesWithCreatorHolder(allRaffles)
 
     const now = new Date()
     const nowTime = now.getTime()

@@ -95,7 +95,6 @@ import {
   Send,
   Eye,
   Share2,
-  BadgeCheck,
   ExternalLink,
   XCircle,
   Loader2,
@@ -167,6 +166,7 @@ import { fireGreenConfetti, preloadConfetti } from '@/lib/confetti'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { getEscrowPrizeClaimSuccessCopy } from '@/lib/raffles/claim-prize-success-copy'
+import { getRaffleDisplayTitle } from '@/lib/raffles/nft-prize-raffle-title'
 import { ClaimSuccessOverlay } from '@/components/ClaimSuccessOverlay'
 import { extractTransactionSignature } from '@/lib/claims/extract-transaction-signature'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
@@ -270,6 +270,11 @@ export function RaffleDetailClient({
   const [showEscrowConfirmDialog, setShowEscrowConfirmDialog] = useState(false)
   const [ticketQuantityDisplay, setTicketQuantityDisplay] = useState('1')
   const dualSolBamboo = useMemo(() => raffleAcceptsSolAndBambooTickets(raffle), [raffle])
+  const displayTitle = useMemo(() => getRaffleDisplayTitle(raffle), [
+    raffle.title,
+    raffle.nft_mint_address,
+    raffle.nft_collection_name,
+  ])
   const [ticketPaymentCurrency, setTicketPaymentCurrency] = useState<RaffleCurrency>(() =>
     normalizeRaffleTicketCurrency(raffle.currency)
   )
@@ -1033,6 +1038,9 @@ export function RaffleDetailClient({
       return
     }
 
+    // Close Enter before Processing opens so checkout does not reappear when
+    // Processing dismisses (esp. verify-pending / after wallet returns).
+    setShowEnterRaffleDialog(false)
     setIsProcessing(true)
     setError(null)
     setSuccess(false)
@@ -1083,6 +1091,7 @@ export function RaffleDetailClient({
                   requestAnimationFrame(() => fireGreenConfetti())
                   router.refresh()
                   fetchEntries()
+                  setTimeout(() => setSuccess(false), 8000)
                 }
               } catch {
                 /* ignore */
@@ -1101,19 +1110,25 @@ export function RaffleDetailClient({
             await new Promise(resolve => setTimeout(resolve, 1500))
             fetchEntries()
           }
+          setTimeout(() => setSuccess(false), 8000)
         },
       })
 
       if (!res.ok) {
         setSuccess(false)
-        setTicketsConfirming(false)
         setError(res.error)
         if (res.isUnconfirmedPayment) {
+          // Payment may have landed — do not reopen checkout (double-pay risk).
+          setTicketsConfirming(true)
           router.refresh()
           const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
           delay(1500).then(() => fetchEntries())
           delay(4000).then(() => fetchEntries())
           delay(8000).then(() => fetchEntries())
+        } else {
+          setTicketsConfirming(false)
+          // Recoverable (wallet reject, create failed, etc.) — restore Enter with error.
+          setShowEnterRaffleDialog(true)
         }
         return
       }
@@ -1127,6 +1142,10 @@ export function RaffleDetailClient({
 
       if (res.freeEntryUnlocked) {
         setFreeEntryUnlockedOpen(true)
+      }
+
+      if (res.ok) {
+        setTimeout(() => setSuccess(false), 8000)
       }
 
       router.refresh()
@@ -1184,6 +1203,7 @@ export function RaffleDetailClient({
     setTicketQuantityDisplay('1')
     setError(null)
     setSuccess(false)
+    setTicketsConfirming(false)
     setShowEnterRaffleDialog(true)
   }
 
@@ -2748,7 +2768,7 @@ export function RaffleDetailClient({
             {shareCopied ? 'Copied!' : 'Share'}
           </Button>
           <RafflePromoPngButton
-            title={raffle.title}
+            title={displayTitle}
             slug={raffle.slug}
             ticketPrice={raffle.ticket_price}
             currency={raffle.currency}
@@ -2761,7 +2781,7 @@ export function RaffleDetailClient({
           />
           {hasEnded && raffle.winner_wallet && (
             <RaffleWinnerPngButton
-              title={raffle.title}
+              title={displayTitle}
               slug={raffle.slug}
               imageUrl={heroImageDead ? null : heroImageSrc}
               imageAttemptUrls={heroImageDead ? [] : promoPngImageAttemptUrls}
@@ -2776,7 +2796,7 @@ export function RaffleDetailClient({
           )}
           {isActive && shouldShowRevenueFlexPublic(profitInfoForSocialFlex) && (
             <RaffleOverThresholdPngButton
-              title={raffle.title}
+              title={displayTitle}
               slug={raffle.slug}
               ticketPrice={raffle.ticket_price}
               currency={raffle.currency}
@@ -3165,8 +3185,8 @@ export function RaffleDetailClient({
         )}
         {/* Mobile: raffle name in the empty space below nav buttons */}
         <div className="md:hidden mb-3">
-          <h1 className="text-lg font-semibold truncate text-foreground" title={raffle.title}>
-            {raffle.title}
+          <h1 className="text-lg font-semibold truncate text-foreground" title={displayTitle}>
+            {displayTitle}
           </h1>
         </div>
         {showDepositEscrow && (
@@ -3703,7 +3723,7 @@ export function RaffleDetailClient({
           <CardHeader className={classes.headerPadding}>
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
               <div className="flex-1 min-w-0">
-                <CardTitle className={classes.title}>{raffle.title}</CardTitle>
+                <CardTitle className={classes.title}>{displayTitle}</CardTitle>
                 <CardDescription className={`${classes.description} break-words`}>
                   <RaffleDescriptionText
                     raffle={{
@@ -3778,16 +3798,6 @@ export function RaffleDetailClient({
                 </div>
               </div>
               <div className="flex items-center gap-2 sm:flex-shrink-0">
-                {isOwlEnabled() && raffle.creator_is_holder === true && (
-                  <span
-                    className="inline-flex items-center justify-center rounded-full bg-emerald-500/15 border border-emerald-500/50 text-emerald-400 p-1"
-                    title="Hosted by an Owltopia (Owl NFT) holder — 3% platform fee on tickets"
-                    role="img"
-                    aria-label="Owl holder"
-                  >
-                    <BadgeCheck className="h-4 w-4 flex-shrink-0" />
-                  </span>
-                )}
                 <OwlVisionBadge score={currentOwlVisionScore} onOpenInTab={() => setActiveTab('owl-vision')} />
               </div>
             </div>
@@ -3877,7 +3887,7 @@ export function RaffleDetailClient({
                   <img
                     key={`hero-${heroIdx}-${heroImageSrc}`}
                     src={heroImageSrc}
-                    alt={raffle.title}
+                    alt={displayTitle}
                     width={1200}
                     height={900}
                     loading="eager"
@@ -4486,6 +4496,7 @@ export function RaffleDetailClient({
                   disabled={
                     purchasesBlocked ||
                     isCreator ||
+                    isProcessing ||
                     (availableTickets !== null && availableTickets <= 0)
                   }
                   size={classes.buttonSize as any}
@@ -4503,8 +4514,23 @@ export function RaffleDetailClient({
                     ? 'Your Raffle'
                     : availableTickets !== null && availableTickets <= 0
                     ? 'Sold Out'
+                    : isProcessing
+                    ? 'Processing...'
                     : 'Enter Raffle'}
                 </Button>
+                {!showEnterRaffleDialog && ticketsConfirming && (
+                  <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm">
+                    {TICKETS_CONFIRMING_MESSAGE}
+                  </div>
+                )}
+                {!showEnterRaffleDialog && success && (
+                  <div className="p-3 rounded-lg bg-green-500/10 border border-green-500 text-green-500 text-sm space-y-2">
+                    <p>Tickets purchased successfully! Transaction confirmed.</p>
+                    <p className="text-xs opacity-90">
+                      Your entry should appear shortly. If you don&apos;t see it, please refresh the page.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
             {isFuture && (
@@ -4817,14 +4843,14 @@ export function RaffleDetailClient({
           <DialogHeader>
             <DialogTitle>Processing your entry</DialogTitle>
             <DialogDescription>
-              Your payment was sent. We&apos;re confirming it on Solana — this usually takes a few seconds.
-              Please keep this page open; your tickets will update automatically once confirmed.
+              Approve in your wallet if prompted, then we&apos;ll confirm on Solana — usually a few seconds.
+              Keep this page open; your tickets update automatically once confirmed.
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-3 mt-3">
             <Loader2 className="h-5 w-5 animate-spin text-primary" />
             <p className="text-sm text-muted-foreground">
-              You can safely read this page while we verify on-chain. Closing the tab won&apos;t cancel the transaction.
+              You can keep reading this page while we verify. Closing the tab won&apos;t cancel a payment already sent.
             </p>
           </div>
         </DialogContent>
@@ -5053,7 +5079,7 @@ export function RaffleDetailClient({
                 ) : null}
                 {raffle.winner_wallet?.trim() ? (
                   <RaffleWinnerPngButton
-                    title={raffle.title}
+                    title={displayTitle}
                     slug={raffle.slug}
                     imageUrl={heroImageDead ? null : heroImageSrc}
                     imageAttemptUrls={heroImageDead ? [] : promoPngImageAttemptUrls}

@@ -699,7 +699,7 @@ export function RafflesPageClient({
     // When server already failed, try direct Supabase only if error doesn't suggest Supabase is down
     if (initialError && !isLikelySupabaseDown(initialError.message)) tryDirectSupabase()
 
-    // lite=true skips Helius holder enrichment so this stays under Vercel maxDuration
+    // lite=true skips partner/admin display enrich for a faster live-activity poll
     fetch('/api/raffles?lite=true')
       .then(async (res) => {
         if (cancelled) return null

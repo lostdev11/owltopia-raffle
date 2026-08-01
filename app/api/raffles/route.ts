@@ -64,13 +64,12 @@ export async function GET(request: NextRequest) {
     }
 
     const filtered = filterRafflesByPendingVisibility(raffles ?? [], viewerWallet, viewerIsAdmin)
-    // Cart browse (`active=true`) / live activity (`lite=true`) skip Helius — otherwise keep a short
-    // budget so admin-role + DB + enrich stay under Vercel maxDuration (60s). A 45s enrich budget
-    // plus upstream connect timeouts was causing widespread 504s.
-    const skipHolderEnrich = activeOnly || searchParams.get('lite') === 'true'
-    const enriched = skipHolderEnrich
+    // Cart browse (`active=true`) / live activity (`lite=true`) skip partner/admin enrich for latency.
+    // Holder badge DAS was removed from enrichment entirely (Helius cost).
+    const skipDisplayEnrich = activeOnly || searchParams.get('lite') === 'true'
+    const enriched = skipDisplayEnrich
       ? filtered
-      : await enrichRafflesWithCreatorHolder(filtered, { budgetMs: 8_000 })
+      : await enrichRafflesWithCreatorHolder(filtered)
     return NextResponse.json(enriched, { status: 200 })
   } catch (err) {
     console.error('[GET /api/raffles] unexpected error:', err)

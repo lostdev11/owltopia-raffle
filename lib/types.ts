@@ -336,7 +336,7 @@ export interface Raffle {
   draw_reveal_tx?: string | null
   /** When the reveal memo tx was confirmed. */
   draw_revealed_at?: string | null
-  /** Enriched at list time: true if creator is an Owltopia (Owl NFT) holder. Used for card badge. */
+  /** Deprecated display field — always false; Owl holder badge removed (fee tiers still use live DAS on create/buy). */
   creator_is_holder?: boolean
   /** Enriched at list time: creator wallet is in partner_community_creators (2% fee, spotlight). */
   creator_is_partner?: boolean

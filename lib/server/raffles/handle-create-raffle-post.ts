@@ -727,7 +727,11 @@ export async function handleCreateRafflePost(
 
       const titleCandidates = await resolveNftPrizeRaffleTitleCandidatesFromMint(
         getSolanaReadConnection(),
-        prizeAssetId
+        prizeAssetId,
+        {
+          metadataUriHint:
+            typeof body.nft_metadata_uri === 'string' ? body.nft_metadata_uri : null,
+        }
       )
       const canonicalNftTitle = titleCandidates[0]!
       const submittedTitle = typeof body.title === 'string' ? body.title : ''
