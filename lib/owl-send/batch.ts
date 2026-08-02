@@ -76,3 +76,100 @@ export function parseRecipientAddresses(raw: string): string[] {
     .map((s) => s.trim())
     .filter(Boolean)
 }
+
+export type TokenScatterEntry = {
+  recipient: string
+  /** UI amount string when provided as `wallet,amount`; null = use default amount. */
+  amountUi: string | null
+}
+
+const AMOUNT_RE = /^[0-9]*\.?[0-9]+$/
+
+/**
+ * Parse token scatter paste:
+ * - `wallet` per line (uses default amount)
+ * - `wallet,amount` or `wallet amount` per line
+ * Blank lines ignored. Comma-separated wallets without amounts still work when each
+ * token is on its own line; mixed `wallet,amount` lines take precedence per line.
+ */
+export function parseTokenScatterEntries(raw: string): TokenScatterEntry[] {
+  const lines = raw
+    .split(/\r?\n/g)
+    .map((l) => l.trim())
+    .filter(Boolean)
+  if (lines.length === 0) {
+    return parseRecipientAddresses(raw).map((recipient) => ({ recipient, amountUi: null }))
+  }
+
+  const entries: TokenScatterEntry[] = []
+  for (const line of lines) {
+    const commaParts = line.split(/[,;]/).map((s) => s.trim()).filter(Boolean)
+    if (commaParts.length === 2 && AMOUNT_RE.test(commaParts[1]!)) {
+      entries.push({ recipient: commaParts[0]!, amountUi: commaParts[1]! })
+      continue
+    }
+    const spaceParts = line.split(/\s+/).filter(Boolean)
+    if (spaceParts.length === 2 && AMOUNT_RE.test(spaceParts[1]!)) {
+      entries.push({ recipient: spaceParts[0]!, amountUi: spaceParts[1]! })
+      continue
+    }
+    // Whole line is one address (or multiple wallets without amounts)
+    const addrs = parseRecipientAddresses(line)
+    for (const recipient of addrs) {
+      entries.push({ recipient, amountUi: null })
+    }
+  }
+  return entries
+}
+
+export type OwlSendTokenScatterLine = {
+  mint: string
+  tokenAccount: string
+  amountRaw: bigint
+  decimals: number
+  symbol?: string
+  recipient: string
+}
+
+/** Build per-recipient token lines from scatter entries + a selected fungible. */
+export function buildTokenScatterLines(params: {
+  mint: string
+  tokenAccount: string
+  decimals: number
+  symbol?: string
+  defaultAmountUi: string
+  entries: TokenScatterEntry[]
+  maxSelect?: number
+}): { ok: true; lines: OwlSendTokenScatterLine[] } | { ok: false; error: string } {
+  const max = params.maxSelect ?? OWL_SEND_MAX_SELECT
+  if (params.entries.length < 1) {
+    return { ok: false, error: 'Paste at least one recipient wallet.' }
+  }
+  if (params.entries.length > max) {
+    return { ok: false, error: `Scatter at most ${max} wallets per send.` }
+  }
+
+  const lines: OwlSendTokenScatterLine[] = []
+  for (const entry of params.entries) {
+    const uiStr = (entry.amountUi ?? params.defaultAmountUi).trim()
+    const ui = Number(uiStr)
+    if (!Number.isFinite(ui) || ui <= 0) {
+      return {
+        ok: false,
+        error: entry.amountUi
+          ? `Invalid amount for ${entry.recipient.slice(0, 4)}…`
+          : 'Enter a default amount greater than 0 (or wallet,amount per line).',
+      }
+    }
+    const amountRaw = BigInt(Math.round(ui * 10 ** params.decimals))
+    lines.push({
+      mint: params.mint,
+      tokenAccount: params.tokenAccount,
+      amountRaw,
+      decimals: params.decimals,
+      symbol: params.symbol,
+      recipient: entry.recipient,
+    })
+  }
+  return { ok: true, lines }
+}

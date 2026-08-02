@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { ArrowLeft, CheckCircle2, Loader2, Send, Shield } from 'lucide-react'
@@ -8,12 +8,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { OwlSendClient } from '@/components/owl-send/OwlSendClient'
-import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import {
   OWL_SEND_MAX_PER_TX,
   OWL_SEND_MAX_SELECT,
 } from '@/lib/owl-send/constants'
 import { formatOwlSendFeeSol, getOwlSendFeeSol, isOwlSendFeeEnabledClient } from '@/lib/owl-send/fee'
+import { useOwlSendAdminAccess } from '@/lib/owl-send/use-owl-send-admin-access'
 
 type Props = {
   initialViewerIsAdmin: boolean
@@ -22,52 +22,39 @@ type Props = {
 
 export function AdminOwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const { publicKey, connected } = useWallet()
-  const wallet = publicKey?.toBase58() ?? ''
-  const cachedTrue =
-    typeof window !== 'undefined' && wallet ? getCachedAdmin(wallet) === true : false
-
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(() =>
-    initialViewerIsAdmin || cachedTrue ? true : null
-  )
-  const [loading, setLoading] = useState(() => !(initialViewerIsAdmin || cachedTrue))
+  const access = useOwlSendAdminAccess({ initialViewerIsAdmin, isPublic })
 
   const feeSol = getOwlSendFeeSol()
   const feeConfigured = isOwlSendFeeEnabledClient()
 
-  useEffect(() => {
-    if (!connected || !publicKey) {
-      setIsAdmin(initialViewerIsAdmin ? true : null)
-      setLoading(false)
-      return
-    }
-    const addr = publicKey.toBase58()
-    if (getCachedAdmin(addr) === true) {
-      setIsAdmin(true)
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    let cancelled = false
-    fetch(`/api/admin/check?wallet=${encodeURIComponent(addr)}`)
-      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
-      .then((data) => {
-        if (cancelled) return
-        const admin = data?.isAdmin === true
-        setCachedAdmin(addr, admin, admin && data?.role ? data.role : null)
-        setIsAdmin(admin)
-      })
-      .catch(() => {
-        if (!cancelled) setIsAdmin(false)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [connected, publicKey, initialViewerIsAdmin])
+  if (access.loading) {
+    return (
+      <div className="container mx-auto flex min-h-[40vh] max-w-3xl items-center justify-center gap-2 px-4 py-16 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Checking admin access…
+      </div>
+    )
+  }
 
   if (!connected || !publicKey) {
+    // SIWS admin session still allows opening the bench after reconnect prompts.
+    if (access.isAdmin) {
+      return (
+        <div className="container mx-auto max-w-3xl px-4 py-10 pb-24">
+          <AdminChrome isPublic={isPublic} feeSol={feeSol} feeConfigured={feeConfigured} />
+          <Card className="mt-6 border-white/10 bg-black/40">
+            <CardHeader>
+              <CardTitle className="text-lg">Reconnect your admin wallet</CardTitle>
+              <CardDescription>
+                Your admin session is active. Connect the same wallet to load NFTs and run a send.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <WalletConnectButton />
+            </CardContent>
+          </Card>
+        </div>
+      )
+    }
     return (
       <div className="container mx-auto max-w-3xl px-4 py-10 pb-24">
         <AdminChrome isPublic={isPublic} feeSol={feeSol} feeConfigured={feeConfigured} />
@@ -86,15 +73,7 @@ export function AdminOwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     )
   }
 
-  if (loading || isAdmin === null) {
-    return (
-      <div className="container mx-auto flex min-h-[40vh] max-w-3xl items-center justify-center gap-2 px-4 py-16 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Checking admin access…
-      </div>
-    )
-  }
-
-  if (!isAdmin) {
+  if (access.denied) {
     return (
       <div className="container mx-auto max-w-lg px-4 py-10">
         <Card>
@@ -108,6 +87,14 @@ export function AdminOwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
             </Button>
           </CardContent>
         </Card>
+      </div>
+    )
+  }
+
+  if (!access.allowed) {
+    return (
+      <div className="container mx-auto flex min-h-[40vh] max-w-3xl items-center justify-center gap-2 px-4 py-16 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Checking admin access…
       </div>
     )
   }
@@ -134,7 +121,9 @@ export function AdminOwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
             <ChecklistItem>
               Scatter 2 NFTs to 2 wallets — confirm pairing + batch of {OWL_SEND_MAX_PER_TX}
             </ChecklistItem>
-            <ChecklistItem>Tokens tab — one SPL line, confirm Solscan success popup</ChecklistItem>
+            <ChecklistItem>
+              Tokens → Scatter — paste wallets (or wallet,amount) and confirm Solscan success
+            </ChecklistItem>
             <ChecklistItem>
               Confirm fee treasury receives {formatOwlSendFeeSol(feeSol)} per line
             </ChecklistItem>

@@ -55,10 +55,13 @@ export async function confirmSignatureSuccessOnChain(
   connection: Connection,
   signature: string,
   /** Mobile / congested RPC: allow extra time before we ask the user to verify manually. */
-  timeoutMs = 120_000
+  timeoutMs = 120_000,
+  /** Override the default raffle-oriented timeout hint (e.g. OwlSend). */
+  timeoutHint?: string
 ): Promise<void> {
   const started = Date.now()
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  const hint = timeoutHint?.trim() || TIMEOUT_HINT
 
   while (Date.now() - started < timeoutMs) {
     if (await pollSignatureOnce(connection, signature)) return
@@ -71,6 +74,6 @@ export async function confirmSignatureSuccessOnChain(
   if (await pollSignatureOnce(connection, signature)) return
 
   throw new Error(
-    `Transaction signature was returned, but it was not confirmed on-chain in time. ${TIMEOUT_HINT}`
+    `Transaction signature was returned, but it was not confirmed on-chain in time. ${hint}`
   )
 }

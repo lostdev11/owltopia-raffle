@@ -13,6 +13,11 @@ import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
 import { getPlatformFeeTreasuryWalletAddressClient } from '@/lib/solana/platform-fee-treasury-wallet'
+import { assertNftTransferable } from '@/lib/owl-send/assert-nft-transferable'
+import {
+  OWL_SEND_CONFIRM_TIMEOUT_HINT,
+  OWL_SEND_CONFIRM_TIMEOUT_MS,
+} from '@/lib/owl-send/confirm'
 import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
 import type { OwlSendLine } from '@/lib/owl-send/batch'
 import type { OwlSendBatchResult } from '@/lib/owl-send/send-spl-nft-batch'
@@ -41,7 +46,12 @@ async function sendFeeOnlyTx(params: {
       preflightCommitment: 'confirmed',
       maxRetries: 3,
     })
-    await confirmSignatureSuccessOnChain(params.connection, signature)
+    await confirmSignatureSuccessOnChain(
+      params.connection,
+      signature,
+      OWL_SEND_CONFIRM_TIMEOUT_MS,
+      OWL_SEND_CONFIRM_TIMEOUT_HINT
+    )
     return { ok: true, signature }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -67,6 +77,18 @@ export async function sendOwlSendSpecialNft(params: {
 
   if (!walletAdapter) {
     return { ok: false, error: 'Wallet adapter not ready for this NFT type.', failedMints: [mint] }
+  }
+
+  // Classic SPL freeze/delegate check when a token account hint exists (nested/staked).
+  // Core/cNFT may not have an SPL account — ignore not_held and continue special paths.
+  const preflight = await assertNftTransferable({
+    connection,
+    mint,
+    owner,
+    tokenAccount: line.tokenAccount,
+  })
+  if (!preflight.ok && (preflight.reason === 'frozen' || preflight.reason === 'delegated')) {
+    return { ok: false, error: preflight.error, failedMints: [mint] }
   }
 
   // Token Metadata / pNFT — append fee as SOL transfer to treasury in the same UMI builder.

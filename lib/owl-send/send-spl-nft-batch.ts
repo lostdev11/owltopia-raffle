@@ -12,14 +12,16 @@ import {
   createTransferInstruction,
   getAccount,
   getAssociatedTokenAddress,
-  TOKEN_2022_PROGRAM_ID,
-  TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
-import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
 import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
 import { getPlatformFeeTreasuryWalletAddressClient } from '@/lib/solana/platform-fee-treasury-wallet'
+import { assertNftTransferable } from '@/lib/owl-send/assert-nft-transferable'
+import {
+  OWL_SEND_CONFIRM_TIMEOUT_HINT,
+  OWL_SEND_CONFIRM_TIMEOUT_MS,
+} from '@/lib/owl-send/confirm'
 import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
 import { OWL_SEND_MAX_PER_TX } from '@/lib/owl-send/constants'
 import type { OwlSendLine } from '@/lib/owl-send/batch'
@@ -34,50 +36,43 @@ async function resolveHolder(
   owner: PublicKey,
   hintTokenAccount?: string | null
 ) {
-  if (hintTokenAccount && hintTokenAccount !== mint.toBase58()) {
-    try {
-      const selectedTokenAccount = new PublicKey(hintTokenAccount)
-      const selectedInfo = await connection.getParsedAccountInfo(selectedTokenAccount, 'processed')
-      const ownerProgram = selectedInfo.value?.owner
-      const isSplProgram = ownerProgram?.equals(TOKEN_PROGRAM_ID) ?? false
-      const isToken2022 = ownerProgram?.equals(TOKEN_2022_PROGRAM_ID) ?? false
-      const info = (
-        selectedInfo.value?.data as { parsed?: { info?: Record<string, unknown> } } | undefined
-      )?.parsed?.info
-      const selectedMint = typeof info?.mint === 'string' ? info.mint : null
-      const amountRaw =
-        typeof info?.tokenAmount === 'object' && info?.tokenAmount
-          ? (info.tokenAmount as { amount?: unknown }).amount
-          : undefined
-      const amount =
-        typeof amountRaw === 'string'
-          ? Number(amountRaw)
-          : typeof amountRaw === 'number'
-            ? amountRaw
-            : 0
-      const delegate = typeof info?.delegate === 'string' ? info.delegate : null
-      if (selectedMint === mint.toBase58() && amount >= 1 && !delegate) {
-        if (isSplProgram) {
-          return { tokenProgram: TOKEN_PROGRAM_ID, tokenAccount: selectedTokenAccount }
-        }
-        if (isToken2022) {
-          return { tokenProgram: TOKEN_2022_PROGRAM_ID, tokenAccount: selectedTokenAccount }
-        }
-      }
-    } catch {
-      /* fall through */
-    }
+  const preflight = await assertNftTransferable({
+    connection,
+    mint: mint.toBase58(),
+    owner,
+    tokenAccount: hintTokenAccount,
+  })
+  if (preflight.ok) {
+    return { tokenProgram: preflight.tokenProgram, tokenAccount: preflight.tokenAccount }
+  }
+  if (preflight.reason === 'frozen' || preflight.reason === 'delegated') {
+    throw new Error(preflight.error)
   }
 
-  for (let attempt = 0; attempt < HOLDER_LOOKUP_MAX_ATTEMPTS; attempt++) {
-    const h = await getNftHolderInWallet(connection, mint, owner, 'processed')
-    if (h && 'delegated' in h && h.delegated) {
-      throw new Error(`NFT ${mint.toBase58().slice(0, 4)}… is staked or delegated — unstake before sending.`)
+  // One fallback scan for non-ATA holdings (no multi-second retry loop).
+  const h = await getNftHolderInWallet(connection, mint, owner, 'processed')
+  if (h && 'delegated' in h && h.delegated) {
+    throw new Error(
+      `NFT ${mint.toBase58().slice(0, 4)}… is staked or nested (delegated) — unstake/unnest before sending.`
+    )
+  }
+  if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
+    try {
+      const acc = await getAccount(connection, h.tokenAccount, 'processed', h.tokenProgram)
+      if (acc.isFrozen) {
+        throw new Error(
+          `NFT ${mint.toBase58().slice(0, 4)}… is frozen (often nested) — unnest or thaw before sending.`
+        )
+      }
+      if (acc.delegate) {
+        throw new Error(
+          `NFT ${mint.toBase58().slice(0, 4)}… is staked or nested (delegated) — unstake/unnest before sending.`
+        )
+      }
+    } catch (e) {
+      if (e instanceof Error && /frozen|staked|nested/i.test(e.message)) throw e
     }
-    if (h && 'tokenProgram' in h && 'tokenAccount' in h) return h
-    if (attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1) {
-      await new Promise((r) => setTimeout(r, 700))
-    }
+    return h
   }
   return null
 }
@@ -187,7 +182,12 @@ export async function sendOwlSendSplNftBatch(params: {
       preflightCommitment: 'confirmed',
       maxRetries: 3,
     })
-    await confirmSignatureSuccessOnChain(connection, signature)
+    await confirmSignatureSuccessOnChain(
+      connection,
+      signature,
+      OWL_SEND_CONFIRM_TIMEOUT_MS,
+      OWL_SEND_CONFIRM_TIMEOUT_HINT
+    )
     return { ok: true, signature, newAtaCount }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

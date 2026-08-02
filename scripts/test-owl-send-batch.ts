@@ -4,10 +4,12 @@
  */
 import assert from 'node:assert/strict'
 import {
+  buildTokenScatterLines,
   capOwlSendSelection,
   chunkOwlSendBatches,
   pairScatterLines,
   parseRecipientAddresses,
+  parseTokenScatterEntries,
 } from '@/lib/owl-send/batch'
 import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
@@ -61,5 +63,44 @@ assert.ok(cost!.rentSolKnown != null && cost!.rentSolKnown > 0)
 assert.equal(canAccessOwlSend({ isAdmin: true, publicOverride: false }), true)
 assert.equal(canAccessOwlSend({ isAdmin: false, publicOverride: false }), false)
 assert.equal(canAccessOwlSend({ isAdmin: false, publicOverride: true }), true)
+
+const scatterEntries = parseTokenScatterEntries('Aaa\nBbb,10\nCcc 2.5')
+assert.equal(scatterEntries.length, 3)
+assert.equal(scatterEntries[0]!.recipient, 'Aaa')
+assert.equal(scatterEntries[0]!.amountUi, null)
+assert.equal(scatterEntries[1]!.recipient, 'Bbb')
+assert.equal(scatterEntries[1]!.amountUi, '10')
+assert.equal(scatterEntries[2]!.recipient, 'Ccc')
+assert.equal(scatterEntries[2]!.amountUi, '2.5')
+
+const tokenLines = buildTokenScatterLines({
+  mint: 'mint1',
+  tokenAccount: 'ata1',
+  decimals: 0,
+  symbol: 'OWL',
+  defaultAmountUi: '1',
+  entries: [
+    { recipient: 'r1', amountUi: null },
+    { recipient: 'r2', amountUi: '3' },
+  ],
+})
+assert.equal(tokenLines.ok, true)
+if (tokenLines.ok) {
+  assert.equal(tokenLines.lines.length, 2)
+  assert.equal(tokenLines.lines[0]!.amountRaw, 1n)
+  assert.equal(tokenLines.lines[1]!.amountRaw, 3n)
+  assert.equal(tokenLines.lines[1]!.recipient, 'r2')
+  const tokenChunks = chunkOwlSendBatches(tokenLines.lines)
+  assert.equal(tokenChunks.length, 1)
+}
+
+const tooMany = buildTokenScatterLines({
+  mint: 'mint1',
+  tokenAccount: 'ata1',
+  decimals: 0,
+  defaultAmountUi: '1',
+  entries: Array.from({ length: 21 }, (_, i) => ({ recipient: `r${i}`, amountUi: null })),
+})
+assert.equal(tooMany.ok, false)
 
 console.log('test-owl-send-batch: ok')

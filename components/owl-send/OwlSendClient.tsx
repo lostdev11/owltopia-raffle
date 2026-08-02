@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import {
   AlertTriangle,
@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { WalletNftPicker } from '@/components/WalletNftPicker'
+import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { OwlSendSuccessBanner } from '@/components/owl-send/OwlSendSuccessBanner'
 import {
   OwlSendSuccessDialog,
@@ -31,11 +32,15 @@ import {
 } from '@/lib/solana/wallet-tokens'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
+import { assertOwlSendLinesTransferable } from '@/lib/owl-send/assert-nft-transferable'
 import {
+  buildTokenScatterLines,
   chunkOwlSendBatches,
   pairScatterLines,
   parseRecipientAddresses,
+  parseTokenScatterEntries,
   type OwlSendLine,
+  type OwlSendTokenScatterLine,
 } from '@/lib/owl-send/batch'
 import {
   OWL_SEND_MAX_PER_TX,
@@ -46,11 +51,12 @@ import {
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { formatOwlSendFeeSol, getOwlSendFeeSol } from '@/lib/owl-send/fee'
 import { sendOwlSendNftBatch } from '@/lib/owl-send/send-batch'
-import { sendOwlSendTokensToOne } from '@/lib/owl-send/send-tokens'
+import { sendOwlSendTokenLines, sendOwlSendTokensToOne } from '@/lib/owl-send/send-tokens'
+import { useOwlSendAdminAccess } from '@/lib/owl-send/use-owl-send-admin-access'
 import { cn } from '@/lib/utils'
 
 type Props = {
-  /** Server session admin hint; client also verifies connected wallet via /api/admin/check. */
+  /** Server session admin hint; client also verifies via SIWS + /api/admin/check. */
   initialViewerIsAdmin: boolean
   isPublic: boolean
 }
@@ -73,9 +79,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const { connection } = useConnection()
   const { publicKey, connected, wallet } = useWallet()
   const sendTransaction = useSendTransactionForWallet()
+  const access = useOwlSendAdminAccess({ initialViewerIsAdmin, isPublic })
 
-  const [viewerIsAdmin, setViewerIsAdmin] = useState(initialViewerIsAdmin)
-  const [accessChecked, setAccessChecked] = useState(isPublic || initialViewerIsAdmin)
   const [assetTab, setAssetTab] = useState<OwlSendAssetTab>('nfts')
   const [mode, setMode] = useState<OwlSendMode>('send_to_one')
   const [nfts, setNfts] = useState<WalletNft[]>([])
@@ -93,50 +98,29 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [activeBatch, setActiveBatch] = useState(0)
   const [retryMints, setRetryMints] = useState<string[]>([])
   const [sessionError, setSessionError] = useState<string | null>(null)
+  const [preparing, setPreparing] = useState(false)
 
   // Tokens tab
+  const [tokenMode, setTokenMode] = useState<OwlSendMode>('send_to_one')
   const [tokenAmounts, setTokenAmounts] = useState<Record<string, string>>({})
   const [tokenDestination, setTokenDestination] = useState('')
+  const [tokenScatterMint, setTokenScatterMint] = useState<string | null>(null)
+  const [tokenScatterDefaultAmount, setTokenScatterDefaultAmount] = useState('')
+  const [tokenScatterRaw, setTokenScatterRaw] = useState('')
+  const [tokenBatches, setTokenBatches] = useState<OwlSendTokenScatterLine[][]>([])
+  const [tokenBatchProgress, setTokenBatchProgress] = useState<BatchProgress[]>([])
+  const [tokenActiveBatch, setTokenActiveBatch] = useState(0)
   const [tokenBusy, setTokenBusy] = useState(false)
   const [tokenError, setTokenError] = useState<string | null>(null)
   const [tokenSuccessSig, setTokenSuccessSig] = useState<string | null>(null)
   const [tokenSuccessDetail, setTokenSuccessDetail] = useState<string | null>(null)
   const [successPopup, setSuccessPopup] = useState<OwlSendSuccessState>(null)
 
-  const feeSol = getOwlSendFeeSol()
-  const showAdminPreview = viewerIsAdmin && !isPublic
-  const allowed = isPublic || viewerIsAdmin
+  const sendCancelledRef = useRef(false)
 
-  useEffect(() => {
-    if (isPublic) {
-      setAccessChecked(true)
-      return
-    }
-    if (!connected || !publicKey) {
-      setViewerIsAdmin(initialViewerIsAdmin)
-      setAccessChecked(true)
-      return
-    }
-    let cancelled = false
-    setAccessChecked(false)
-    fetch(`/api/admin/check?wallet=${encodeURIComponent(publicKey.toBase58())}`, {
-      cache: 'no-store',
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (cancelled) return
-        setViewerIsAdmin(data?.isAdmin === true || initialViewerIsAdmin)
-        setAccessChecked(true)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setViewerIsAdmin(initialViewerIsAdmin)
-        setAccessChecked(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [connected, publicKey, isPublic, initialViewerIsAdmin])
+  const feeSol = getOwlSendFeeSol()
+  const showAdminPreview = access.isAdmin && !isPublic
+  const allowed = access.allowed
 
   const loadAssets = useCallback(async () => {
     if (!publicKey) return
@@ -174,6 +158,10 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   )
 
   const scatterRecipients = useMemo(() => parseRecipientAddresses(scatterRaw), [scatterRaw])
+  const tokenScatterEntries = useMemo(
+    () => parseTokenScatterEntries(tokenScatterRaw),
+    [tokenScatterRaw]
+  )
 
   const cost = useMemo(() => {
     if (preparedLines && preparedLines.length > 0) {
@@ -189,6 +177,35 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       batchCount: Math.ceil(count / OWL_SEND_MAX_PER_TX),
     })
   }, [preparedLines, batches.length, selectedNfts.length])
+
+  const cancelInFlightSend = () => {
+    sendCancelledRef.current = true
+    setBatchProgress((prev) =>
+      prev.map((b) =>
+        b.status === 'sending'
+          ? {
+              ...b,
+              status: 'failed',
+              error: 'Cancelled — approve may still complete in your wallet; check Solscan before retrying.',
+            }
+          : b
+      )
+    )
+    setTokenBatchProgress((prev) =>
+      prev.map((b) =>
+        b.status === 'sending'
+          ? {
+              ...b,
+              status: 'failed',
+              error: 'Cancelled — approve may still complete in your wallet; check Solscan before retrying.',
+            }
+          : b
+      )
+    )
+    setTokenBusy(false)
+    setSessionError('Send cancelled. If a wallet popup is still open, reject it.')
+    setTokenError('Send cancelled. If a wallet popup is still open, reject it.')
+  }
 
   const toggleNft = (nft: WalletNft) => {
     setPreparedLines(null)
@@ -211,9 +228,13 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setSelectedMints(new Set(mints.slice(0, OWL_SEND_MAX_SELECT)))
   }
 
-  const prepareNftSend = () => {
+  const prepareNftSend = async () => {
     setSessionError(null)
     setRetryMints([])
+    if (!publicKey) {
+      setSessionError('Connect your wallet first.')
+      return
+    }
     if (selectedNfts.length < 1) {
       setSessionError('Select at least one NFT.')
       return
@@ -230,7 +251,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         setSessionError('Enter a valid destination wallet.')
         return
       }
-      if (dest === publicKey?.toBase58()) {
+      if (dest === publicKey.toBase58()) {
         setSessionError('Destination is your own wallet.')
         return
       }
@@ -265,17 +286,36 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       lines = paired.lines
     }
 
-    const chunked = chunkOwlSendBatches(lines)
-    setPreparedLines(lines)
-    setBatches(chunked)
-    setBatchProgress(
-      chunked.map((_, i) => ({
-        index: i,
-        total: chunked.length,
-        status: i === 0 ? 'ready' : 'pending',
-      }))
-    )
-    setActiveBatch(0)
+    setPreparing(true)
+    try {
+      const preflight = await assertOwlSendLinesTransferable({
+        connection,
+        owner: publicKey,
+        lines,
+      })
+      if (!preflight.ok) {
+        setRetryMints(preflight.failedMints)
+        setSessionError(preflight.error)
+        setPreparedLines(null)
+        setBatches([])
+        setBatchProgress([])
+        return
+      }
+
+      const chunked = chunkOwlSendBatches(lines)
+      setPreparedLines(lines)
+      setBatches(chunked)
+      setBatchProgress(
+        chunked.map((_, i) => ({
+          index: i,
+          total: chunked.length,
+          status: i === 0 ? 'ready' : 'pending',
+        }))
+      )
+      setActiveBatch(0)
+    } finally {
+      setPreparing(false)
+    }
   }
 
   const runBatch = async (batchIndex: number) => {
@@ -283,10 +323,30 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     const lines = batches[batchIndex]
     if (!lines?.length) return
 
+    sendCancelledRef.current = false
     setBatchProgress((prev) =>
       prev.map((b) => (b.index === batchIndex ? { ...b, status: 'sending', error: undefined } : b))
     )
     setSessionError(null)
+
+    const preflight = await assertOwlSendLinesTransferable({
+      connection,
+      owner: publicKey,
+      lines,
+    })
+    if (sendCancelledRef.current) return
+    if (!preflight.ok) {
+      setBatchProgress((prev) =>
+        prev.map((b) =>
+          b.index === batchIndex
+            ? { ...b, status: 'failed', error: preflight.error, failedMints: preflight.failedMints }
+            : b
+        )
+      )
+      setRetryMints((prev) => [...new Set([...prev, ...preflight.failedMints])])
+      setSessionError(preflight.error)
+      return
+    }
 
     const result = await sendOwlSendNftBatch({
       connection,
@@ -295,6 +355,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       sendTransaction,
       lines,
     })
+
+    if (sendCancelledRef.current) return
 
     if (result.ok) {
       setBatchProgress((prev) =>
@@ -336,7 +398,109 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     }
   }
 
-  const sendTokens = async () => {
+  const prepareTokenScatter = () => {
+    setTokenError(null)
+    setTokenSuccessSig(null)
+    setTokenBatches([])
+    setTokenBatchProgress([])
+    if (!publicKey) {
+      setTokenError('Connect your wallet first.')
+      return
+    }
+    const tok = tokens.find((t) => t.mint === tokenScatterMint)
+    if (!tok) {
+      setTokenError('Select a token to scatter.')
+      return
+    }
+    const built = buildTokenScatterLines({
+      mint: tok.mint,
+      tokenAccount: tok.tokenAccount,
+      decimals: tok.decimals,
+      symbol: walletTokenDisplayName(tok),
+      defaultAmountUi: tokenScatterDefaultAmount,
+      entries: tokenScatterEntries,
+    })
+    if (!built.ok) {
+      setTokenError(built.error)
+      return
+    }
+    for (const line of built.lines) {
+      if (!isValidSolanaPubkey(line.recipient)) {
+        setTokenError(`Invalid recipient wallet: ${line.recipient}`)
+        return
+      }
+    }
+    const totalRaw = built.lines.reduce((sum, l) => sum + l.amountRaw, 0n)
+    if (totalRaw > BigInt(tok.balance)) {
+      setTokenError(`Insufficient balance for ${walletTokenDisplayName(tok)}.`)
+      return
+    }
+    const chunked = chunkOwlSendBatches(built.lines)
+    setTokenBatches(chunked)
+    setTokenBatchProgress(
+      chunked.map((_, i) => ({
+        index: i,
+        total: chunked.length,
+        status: i === 0 ? 'ready' : 'pending',
+      }))
+    )
+    setTokenActiveBatch(0)
+  }
+
+  const runTokenBatch = async (batchIndex: number) => {
+    if (!publicKey) return
+    const lines = tokenBatches[batchIndex]
+    if (!lines?.length) return
+
+    sendCancelledRef.current = false
+    setTokenBusy(true)
+    setTokenError(null)
+    setTokenBatchProgress((prev) =>
+      prev.map((b) => (b.index === batchIndex ? { ...b, status: 'sending', error: undefined } : b))
+    )
+
+    try {
+      const result = await sendOwlSendTokenLines({
+        connection,
+        owner: publicKey,
+        sendTransaction,
+        lines,
+      })
+      if (sendCancelledRef.current) return
+      if (result.ok) {
+        setTokenBatchProgress((prev) =>
+          prev.map((b) =>
+            b.index === batchIndex
+              ? { ...b, status: 'done', signature: result.signature }
+              : b.index === batchIndex + 1 && b.status === 'pending'
+                ? { ...b, status: 'ready' }
+                : b
+          )
+        )
+        if (batchIndex + 1 < tokenBatches.length) setTokenActiveBatch(batchIndex + 1)
+        setSuccessPopup({
+          title:
+            tokenBatches.length > 1
+              ? `Token batch ${batchIndex + 1} of ${tokenBatches.length} sent`
+              : 'Tokens sent successfully',
+          detail: `${lines.length} transfer${lines.length === 1 ? '' : 's'} · fee paid to Owltopia treasury.`,
+          signature: result.signature,
+        })
+        void loadAssets()
+      } else {
+        setTokenBatchProgress((prev) =>
+          prev.map((b) =>
+            b.index === batchIndex ? { ...b, status: 'failed', error: result.error } : b
+          )
+        )
+        setTokenError(result.error)
+      }
+    } finally {
+      if (!sendCancelledRef.current) setTokenBusy(false)
+    }
+  }
+
+  const sendTokensToOne = async () => {
     if (!publicKey) return
     setTokenError(null)
     setTokenSuccessSig(null)
@@ -377,6 +541,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       return
     }
 
+    sendCancelledRef.current = false
     setTokenBusy(true)
     try {
       const result = await sendOwlSendTokensToOne({
@@ -386,6 +551,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         sendTransaction,
         lines,
       })
+      if (sendCancelledRef.current) return
       if (result.ok) {
         const names = lines.map((l) => l.symbol).filter(Boolean)
         setTokenSuccessSig(result.signature)
@@ -408,7 +574,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         setTokenError(result.error)
       }
     } finally {
-      setTokenBusy(false)
+      if (!sendCancelledRef.current) setTokenBusy(false)
     }
   }
 
@@ -420,8 +586,13 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
   const doneCount = batchProgress.filter((b) => b.status === 'done').length
   const allDone = batches.length > 0 && doneCount === batches.length
+  const nftSending = batchProgress.some((b) => b.status === 'sending')
+  const tokenSending =
+    tokenBusy || tokenBatchProgress.some((b) => b.status === 'sending')
+  const tokenDoneCount = tokenBatchProgress.filter((b) => b.status === 'done').length
+  const tokenAllDone = tokenBatches.length > 0 && tokenDoneCount === tokenBatches.length
 
-  if (!accessChecked) {
+  if (access.loading) {
     return (
       <div className="mx-auto flex min-h-[40vh] max-w-3xl items-center justify-center gap-2 px-4 py-16 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" /> Checking access…
@@ -430,13 +601,34 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   }
 
   if (!allowed) {
+    if (!connected || !publicKey) {
+      return (
+        <div className="mx-auto flex min-h-[50vh] max-w-lg flex-col items-center justify-center gap-4 px-4 py-16 text-center">
+          <Bird className="h-10 w-10 text-theme-prime" />
+          <h1 className="font-display text-3xl tracking-wide text-white">OwlSend</h1>
+          <p className="text-sm text-muted-foreground">
+            {isPublic
+              ? 'Connect a wallet to send NFTs and tokens.'
+              : 'Admin preview — connect an admin wallet to continue.'}
+          </p>
+          <WalletConnectButton />
+        </div>
+      )
+    }
+    if (access.denied) {
+      return (
+        <div className="mx-auto flex min-h-[50vh] max-w-lg flex-col items-center justify-center gap-4 px-4 py-16 text-center">
+          <Bird className="h-10 w-10 text-theme-prime" />
+          <h1 className="font-display text-3xl tracking-wide text-white">OwlSend</h1>
+          <p className="text-sm text-muted-foreground">
+            Coming soon. Only site admins can preview OwlSend before public launch.
+          </p>
+        </div>
+      )
+    }
     return (
-      <div className="mx-auto flex min-h-[50vh] max-w-lg flex-col items-center justify-center gap-4 px-4 py-16 text-center">
-        <Bird className="h-10 w-10 text-theme-prime" />
-        <h1 className="font-display text-3xl tracking-wide text-white">OwlSend</h1>
-        <p className="text-sm text-muted-foreground">
-          Coming soon. Admins can connect an admin wallet to preview before public launch.
-        </p>
+      <div className="mx-auto flex min-h-[40vh] max-w-3xl items-center justify-center gap-2 px-4 py-16 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Checking access…
       </div>
     )
   }
@@ -472,8 +664,15 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
             <CardTitle className="flex items-center gap-2 text-lg">
               <Wallet className="h-5 w-5" /> Connect wallet
             </CardTitle>
-            <CardDescription>Connect to load NFTs and start a transfer.</CardDescription>
+            <CardDescription>
+              {access.isAdmin
+                ? 'Admin session active — reconnect to load NFTs and start a transfer.'
+                : 'Connect to load NFTs and start a transfer.'}
+            </CardDescription>
           </CardHeader>
+          <CardContent>
+            <WalletConnectButton />
+          </CardContent>
         </Card>
       ) : (
         <>
@@ -489,7 +688,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                 type="button"
                 onClick={() => setAssetTab(id)}
                 className={cn(
-                  'flex-1 rounded-md px-3 py-2 text-sm font-semibold transition',
+                  'min-h-[44px] flex-1 touch-manipulation rounded-md px-3 py-2 text-sm font-semibold transition',
                   assetTab === id
                     ? 'bg-emerald-500/20 text-theme-prime'
                     : 'text-muted-foreground hover:text-white'
@@ -502,32 +701,54 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
           {assetTab === 'nfts' ? (
             <div className="space-y-5">
-              <div className="flex gap-2 rounded-lg border border-white/10 bg-black/30 p-1">
-                {(
-                  [
-                    ['send_to_one', 'Send to one'],
-                    ['scatter', 'Scatter NFTs'],
-                  ] as const
-                ).map(([id, label]) => (
+              <div className="space-y-2">
+                <div className="flex gap-2 rounded-lg border border-white/10 bg-black/30 p-1">
+                  {(
+                    [
+                      ['send_to_one', 'One wallet'],
+                      ['scatter', 'Many wallets'],
+                    ] as const
+                  ).map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        setMode(id)
+                        setPreparedLines(null)
+                        setBatches([])
+                        setBatchProgress([])
+                      }}
+                      className={cn(
+                        'min-h-[44px] flex-1 touch-manipulation rounded-md px-3 py-2 text-sm font-semibold transition',
+                        mode === id
+                          ? 'bg-emerald-500/20 text-theme-prime'
+                          : 'text-muted-foreground hover:text-white'
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {mode === 'send_to_one'
+                    ? 'All selected NFTs go to one destination (batches of 5).'
+                    : 'Airdrop mode — paste one wallet per NFT (1:1 pairing).'}
+                </p>
+                {mode === 'send_to_one' && selectedNfts.length >= 2 ? (
                   <button
-                    key={id}
                     type="button"
                     onClick={() => {
-                      setMode(id)
+                      setMode('scatter')
                       setPreparedLines(null)
                       setBatches([])
                       setBatchProgress([])
                     }}
-                    className={cn(
-                      'flex-1 rounded-md px-3 py-2 text-sm font-semibold transition',
-                      mode === id
-                        ? 'bg-emerald-500/20 text-theme-prime'
-                        : 'text-muted-foreground hover:text-white'
-                    )}
+                    className="w-full touch-manipulation rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-left text-xs text-sky-100 min-h-[44px]"
                   >
-                    {label}
+                    Sending to different wallets? Switch to <span className="font-semibold">Many wallets</span>{' '}
+                    (Scatter) — paste {selectedNfts.length} addresses.
                   </button>
-                ))}
+                ) : null}
               </div>
 
               <Card className="border-white/10 bg-black/40">
@@ -538,6 +759,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       type="button"
                       variant="ghost"
                       size="sm"
+                      className="min-h-[44px] touch-manipulation"
                       onClick={() => void loadAssets()}
                       disabled={loadingAssets}
                     >
@@ -546,7 +768,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   </div>
                   <CardDescription>
                     Up to {OWL_SEND_MAX_SELECT} NFTs · {OWL_SEND_MAX_PER_TX} per wallet
-                    approval · you start each next batch
+                    approval · nested/frozen NFTs are blocked before approve
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -559,7 +781,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     </div>
                   ) : (
                     <fieldset
-                      disabled={batchProgress.some((b) => b.status === 'sending')}
+                      disabled={nftSending}
                       className="min-w-0 disabled:opacity-60"
                     >
                       <WalletNftPicker
@@ -583,12 +805,12 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               <Card className="border-white/10 bg-black/40">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">
-                    {mode === 'send_to_one' ? 'Destination' : 'Scatter wallets'}
+                    {mode === 'send_to_one' ? 'Destination' : 'Recipient wallets'}
                   </CardTitle>
                   <CardDescription>
                     {mode === 'send_to_one'
                       ? 'All selected NFTs go to this wallet (batches of 5).'
-                      : `Paste ${selectedNfts.length || 'N'} wallets (one per NFT). Pairing is 1:1.`}
+                      : `Paste ${selectedNfts.length || 'N'} wallets — one per NFT (newline, comma, or space).`}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -603,7 +825,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                           setPreparedLines(null)
                         }}
                         placeholder="Recipient Solana address"
-                        className="bg-black/40 font-mono text-sm"
+                        className="min-h-[44px] bg-black/40 font-mono text-sm"
                       />
                     </div>
                   ) : (
@@ -618,21 +840,28 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                             setPreparedLines(null)
                           }}
                           rows={5}
-                          placeholder={'One address per line\n…'}
-                          className="w-full rounded-md border border-input bg-black/40 px-3 py-2 font-mono text-sm"
+                          placeholder={'wallet1\nwallet2\nwallet3'}
+                          className="w-full rounded-md border border-input bg-black/40 px-3 py-2 font-mono text-sm touch-manipulation"
                         />
-                        <p className="text-xs text-muted-foreground">
+                        <p
+                          className={cn(
+                            'text-xs',
+                            scatterRecipients.length === selectedNfts.length && selectedNfts.length > 0
+                              ? 'text-emerald-300'
+                              : 'text-muted-foreground'
+                          )}
+                        >
                           {scatterRecipients.length} address
                           {scatterRecipients.length === 1 ? '' : 'es'} · need {selectedNfts.length}{' '}
                           for current selection
                         </p>
                       </div>
-                      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <label className="flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground touch-manipulation">
                         <input
                           type="checkbox"
                           checked={randomizeScatter}
                           onChange={(e) => setRandomizeScatter(e.target.checked)}
-                          className="rounded border-white/20"
+                          className="h-5 w-5 rounded border-white/20"
                         />
                         Randomize which NFT goes to which wallet
                       </label>
@@ -655,11 +884,15 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
                   <Button
                     type="button"
-                    className="w-full"
-                    onClick={prepareNftSend}
-                    disabled={selectedNfts.length < 1}
+                    className="min-h-[44px] w-full touch-manipulation"
+                    onClick={() => void prepareNftSend()}
+                    disabled={selectedNfts.length < 1 || preparing || nftSending}
                   >
-                    Review batches
+                    {preparing ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      'Review batches'
+                    )}
                   </Button>
                 </CardContent>
               </Card>
@@ -739,30 +972,48 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                         above for each tx.
                       </div>
                     ) : (
-                      <Button
-                        type="button"
-                        className="w-full gap-2"
-                        disabled={
-                          !batchProgress[activeBatch] ||
-                          batchProgress[activeBatch]?.status === 'sending' ||
-                          batchProgress[activeBatch]?.status === 'done' ||
-                          (batchProgress[activeBatch]?.status !== 'ready' &&
-                            batchProgress[activeBatch]?.status !== 'failed')
-                        }
-                        onClick={() => void runBatch(activeBatch)}
-                      >
-                        {batchProgress[activeBatch]?.status === 'sending' ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Send className="h-4 w-4" />
-                        )}
-                        {batchProgress[activeBatch]?.status === 'failed'
-                          ? `Retry batch ${activeBatch + 1}`
-                          : activeBatch === 0
-                            ? `Start batch 1 of ${batches.length}`
-                            : `Start next batch (${activeBatch + 1} of ${batches.length})`}
-                      </Button>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Button
+                          type="button"
+                          className="min-h-[44px] flex-1 gap-2 touch-manipulation"
+                          disabled={
+                            !batchProgress[activeBatch] ||
+                            batchProgress[activeBatch]?.status === 'sending' ||
+                            batchProgress[activeBatch]?.status === 'done' ||
+                            (batchProgress[activeBatch]?.status !== 'ready' &&
+                              batchProgress[activeBatch]?.status !== 'failed')
+                          }
+                          onClick={() => void runBatch(activeBatch)}
+                        >
+                          {batchProgress[activeBatch]?.status === 'sending' ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Send className="h-4 w-4" />
+                          )}
+                          {batchProgress[activeBatch]?.status === 'failed'
+                            ? `Retry batch ${activeBatch + 1}`
+                            : activeBatch === 0
+                              ? `Start batch 1 of ${batches.length}`
+                              : `Start next batch (${activeBatch + 1} of ${batches.length})`}
+                        </Button>
+                        {nftSending ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="min-h-[44px] touch-manipulation sm:w-auto"
+                            onClick={cancelInFlightSend}
+                          >
+                            Cancel
+                          </Button>
+                        ) : null}
+                      </div>
                     )}
+                    {nftSending ? (
+                      <p className="text-xs text-muted-foreground">
+                        Waiting on wallet approve / confirm (up to ~90s). Cancel resets this screen —
+                        reject the wallet popup if it is still open.
+                      </p>
+                    ) : null}
                   </CardContent>
                 </Card>
               ) : null}
@@ -773,93 +1024,328 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   <div>
                     <p className="font-semibold">Retry list</p>
                     <p className="text-xs text-amber-100/80">
-                      {retryMints.map(shorten).join(', ')} — reselect these NFTs after fixing the
-                      error (or send Core/cNFT/pNFT alone).
+                      {retryMints.map(shorten).join(', ')} — unnest/unstake frozen or delegated NFTs,
+                      or send Core/cNFT/pNFT alone.
                     </p>
                   </div>
                 </div>
               ) : null}
             </div>
           ) : (
-            <Card className="border-white/10 bg-black/40">
-              <CardHeader>
-                <CardTitle className="text-base">Tokens — Send to one</CardTitle>
-                <CardDescription>
-                  Up to {OWL_SEND_MAX_PER_TX} token lines per approval ·{' '}
-                  {formatOwlSendFeeSol(feeSol)} each · rent shown by Solana when ATAs are created
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="owl-send-token-dest">Destination</Label>
-                  <Input
-                    id="owl-send-token-dest"
-                    value={tokenDestination}
-                    onChange={(e) => setTokenDestination(e.target.value)}
-                    placeholder="Recipient Solana address"
-                    className="bg-black/40 font-mono text-sm"
-                  />
+            <div className="space-y-5">
+              <div className="space-y-2">
+                <div className="flex gap-2 rounded-lg border border-white/10 bg-black/30 p-1">
+                  {(
+                    [
+                      ['send_to_one', 'One wallet'],
+                      ['scatter', 'Many wallets'],
+                    ] as const
+                  ).map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        setTokenMode(id)
+                        setTokenBatches([])
+                        setTokenBatchProgress([])
+                        setTokenError(null)
+                      }}
+                      className={cn(
+                        'min-h-[44px] flex-1 touch-manipulation rounded-md px-3 py-2 text-sm font-semibold transition',
+                        tokenMode === id
+                          ? 'bg-emerald-500/20 text-theme-prime'
+                          : 'text-muted-foreground hover:text-white'
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-                {loadingAssets && tokens.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Loading tokens…</p>
-                ) : tokens.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No fungible tokens found in this wallet.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {tokens.slice(0, 40).map((t) => {
-                      const uiBal = Number(t.balance) / 10 ** t.decimals
-                      const label = walletTokenDisplayName(t)
-                      const showTicker =
-                        Boolean(t.symbol) &&
-                        !/^Token \(/i.test(t.symbol) &&
-                        t.symbol.trim().toLowerCase() !== label.trim().toLowerCase()
-                      return (
-                        <li
-                          key={`${t.tokenAccount}-${t.mint}`}
-                          className="flex flex-col gap-1 rounded-lg border border-white/10 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                <p className="text-xs text-muted-foreground">
+                  {tokenMode === 'send_to_one'
+                    ? `Up to ${OWL_SEND_MAX_PER_TX} token lines per approval · ${formatOwlSendFeeSol(feeSol)} each.`
+                    : `Airdrop one token to many wallets · ${OWL_SEND_MAX_PER_TX} per approval · ${formatOwlSendFeeSol(feeSol)} per line.`}
+                </p>
+              </div>
+
+              {tokenMode === 'send_to_one' ? (
+                <Card className="border-white/10 bg-black/40">
+                  <CardHeader>
+                    <CardTitle className="text-base">Tokens — one wallet</CardTitle>
+                    <CardDescription>
+                      Enter amounts, then send up to {OWL_SEND_MAX_PER_TX} lines in one approval.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="owl-send-token-dest">Destination</Label>
+                      <Input
+                        id="owl-send-token-dest"
+                        value={tokenDestination}
+                        onChange={(e) => setTokenDestination(e.target.value)}
+                        placeholder="Recipient Solana address"
+                        className="min-h-[44px] bg-black/40 font-mono text-sm"
+                      />
+                    </div>
+                    {loadingAssets && tokens.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Loading tokens…</p>
+                    ) : tokens.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No fungible tokens found in this wallet.
+                      </p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {tokens.slice(0, 40).map((t) => {
+                          const uiBal = Number(t.balance) / 10 ** t.decimals
+                          const label = walletTokenDisplayName(t)
+                          const showTicker =
+                            Boolean(t.symbol) &&
+                            !/^Token \(/i.test(t.symbol) &&
+                            t.symbol.trim().toLowerCase() !== label.trim().toLowerCase()
+                          return (
+                            <li
+                              key={`${t.tokenAccount}-${t.mint}`}
+                              className="flex flex-col gap-1 rounded-lg border border-white/10 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium">{label}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {showTicker ? `${t.symbol} · ` : ''}
+                                  Balance{' '}
+                                  {uiBal.toLocaleString(undefined, { maximumFractionDigits: 6 })}
+                                </p>
+                              </div>
+                              <Input
+                                value={tokenAmounts[t.mint] ?? ''}
+                                onChange={(e) =>
+                                  setTokenAmounts((prev) => ({ ...prev, [t.mint]: e.target.value }))
+                                }
+                                placeholder="Amount"
+                                className="h-11 w-full bg-black/40 sm:w-36"
+                                inputMode="decimal"
+                              />
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    )}
+                    {tokenSuccessSig ? (
+                      <OwlSendSuccessBanner
+                        title="Tokens sent successfully"
+                        signature={tokenSuccessSig}
+                        detail={tokenSuccessDetail ?? undefined}
+                      />
+                    ) : null}
+                    {tokenError ? <p className="text-sm text-red-300">{tokenError}</p> : null}
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <Button
+                        type="button"
+                        className="min-h-[44px] flex-1 gap-2 touch-manipulation"
+                        disabled={tokenBusy}
+                        onClick={() => void sendTokensToOne()}
+                      >
+                        {tokenBusy ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Send className="h-4 w-4" />
+                        )}
+                        Send tokens
+                      </Button>
+                      {tokenBusy ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="min-h-[44px] touch-manipulation"
+                          onClick={cancelInFlightSend}
                         >
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">{label}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {showTicker ? `${t.symbol} · ` : ''}
-                              Balance {uiBal.toLocaleString(undefined, { maximumFractionDigits: 6 })}
-                            </p>
+                          Cancel
+                        </Button>
+                      ) : null}
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card className="border-white/10 bg-black/40">
+                  <CardHeader>
+                    <CardTitle className="text-base">Tokens — many wallets</CardTitle>
+                    <CardDescription>
+                      Pick one token, set a default amount, paste wallets (or wallet,amount per
+                      line).
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {loadingAssets && tokens.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Loading tokens…</p>
+                    ) : tokens.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No fungible tokens found in this wallet.
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="owl-send-token-scatter-mint">Token</Label>
+                        <select
+                          id="owl-send-token-scatter-mint"
+                          value={tokenScatterMint ?? ''}
+                          onChange={(e) => {
+                            setTokenScatterMint(e.target.value || null)
+                            setTokenBatches([])
+                            setTokenBatchProgress([])
+                          }}
+                          className="min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-black/40 px-3 text-sm"
+                        >
+                          <option value="">Select token…</option>
+                          {tokens.slice(0, 40).map((t) => {
+                            const uiBal = Number(t.balance) / 10 ** t.decimals
+                            return (
+                              <option key={`${t.tokenAccount}-${t.mint}`} value={t.mint}>
+                                {walletTokenDisplayName(t)} ·{' '}
+                                {uiBal.toLocaleString(undefined, { maximumFractionDigits: 6 })}
+                              </option>
+                            )
+                          })}
+                        </select>
+                      </div>
+                    )}
+                    <div className="space-y-1.5">
+                      <Label htmlFor="owl-send-token-scatter-amt">Default amount each</Label>
+                      <Input
+                        id="owl-send-token-scatter-amt"
+                        value={tokenScatterDefaultAmount}
+                        onChange={(e) => {
+                          setTokenScatterDefaultAmount(e.target.value)
+                          setTokenBatches([])
+                          setTokenBatchProgress([])
+                        }}
+                        placeholder="e.g. 100"
+                        className="min-h-[44px] bg-black/40"
+                        inputMode="decimal"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="owl-send-token-scatter">Recipients</Label>
+                      <textarea
+                        id="owl-send-token-scatter"
+                        value={tokenScatterRaw}
+                        onChange={(e) => {
+                          setTokenScatterRaw(e.target.value)
+                          setTokenBatches([])
+                          setTokenBatchProgress([])
+                        }}
+                        rows={5}
+                        placeholder={'wallet1\nwallet2,50\nwallet3 25'}
+                        className="w-full rounded-md border border-input bg-black/40 px-3 py-2 font-mono text-sm touch-manipulation"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {tokenScatterEntries.length} recipient
+                        {tokenScatterEntries.length === 1 ? '' : 's'} · max {OWL_SEND_MAX_SELECT} ·{' '}
+                        {Math.ceil(Math.max(1, tokenScatterEntries.length) / OWL_SEND_MAX_PER_TX)}{' '}
+                        approval
+                        {Math.ceil(Math.max(1, tokenScatterEntries.length) / OWL_SEND_MAX_PER_TX) ===
+                        1
+                          ? ''
+                          : 's'}{' '}
+                        if prepared
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      className="min-h-[44px] w-full touch-manipulation"
+                      onClick={prepareTokenScatter}
+                      disabled={!tokenScatterMint || tokenScatterEntries.length < 1 || tokenSending}
+                    >
+                      Review batches
+                    </Button>
+
+                    {tokenBatches.length > 0 ? (
+                      <div className="space-y-3">
+                        <ol className="space-y-2">
+                          {tokenBatchProgress.map((b) => {
+                            const lines = tokenBatches[b.index] ?? []
+                            return (
+                              <li
+                                key={b.index}
+                                className={cn(
+                                  'rounded-lg border px-3 py-2 text-sm',
+                                  b.status === 'done' && 'border-emerald-500/40 bg-emerald-500/10',
+                                  b.status === 'failed' && 'border-red-500/40 bg-red-500/10',
+                                  b.status === 'ready' && 'border-theme-prime/40 bg-white/[0.03]',
+                                  b.status === 'pending' && 'border-white/10 opacity-70',
+                                  b.status === 'sending' && 'border-sky-500/40 bg-sky-500/10'
+                                )}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold">
+                                    Batch {b.index + 1} of {b.total}
+                                  </span>
+                                  <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                                    {b.status}
+                                  </span>
+                                </div>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {lines.length} wallet{lines.length === 1 ? '' : 's'} ·{' '}
+                                  {formatOwlSendFeeSol(feeSol * lines.length)} fee
+                                </p>
+                                {b.signature ? (
+                                  <div className="mt-2">
+                                    <OwlSendSuccessBanner
+                                      title={`Batch ${b.index + 1} sent`}
+                                      signature={b.signature}
+                                    />
+                                  </div>
+                                ) : null}
+                                {b.error ? (
+                                  <p className="mt-1 text-xs text-red-300">{b.error}</p>
+                                ) : null}
+                              </li>
+                            )
+                          })}
+                        </ol>
+                        {tokenAllDone ? (
+                          <div className="flex items-center gap-2 text-sm text-emerald-300">
+                            <CheckCircle2 className="h-4 w-4" /> All token batches confirmed.
                           </div>
-                          <Input
-                            value={tokenAmounts[t.mint] ?? ''}
-                            onChange={(e) =>
-                              setTokenAmounts((prev) => ({ ...prev, [t.mint]: e.target.value }))
-                            }
-                            placeholder="Amount"
-                            className="h-9 w-full bg-black/40 sm:w-36"
-                            inputMode="decimal"
-                          />
-                        </li>
-                      )
-                    })}
-                  </ul>
-                )}
-                {tokenSuccessSig ? (
-                  <OwlSendSuccessBanner
-                    title="Tokens sent successfully"
-                    signature={tokenSuccessSig}
-                    detail={tokenSuccessDetail ?? undefined}
-                  />
-                ) : null}
-                {tokenError ? (
-                  <p className="text-sm text-red-300">{tokenError}</p>
-                ) : null}
-                <Button
-                  type="button"
-                  className="w-full gap-2"
-                  disabled={tokenBusy}
-                  onClick={() => void sendTokens()}
-                >
-                  {tokenBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  Send tokens
-                </Button>
-              </CardContent>
-            </Card>
+                        ) : (
+                          <div className="flex flex-col gap-2 sm:flex-row">
+                            <Button
+                              type="button"
+                              className="min-h-[44px] flex-1 gap-2 touch-manipulation"
+                              disabled={
+                                !tokenBatchProgress[tokenActiveBatch] ||
+                                tokenBatchProgress[tokenActiveBatch]?.status === 'sending' ||
+                                tokenBatchProgress[tokenActiveBatch]?.status === 'done' ||
+                                (tokenBatchProgress[tokenActiveBatch]?.status !== 'ready' &&
+                                  tokenBatchProgress[tokenActiveBatch]?.status !== 'failed')
+                              }
+                              onClick={() => void runTokenBatch(tokenActiveBatch)}
+                            >
+                              {tokenBatchProgress[tokenActiveBatch]?.status === 'sending' ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Send className="h-4 w-4" />
+                              )}
+                              {tokenBatchProgress[tokenActiveBatch]?.status === 'failed'
+                                ? `Retry batch ${tokenActiveBatch + 1}`
+                                : `Start batch ${tokenActiveBatch + 1} of ${tokenBatches.length}`}
+                            </Button>
+                            {tokenSending ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="min-h-[44px] touch-manipulation"
+                                onClick={cancelInFlightSend}
+                              >
+                                Cancel
+                              </Button>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                    {tokenError ? <p className="text-sm text-red-300">{tokenError}</p> : null}
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           )}
 
           {sessionError ? (
@@ -873,8 +1359,10 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               {assetTab === 'nfts'
                 ? selectedNfts.length === 0
                   ? 'No NFT(s) selected.'
-                  : `${selectedNfts.length} NFT(s) selected · ${formatOwlSendFeeSol(feeSol * selectedNfts.length)} Owl fee`
-                : 'Token send to one wallet.'}
+                  : `${selectedNfts.length} NFT(s) selected · ${formatOwlSendFeeSol(feeSol * selectedNfts.length)} Owl fee · ${mode === 'scatter' ? 'many wallets' : 'one wallet'}`
+                : tokenMode === 'scatter'
+                  ? `${tokenScatterEntries.length} recipient(s) · token scatter`
+                  : 'Token send to one wallet.'}
             </p>
           </footer>
         </>
