@@ -113,6 +113,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   /** Per-NFT recipient when randomize is off (keyed by mint). */
   const [scatterByMint, setScatterByMint] = useState<Record<string, string>>({})
   const [randomizeScatter, setRandomizeScatter] = useState(true)
+  /** When randomize is off: false = one wallet for the whole selection (grouped). */
+  const [pairPerNft, setPairPerNft] = useState(false)
   const [preparedLines, setPreparedLines] = useState<OwlSendLine[] | null>(null)
   const [batches, setBatches] = useState<OwlSendLine[][]>([])
   const [batchProgress, setBatchProgress] = useState<BatchProgress[]>([])
@@ -234,10 +236,62 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     [selectedNfts, scatterByMint]
   )
   const activeScatterRecipients = randomizeScatter ? scatterRecipients : pairedScatterRecipients
+  const groupedPairWallet = useMemo(() => {
+    for (const n of selectedNfts) {
+      const v = scatterByMint[n.mint]
+      if (v?.trim()) return v
+    }
+    return ''
+  }, [selectedNfts, scatterByMint])
+  const uniquePairedWallets = useMemo(() => {
+    const seen = new Set<string>()
+    for (const n of selectedNfts) {
+      const w = (scatterByMint[n.mint] ?? '').trim()
+      if (w) seen.add(w)
+    }
+    return [...seen]
+  }, [selectedNfts, scatterByMint])
   const tokenScatterEntries = useMemo(
     () => parseTokenScatterEntries(tokenScatterRaw),
     [tokenScatterRaw]
   )
+
+  const applyWalletToAllSelected = useCallback(
+    (value: string) => {
+      setScatterByMint((prev) => {
+        const nextMap: Record<string, string> = { ...prev }
+        for (const n of selectedNfts) nextMap[n.mint] = value
+        return nextMap
+      })
+      setPreparedLines(null)
+    },
+    [selectedNfts]
+  )
+
+  // Keep newly selected NFTs on the shared wallet while grouped.
+  useEffect(() => {
+    if (mode !== 'scatter' || randomizeScatter || pairPerNft) return
+    if (selectedNfts.length === 0) return
+    const shared = groupedPairWallet.trim()
+    if (!shared) return
+    let needsFill = false
+    for (const n of selectedNfts) {
+      if (!(scatterByMint[n.mint] ?? '').trim()) {
+        needsFill = true
+        break
+      }
+    }
+    if (!needsFill) return
+    applyWalletToAllSelected(groupedPairWallet)
+  }, [
+    mode,
+    randomizeScatter,
+    pairPerNft,
+    selectedNfts,
+    groupedPairWallet,
+    scatterByMint,
+    applyWalletToAllSelected,
+  ])
 
   const setRandomizeScatterMode = (next: boolean) => {
     setPreparedLines(null)
@@ -261,6 +315,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         })
         return nextMap
       })
+      const unique = [...new Set(addrs.map((a) => a.trim()).filter(Boolean))]
+      // Multiple distinct wallets from paste → per-NFT fields; one (or none) → grouped.
+      setPairPerNft(unique.length > 1)
     }
     setRandomizeScatter(next)
   }
@@ -452,7 +509,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     )
     setSessionError(null)
 
-    // Skip a second frozen-preflight here — Review batches already checked, and send build
+    // Skip a second frozen-preflight here — Review send already checked, and send build
     // re-resolves holders. Duplicate RPC was leaving users stuck before the wallet popup.
 
     const result = await sendOwlSendNftBatch({
@@ -1115,23 +1172,65 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       ? 'All selected NFTs go to this wallet (batches of 5).'
                       : randomizeScatter
                         ? 'Paste wallets (one per line), or wallet,N for exact counts — e.g. walletA,5 then walletB,1. Counts must sum to selected NFTs; otherwise split evenly.'
-                        : 'Enter one wallet under each NFT for an exact 1:1 send.'}
+                        : pairPerNft
+                          ? 'Enter one wallet under each NFT for an exact 1:1 send.'
+                          : 'One wallet for all selected NFTs — they stay grouped under that destination.'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {mode === 'send_to_one' ? (
-                    <div className="space-y-1.5">
-                      <Label htmlFor="owl-send-dest">Wallet address</Label>
-                      <Input
-                        id="owl-send-dest"
-                        value={destination}
-                        onChange={(e) => {
-                          setDestination(e.target.value)
-                          setPreparedLines(null)
-                        }}
-                        placeholder="Recipient Solana address"
-                        className="min-h-[44px] bg-black/40 font-mono text-sm"
-                      />
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="owl-send-dest">Wallet address</Label>
+                        <Input
+                          id="owl-send-dest"
+                          value={destination}
+                          onChange={(e) => {
+                            setDestination(e.target.value)
+                            setPreparedLines(null)
+                          }}
+                          placeholder="Recipient Solana address"
+                          className="min-h-[44px] bg-black/40 font-mono text-sm"
+                        />
+                      </div>
+                      {selectedNfts.length > 0 ? (
+                        <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-3">
+                          <p className="mb-2 text-xs text-muted-foreground">
+                            {selectedNfts.length} NFT{selectedNfts.length === 1 ? '' : 's'} → this
+                            wallet
+                          </p>
+                          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            {selectedNfts.map((n) => {
+                              const label = n.name?.trim() || shorten(n.mint)
+                              const collection = n.collectionName?.trim()
+                              return (
+                                <li key={n.mint} className="flex min-w-0 items-center gap-2">
+                                  {n.image ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={n.image}
+                                      alt=""
+                                      className="h-11 w-11 shrink-0 rounded-md object-cover"
+                                    />
+                                  ) : (
+                                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-white/5 text-xs text-muted-foreground">
+                                      NFT
+                                    </div>
+                                  )}
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-medium text-white">{label}</p>
+                                    {collection ? (
+                                      <p className="truncate text-xs text-muted-foreground">
+                                        {collection}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -1228,71 +1327,167 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                         </div>
                       ) : selectedNfts.length === 0 ? (
                         <p className="text-sm text-muted-foreground">
-                          Select NFTs above to assign each a wallet.
+                          Select NFTs above to assign a wallet.
                         </p>
-                      ) : (
-                        <ul className="space-y-3">
-                          {selectedNfts.map((n) => {
-                            const label = n.name?.trim() || shorten(n.mint)
-                            const collection = n.collectionName?.trim()
-                            return (
-                              <li
-                                key={n.mint}
-                                className="rounded-lg border border-white/10 bg-black/30 px-3 py-3"
-                              >
-                                <div className="mb-2 flex items-center gap-3">
-                                  {n.image ? (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img
-                                      src={n.image}
-                                      alt=""
-                                      className="h-11 w-11 shrink-0 rounded-md object-cover"
-                                    />
-                                  ) : (
-                                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-white/5 text-xs text-muted-foreground">
-                                      NFT
-                                    </div>
-                                  )}
-                                  <div className="min-w-0">
-                                    <Label
-                                      htmlFor={`owl-send-scatter-${n.mint}`}
-                                      className="truncate text-sm font-medium text-white"
-                                    >
-                                      {label}
-                                    </Label>
-                                    {collection ? (
-                                      <p className="truncate text-xs text-muted-foreground">
-                                        {collection}
-                                      </p>
-                                    ) : null}
-                                  </div>
-                                </div>
-                                <Input
-                                  id={`owl-send-scatter-${n.mint}`}
-                                  value={scatterByMint[n.mint] ?? ''}
-                                  onChange={(e) => {
-                                    const value = e.target.value
-                                    setScatterByMint((prev) => ({ ...prev, [n.mint]: value }))
-                                    setPreparedLines(null)
-                                  }}
-                                  placeholder="Recipient Solana address"
-                                  className="min-h-[44px] bg-black/40 font-mono text-sm"
-                                  autoComplete="off"
-                                />
-                              </li>
-                            )
-                          })}
+                      ) : !pairPerNft ? (
+                        <div className="space-y-3">
+                          <div className="space-y-3 rounded-lg border border-white/10 bg-black/30 px-3 py-3">
+                            <div className="space-y-1.5">
+                              <Label htmlFor="owl-send-scatter-grouped">Wallet address</Label>
+                              <Input
+                                id="owl-send-scatter-grouped"
+                                value={groupedPairWallet}
+                                onChange={(e) => applyWalletToAllSelected(e.target.value)}
+                                placeholder="Recipient Solana address"
+                                className="min-h-[44px] bg-black/40 font-mono text-sm"
+                                autoComplete="off"
+                              />
+                            </div>
+                            <div>
+                              <p className="mb-2 text-xs text-muted-foreground">
+                                {selectedNfts.length} NFT{selectedNfts.length === 1 ? '' : 's'} →
+                                this wallet
+                              </p>
+                              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                {selectedNfts.map((n) => {
+                                  const label = n.name?.trim() || shorten(n.mint)
+                                  const collection = n.collectionName?.trim()
+                                  return (
+                                    <li key={n.mint} className="flex min-w-0 items-center gap-2">
+                                      {n.image ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img
+                                          src={n.image}
+                                          alt=""
+                                          className="h-11 w-11 shrink-0 rounded-md object-cover"
+                                        />
+                                      ) : (
+                                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-white/5 text-xs text-muted-foreground">
+                                          NFT
+                                        </div>
+                                      )}
+                                      <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium text-white">
+                                          {label}
+                                        </p>
+                                        {collection ? (
+                                          <p className="truncate text-xs text-muted-foreground">
+                                            {collection}
+                                          </p>
+                                        ) : null}
+                                      </div>
+                                    </li>
+                                  )
+                                })}
+                              </ul>
+                            </div>
+                          </div>
+                          {selectedNfts.length >= 2 ? (
+                            <button
+                              type="button"
+                              onClick={() => setPairPerNft(true)}
+                              className="w-full touch-manipulation rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-left text-xs text-muted-foreground min-h-[44px] hover:text-white"
+                            >
+                              Sending to different wallets?{' '}
+                              <span className="font-semibold text-sky-100">
+                                Assign a wallet per NFT
+                              </span>
+                            </button>
+                          ) : null}
                           <p
                             className={cn(
                               'text-xs',
-                              activeScatterRecipients.length === selectedNfts.length
+                              groupedPairWallet.trim()
                                 ? 'text-emerald-300'
                                 : 'text-muted-foreground'
                             )}
                           >
-                            {activeScatterRecipients.length} of {selectedNfts.length} wallets filled
+                            {groupedPairWallet.trim()
+                              ? `${selectedNfts.length} NFT${selectedNfts.length === 1 ? '' : 's'} grouped under 1 wallet`
+                              : `Enter a wallet for ${selectedNfts.length} NFT${selectedNfts.length === 1 ? '' : 's'}`}
                           </p>
-                        </ul>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {uniquePairedWallets.length <= 1 && selectedNfts.length >= 2 ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (uniquePairedWallets[0]) {
+                                  applyWalletToAllSelected(uniquePairedWallets[0])
+                                }
+                                setPairPerNft(false)
+                              }}
+                              className="w-full touch-manipulation rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-left text-xs text-emerald-100 min-h-[44px]"
+                            >
+                              Same destination for every NFT —{' '}
+                              <span className="font-semibold">group under one wallet</span>
+                            </button>
+                          ) : null}
+                          <ul className="space-y-3">
+                            {selectedNfts.map((n) => {
+                              const label = n.name?.trim() || shorten(n.mint)
+                              const collection = n.collectionName?.trim()
+                              return (
+                                <li
+                                  key={n.mint}
+                                  className="rounded-lg border border-white/10 bg-black/30 px-3 py-3"
+                                >
+                                  <div className="mb-2 flex items-center gap-3">
+                                    {n.image ? (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img
+                                        src={n.image}
+                                        alt=""
+                                        className="h-11 w-11 shrink-0 rounded-md object-cover"
+                                      />
+                                    ) : (
+                                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-white/5 text-xs text-muted-foreground">
+                                        NFT
+                                      </div>
+                                    )}
+                                    <div className="min-w-0">
+                                      <Label
+                                        htmlFor={`owl-send-scatter-${n.mint}`}
+                                        className="truncate text-sm font-medium text-white"
+                                      >
+                                        {label}
+                                      </Label>
+                                      {collection ? (
+                                        <p className="truncate text-xs text-muted-foreground">
+                                          {collection}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <Input
+                                    id={`owl-send-scatter-${n.mint}`}
+                                    value={scatterByMint[n.mint] ?? ''}
+                                    onChange={(e) => {
+                                      const value = e.target.value
+                                      setScatterByMint((prev) => ({ ...prev, [n.mint]: value }))
+                                      setPreparedLines(null)
+                                    }}
+                                    placeholder="Recipient Solana address"
+                                    className="min-h-[44px] bg-black/40 font-mono text-sm"
+                                    autoComplete="off"
+                                  />
+                                </li>
+                              )
+                            })}
+                            <p
+                              className={cn(
+                                'text-xs',
+                                activeScatterRecipients.length === selectedNfts.length
+                                  ? 'text-emerald-300'
+                                  : 'text-muted-foreground'
+                              )}
+                            >
+                              {activeScatterRecipients.length} of {selectedNfts.length} wallets
+                              filled
+                            </p>
+                          </ul>
+                        </div>
                       )}
                     </div>
                   )}
@@ -1305,7 +1500,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       <p className="pt-1 font-semibold text-white">Total {cost.totalLabel}</p>
                       {cost.batchCount > 1 ? (
                         <p className="text-xs text-muted-foreground">
-                          {cost.batchCount} batches · {OWL_SEND_MAX_PER_TX} NFTs per approval
+                          {cost.batchCount} wallet approvals · {OWL_SEND_MAX_PER_TX} NFTs each
                         </p>
                       ) : null}
                     </div>
@@ -1320,7 +1515,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     {preparing ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      'Review batches'
+                      'Review send'
                     )}
                   </Button>
                 </CardContent>
@@ -1359,11 +1554,11 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               {batches.length > 0 ? (
                 <Card className="border-white/10 bg-black/40">
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Batches</CardTitle>
+                    <CardTitle className="text-base">Confirm send</CardTitle>
                     <CardDescription>
                       {preparedLines?.length} NFT{preparedLines?.length === 1 ? '' : 's'} ·{' '}
-                      {batches.length} approval{batches.length === 1 ? '' : 's'} · start the next
-                      batch after each confirm
+                      {batches.length} wallet approval{batches.length === 1 ? '' : 's'} · confirm
+                      each one so they don’t fire back-to-back
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
@@ -1384,7 +1579,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                           >
                             <div className="flex items-center justify-between gap-2">
                               <span className="font-semibold">
-                                Batch {b.index + 1} of {b.total}
+                                Approval {b.index + 1} of {b.total}
                               </span>
                               <span className="text-xs uppercase tracking-wide text-muted-foreground">
                                 {b.status === 'sending' && sendPhase
@@ -1411,7 +1606,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                                 <OwlSendSuccessBanner
                                   title={
                                     b.status === 'done'
-                                      ? `Batch ${b.index + 1} sent successfully`
+                                      ? `Approval ${b.index + 1} sent successfully`
                                       : 'Transaction confirmed'
                                   }
                                   signature={b.signature}
@@ -1435,7 +1630,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
                     {allDone ? (
                       <div className="flex items-center gap-2 text-sm text-emerald-300">
-                        <CheckCircle2 className="h-4 w-4" /> All batches confirmed — open Solscan
+                        <CheckCircle2 className="h-4 w-4" /> All approvals confirmed — open Solscan
                         above for each tx.
                       </div>
                     ) : (
@@ -1460,15 +1655,17 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                             )}
                             {batchProgress[activeBatch]?.status === 'sending'
                               ? sendPhase === 'confirming'
-                                ? `Confirming batch ${activeBatch + 1}…`
+                                ? `Confirming ${activeBatch + 1} of ${batches.length}…`
                                 : sendPhase === 'approving'
-                                  ? `Approve batch ${activeBatch + 1} in wallet…`
-                                  : `Sending batch ${activeBatch + 1}…`
+                                  ? `Approve in wallet (${activeBatch + 1} of ${batches.length})…`
+                                  : `Sending ${activeBatch + 1} of ${batches.length}…`
                               : batchProgress[activeBatch]?.status === 'failed'
-                                ? `Retry batch ${activeBatch + 1}`
-                                : activeBatch === 0
-                                  ? `Start batch 1 of ${batches.length}`
-                                  : `Start next batch (${activeBatch + 1} of ${batches.length})`}
+                                ? `Retry ${activeBatch + 1} of ${batches.length}`
+                                : batches.length === 1
+                                  ? 'Are you sure? Send'
+                                  : activeBatch === 0
+                                    ? `Are you sure? Send 1 of ${batches.length}`
+                                    : `Are you sure? Send ${activeBatch + 1} of ${batches.length}`}
                           </Button>
                           {nftSending ? (
                             <Button
@@ -1481,6 +1678,12 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                             </Button>
                           ) : null}
                         </div>
+                        {!nftSending && batchProgress[activeBatch]?.status !== 'failed' ? (
+                          <p className="text-xs text-muted-foreground">
+                            Opens your wallet for this transfer only — remaining approvals wait until
+                            you confirm the next one.
+                          </p>
+                        ) : null}
                         {canResumeRemaining ? (
                           <Button
                             type="button"
@@ -1504,8 +1707,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                           : sendPhase === 'approving'
                             ? 'Check Phantom/Solflare for the approve prompt (mobile: open the wallet app). If nothing appears, Cancel and Retry.'
                             : 'Confirming on-chain can take up to ~90s on mobile/busy RPC.'}{' '}
-                        Cancel marks this batch failed — reject any open wallet popup, check Solscan,
-                        then Retry or Resume remaining.
+                        Cancel marks this approval failed — reject any open wallet popup, check
+                        Solscan, then Retry or Resume remaining.
                       </p>
                     ) : null}
                   </CardContent>
@@ -1747,7 +1950,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       onClick={prepareTokenScatter}
                       disabled={!tokenScatterMint || tokenScatterEntries.length < 1 || tokenSending}
                     >
-                      Review batches
+                      Review send
                     </Button>
 
                     {tokenBatches.length > 0 ? (
@@ -1769,7 +1972,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                               >
                                 <div className="flex items-center justify-between gap-2">
                                   <span className="font-semibold">
-                                    Batch {b.index + 1} of {b.total}
+                                    Approval {b.index + 1} of {b.total}
                                   </span>
                                   <span className="text-xs uppercase tracking-wide text-muted-foreground">
                                     {b.status}
@@ -1782,7 +1985,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                                 {b.signature ? (
                                   <div className="mt-2">
                                     <OwlSendSuccessBanner
-                                      title={`Batch ${b.index + 1} sent`}
+                                      title={`Approval ${b.index + 1} sent`}
                                       signature={b.signature}
                                     />
                                   </div>
@@ -1796,7 +1999,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                         </ol>
                         {tokenAllDone ? (
                           <div className="flex items-center gap-2 text-sm text-emerald-300">
-                            <CheckCircle2 className="h-4 w-4" /> All token batches confirmed.
+                            <CheckCircle2 className="h-4 w-4" /> All token approvals confirmed.
                           </div>
                         ) : (
                           <div className="flex flex-col gap-2 sm:flex-row">
@@ -1818,8 +2021,10 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                                 <Send className="h-4 w-4" />
                               )}
                               {tokenBatchProgress[tokenActiveBatch]?.status === 'failed'
-                                ? `Retry batch ${tokenActiveBatch + 1}`
-                                : `Start batch ${tokenActiveBatch + 1} of ${tokenBatches.length}`}
+                                ? `Retry ${tokenActiveBatch + 1} of ${tokenBatches.length}`
+                                : tokenBatches.length === 1
+                                  ? 'Are you sure? Send'
+                                  : `Are you sure? Send ${tokenActiveBatch + 1} of ${tokenBatches.length}`}
                             </Button>
                             {tokenSending ? (
                               <Button
