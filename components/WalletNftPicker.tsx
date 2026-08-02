@@ -382,10 +382,8 @@ function WalletNftPickerBody({
                 <p className="text-xs font-medium truncate" title={nft.name ?? nft.mint}>
                   {nft.name ?? `${nft.mint.slice(0, 4)}…`}
                 </p>
-                {nft.delegated || nft.frozen ? (
-                  <p className="text-[10px] font-medium text-amber-300">
-                    {nft.delegated ? 'Staked/nested' : 'Frozen'}
-                  </p>
+                {nft.frozen ? (
+                  <p className="text-[10px] font-medium text-amber-300">Frozen/nested</p>
                 ) : null}
                 <p
                   className="text-[10px] text-muted-foreground truncate"
@@ -420,7 +418,7 @@ function WalletNftPickerBody({
                     <p className="text-xs text-muted-foreground truncate">
                       {walletNftCollectionDisplayLabel(nft)}
                       {nft.symbol ? ` · ${nft.symbol}` : ''}
-                      {nft.delegated ? ' · Staked/nested' : nft.frozen ? ' · Frozen' : ''}
+                      {nft.frozen ? ' · Frozen/nested' : ''}
                     </p>
                     <p className="text-[10px] font-mono text-muted-foreground truncate">{nft.mint}</p>
                   </div>

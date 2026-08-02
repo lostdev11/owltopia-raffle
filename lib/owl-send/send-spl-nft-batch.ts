@@ -45,17 +45,12 @@ async function resolveHolder(
   if (preflight.ok) {
     return { tokenProgram: preflight.tokenProgram, tokenAccount: preflight.tokenAccount }
   }
-  if (preflight.reason === 'frozen' || preflight.reason === 'delegated') {
+  if (preflight.reason === 'frozen') {
     throw new Error(preflight.error)
   }
 
-  // One fallback scan for non-ATA holdings (no multi-second retry loop).
+  // Fallback for non-ATA holdings. Leftover delegates without freeze are still owner-sendable.
   const h = await getNftHolderInWallet(connection, mint, owner, 'processed')
-  if (h && 'delegated' in h && h.delegated) {
-    throw new Error(
-      `NFT ${mint.toBase58().slice(0, 4)}… is staked or nested (delegated) — unstake/unnest before sending.`
-    )
-  }
   if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
     try {
       const acc = await getAccount(connection, h.tokenAccount, 'processed', h.tokenProgram)
@@ -64,13 +59,8 @@ async function resolveHolder(
           `NFT ${mint.toBase58().slice(0, 4)}… is frozen (often nested) — unnest or thaw before sending.`
         )
       }
-      if (acc.delegate) {
-        throw new Error(
-          `NFT ${mint.toBase58().slice(0, 4)}… is staked or nested (delegated) — unstake/unnest before sending.`
-        )
-      }
     } catch (e) {
-      if (e instanceof Error && /frozen|staked|nested/i.test(e.message)) throw e
+      if (e instanceof Error && /frozen|unnest|thaw/i.test(e.message)) throw e
     }
     return h
   }

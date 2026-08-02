@@ -135,7 +135,7 @@ const tooMany = buildTokenScatterLines({
 })
 assert.equal(tooMany.ok, false)
 
-// Picker shows all NFTs; lock label is advisory only
+// Badge only for frozen (true nest lock); leftover CM delegates are not nested
 assert.equal(
   owlSendNftLockLabel({
     mint: 'm',
@@ -146,10 +146,10 @@ assert.equal(
     name: null,
     image: null,
     collectionName: null,
-    frozen: true,
-    delegated: false,
+    frozen: false,
+    delegated: true,
   }),
-  'Frozen'
+  null
 )
 assert.equal(
   owlSendNftLockLabel({
@@ -164,7 +164,7 @@ assert.equal(
     frozen: true,
     delegated: true,
   }),
-  'Staked/nested'
+  'Frozen/nested'
 )
 assert.equal(
   owlSendNftLockLabel({

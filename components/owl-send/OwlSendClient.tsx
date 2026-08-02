@@ -822,8 +822,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   </div>
                   <CardDescription>
                     Up to {OWL_SEND_MAX_SELECT} NFTs · {OWL_SEND_MAX_PER_TX} per wallet
-                    approval · frozen/staked/nested assets stay visible and are rejected at
-                    send with a named reason
+                    approval · frozen/nested assets stay visible and are rejected at send
+                    with a named reason
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -833,8 +833,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   {!loadingAssets && nfts.length > 0 ? (
                     <p className="mb-3 text-xs text-muted-foreground">
                       {nfts.length} NFT{nfts.length === 1 ? '' : 's'} in wallet
-                      {nfts.some((n) => n.frozen || n.delegated)
-                        ? ` · ${nfts.filter((n) => n.frozen || n.delegated).length} marked frozen/staked (can select; send will explain)`
+                      {nfts.some((n) => n.frozen)
+                        ? ` · ${nfts.filter((n) => n.frozen).length} frozen/nested (can select; send will explain)`
                         : ''}
                     </p>
                   ) : null}

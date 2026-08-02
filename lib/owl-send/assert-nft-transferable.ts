@@ -8,7 +8,7 @@ import {
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
 
-export type NftTransferBlockReason = 'frozen' | 'delegated' | 'not_held' | 'invalid'
+export type NftTransferBlockReason = 'frozen' | 'not_held' | 'invalid'
 
 export type NftTransferableResult =
   | { ok: true; tokenAccount: PublicKey; tokenProgram: PublicKey }
@@ -20,17 +20,10 @@ function assetLabel(mint: string, name?: string | null): string {
   return mint.length > 8 ? `${mint.slice(0, 4)}…${mint.slice(-4)}` : mint
 }
 
-function blockedMessage(mint: string, reason: 'frozen' | 'delegated', name?: string | null): string {
-  const label = assetLabel(mint, name)
-  if (reason === 'frozen') {
-    return `${label} is frozen (often nested or mint-locked) — unnest/thaw before sending.`
-  }
-  return `${label} is staked or nested (delegated) — unstake/unnest before sending.`
-}
-
 /**
- * Fast preflight: read the token account (hint or ATA) and reject frozen/delegated holdings
- * without multi-attempt holder lookup retries.
+ * Fast preflight: reject **frozen** token accounts (nested / mint-locked).
+ * A leftover SPL delegate without freeze (common after Candy Machine thaw) does not block
+ * owner transfers — do not treat that as staked/nested.
  */
 export async function assertNftTransferable(params: {
   connection: Connection
@@ -42,6 +35,7 @@ export async function assertNftTransferable(params: {
   const mintPk = new PublicKey(params.mint)
   const mintStr = mintPk.toBase58()
   const name = params.name
+  const frozenMsg = `${assetLabel(mintStr, name)} is frozen (nested or mint-locked) — unnest/thaw before sending.`
 
   if (params.tokenAccount && params.tokenAccount !== mintStr) {
     try {
@@ -94,11 +88,7 @@ export async function assertNftTransferable(params: {
       }
       const state = typeof parsed.state === 'string' ? parsed.state.toLowerCase() : ''
       if (state === 'frozen') {
-        return { ok: false, reason: 'frozen', error: blockedMessage(mintStr, 'frozen', name) }
-      }
-      const delegate = typeof parsed.delegate === 'string' ? parsed.delegate : null
-      if (delegate) {
-        return { ok: false, reason: 'delegated', error: blockedMessage(mintStr, 'delegated', name) }
+        return { ok: false, reason: 'frozen', error: frozenMsg }
       }
       return {
         ok: true,
@@ -116,10 +106,7 @@ export async function assertNftTransferable(params: {
       const account = await getAccount(params.connection, ata, 'processed', programId)
       if (account.amount < 1n) continue
       if (account.isFrozen) {
-        return { ok: false, reason: 'frozen', error: blockedMessage(mintStr, 'frozen', name) }
-      }
-      if (account.delegate) {
-        return { ok: false, reason: 'delegated', error: blockedMessage(mintStr, 'delegated', name) }
+        return { ok: false, reason: 'frozen', error: frozenMsg }
       }
       return { ok: true, tokenAccount: ata, tokenProgram: programId }
     } catch {
@@ -134,7 +121,7 @@ export async function assertNftTransferable(params: {
   }
 }
 
-/** Preflight every line; returns blocking errors naming each asset. */
+/** Preflight every line; returns blocking errors naming each frozen asset. */
 export async function assertOwlSendLinesTransferable(params: {
   connection: Connection
   owner: PublicKey
@@ -150,7 +137,7 @@ export async function assertOwlSendLinesTransferable(params: {
       tokenAccount: line.tokenAccount,
       name: line.name,
     })
-    if (!result.ok && (result.reason === 'frozen' || result.reason === 'delegated')) {
+    if (!result.ok && result.reason === 'frozen') {
       failedMints.push(line.mint)
       errors.push(result.error)
     }
