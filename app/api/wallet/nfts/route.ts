@@ -81,8 +81,6 @@ function parseTokenAccountsToNfts(
     const state = typeof info.state === 'string' ? info.state.toLowerCase() : ''
     const frozen = state === 'frozen'
     const delegated = Boolean(delegate)
-    // Skip staked / nested — not selectable for send/deposit flows that need a transfer
-    if (delegated || frozen) continue
     const decimals = Number(info.tokenAmount?.decimals ?? 9)
     const amount = String(info.tokenAmount?.amount ?? '0')
     const isNft =
@@ -100,8 +98,8 @@ function parseTokenAccountsToNfts(
       collectionName: null,
       collectionMint: null,
       symbol: null,
-      frozen: false,
-      delegated: false,
+      frozen,
+      delegated,
       interface: null,
     })
   }
@@ -149,7 +147,7 @@ async function getNftsViaRpcFallback(rpcUrl: string, wallet: string): Promise<Wa
 }
 
 /** Per Helius request; DAS occasionally hangs, which used to stall the route until the platform killed it. */
-const HELIUS_FETCH_TIMEOUT_MS = 12_000
+const HELIUS_FETCH_TIMEOUT_MS = 20_000
 const HELIUS_RETRY_DELAY_MS = 700
 
 /**
@@ -186,11 +184,10 @@ async function fetchHeliusWithRetry(rpcUrl: string, body: string): Promise<Respo
  * GET /api/wallet/nfts?wallet=<address>
  * Returns NFTs owned by the wallet using Helius DAS getAssetsByOwner when HELIUS_API_KEY is set.
  * Excludes burned NFTs (drops DAS items with burnt === true; indexer can lag briefly).
- * Attaches DAS ownership.frozen / ownership.delegated so clients (e.g. OwlSend) can hide non-transferable assets.
+ * Attaches DAS ownership.frozen / ownership.delegated so clients can warn or reject sends.
  * On devnet, if DAS returns none, falls back to getParsedTokenAccountsByOwner so NFTs still show
- * (RPC fallback already omits frozen/delegated token accounts).
- * Raffle creation still rejects staked/delegated SPL holdings at deposit time; this listing keeps
- * ownership flags for optional UI filtering.
+ * (including frozen/delegated rows with flags set).
+ * Raffle creation still rejects staked/delegated SPL holdings at deposit time.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -242,6 +239,8 @@ export async function GET(request: NextRequest) {
 
       if (!res || !res.ok) {
         console.error('Helius getAssetsByOwner non-OK', res?.status ?? 'network/timeout')
+        // Keep partial pages for large wallets instead of failing the whole list.
+        if (allItems.length > 0) break
         return NextResponse.json(
           { error: 'Failed to fetch NFTs' },
           { status: 502 }

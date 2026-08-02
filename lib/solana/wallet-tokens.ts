@@ -373,14 +373,17 @@ async function mapWithConcurrency<T, R>(
 export async function getWalletNfts(
   connection: Connection,
   ownerPublicKey: PublicKey,
-  options?: { fetchMetadata?: boolean }
+  options?: { fetchMetadata?: boolean; /** Include frozen/delegated holdings (flags set on WalletNft). */ includeLocked?: boolean }
 ): Promise<WalletNft[]> {
   const fetchMetadata = options?.fetchMetadata !== false
+  const includeLocked = options?.includeLocked === true
   const rows: Array<{
     mint: string
     tokenAccount: string
     amount: string
     decimals: number
+    frozen: boolean
+    delegated: boolean
   }> = []
   for (const programId of NFT_TOKEN_PROGRAM_IDS) {
     const response = await connection.getParsedTokenAccountsByOwner(ownerPublicKey, {
@@ -389,11 +392,13 @@ export async function getWalletNfts(
     for (const { pubkey, account } of response.value) {
       const info = account.data?.parsed?.info
       if (!info) continue
-      // Skip delegated / frozen (staked or nested) — not transferable until unlocked
       const delegate = info.delegate
-      if (delegate && typeof delegate === 'string' && delegate !== '') continue
-      const state = typeof info.state === 'string' ? info.state.toLowerCase() : ''
-      if (state === 'frozen') continue
+      const delegated = Boolean(delegate && typeof delegate === 'string' && delegate !== '')
+      const state = typeof (info as { state?: string }).state === 'string'
+        ? (info as { state?: string }).state!.toLowerCase()
+        : ''
+      const frozen = state === 'frozen'
+      if (!includeLocked && (delegated || frozen)) continue
       const rawDecimals = info.tokenAmount?.decimals
       const decimals = typeof rawDecimals === 'number' && !Number.isNaN(rawDecimals) ? rawDecimals : Number(rawDecimals ?? 9)
       const amount = String(info.tokenAmount?.amount ?? '0')
@@ -405,7 +410,7 @@ export async function getWalletNfts(
       if (!isNft) continue
       const mint = info.mint as string
       const tokenAccount = pubkey.toBase58()
-      rows.push({ mint, tokenAccount, amount, decimals })
+      rows.push({ mint, tokenAccount, amount, decimals, frozen, delegated })
     }
   }
 
@@ -418,6 +423,7 @@ export async function getWalletNfts(
       collectionName: null,
       collectionMint: null,
       symbol: null,
+      interface: null,
     }))
   }
 
@@ -452,6 +458,7 @@ export async function getWalletNfts(
       collectionName,
       collectionMint,
       symbol,
+      interface: null,
     }
   })
 

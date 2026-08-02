@@ -14,16 +14,18 @@ export type NftTransferableResult =
   | { ok: true; tokenAccount: PublicKey; tokenProgram: PublicKey }
   | { ok: false; reason: NftTransferBlockReason; error: string }
 
-function shortMint(mint: string): string {
-  return mint.length > 8 ? `${mint.slice(0, 4)}…` : mint
+function assetLabel(mint: string, name?: string | null): string {
+  const n = name?.trim()
+  if (n) return n
+  return mint.length > 8 ? `${mint.slice(0, 4)}…${mint.slice(-4)}` : mint
 }
 
-function blockedMessage(mint: string, reason: 'frozen' | 'delegated'): string {
-  const id = shortMint(mint)
+function blockedMessage(mint: string, reason: 'frozen' | 'delegated', name?: string | null): string {
+  const label = assetLabel(mint, name)
   if (reason === 'frozen') {
-    return `NFT ${id} is frozen (often nested) — unnest or thaw before sending.`
+    return `${label} is frozen (often nested or mint-locked) — unnest/thaw before sending.`
   }
-  return `NFT ${id} is staked or nested (delegated) — unstake/unnest before sending.`
+  return `${label} is staked or nested (delegated) — unstake/unnest before sending.`
 }
 
 /**
@@ -35,9 +37,11 @@ export async function assertNftTransferable(params: {
   mint: string
   owner: PublicKey
   tokenAccount?: string | null
+  name?: string | null
 }): Promise<NftTransferableResult> {
   const mintPk = new PublicKey(params.mint)
   const mintStr = mintPk.toBase58()
+  const name = params.name
 
   if (params.tokenAccount && params.tokenAccount !== mintStr) {
     try {
@@ -50,7 +54,7 @@ export async function assertNftTransferable(params: {
         return {
           ok: false,
           reason: 'invalid',
-          error: `NFT ${shortMint(mintStr)} token account is not a classic SPL / Token-2022 hold.`,
+          error: `${assetLabel(mintStr, name)} token account is not a classic SPL / Token-2022 hold.`,
         }
       }
       const parsed = (
@@ -60,7 +64,7 @@ export async function assertNftTransferable(params: {
         return {
           ok: false,
           reason: 'invalid',
-          error: `NFT ${shortMint(mintStr)} token account could not be parsed.`,
+          error: `${assetLabel(mintStr, name)} token account could not be parsed.`,
         }
       }
       const selectedMint = typeof parsed.mint === 'string' ? parsed.mint : null
@@ -68,7 +72,7 @@ export async function assertNftTransferable(params: {
         return {
           ok: false,
           reason: 'not_held',
-          error: `NFT ${shortMint(mintStr)} is not in the selected token account.`,
+          error: `${assetLabel(mintStr, name)} is not in the selected token account.`,
         }
       }
       const amountRaw =
@@ -85,16 +89,16 @@ export async function assertNftTransferable(params: {
         return {
           ok: false,
           reason: 'not_held',
-          error: `NFT ${shortMint(mintStr)} is not held in your wallet.`,
+          error: `${assetLabel(mintStr, name)} is not held in your wallet.`,
         }
       }
       const state = typeof parsed.state === 'string' ? parsed.state.toLowerCase() : ''
       if (state === 'frozen') {
-        return { ok: false, reason: 'frozen', error: blockedMessage(mintStr, 'frozen') }
+        return { ok: false, reason: 'frozen', error: blockedMessage(mintStr, 'frozen', name) }
       }
       const delegate = typeof parsed.delegate === 'string' ? parsed.delegate : null
       if (delegate) {
-        return { ok: false, reason: 'delegated', error: blockedMessage(mintStr, 'delegated') }
+        return { ok: false, reason: 'delegated', error: blockedMessage(mintStr, 'delegated', name) }
       }
       return {
         ok: true,
@@ -112,10 +116,10 @@ export async function assertNftTransferable(params: {
       const account = await getAccount(params.connection, ata, 'processed', programId)
       if (account.amount < 1n) continue
       if (account.isFrozen) {
-        return { ok: false, reason: 'frozen', error: blockedMessage(mintStr, 'frozen') }
+        return { ok: false, reason: 'frozen', error: blockedMessage(mintStr, 'frozen', name) }
       }
       if (account.delegate) {
-        return { ok: false, reason: 'delegated', error: blockedMessage(mintStr, 'delegated') }
+        return { ok: false, reason: 'delegated', error: blockedMessage(mintStr, 'delegated', name) }
       }
       return { ok: true, tokenAccount: ata, tokenProgram: programId }
     } catch {
@@ -126,11 +130,11 @@ export async function assertNftTransferable(params: {
   return {
     ok: false,
     reason: 'not_held',
-    error: `NFT ${shortMint(mintStr)} is not a transferable SPL hold in this wallet (may be Core/cNFT/pNFT — send alone).`,
+    error: `${assetLabel(mintStr, name)} is not a transferable SPL hold in this wallet (may be Core/cNFT/pNFT — send alone).`,
   }
 }
 
-/** Preflight every line; returns the first blocking error or null. */
+/** Preflight every line; returns blocking errors naming each asset. */
 export async function assertOwlSendLinesTransferable(params: {
   connection: Connection
   owner: PublicKey
@@ -144,6 +148,7 @@ export async function assertOwlSendLinesTransferable(params: {
       mint: line.mint,
       owner: params.owner,
       tokenAccount: line.tokenAccount,
+      name: line.name,
     })
     if (!result.ok && (result.reason === 'frozen' || result.reason === 'delegated')) {
       failedMints.push(line.mint)
@@ -151,9 +156,10 @@ export async function assertOwlSendLinesTransferable(params: {
     }
   }
   if (errors.length === 0) return { ok: true }
+  const more = errors.length > 3 ? ` (+${errors.length - 3} more)` : ''
   return {
     ok: false,
-    error: errors.slice(0, 3).join(' '),
+    error: `${errors.slice(0, 3).join(' ')}${more}`,
     failedMints,
   }
 }

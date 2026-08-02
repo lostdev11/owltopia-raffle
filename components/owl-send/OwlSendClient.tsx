@@ -33,7 +33,6 @@ import {
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
 import { assertOwlSendLinesTransferable } from '@/lib/owl-send/assert-nft-transferable'
-import { filterOwlSendPickerNfts } from '@/lib/owl-send/picker-eligibility'
 import {
   buildTokenScatterLines,
   chunkOwlSendBatches,
@@ -88,7 +87,6 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [tokens, setTokens] = useState<WalletToken[]>([])
   const [loadingAssets, setLoadingAssets] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [hiddenNonTransferableCount, setHiddenNonTransferableCount] = useState(0)
   const [selectedMints, setSelectedMints] = useState<Set<string>>(new Set())
   const [nftSearchQuery, setNftSearchQuery] = useState('')
   const [destination, setDestination] = useState('')
@@ -135,14 +133,14 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       const api = await fetchWalletNftsWithRetry(walletAddr)
       let list = api.nfts
       if (list.length === 0) {
-        list = await getWalletNfts(connection, publicKey)
+        // Include frozen/delegated so the picker matches full wallet inventory;
+        // send preflight rejects non-transferable assets with a named reason.
+        list = await getWalletNfts(connection, publicKey, { includeLocked: true })
       }
-      const { eligible, hiddenCount } = filterOwlSendPickerNfts(list)
-      setNfts(eligible)
-      setHiddenNonTransferableCount(hiddenCount)
+      setNfts(list)
       setSelectedMints((prev) => {
         if (prev.size === 0) return prev
-        const allowed = new Set(eligible.map((n) => n.mint))
+        const allowed = new Set(list.map((n) => n.mint))
         const next = new Set([...prev].filter((m) => allowed.has(m)))
         return next.size === prev.size ? prev : next
       })
@@ -161,7 +159,6 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       setNfts([])
       setTokens([])
       setSelectedMints(new Set())
-      setHiddenNonTransferableCount(0)
     }
   }, [connected, publicKey, loadAssets])
 
@@ -825,18 +822,20 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   </div>
                   <CardDescription>
                     Up to {OWL_SEND_MAX_SELECT} NFTs · {OWL_SEND_MAX_PER_TX} per wallet
-                    approval · staked/nested (delegated) NFTs are hidden from this list
+                    approval · frozen/staked/nested assets stay visible and are rejected at
+                    send with a named reason
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   {loadError ? (
                     <p className="mb-3 text-sm text-red-400">{loadError}</p>
                   ) : null}
-                  {hiddenNonTransferableCount > 0 ? (
+                  {!loadingAssets && nfts.length > 0 ? (
                     <p className="mb-3 text-xs text-muted-foreground">
-                      Hid {hiddenNonTransferableCount} staked or nested NFT
-                      {hiddenNonTransferableCount === 1 ? '' : 's'} — unstake/unnest to send
-                      them.
+                      {nfts.length} NFT{nfts.length === 1 ? '' : 's'} in wallet
+                      {nfts.some((n) => n.frozen || n.delegated)
+                        ? ` · ${nfts.filter((n) => n.frozen || n.delegated).length} marked frozen/staked (can select; send will explain)`
+                        : ''}
                     </p>
                   ) : null}
                   {loadingAssets && nfts.length === 0 ? (

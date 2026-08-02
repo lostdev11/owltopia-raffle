@@ -11,7 +11,7 @@ import {
   parseRecipientAddresses,
   parseTokenScatterEntries,
 } from '@/lib/owl-send/batch'
-import { filterOwlSendPickerNfts, isOwlSendPickerEligible } from '@/lib/owl-send/picker-eligibility'
+import { owlSendNftLockLabel } from '@/lib/owl-send/picker-eligibility'
 import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { getOwlSendFeeLamportsForCount, getOwlSendFeeSol } from '@/lib/owl-send/fee'
@@ -135,9 +135,9 @@ const tooMany = buildTokenScatterLines({
 })
 assert.equal(tooMany.ok, false)
 
-// Picker eligibility: hide delegated (staked/nested); keep Gen2 mint-frozen visible
+// Picker shows all NFTs; lock label is advisory only
 assert.equal(
-  isOwlSendPickerEligible({
+  owlSendNftLockLabel({
     mint: 'm',
     tokenAccount: 't',
     amount: '1',
@@ -149,25 +149,10 @@ assert.equal(
     frozen: true,
     delegated: false,
   }),
-  true
+  'Frozen'
 )
 assert.equal(
-  isOwlSendPickerEligible({
-    mint: 'm',
-    tokenAccount: 't',
-    amount: '1',
-    decimals: 0,
-    metadataUri: null,
-    name: null,
-    image: null,
-    collectionName: null,
-    frozen: false,
-    delegated: true,
-  }),
-  false
-)
-assert.equal(
-  isOwlSendPickerEligible({
+  owlSendNftLockLabel({
     mint: 'm',
     tokenAccount: 't',
     amount: '1',
@@ -179,11 +164,11 @@ assert.equal(
     frozen: true,
     delegated: true,
   }),
-  false
+  'Staked/nested'
 )
-const filtered = filterOwlSendPickerNfts([
-  {
-    mint: 'ok',
+assert.equal(
+  owlSendNftLockLabel({
+    mint: 'm',
     tokenAccount: 't',
     amount: '1',
     decimals: 0,
@@ -191,37 +176,8 @@ const filtered = filterOwlSendPickerNfts([
     name: null,
     image: null,
     collectionName: null,
-  },
-  {
-    mint: 'gen2-mint-frozen',
-    tokenAccount: 't',
-    amount: '1',
-    decimals: 0,
-    metadataUri: null,
-    name: null,
-    image: null,
-    collectionName: null,
-    frozen: true,
-    delegated: false,
-  },
-  {
-    mint: 'nested',
-    tokenAccount: 't',
-    amount: '1',
-    decimals: 0,
-    metadataUri: null,
-    name: null,
-    image: null,
-    collectionName: null,
-    frozen: true,
-    delegated: true,
-  },
-])
-assert.equal(filtered.eligible.length, 2)
-assert.equal(filtered.hiddenCount, 1)
-assert.deepEqual(
-  filtered.eligible.map((n) => n.mint).sort(),
-  ['gen2-mint-frozen', 'ok']
+  }),
+  null
 )
 
 console.log('test-owl-send-batch: ok')

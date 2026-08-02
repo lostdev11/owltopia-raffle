@@ -86,6 +86,7 @@ export async function sendOwlSendSpecialNft(params: {
     mint,
     owner,
     tokenAccount: line.tokenAccount,
+    name: line.name,
   })
   if (!preflight.ok && (preflight.reason === 'frozen' || preflight.reason === 'delegated')) {
     return { ok: false, error: preflight.error, failedMints: [mint] }
