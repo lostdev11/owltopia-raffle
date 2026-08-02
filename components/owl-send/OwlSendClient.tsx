@@ -91,6 +91,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [nftSearchQuery, setNftSearchQuery] = useState('')
   const [destination, setDestination] = useState('')
   const [scatterRaw, setScatterRaw] = useState('')
+  /** Per-NFT recipient when randomize is off (keyed by mint). */
+  const [scatterByMint, setScatterByMint] = useState<Record<string, string>>({})
   const [randomizeScatter, setRandomizeScatter] = useState(true)
   const [preparedLines, setPreparedLines] = useState<OwlSendLine[] | null>(null)
   const [batches, setBatches] = useState<OwlSendLine[][]>([])
@@ -158,10 +160,41 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   )
 
   const scatterRecipients = useMemo(() => parseRecipientAddresses(scatterRaw), [scatterRaw])
+  const pairedScatterRecipients = useMemo(
+    () => selectedNfts.map((n) => (scatterByMint[n.mint] ?? '').trim()).filter(Boolean),
+    [selectedNfts, scatterByMint]
+  )
+  const activeScatterRecipients = randomizeScatter ? scatterRecipients : pairedScatterRecipients
   const tokenScatterEntries = useMemo(
     () => parseTokenScatterEntries(tokenScatterRaw),
     [tokenScatterRaw]
   )
+
+  const setRandomizeScatterMode = (next: boolean) => {
+    setPreparedLines(null)
+    setBatches([])
+    setBatchProgress([])
+    if (next) {
+      // Bulk paste: fold per-NFT fields into one list (selection order).
+      const fromFields = selectedNfts
+        .map((n) => (scatterByMint[n.mint] ?? '').trim())
+        .filter(Boolean)
+      if (fromFields.length > 0) {
+        setScatterRaw(fromFields.join('\n'))
+      }
+    } else {
+      // Explicit pairing: map pasted wallets onto each selected NFT.
+      const addrs = parseRecipientAddresses(scatterRaw)
+      setScatterByMint((prev) => {
+        const nextMap: Record<string, string> = { ...prev }
+        selectedNfts.forEach((n, i) => {
+          if (addrs[i]) nextMap[n.mint] = addrs[i]!
+        })
+        return nextMap
+      })
+    }
+    setRandomizeScatter(next)
+  }
 
   const cost = useMemo(() => {
     if (preparedLines && preparedLines.length > 0) {
@@ -263,6 +296,19 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         recipient: dest,
       }))
     } else {
+      let recipients: string[]
+      if (randomizeScatter) {
+        recipients = scatterRecipients
+      } else {
+        const missing = selectedNfts.find((n) => !(scatterByMint[n.mint] ?? '').trim())
+        if (missing) {
+          setSessionError(
+            `Enter a wallet for ${missing.name?.trim() || shorten(missing.mint)}.`
+          )
+          return
+        }
+        recipients = selectedNfts.map((n) => (scatterByMint[n.mint] ?? '').trim())
+      }
       const paired = pairScatterLines({
         mints: selectedNfts.map((n) => ({
           mint: n.mint,
@@ -270,7 +316,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
           tokenAccount: n.tokenAccount,
           image: n.image,
         })),
-        recipients: scatterRecipients,
+        recipients,
         randomize: randomizeScatter,
       })
       if (!paired.ok) {
@@ -810,7 +856,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   <CardDescription>
                     {mode === 'send_to_one'
                       ? 'All selected NFTs go to this wallet (batches of 5).'
-                      : `Paste ${selectedNfts.length || 'N'} wallets — one per NFT (newline, comma, or space).`}
+                      : randomizeScatter
+                        ? `Paste ${selectedNfts.length || 'N'} wallet${selectedNfts.length === 1 ? '' : 's'} — one per NFT (newline, comma, or space). NFTs are shuffled onto that list.`
+                        : 'Enter one wallet under each NFT for an exact 1:1 send.'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -830,41 +878,112 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      <div className="space-y-1.5">
-                        <Label htmlFor="owl-send-scatter">Recipient wallets</Label>
-                        <textarea
-                          id="owl-send-scatter"
-                          value={scatterRaw}
-                          onChange={(e) => {
-                            setScatterRaw(e.target.value)
-                            setPreparedLines(null)
-                          }}
-                          rows={5}
-                          placeholder={'wallet1\nwallet2\nwallet3'}
-                          className="w-full rounded-md border border-input bg-black/40 px-3 py-2 font-mono text-sm touch-manipulation"
-                        />
-                        <p
-                          className={cn(
-                            'text-xs',
-                            scatterRecipients.length === selectedNfts.length && selectedNfts.length > 0
-                              ? 'text-emerald-300'
-                              : 'text-muted-foreground'
-                          )}
-                        >
-                          {scatterRecipients.length} address
-                          {scatterRecipients.length === 1 ? '' : 'es'} · need {selectedNfts.length}{' '}
-                          for current selection
-                        </p>
-                      </div>
                       <label className="flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground touch-manipulation">
                         <input
                           type="checkbox"
                           checked={randomizeScatter}
-                          onChange={(e) => setRandomizeScatter(e.target.checked)}
+                          onChange={(e) => setRandomizeScatterMode(e.target.checked)}
                           className="h-5 w-5 rounded border-white/20"
                         />
                         Randomize which NFT goes to which wallet
                       </label>
+
+                      {randomizeScatter ? (
+                        <div className="space-y-1.5">
+                          <Label htmlFor="owl-send-scatter">Recipient wallets</Label>
+                          <textarea
+                            id="owl-send-scatter"
+                            value={scatterRaw}
+                            onChange={(e) => {
+                              setScatterRaw(e.target.value)
+                              setPreparedLines(null)
+                            }}
+                            rows={5}
+                            placeholder={'wallet1\nwallet2\nwallet3'}
+                            className="w-full rounded-md border border-input bg-black/40 px-3 py-2 font-mono text-sm touch-manipulation"
+                          />
+                          <p
+                            className={cn(
+                              'text-xs',
+                              activeScatterRecipients.length === selectedNfts.length &&
+                                selectedNfts.length > 0
+                                ? 'text-emerald-300'
+                                : 'text-muted-foreground'
+                            )}
+                          >
+                            {activeScatterRecipients.length} address
+                            {activeScatterRecipients.length === 1 ? '' : 'es'} · need{' '}
+                            {selectedNfts.length} for current selection
+                          </p>
+                        </div>
+                      ) : selectedNfts.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          Select NFTs above to assign each a wallet.
+                        </p>
+                      ) : (
+                        <ul className="space-y-3">
+                          {selectedNfts.map((n) => {
+                            const label = n.name?.trim() || shorten(n.mint)
+                            const collection = n.collectionName?.trim()
+                            return (
+                              <li
+                                key={n.mint}
+                                className="rounded-lg border border-white/10 bg-black/30 px-3 py-3"
+                              >
+                                <div className="mb-2 flex items-center gap-3">
+                                  {n.image ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={n.image}
+                                      alt=""
+                                      className="h-11 w-11 shrink-0 rounded-md object-cover"
+                                    />
+                                  ) : (
+                                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-white/5 text-xs text-muted-foreground">
+                                      NFT
+                                    </div>
+                                  )}
+                                  <div className="min-w-0">
+                                    <Label
+                                      htmlFor={`owl-send-scatter-${n.mint}`}
+                                      className="truncate text-sm font-medium text-white"
+                                    >
+                                      {label}
+                                    </Label>
+                                    {collection ? (
+                                      <p className="truncate text-xs text-muted-foreground">
+                                        {collection}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                <Input
+                                  id={`owl-send-scatter-${n.mint}`}
+                                  value={scatterByMint[n.mint] ?? ''}
+                                  onChange={(e) => {
+                                    const value = e.target.value
+                                    setScatterByMint((prev) => ({ ...prev, [n.mint]: value }))
+                                    setPreparedLines(null)
+                                  }}
+                                  placeholder="Recipient Solana address"
+                                  className="min-h-[44px] bg-black/40 font-mono text-sm"
+                                  autoComplete="off"
+                                />
+                              </li>
+                            )
+                          })}
+                          <p
+                            className={cn(
+                              'text-xs',
+                              activeScatterRecipients.length === selectedNfts.length
+                                ? 'text-emerald-300'
+                                : 'text-muted-foreground'
+                            )}
+                          >
+                            {activeScatterRecipients.length} of {selectedNfts.length} wallets filled
+                          </p>
+                        </ul>
+                      )}
                     </div>
                   )}
 
