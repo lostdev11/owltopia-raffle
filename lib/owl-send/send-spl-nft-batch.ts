@@ -69,7 +69,7 @@ async function resolveHolder(
           if (account.isFrozen) {
             const label = name?.trim() || `${mintStr.slice(0, 4)}…${mintStr.slice(-4)}`
             throw new Error(
-              `${label} is frozen (nested or mint-locked) — unnest/thaw before sending.`
+              `${label} is frozen on-chain (Owltopia nest lock or Gen2 Candy Machine mint freeze) — unnest/thaw before sending. A leftover stake delegate after thaw alone does not block sends.`
             )
           }
           return { tokenProgram: programId, tokenAccount: ta }

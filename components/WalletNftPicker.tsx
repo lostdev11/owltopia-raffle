@@ -56,6 +56,10 @@ export interface WalletNftPickerProps {
   onSelectFilteredMints?: (mints: string[]) => void
   dialogTitle?: string
   dialogDescription?: string
+  /** Mints that failed send/preflight — amber highlight in the grid/list. */
+  problemMints?: Set<string>
+  /** Optional per-tile status line (e.g. frozen lock or “Can’t send”). */
+  statusLabel?: (nft: WalletNft) => string | null
 }
 
 /** Picker tiles are ≤160px; NFT art can be a 5–8MB original, so prefer the server-downscaled proxy. */
@@ -153,6 +157,8 @@ function WalletNftPickerBody({
   onToggle,
   maxSelect,
   onSelectFilteredMints,
+  problemMints,
+  statusLabel,
 }: {
   nfts: WalletNft[]
   selectedMint: string | null
@@ -167,6 +173,8 @@ function WalletNftPickerBody({
   onToggle?: (nft: WalletNft) => void
   maxSelect?: number
   onSelectFilteredMints?: (mints: string[]) => void
+  problemMints?: Set<string>
+  statusLabel?: (nft: WalletNft) => string | null
 }) {
   const [collectionKey, setCollectionKey] = useState<string | 'all'>('all')
   const [viewMode, setViewMode] = useState<WalletNftViewMode>(defaultViewMode)
@@ -177,10 +185,16 @@ function WalletNftPickerBody({
 
   const collections = useMemo(() => groupWalletNftsByCollection(nfts), [nfts])
 
-  const filtered = useMemo(
-    () => sortWalletNfts(filterWalletNfts({ nfts, searchQuery, collectionKey }), sort),
-    [nfts, searchQuery, collectionKey, sort]
-  )
+  const filtered = useMemo(() => {
+    const sorted = sortWalletNfts(filterWalletNfts({ nfts, searchQuery, collectionKey }), sort)
+    if (!problemMints?.size) return sorted
+    // Surface failed/unsendable NFTs first so mobile users see them without paging.
+    return [...sorted].sort((a, b) => {
+      const ap = problemMints.has(a.mint) ? 0 : 1
+      const bp = problemMints.has(b.mint) ? 0 : 1
+      return ap - bp
+    })
+  }, [nfts, searchQuery, collectionKey, sort, problemMints])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const safePage = Math.min(page, totalPages - 1)
@@ -363,6 +377,8 @@ function WalletNftPickerBody({
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {pageItems.map((nft) => {
             const selected = isSelected(nft.mint)
+            const problem = problemMints?.has(nft.mint) === true
+            const badge = statusLabel?.(nft) ?? (nft.frozen ? 'Frozen (nest/mint lock)' : null)
             const atCap = multi && !selected && maxSelect != null && selectedCount >= maxSelect
             return (
               <button
@@ -371,9 +387,11 @@ function WalletNftPickerBody({
                 disabled={atCap}
                 onClick={() => handleSelect(nft)}
                 className={`rounded-lg border-2 p-2 text-left transition-colors touch-manipulation disabled:opacity-40 ${
-                  selected
-                    ? 'border-primary bg-primary/10'
-                    : 'border-border hover:border-muted-foreground/50'
+                  problem
+                    ? 'border-amber-400 bg-amber-500/15 ring-2 ring-amber-400/40'
+                    : selected
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border hover:border-muted-foreground/50'
                 }`}
               >
                 <div className="aspect-square rounded overflow-hidden bg-muted mb-2">
@@ -382,8 +400,8 @@ function WalletNftPickerBody({
                 <p className="text-xs font-medium truncate" title={nft.name ?? nft.mint}>
                   {nft.name ?? `${nft.mint.slice(0, 4)}…`}
                 </p>
-                {nft.frozen ? (
-                  <p className="text-[10px] font-medium text-amber-300">Frozen/nested</p>
+                {badge ? (
+                  <p className="text-[10px] font-medium text-amber-300">{badge}</p>
                 ) : null}
                 <p
                   className="text-[10px] text-muted-foreground truncate"
@@ -399,6 +417,8 @@ function WalletNftPickerBody({
         <ul className="divide-y divide-border rounded-md border">
           {pageItems.map((nft) => {
             const selected = isSelected(nft.mint)
+            const problem = problemMints?.has(nft.mint) === true
+            const badge = statusLabel?.(nft) ?? (nft.frozen ? 'Frozen (nest/mint lock)' : null)
             const atCap = multi && !selected && maxSelect != null && selectedCount >= maxSelect
             return (
               <li key={`${nft.tokenAccount}-${nft.mint}`}>
@@ -407,7 +427,11 @@ function WalletNftPickerBody({
                   disabled={atCap}
                   onClick={() => handleSelect(nft)}
                   className={`flex w-full items-center gap-3 p-3 text-left transition-colors touch-manipulation min-h-[64px] disabled:opacity-40 ${
-                    selected ? 'bg-primary/10' : 'hover:bg-muted/60 active:bg-muted'
+                    problem
+                      ? 'bg-amber-500/15 ring-inset ring-2 ring-amber-400/50'
+                      : selected
+                        ? 'bg-primary/10'
+                        : 'hover:bg-muted/60 active:bg-muted'
                   }`}
                 >
                   <div className="h-12 w-12 shrink-0 rounded overflow-hidden">
@@ -418,11 +442,15 @@ function WalletNftPickerBody({
                     <p className="text-xs text-muted-foreground truncate">
                       {walletNftCollectionDisplayLabel(nft)}
                       {nft.symbol ? ` · ${nft.symbol}` : ''}
-                      {nft.frozen ? ' · Frozen/nested' : ''}
+                      {badge ? ` · ${badge}` : ''}
                     </p>
                     <p className="text-[10px] font-mono text-muted-foreground truncate">{nft.mint}</p>
                   </div>
-                  {selected ? (
+                  {problem ? (
+                    <Badge className="shrink-0 border-amber-400/40 bg-amber-500/20 text-amber-100">
+                      Can&apos;t send
+                    </Badge>
+                  ) : selected ? (
                     <Badge variant="secondary" className="shrink-0">
                       Selected
                     </Badge>
@@ -456,6 +484,8 @@ export function WalletNftPicker({
   onSelectFilteredMints,
   dialogTitle,
   dialogDescription,
+  problemMints,
+  statusLabel,
 }: WalletNftPickerProps) {
   const coarsePointer = useCoarsePointer()
   const [browseOpen, setBrowseOpen] = useState(false)
@@ -501,6 +531,8 @@ export function WalletNftPicker({
     maxSelect,
     onSelectFilteredMints,
     defaultViewMode,
+    problemMints,
+    statusLabel,
   }
 
   const mintPaste =
@@ -531,14 +563,25 @@ export function WalletNftPicker({
                 {maxSelect != null ? ` (max ${maxSelect})` : ''}
               </p>
               <ul className="space-y-1.5 max-h-36 overflow-y-auto">
-                {selectedMultiNfts.slice(0, 8).map((nft) => (
-                  <li key={nft.mint} className="flex items-center gap-2 text-xs">
-                    <div className="h-8 w-8 shrink-0 overflow-hidden rounded">
-                      <NftThumb nft={nft} className="h-full w-full object-cover" />
-                    </div>
-                    <span className="truncate">{nft.name ?? shortenMint(nft.mint)}</span>
-                  </li>
-                ))}
+                {selectedMultiNfts.slice(0, 8).map((nft) => {
+                  const problem = problemMints?.has(nft.mint) === true
+                  return (
+                    <li
+                      key={nft.mint}
+                      className={`flex items-center gap-2 text-xs ${
+                        problem ? 'rounded-md bg-amber-500/15 px-1.5 py-1' : ''
+                      }`}
+                    >
+                      <div className="h-8 w-8 shrink-0 overflow-hidden rounded">
+                        <NftThumb nft={nft} className="h-full w-full object-cover" />
+                      </div>
+                      <span className="min-w-0 truncate">
+                        {nft.name ?? shortenMint(nft.mint)}
+                        {problem ? ' · Can’t send' : ''}
+                      </span>
+                    </li>
+                  )
+                })}
                 {selectedMultiNfts.length > 8 ? (
                   <li className="text-muted-foreground">+{selectedMultiNfts.length - 8} more</li>
                 ) : null}

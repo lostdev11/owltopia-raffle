@@ -35,7 +35,7 @@ export async function assertNftTransferable(params: {
   const mintPk = new PublicKey(params.mint)
   const mintStr = mintPk.toBase58()
   const name = params.name
-  const frozenMsg = `${assetLabel(mintStr, name)} is frozen (nested or mint-locked) — unnest/thaw before sending.`
+  const frozenMsg = `${assetLabel(mintStr, name)} is frozen on-chain (Owltopia nest lock or Gen2 Candy Machine mint freeze) — unnest/thaw before sending. A leftover stake delegate after thaw alone does not block sends.`
 
   if (params.tokenAccount && params.tokenAccount !== mintStr) {
     try {

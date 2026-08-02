@@ -19,7 +19,9 @@ import {
   collectSentMintsFromBatches,
   collectSentMintsFromLedger,
 } from '@/lib/owl-send/resume'
+import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-locks'
 import { owlSendNftLockLabel } from '@/lib/owl-send/picker-eligibility'
+import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
 import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { getOwlSendFeeLamportsForCount, getOwlSendFeeSol } from '@/lib/owl-send/fee'
@@ -304,7 +306,7 @@ assert.equal(
     frozen: true,
     delegated: true,
   }),
-  'Frozen/nested'
+  'Frozen (nest/mint lock)'
 )
 assert.equal(
   owlSendNftLockLabel({
@@ -319,5 +321,43 @@ assert.equal(
   }),
   null
 )
+
+const merged = mergeDasNftsWithOnChainLocks(
+  [
+    {
+      mint: 'mintA',
+      tokenAccount: 'mintA',
+      amount: '1',
+      decimals: 0,
+      metadataUri: null,
+      name: 'Gen2 #1',
+      image: null,
+      collectionName: 'Gen2',
+      frozen: true,
+      delegated: true,
+    },
+  ],
+  [
+    {
+      mint: 'mintA',
+      tokenAccount: 'realAta',
+      amount: '1',
+      decimals: 0,
+      metadataUri: null,
+      name: null,
+      image: null,
+      collectionName: null,
+      frozen: false,
+      delegated: true,
+    },
+  ]
+)
+assert.equal(merged[0]!.tokenAccount, 'realAta')
+assert.equal(merged[0]!.frozen, false)
+assert.equal(merged[0]!.name, 'Gen2 #1')
+
+assert.match(owlSendRetryHint('Owl #3 is frozen on-chain'), /Frozen on-chain/)
+assert.match(owlSendRetryHint('Could not find a transferable SPL'), /batch of 1/)
+assert.match(owlSendRetryHint('User rejected the request'), /Wallet rejected/)
 
 console.log('test-owl-send-batch: ok')

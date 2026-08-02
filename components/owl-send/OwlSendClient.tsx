@@ -33,6 +33,9 @@ import {
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
 import { assertOwlSendLinesTransferable } from '@/lib/owl-send/assert-nft-transferable'
+import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-locks'
+import { owlSendNftProblemLabel } from '@/lib/owl-send/picker-eligibility'
+import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
 import {
   buildTokenScatterLines,
   chunkOwlSendBatches,
@@ -159,12 +162,16 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     try {
       const walletAddr = publicKey.toBase58()
       const api = await fetchWalletNftsWithRetry(walletAddr)
-      let list = api.nfts
-      if (list.length === 0) {
-        // Include frozen/delegated so the picker matches full wallet inventory;
-        // send preflight rejects non-transferable assets with a named reason.
-        list = await getWalletNfts(connection, publicKey, { includeLocked: true })
-      }
+      // Live SPL freeze/ATA overlay — DAS often uses mint as tokenAccount and can leave
+      // stale ownership.frozen after Gen2 Candy Machine thaw (looks “staked” when it isn’t).
+      const onChainLocks = await getWalletNfts(connection, publicKey, {
+        includeLocked: true,
+        fetchMetadata: api.nfts.length === 0,
+      })
+      const list =
+        api.nfts.length > 0
+          ? mergeDasNftsWithOnChainLocks(api.nfts, onChainLocks)
+          : onChainLocks
       setNfts(list)
       setSelectedMints((prev) => {
         if (prev.size === 0) return prev
@@ -222,6 +229,13 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     () => nfts.filter((n) => selectedMints.has(n.mint)),
     [nfts, selectedMints]
   )
+  const retryMintSet = useMemo(() => new Set(retryMints), [retryMints])
+  const retryNftLabels = useMemo(() => {
+    return retryMints.map((mint) => {
+      const nft = nfts.find((n) => n.mint === mint)
+      return nft?.name?.trim() || shorten(mint)
+    })
+  }, [retryMints, nfts])
 
   const nftScatterEntries = useMemo(() => parseNftScatterEntries(scatterRaw), [scatterRaw])
   const scatterRecipients = useMemo(
@@ -1119,8 +1133,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   </div>
                   <CardDescription>
                     Up to {OWL_SEND_MAX_SELECT} NFTs · {OWL_SEND_MAX_PER_TX} per wallet
-                    approval · frozen/nested assets stay visible and are rejected at send
-                    with a named reason
+                    approval · on-chain frozen assets stay visible and are rejected at send
+                    with a named reason (leftover Gen2 delegates after thaw are fine)
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1131,7 +1145,10 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     <p className="mb-3 text-xs text-muted-foreground">
                       {nfts.length} NFT{nfts.length === 1 ? '' : 's'} in wallet
                       {nfts.some((n) => n.frozen)
-                        ? ` · ${nfts.filter((n) => n.frozen).length} frozen/nested (can select; send will explain)`
+                        ? ` · ${nfts.filter((n) => n.frozen).length} frozen (nest or mint lock; can select; send will explain)`
+                        : ''}
+                      {retryMints.length > 0
+                        ? ` · ${retryMints.length} highlighted from last failed send`
                         : ''}
                     </p>
                   ) : null}
@@ -1155,7 +1172,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                         onSelectFilteredMints={selectMints}
                         searchInputId="owl-send-nft-search"
                         dialogTitle="Select NFTs to send"
-                        dialogDescription="Filter by collection, switch to list view, or search by name or mint — same controls as create raffle."
+                        dialogDescription="Filter by collection, switch to list view, or search by name or mint — same controls as create raffle. Failed sends are highlighted in amber."
+                        problemMints={retryMintSet}
+                        statusLabel={(nft) => owlSendNftProblemLabel(nft, retryMintSet)}
                       />
                     </fieldset>
                   )}
@@ -1718,12 +1737,35 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               {retryMints.length > 0 ? (
                 <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <div>
+                  <div className="min-w-0 space-y-1">
                     <p className="font-semibold">Retry list</p>
-                    <p className="text-xs text-amber-100/80">
-                      {retryMints.map(shorten).join(', ')} — unnest/unstake frozen or delegated NFTs,
-                      or send Core/cNFT/pNFT alone.
+                    <p className="text-xs font-medium text-amber-50">
+                      {retryNftLabels.join(', ')}
                     </p>
+                    <p className="text-xs text-amber-100/80">{owlSendRetryHint(sessionError)}</p>
+                    <p className="text-[11px] text-amber-100/60">
+                      Highlighted in amber in Select NFTs above. Gen2 leftover delegates after thaw
+                      are sendable — only a frozen token account blocks transfer.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="mt-1 h-9 min-h-[36px] touch-manipulation px-2 text-amber-100"
+                      onClick={() => {
+                        setSelectedMints((prev) => {
+                          const next = new Set(prev)
+                          for (const m of retryMints) next.delete(m)
+                          return next
+                        })
+                        setRetryMints([])
+                        setPreparedLines(null)
+                        setBatches([])
+                        setBatchProgress([])
+                      }}
+                    >
+                      Deselect problem NFTs
+                    </Button>
                   </div>
                 </div>
               ) : null}
