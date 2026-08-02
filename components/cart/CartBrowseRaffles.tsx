@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { getCachedAdmin } from '@/lib/admin-check-cache'
 import { fetchCartBrowseRaffles } from '@/lib/cart/fetch-cart-browse-raffles'
+import { fetchEntrySummariesByRaffleIdsClient } from '@/lib/raffles/fetch-entry-summaries-client'
 import { Input } from '@/components/ui/input'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import type { Raffle } from '@/lib/types'
@@ -14,6 +15,12 @@ import { raffleCheckoutBlockedReason } from '@/lib/cart/validate-raffle-checkout
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
 import { useCart } from '@/components/cart/CartProvider'
 import { RaffleListThumbnail } from '@/components/RaffleListThumbnail'
+
+const SUMMARY_CHUNK = 80
+
+function formatTicketCount(n: number, noun = 'ticket'): string {
+  return n === 1 ? `1 ${noun}` : `${n} ${noun}s`
+}
 
 function sortPurchasable(a: Raffle, b: Raffle): number {
   const endA = new Date(a.end_time).getTime()
@@ -27,12 +34,22 @@ export function CartBrowseRaffles() {
   const { lines, addItem } = useCart()
   const [list, setList] = useState<Raffle[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [quantities, setQuantities] = useState<Record<string, number>>({})
+  /** String drafts so users can clear the field (e.g. erase a leading 0) while typing. */
+  const [quantities, setQuantities] = useState<Record<string, string>>({})
   const [flashError, setFlashError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  /** Confirmed tickets already owned by the connected wallet, keyed by raffle id. */
+  const [ownedByRaffleId, setOwnedByRaffleId] = useState<Record<string, number>>({})
 
   const cartCurrency = lines[0]?.snapshot.currency ?? null
   const viewerWallet = publicKey?.toBase58() ?? null
+  const cartQtyByRaffleId = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const line of lines) {
+      map[line.raffleId] = Math.max(0, Math.floor(line.quantity))
+    }
+    return map
+  }, [lines])
 
   useEffect(() => {
     const ac = new AbortController()
@@ -75,11 +92,42 @@ export function CartBrowseRaffles() {
     return rows
   }, [list, cartCurrency, viewerWallet])
 
+  const purchasableIdsKey = useMemo(() => purchasable.map(r => r.id).join('|'), [purchasable])
+
+  useEffect(() => {
+    if (!viewerWallet || !purchasableIdsKey) {
+      setOwnedByRaffleId({})
+      return
+    }
+    const ids = purchasableIdsKey.split('|').filter(Boolean)
+    const ac = new AbortController()
+    let cancelled = false
+    ;(async () => {
+      const next: Record<string, number> = {}
+      for (let i = 0; i < ids.length; i += SUMMARY_CHUNK) {
+        const chunk = ids.slice(i, i + SUMMARY_CHUNK)
+        const summaries = await fetchEntrySummariesByRaffleIdsClient(chunk, viewerWallet, ac.signal)
+        if (cancelled || ac.signal.aborted) return
+        for (const id of chunk) {
+          const n = Math.max(0, Math.floor(summaries.get(id)?.viewerConfirmedTickets ?? 0))
+          if (n > 0) next[id] = n
+        }
+      }
+      if (!cancelled) setOwnedByRaffleId(next)
+    })()
+    return () => {
+      cancelled = true
+      ac.abort()
+    }
+  }, [viewerWallet, purchasableIdsKey])
+
   const getQty = useCallback(
     (id: string) => {
-      const q = quantities[id]
-      if (typeof q === 'number' && q >= 0) return Math.min(MAX_TICKET_QUANTITY_PER_ENTRY, q)
-      return 0
+      const raw = quantities[id]
+      if (raw === undefined || raw === '') return 0
+      const n = Math.floor(Number(raw))
+      if (!Number.isFinite(n) || n < 0) return 0
+      return Math.min(MAX_TICKET_QUANTITY_PER_ENTRY, n)
     },
     [quantities]
   )
@@ -88,6 +136,10 @@ export function CartBrowseRaffles() {
     (raffle: Raffle) => {
       setFlashError(null)
       const q = getQty(raffle.id)
+      if (q < 1) {
+        setFlashError('Enter at least 1 ticket before adding.')
+        return
+      }
       const result = addItem(raffle, q)
       if (!result.ok) setFlashError(result.error)
     },
@@ -145,9 +197,15 @@ export function CartBrowseRaffles() {
       ) : null}
       <ul className="space-y-2">
         {purchasable.map(raffle => {
-          const inCart = lines.some(l => l.raffleId === raffle.id)
+          const cartQty = cartQtyByRaffleId[raffle.id] ?? 0
+          const ownedQty = ownedByRaffleId[raffle.id] ?? 0
+          const inCart = cartQty > 0
           const price = Number(raffle.ticket_price) || 0
           const cur = (raffle.currency || 'SOL') as 'SOL' | 'USDC' | 'OWL'
+          const holdingParts: string[] = []
+          if (ownedQty > 0) holdingParts.push(`You have ${formatTicketCount(ownedQty)}`)
+          if (cartQty > 0) holdingParts.push(`${formatTicketCount(cartQty)} in cart`)
+          const holdingLabel = holdingParts.join(' · ')
 
           return (
             <li
@@ -175,9 +233,6 @@ export function CartBrowseRaffles() {
                     <CurrencyIcon currency={cur} size={14} />
                   </span>
                   <span className="text-xs">per ticket</span>
-                  {inCart ? (
-                    <span className="text-xs font-medium text-green-600 dark:text-green-400">In cart</span>
-                  ) : null}
                 </div>
               </div>
               <div className="flex items-center gap-2 flex-wrap shrink-0">
@@ -186,18 +241,42 @@ export function CartBrowseRaffles() {
                 </label>
                 <Input
                   id={`browse-q-${raffle.id}`}
-                  type="number"
-                  min={0}
-                  max={MAX_TICKET_QUANTITY_PER_ENTRY}
+                  type="text"
                   inputMode="numeric"
-                  className="w-20 h-11 text-base"
-                  value={quantities[raffle.id] ?? 0}
+                  autoComplete="off"
+                  className="w-20 h-11 text-base touch-manipulation"
+                  value={quantities[raffle.id] ?? '0'}
                   onChange={e => {
-                    const n = Math.min(
-                      MAX_TICKET_QUANTITY_PER_ENTRY,
-                      Math.max(0, Math.floor(Number(e.target.value) || 0))
-                    )
-                    setQuantities(prev => ({ ...prev, [raffle.id]: n }))
+                    const raw = e.target.value
+                    if (raw !== '' && !/^\d*$/.test(raw)) return
+                    if (raw !== '') {
+                      const n = Number(raw)
+                      if (Number.isFinite(n) && n > MAX_TICKET_QUANTITY_PER_ENTRY) {
+                        setQuantities(prev => ({
+                          ...prev,
+                          [raffle.id]: String(MAX_TICKET_QUANTITY_PER_ENTRY),
+                        }))
+                        return
+                      }
+                    }
+                    setQuantities(prev => ({ ...prev, [raffle.id]: raw }))
+                  }}
+                  onBlur={() => {
+                    const raw = quantities[raffle.id]
+                    if (raw === undefined) return
+                    if (raw === '') {
+                      setQuantities(prev => ({ ...prev, [raffle.id]: '0' }))
+                      return
+                    }
+                    const n = Math.floor(Number(raw))
+                    if (!Number.isFinite(n) || n < 0) {
+                      setQuantities(prev => ({ ...prev, [raffle.id]: '0' }))
+                      return
+                    }
+                    setQuantities(prev => ({
+                      ...prev,
+                      [raffle.id]: String(Math.min(MAX_TICKET_QUANTITY_PER_ENTRY, n)),
+                    }))
                   }}
                 />
                 <Button
@@ -207,6 +286,14 @@ export function CartBrowseRaffles() {
                 >
                   {inCart ? 'Add more' : 'Add to cart'}
                 </Button>
+                {holdingLabel ? (
+                  <p
+                    className="text-xs font-medium text-green-700 dark:text-green-400 basis-full sm:basis-auto sm:max-w-[11rem] leading-snug"
+                    aria-live="polite"
+                  >
+                    {holdingLabel}
+                  </p>
+                ) : null}
               </div>
               </div>
             </li>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { Ticket } from 'lucide-react'
@@ -8,7 +8,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import { useCart } from '@/components/cart/CartProvider'
+import { fetchEntrySummariesByRaffleIdsClient } from '@/lib/raffles/fetch-entry-summaries-client'
 import { getRaffleDisplayImageUrl } from '@/lib/raffle-display-image-url'
+
+function formatTicketCount(n: number): string {
+  return n === 1 ? '1 ticket' : `${n} tickets`
+}
 
 function CartLineThumbnail({
   imageUrl,
@@ -71,12 +76,14 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
     checkoutError,
     checkoutBatchProgress,
   } = useCart()
-  const { connected } = useWallet()
+  const { connected, publicKey } = useWallet()
+  const viewerWallet = publicKey?.toBase58() ?? null
 
   /** Lets users clear the tickets field and type freely; synced from `lines` on blur. */
   const [qtyDraftById, setQtyDraftById] = useState<Record<string, string>>({})
+  const [ownedByRaffleId, setOwnedByRaffleId] = useState<Record<string, number>>({})
 
-  const lineIdsKey = lines.map(l => l.raffleId).join('|')
+  const lineIdsKey = useMemo(() => lines.map(l => l.raffleId).join('|'), [lines])
 
   useEffect(() => {
     if (!lineIdsKey) {
@@ -93,6 +100,30 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
     })
   }, [lineIdsKey])
 
+  useEffect(() => {
+    if (!viewerWallet || !lineIdsKey) {
+      setOwnedByRaffleId({})
+      return
+    }
+    const ids = lineIdsKey.split('|').filter(Boolean)
+    const ac = new AbortController()
+    let cancelled = false
+    ;(async () => {
+      const summaries = await fetchEntrySummariesByRaffleIdsClient(ids, viewerWallet, ac.signal)
+      if (cancelled || ac.signal.aborted) return
+      const next: Record<string, number> = {}
+      for (const id of ids) {
+        const n = Math.max(0, Math.floor(summaries.get(id)?.viewerConfirmedTickets ?? 0))
+        if (n > 0) next[id] = n
+      }
+      setOwnedByRaffleId(next)
+    })()
+    return () => {
+      cancelled = true
+      ac.abort()
+    }
+  }, [viewerWallet, lineIdsKey])
+
   const subtotalPreview = lines.reduce((s, l) => s + l.snapshot.ticket_price * l.quantity, 0)
   const currencyLabel = lines[0]?.snapshot.currency ?? ''
 
@@ -105,7 +136,11 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
           </p>
         ) : (
           <ul className="space-y-3">
-            {lines.map(line => (
+            {lines.map(line => {
+              const ownedQty = ownedByRaffleId[line.raffleId] ?? 0
+              const checkoutQty = Math.max(0, Math.floor(line.quantity))
+              const afterCheckout = ownedQty + checkoutQty
+              return (
               <li
                 key={line.raffleId}
                 className="rounded-lg border border-border p-3 space-y-3 bg-muted/30"
@@ -125,9 +160,17 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
                         {line.snapshot.title}
                       </Link>
                       <p className="text-xs text-muted-foreground">
-                        {line.quantity === 1 ? '1 ticket' : `${line.quantity} tickets`} for this raffle
-                        {line.quantity < 1 ? ' — set a quantity to checkout' : ''}
+                        {formatTicketCount(checkoutQty)} in cart
+                        {checkoutQty < 1 ? ' — set a quantity to checkout' : ''}
                       </p>
+                      {ownedQty > 0 ? (
+                        <p className="text-xs font-medium text-green-700 dark:text-green-400">
+                          You already have {formatTicketCount(ownedQty)}
+                          {checkoutQty > 0
+                            ? ` · after checkout: ${formatTicketCount(afterCheckout)}`
+                            : ''}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                   <Button
@@ -156,12 +199,13 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
                     value={qtyDraftById[line.raffleId] ?? String(line.quantity)}
                     onChange={e => {
                       const raw = e.target.value
+                      // Allow empty so the field can be cleared (e.g. erase a 0) while typing.
+                      if (raw !== '' && !/^\d*$/.test(raw)) return
                       setQtyDraftById(d => ({ ...d, [line.raffleId]: raw }))
                       if (raw === '') {
                         setLineQuantity(line.raffleId, 0)
                         return
                       }
-                      if (!/^\d*$/.test(raw)) return
                       const n = Number(raw)
                       if (!Number.isFinite(n)) return
                       setLineQuantity(line.raffleId, n)
@@ -191,7 +235,8 @@ export function CartCheckoutPanel({ onAfterRaffleLinkNavigate }: CartCheckoutPan
                   </span>
                 </div>
               </li>
-            ))}
+              )
+            })}
           </ul>
         )}
       </div>
