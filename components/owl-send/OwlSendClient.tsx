@@ -825,7 +825,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   </div>
                   <CardDescription>
                     Up to {OWL_SEND_MAX_SELECT} NFTs · {OWL_SEND_MAX_PER_TX} per wallet
-                    approval · nested/staked/frozen NFTs are hidden from this list
+                    approval · staked/nested (delegated) NFTs are hidden from this list
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -834,8 +834,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   ) : null}
                   {hiddenNonTransferableCount > 0 ? (
                     <p className="mb-3 text-xs text-muted-foreground">
-                      Hid {hiddenNonTransferableCount} frozen or staked NFT
-                      {hiddenNonTransferableCount === 1 ? '' : 's'} — unnest/unstake to send
+                      Hid {hiddenNonTransferableCount} staked or nested NFT
+                      {hiddenNonTransferableCount === 1 ? '' : 's'} — unstake/unnest to send
                       them.
                     </p>
                   ) : null}

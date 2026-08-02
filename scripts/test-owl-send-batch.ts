@@ -135,7 +135,7 @@ const tooMany = buildTokenScatterLines({
 })
 assert.equal(tooMany.ok, false)
 
-// Picker eligibility: hide frozen/delegated; keep programmable frozen
+// Picker eligibility: hide delegated (staked/nested); keep Gen2 mint-frozen visible
 assert.equal(
   isOwlSendPickerEligible({
     mint: 'm',
@@ -149,7 +149,7 @@ assert.equal(
     frozen: true,
     delegated: false,
   }),
-  false
+  true
 )
 assert.equal(
   isOwlSendPickerEligible({
@@ -177,10 +177,9 @@ assert.equal(
     image: null,
     collectionName: null,
     frozen: true,
-    delegated: false,
-    interface: 'ProgrammableNFT',
+    delegated: true,
   }),
-  true
+  false
 )
 const filtered = filterOwlSendPickerNfts([
   {
@@ -192,6 +191,18 @@ const filtered = filterOwlSendPickerNfts([
     name: null,
     image: null,
     collectionName: null,
+  },
+  {
+    mint: 'gen2-mint-frozen',
+    tokenAccount: 't',
+    amount: '1',
+    decimals: 0,
+    metadataUri: null,
+    name: null,
+    image: null,
+    collectionName: null,
+    frozen: true,
+    delegated: false,
   },
   {
     mint: 'nested',
@@ -206,8 +217,11 @@ const filtered = filterOwlSendPickerNfts([
     delegated: true,
   },
 ])
-assert.equal(filtered.eligible.length, 1)
+assert.equal(filtered.eligible.length, 2)
 assert.equal(filtered.hiddenCount, 1)
-assert.equal(filtered.eligible[0]!.mint, 'ok')
+assert.deepEqual(
+  filtered.eligible.map((n) => n.mint).sort(),
+  ['gen2-mint-frozen', 'ok']
+)
 
 console.log('test-owl-send-batch: ok')
