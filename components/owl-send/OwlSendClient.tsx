@@ -34,6 +34,11 @@ import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWa
 import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
 import { assertOwlSendLinesTransferable } from '@/lib/owl-send/assert-nft-transferable'
 import {
+  OWL_SEND_BUILD_TIMEOUT_HINT,
+  OWL_SEND_BUILD_TIMEOUT_MS,
+  withOwlSendTimeout,
+} from '@/lib/owl-send/confirm'
+import {
   buildTokenScatterLines,
   chunkOwlSendBatches,
   collapseRecipientsToNftScatterPaste,
@@ -452,11 +457,19 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     )
     setSessionError(null)
 
-    const preflight = await assertOwlSendLinesTransferable({
-      connection,
-      owner: publicKey,
-      lines,
-    })
+    const preflight = await withOwlSendTimeout(
+      assertOwlSendLinesTransferable({
+        connection,
+        owner: publicKey,
+        lines,
+      }),
+      OWL_SEND_BUILD_TIMEOUT_MS,
+      OWL_SEND_BUILD_TIMEOUT_HINT
+    ).catch((e: unknown) => ({
+      ok: false as const,
+      error: e instanceof Error ? e.message : OWL_SEND_BUILD_TIMEOUT_HINT,
+      failedMints: lines.map((l) => l.mint),
+    }))
     if (sendCancelledRef.current) {
       setSendPhase(null)
       setSendPhaseStartedAt(null)
@@ -897,7 +910,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
   const sendPhaseLabel =
     sendPhase === 'building'
-      ? 'Building transaction…'
+      ? 'Building transaction (RPC)…'
       : sendPhase === 'approving'
         ? 'Approve in your wallet…'
         : sendPhase === 'confirming'
@@ -1521,9 +1534,13 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     )}
                     {nftSending ? (
                       <p className="text-xs text-muted-foreground">
-                        {sendPhaseLabel} Confirm can take up to ~90s on mobile/busy RPC. Cancel marks
-                        this batch failed — reject any open wallet popup, check Solscan, then Retry
-                        or Resume remaining.
+                        {sendPhase === 'building'
+                          ? 'Wallet popup appears after the tx is built (RPC). Build times out around 45s if the network is stuck.'
+                          : sendPhase === 'approving'
+                            ? 'Open your wallet app and approve. On mobile, return here after signing.'
+                            : 'Confirming on-chain can take up to ~90s on mobile/busy RPC.'}{' '}
+                        Cancel marks this batch failed — reject any open wallet popup, check Solscan,
+                        then Retry or Resume remaining.
                       </p>
                     ) : null}
                   </CardContent>

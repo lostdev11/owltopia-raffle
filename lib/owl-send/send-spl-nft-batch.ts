@@ -10,21 +10,25 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountInstruction,
   createTransferInstruction,
-  getAccount,
   getAssociatedTokenAddress,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
-import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
 import { getPlatformFeeTreasuryWalletAddressClient } from '@/lib/solana/platform-fee-treasury-wallet'
 import { assertNftTransferable } from '@/lib/owl-send/assert-nft-transferable'
 import {
+  OWL_SEND_BUILD_TIMEOUT_HINT,
+  OWL_SEND_BUILD_TIMEOUT_MS,
   OWL_SEND_CONFIRM_TIMEOUT_HINT,
   OWL_SEND_CONFIRM_TIMEOUT_MS,
+  withOwlSendTimeout,
 } from '@/lib/owl-send/confirm'
 import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
 import { OWL_SEND_MAX_PER_TX } from '@/lib/owl-send/constants'
 import type { OwlSendLine } from '@/lib/owl-send/batch'
+import { sendTransactionWithTimeout } from '@/lib/solana/send-transaction-with-timeout'
 
 export type OwlSendBatchResult =
   | { ok: true; signature: string; newAtaCount: number }
@@ -33,17 +37,32 @@ export type OwlSendBatchResult =
 /** UI phases while a batch is in flight (wallet approve → RPC confirm). */
 export type OwlSendSendPhase = 'building' | 'approving' | 'confirming'
 
+type ResolvedHolder = {
+  mintPk: PublicKey
+  recipientPk: PublicKey
+  line: OwlSendLine
+  tokenProgram: PublicKey
+  tokenAccount: PublicKey
+  destAta: PublicKey
+}
+
+/**
+ * Resolve SPL holder for one NFT. Prefer the picker token-account hint + ATA probe.
+ * Avoids heavy getParsedTokenAccountsByOwner scans that hang OwlSend on slow RPCs.
+ */
 async function resolveHolder(
   connection: Connection,
   mint: PublicKey,
   owner: PublicKey,
-  hintTokenAccount?: string | null
+  hintTokenAccount?: string | null,
+  name?: string | null
 ) {
   const preflight = await assertNftTransferable({
     connection,
     mint: mint.toBase58(),
     owner,
     tokenAccount: hintTokenAccount,
+    name,
   })
   if (preflight.ok) {
     return { tokenProgram: preflight.tokenProgram, tokenAccount: preflight.tokenAccount }
@@ -51,23 +70,148 @@ async function resolveHolder(
   if (preflight.reason === 'frozen') {
     throw new Error(preflight.error)
   }
-
-  // Fallback for non-ATA holdings. Leftover delegates without freeze are still owner-sendable.
-  const h = await getNftHolderInWallet(connection, mint, owner, 'processed')
-  if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
-    try {
-      const acc = await getAccount(connection, h.tokenAccount, 'processed', h.tokenProgram)
-      if (acc.isFrozen) {
-        throw new Error(
-          `NFT ${mint.toBase58().slice(0, 4)}… is frozen (often nested) — unnest or thaw before sending.`
-        )
-      }
-    } catch (e) {
-      if (e instanceof Error && /frozen|unnest|thaw/i.test(e.message)) throw e
-    }
-    return h
-  }
   return null
+}
+
+async function buildOwlSendSplNftTransaction(params: {
+  connection: Connection
+  owner: PublicKey
+  lines: OwlSendLine[]
+}): Promise<
+  | { ok: true; tx: Transaction; newAtaCount: number }
+  | { ok: false; error: string; failedMints: string[] }
+> {
+  const { connection, owner, lines } = params
+  const treasury = getPlatformFeeTreasuryWalletAddressClient()
+  const feeLamports = getOwlSendFeeLamportsForCount(lines.length)
+  if (feeLamports > 0 && !treasury) {
+    return {
+      ok: false,
+      error: 'OwlSend fee treasury is not configured (NEXT_PUBLIC_OWL_PLATFORM_FEE_TREASURY_WALLET).',
+      failedMints: [],
+    }
+  }
+
+  const resolved: ResolvedHolder[] = []
+  const holderResults = await Promise.all(
+    lines.map(async (line) => {
+      let mintPk: PublicKey
+      let recipientPk: PublicKey
+      try {
+        mintPk = new PublicKey(line.mint.trim())
+        recipientPk = new PublicKey(line.recipient.trim())
+      } catch {
+        return {
+          ok: false as const,
+          mint: line.mint,
+          error: `Invalid mint or recipient for ${line.name ?? line.mint}.`,
+        }
+      }
+
+      try {
+        const holder = await resolveHolder(
+          connection,
+          mintPk,
+          owner,
+          line.tokenAccount,
+          line.name
+        )
+        if (!holder) {
+          return {
+            ok: false as const,
+            mint: line.mint,
+            error: `Could not find a transferable SPL token account for ${line.name ?? line.mint.slice(0, 8)}. Compressed / Core / pNFTs may need a single-NFT send.`,
+          }
+        }
+        const destAta = await getAssociatedTokenAddress(
+          mintPk,
+          recipientPk,
+          false,
+          holder.tokenProgram,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+        return {
+          ok: true as const,
+          value: {
+            mintPk,
+            recipientPk,
+            line,
+            tokenProgram: holder.tokenProgram,
+            tokenAccount: holder.tokenAccount,
+            destAta,
+          },
+        }
+      } catch (e) {
+        return {
+          ok: false as const,
+          mint: line.mint,
+          error: e instanceof Error ? e.message : String(e),
+        }
+      }
+    })
+  )
+
+  for (const result of holderResults) {
+    if (!result.ok) {
+      return { ok: false, error: result.error, failedMints: [result.mint] }
+    }
+    resolved.push(result.value)
+  }
+
+  // One RPC for all destination ATAs (processed = faster; missing → create ATA ix).
+  const destInfos = await connection.getMultipleAccountsInfo(
+    resolved.map((r) => r.destAta),
+    'processed'
+  )
+
+  const tx = new Transaction()
+  let newAtaCount = 0
+
+  for (let i = 0; i < resolved.length; i++) {
+    const r = resolved[i]!
+    const info = destInfos[i]
+    const ownerProgram = info?.owner
+    const hasAta =
+      !!info &&
+      (ownerProgram?.equals(TOKEN_PROGRAM_ID) || ownerProgram?.equals(TOKEN_2022_PROGRAM_ID))
+
+    if (!hasAta) {
+      tx.add(
+        createAssociatedTokenAccountInstruction(
+          owner,
+          r.destAta,
+          r.recipientPk,
+          r.mintPk,
+          r.tokenProgram,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+      )
+      newAtaCount += 1
+    }
+
+    tx.add(
+      createTransferInstruction(
+        r.tokenAccount,
+        r.destAta,
+        owner,
+        1n,
+        [],
+        r.tokenProgram
+      )
+    )
+  }
+
+  if (feeLamports > 0 && treasury) {
+    tx.add(
+      SystemProgram.transfer({
+        fromPubkey: owner,
+        toPubkey: new PublicKey(treasury),
+        lamports: feeLamports,
+      })
+    )
+  }
+
+  return { ok: true, tx, newAtaCount }
 }
 
 /**
@@ -92,89 +236,25 @@ export async function sendOwlSendSplNftBatch(params: {
 
   onPhase?.('building')
 
-  const treasury = getPlatformFeeTreasuryWalletAddressClient()
-  const feeLamports = getOwlSendFeeLamportsForCount(lines.length)
-  if (feeLamports > 0 && !treasury) {
-    return {
-      ok: false,
-      error: 'OwlSend fee treasury is not configured (NEXT_PUBLIC_OWL_PLATFORM_FEE_TREASURY_WALLET).',
-    }
+  let built: Awaited<ReturnType<typeof buildOwlSendSplNftTransaction>>
+  try {
+    built = await withOwlSendTimeout(
+      buildOwlSendSplNftTransaction({ connection, owner, lines }),
+      OWL_SEND_BUILD_TIMEOUT_MS,
+      OWL_SEND_BUILD_TIMEOUT_HINT
+    )
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: msg || OWL_SEND_BUILD_TIMEOUT_HINT, failedMints: lines.map((l) => l.mint) }
   }
 
-  const tx = new Transaction()
-  let newAtaCount = 0
-  const failedMints: string[] = []
-
-  for (const line of lines) {
-    let mintPk: PublicKey
-    let recipientPk: PublicKey
-    try {
-      mintPk = new PublicKey(line.mint.trim())
-      recipientPk = new PublicKey(line.recipient.trim())
-    } catch {
-      failedMints.push(line.mint)
-      return { ok: false, error: `Invalid mint or recipient for ${line.name ?? line.mint}.`, failedMints }
-    }
-
-    const holder = await resolveHolder(connection, mintPk, owner, line.tokenAccount)
-    if (!holder) {
-      failedMints.push(line.mint)
-      return {
-        ok: false,
-        error: `Could not find a transferable SPL token account for ${line.name ?? line.mint.slice(0, 8)}. Compressed / Core / pNFTs may need a single-NFT send.`,
-        failedMints,
-      }
-    }
-
-    const destAta = await getAssociatedTokenAddress(
-      mintPk,
-      recipientPk,
-      false,
-      holder.tokenProgram,
-      ASSOCIATED_TOKEN_PROGRAM_ID
-    )
-
-    try {
-      await getAccount(connection, destAta, 'confirmed', holder.tokenProgram)
-    } catch {
-      tx.add(
-        createAssociatedTokenAccountInstruction(
-          owner,
-          destAta,
-          recipientPk,
-          mintPk,
-          holder.tokenProgram,
-          ASSOCIATED_TOKEN_PROGRAM_ID
-        )
-      )
-      newAtaCount += 1
-    }
-
-    tx.add(
-      createTransferInstruction(
-        holder.tokenAccount,
-        destAta,
-        owner,
-        1n,
-        [],
-        holder.tokenProgram
-      )
-    )
-  }
-
-  if (feeLamports > 0 && treasury) {
-    tx.add(
-      SystemProgram.transfer({
-        fromPubkey: owner,
-        toPubkey: new PublicKey(treasury),
-        lamports: feeLamports,
-      })
-    )
+  if (!built.ok) {
+    return { ok: false, error: built.error, failedMints: built.failedMints }
   }
 
   try {
     onPhase?.('approving')
-    const signature = await sendTransaction(tx, connection, {
+    const signature = await sendTransactionWithTimeout(sendTransaction, built.tx, connection, {
       skipPreflight: false,
       preflightCommitment: 'confirmed',
       maxRetries: 3,
@@ -186,7 +266,7 @@ export async function sendOwlSendSplNftBatch(params: {
       OWL_SEND_CONFIRM_TIMEOUT_MS,
       OWL_SEND_CONFIRM_TIMEOUT_HINT
     )
-    return { ok: true, signature, newAtaCount }
+    return { ok: true, signature, newAtaCount: built.newAtaCount }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     if (/too large|versionedtransaction too large|transaction too large/i.test(msg)) {

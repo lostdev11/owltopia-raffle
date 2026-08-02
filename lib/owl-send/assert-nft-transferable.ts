@@ -127,16 +127,21 @@ export async function assertOwlSendLinesTransferable(params: {
   owner: PublicKey
   lines: Array<{ mint: string; tokenAccount?: string | null; name?: string | null }>
 }): Promise<{ ok: true } | { ok: false; error: string; failedMints: string[] }> {
+  const results = await Promise.all(
+    params.lines.map((line) =>
+      assertNftTransferable({
+        connection: params.connection,
+        mint: line.mint,
+        owner: params.owner,
+        tokenAccount: line.tokenAccount,
+        name: line.name,
+      }).then((result) => ({ line, result }))
+    )
+  )
+
   const failedMints: string[] = []
   const errors: string[] = []
-  for (const line of params.lines) {
-    const result = await assertNftTransferable({
-      connection: params.connection,
-      mint: line.mint,
-      owner: params.owner,
-      tokenAccount: line.tokenAccount,
-      name: line.name,
-    })
+  for (const { line, result } of results) {
     if (!result.ok && result.reason === 'frozen') {
       failedMints.push(line.mint)
       errors.push(result.error)
