@@ -1,15 +1,18 @@
-import type { SendTransactionOptions } from '@solana/wallet-adapter-base'
-import type { Connection, Transaction, TransactionSignature, VersionedTransaction } from '@solana/web3.js'
+import type { Connection, SendOptions, Transaction, TransactionSignature, VersionedTransaction } from '@solana/web3.js'
 import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
 import { isMobileDevice } from '@/lib/utils'
 
+/**
+ * Compatible with wallet-adapter `sendTransaction` and OwlSend's `WalletSendTransactionFn`
+ * (`signers` omitted — partial signers are not used with this helper).
+ */
 export type SendTransactionFn = (
   transaction: Transaction | VersionedTransaction,
   connection: Connection,
-  options?: SendTransactionOptions
+  options?: SendOptions
 ) => Promise<TransactionSignature>
 
-export type SendTransactionWithTimeoutOptions = SendTransactionOptions & {
+export type SendTransactionWithTimeoutOptions = SendOptions & {
   /** Default: 60s mobile, 90s desktop */
   timeoutMs?: number
 }
