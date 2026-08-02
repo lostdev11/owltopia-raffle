@@ -17,6 +17,10 @@ import {
 const SITE_URL = getSiteBaseUrl()
 const NESTING_PAGE_DESCRIPTION =
   'Land on Owltopia perches, earn OWL over time, and claim whenever you want—Owl Nesting made simple.'
+/** Dedicated Nesting link-preview art (`public/nesting-og.png`). Bump `v` when the asset changes. */
+const OG_IMAGE_URL = `${SITE_URL}/nesting-og.png?v=1`
+const OG_IMAGE_DIMS = { width: 1024, height: 682 } as const
+const OG_ALT = `Owl Nesting — stake your owls, grow together. | ${PLATFORM_NAME}`
 
 export const metadata: Metadata = {
   title: `Owl Nesting | ${PLATFORM_NAME}`,
@@ -28,11 +32,13 @@ export const metadata: Metadata = {
     siteName: PLATFORM_NAME,
     title: `Owl Nesting | ${PLATFORM_NAME}`,
     description: NESTING_PAGE_DESCRIPTION,
+    images: [{ url: OG_IMAGE_URL, ...OG_IMAGE_DIMS, alt: OG_ALT, type: 'image/png' }],
   },
   twitter: {
     card: 'summary_large_image',
     title: `Owl Nesting | ${PLATFORM_NAME}`,
     description: NESTING_PAGE_DESCRIPTION,
+    images: [{ url: OG_IMAGE_URL, alt: OG_ALT, ...OG_IMAGE_DIMS }],
   },
 }
 

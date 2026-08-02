@@ -20,19 +20,22 @@ import { Button } from '@/components/ui/button'
 import { PartnerProgramApplyForm } from '@/components/PartnerProgramApplyForm'
 import {
   PLATFORM_NAME,
-  OG_ALT,
-  DEFAULT_OG_IMAGE_DIMS,
-  DEFAULT_OG_IMAGE_TYPE,
   getSiteBaseUrl,
-  getDefaultOgImageAbsoluteUrl,
 } from '@/lib/site-config'
 import { PARTNER_COMMUNITY_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
 import { PARTNER_PRO_SETUP_USD } from '@/lib/config/partner-program-pricing'
 import { getStakingPlatformFeeSol } from '@/lib/nesting/staking-platform-fee'
 
 const SITE_URL = getSiteBaseUrl()
-const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
+/** Dedicated Partner Program link-preview art (`public/partner-program-og.png`). Bump `v` when the asset changes. */
+const OG_IMAGE_URL = `${SITE_URL}/partner-program-og.png?v=1`
+const OG_IMAGE_DIMS = { width: 1024, height: 682 } as const
+const OG_ALT = `Owltopia Partner Program — build together, grow together. | ${PLATFORM_NAME}`
 const DISCORD_URL = 'https://discord.gg/nRD2wyg2vq'
+const PAGE_DESCRIPTION =
+  `Owltopia Partner Program: collaborate with ${PLATFORM_NAME}, reduced platform fees, partner spotlight, Discord integration, Partner Nesting, and Partner Pro custom SPL ticket currency for your raffles only.`
+const OG_DESCRIPTION =
+  'Owltopia Partner Program — reduced fees, Partner Nesting, visibility, tooling, and optional Partner Pro SPL ticket currency (your wallet only).'
 
 const partnerFeePercent = PARTNER_COMMUNITY_FEE_BPS / 100
 const standardFeePercent = STANDARD_FEE_BPS / 100
@@ -40,21 +43,21 @@ const nestingPlatformFeeSol = getStakingPlatformFeeSol()
 
 export const metadata: Metadata = {
   title: `Partner Program | ${PLATFORM_NAME}`,
-  description: `Owltopia Partner Program: collaborate with ${PLATFORM_NAME}, reduced platform fees, partner spotlight, Discord integration, Partner Nesting, and Partner Pro custom SPL ticket currency for your raffles only.`,
+  description: PAGE_DESCRIPTION,
   alternates: { canonical: `${SITE_URL}/partner-program` },
   openGraph: {
     type: 'website',
     url: `${SITE_URL}/partner-program`,
     siteName: PLATFORM_NAME,
     title: `Partner Program | ${PLATFORM_NAME}`,
-    description: `Owltopia Partner Program — reduced fees, Partner Nesting, visibility, tooling, and optional Partner Pro SPL ticket currency (your wallet only).`,
-    images: [{ url: OG_IMAGE, ...DEFAULT_OG_IMAGE_DIMS, alt: OG_ALT, type: DEFAULT_OG_IMAGE_TYPE }],
+    description: OG_DESCRIPTION,
+    images: [{ url: OG_IMAGE_URL, ...OG_IMAGE_DIMS, alt: OG_ALT, type: 'image/png' }],
   },
   twitter: {
     card: 'summary_large_image',
     title: `Partner Program | ${PLATFORM_NAME}`,
-    description: `Owltopia Partner Program — reduced fees, Partner Nesting, visibility, tooling, and optional Partner Pro SPL ticket currency (your wallet only).`,
-    images: [{ url: OG_IMAGE, alt: OG_ALT, ...DEFAULT_OG_IMAGE_DIMS }],
+    description: OG_DESCRIPTION,
+    images: [{ url: OG_IMAGE_URL, alt: OG_ALT, ...OG_IMAGE_DIMS }],
   },
 }
 
