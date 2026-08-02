@@ -12,6 +12,13 @@ interface HeliusAsset {
   id?: string
   /** When true, the mint was burned; DAS can still return the row until re-indexed. */
   burnt?: boolean
+  interface?: string
+  ownership?: {
+    frozen?: boolean
+    delegated?: boolean
+    delegate?: string | null
+    owner?: string
+  }
   collection?: { address?: string; key?: string; name?: string }
   content?: {
     json_uri?: string
@@ -58,6 +65,7 @@ function extractCollectionMintFromDasAsset(item: HeliusAsset): string | null {
 interface ParsedTokenAccountInfo {
   mint?: string
   delegate?: string
+  state?: string
   tokenAmount?: { decimals?: number; amount?: string }
 }
 
@@ -69,6 +77,12 @@ function parseTokenAccountsToNfts(
   for (const item of value) {
     const info = item.account?.data?.parsed?.info
     if (!info?.mint) continue
+    const delegate = typeof info.delegate === 'string' ? info.delegate : null
+    const state = typeof info.state === 'string' ? info.state.toLowerCase() : ''
+    const frozen = state === 'frozen'
+    const delegated = Boolean(delegate)
+    // Skip staked / nested — not selectable for send/deposit flows that need a transfer
+    if (delegated || frozen) continue
     const decimals = Number(info.tokenAmount?.decimals ?? 9)
     const amount = String(info.tokenAmount?.amount ?? '0')
     const isNft =
@@ -86,6 +100,9 @@ function parseTokenAccountsToNfts(
       collectionName: null,
       collectionMint: null,
       symbol: null,
+      frozen: false,
+      delegated: false,
+      interface: null,
     })
   }
   return nfts
@@ -169,8 +186,11 @@ async function fetchHeliusWithRetry(rpcUrl: string, body: string): Promise<Respo
  * GET /api/wallet/nfts?wallet=<address>
  * Returns NFTs owned by the wallet using Helius DAS getAssetsByOwner when HELIUS_API_KEY is set.
  * Excludes burned NFTs (drops DAS items with burnt === true; indexer can lag briefly).
- * On devnet, if DAS returns none, falls back to getParsedTokenAccountsByOwner so NFTs still show.
- * Raffle creation only rejects staked/delegated SPL holdings (see POST /api/raffles); listing is not filtered by blocklist.
+ * Attaches DAS ownership.frozen / ownership.delegated so clients (e.g. OwlSend) can hide non-transferable assets.
+ * On devnet, if DAS returns none, falls back to getParsedTokenAccountsByOwner so NFTs still show
+ * (RPC fallback already omits frozen/delegated token accounts).
+ * Raffle creation still rejects staked/delegated SPL holdings at deposit time; this listing keeps
+ * ownership flags for optional UI filtering.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -258,6 +278,11 @@ export async function GET(request: NextRequest) {
           typeof content?.metadata?.symbol === 'string' ? content.metadata.symbol.trim() || null : null
         const collectionMint = extractCollectionMintFromDasAsset(item)
         const collectionName = extractCollectionNameFromDasAsset(item)
+        const frozen = item.ownership?.frozen === true
+        const delegated =
+          item.ownership?.delegated === true ||
+          (typeof item.ownership?.delegate === 'string' && item.ownership.delegate.length > 0)
+        const iface = typeof item.interface === 'string' ? item.interface : null
 
         return {
           mint,
@@ -270,6 +295,9 @@ export async function GET(request: NextRequest) {
           collectionName,
           collectionMint: collectionMint ?? null,
           symbol,
+          frozen,
+          delegated,
+          interface: iface,
         }
       })
 

@@ -216,6 +216,12 @@ export interface WalletNft {
   collectionMint?: string | null
   /** Token-metadata symbol when resolved (e.g. client RPC path). */
   symbol?: string | null
+  /** DAS / parsed token account: frozen (nested, stake lock, or pNFT). */
+  frozen?: boolean | null
+  /** DAS / parsed token account: delegated (staked or nested). */
+  delegated?: boolean | null
+  /** DAS asset interface when known (e.g. ProgrammableNFT, MplCoreAsset). */
+  interface?: string | null
 }
 
 /**
@@ -383,9 +389,11 @@ export async function getWalletNfts(
     for (const { pubkey, account } of response.value) {
       const info = account.data?.parsed?.info
       if (!info) continue
-      // Skip delegated (e.g. staked) NFTs – user can't transfer them until unstaked
+      // Skip delegated / frozen (staked or nested) — not transferable until unlocked
       const delegate = info.delegate
       if (delegate && typeof delegate === 'string' && delegate !== '') continue
+      const state = typeof info.state === 'string' ? info.state.toLowerCase() : ''
+      if (state === 'frozen') continue
       const rawDecimals = info.tokenAmount?.decimals
       const decimals = typeof rawDecimals === 'number' && !Number.isNaN(rawDecimals) ? rawDecimals : Number(rawDecimals ?? 9)
       const amount = String(info.tokenAmount?.amount ?? '0')

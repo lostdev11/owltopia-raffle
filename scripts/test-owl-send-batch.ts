@@ -11,6 +11,7 @@ import {
   parseRecipientAddresses,
   parseTokenScatterEntries,
 } from '@/lib/owl-send/batch'
+import { filterOwlSendPickerNfts, isOwlSendPickerEligible } from '@/lib/owl-send/picker-eligibility'
 import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { getOwlSendFeeLamportsForCount, getOwlSendFeeSol } from '@/lib/owl-send/fee'
@@ -53,6 +54,37 @@ if (goodPair.ok) {
   assert.equal(goodPair.lines.length, 2)
   assert.equal(goodPair.lines[0]!.recipient, 'r1')
   assert.equal(goodPair.lines[1]!.recipient, 'r2')
+}
+
+// Randomize: 20 NFTs across 4 wallets (~5 each)
+const distribute = pairScatterLines({
+  mints: Array.from({ length: 20 }, (_, i) => ({ mint: `m${i}` })),
+  recipients: ['w1', 'w2', 'w3', 'w4'],
+  randomize: true,
+})
+assert.equal(distribute.ok, true)
+if (distribute.ok) {
+  assert.equal(distribute.lines.length, 20)
+  const counts = new Map<string, number>()
+  for (const line of distribute.lines) {
+    counts.set(line.recipient, (counts.get(line.recipient) ?? 0) + 1)
+  }
+  assert.equal(counts.size, 4)
+  for (const c of counts.values()) assert.equal(c, 5)
+}
+
+// Randomize with duplicate paste still uses unique wallets
+const deduped = pairScatterLines({
+  mints: Array.from({ length: 6 }, (_, i) => ({ mint: `d${i}` })),
+  recipients: ['a', 'b', 'a'],
+  randomize: true,
+})
+assert.equal(deduped.ok, true)
+if (deduped.ok) {
+  const set = new Set(deduped.lines.map((l) => l.recipient))
+  assert.equal(set.size, 2)
+  assert.equal(deduped.lines.filter((l) => l.recipient === 'a').length, 3)
+  assert.equal(deduped.lines.filter((l) => l.recipient === 'b').length, 3)
 }
 
 const cost = buildOwlSendCostEstimate({ nftCount: 20, batchCount: 4, newAtaCount: 2 })
@@ -102,5 +134,80 @@ const tooMany = buildTokenScatterLines({
   entries: Array.from({ length: 21 }, (_, i) => ({ recipient: `r${i}`, amountUi: null })),
 })
 assert.equal(tooMany.ok, false)
+
+// Picker eligibility: hide frozen/delegated; keep programmable frozen
+assert.equal(
+  isOwlSendPickerEligible({
+    mint: 'm',
+    tokenAccount: 't',
+    amount: '1',
+    decimals: 0,
+    metadataUri: null,
+    name: null,
+    image: null,
+    collectionName: null,
+    frozen: true,
+    delegated: false,
+  }),
+  false
+)
+assert.equal(
+  isOwlSendPickerEligible({
+    mint: 'm',
+    tokenAccount: 't',
+    amount: '1',
+    decimals: 0,
+    metadataUri: null,
+    name: null,
+    image: null,
+    collectionName: null,
+    frozen: false,
+    delegated: true,
+  }),
+  false
+)
+assert.equal(
+  isOwlSendPickerEligible({
+    mint: 'm',
+    tokenAccount: 't',
+    amount: '1',
+    decimals: 0,
+    metadataUri: null,
+    name: null,
+    image: null,
+    collectionName: null,
+    frozen: true,
+    delegated: false,
+    interface: 'ProgrammableNFT',
+  }),
+  true
+)
+const filtered = filterOwlSendPickerNfts([
+  {
+    mint: 'ok',
+    tokenAccount: 't',
+    amount: '1',
+    decimals: 0,
+    metadataUri: null,
+    name: null,
+    image: null,
+    collectionName: null,
+  },
+  {
+    mint: 'nested',
+    tokenAccount: 't',
+    amount: '1',
+    decimals: 0,
+    metadataUri: null,
+    name: null,
+    image: null,
+    collectionName: null,
+    frozen: true,
+    delegated: true,
+  },
+])
+assert.equal(filtered.eligible.length, 1)
+assert.equal(filtered.hiddenCount, 1)
+assert.equal(filtered.eligible[0]!.mint, 'ok')
 
 console.log('test-owl-send-batch: ok')

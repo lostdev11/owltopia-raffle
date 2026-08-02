@@ -28,35 +28,66 @@ export function chunkOwlSendBatches<T>(
 }
 
 /**
- * Pair NFTs 1:1 with recipients for Scatter.
- * When `randomize` is true, shuffle NFT order (recipients stay in pasted order).
+ * Pair NFTs with recipients for Scatter.
+ *
+ * - `randomize: false` — exact 1:1 (same count of NFTs and wallets).
+ * - `randomize: true` — shuffle NFTs, then either 1:1 if counts match, or
+ *   distribute evenly across fewer unique wallets (e.g. 20 NFTs → 4 wallets).
  */
 export function pairScatterLines(params: {
   mints: Array<{ mint: string; name?: string | null; tokenAccount?: string | null; image?: string | null }>
   recipients: string[]
   randomize?: boolean
 }): { ok: true; lines: OwlSendLine[] } | { ok: false; error: string } {
-  const recipients = params.recipients.map((r) => r.trim()).filter(Boolean)
+  const recipientsRaw = params.recipients.map((r) => r.trim()).filter(Boolean)
   const mints = [...params.mints]
   if (mints.length === 0) return { ok: false, error: 'Select at least one NFT.' }
-  if (recipients.length === 0) return { ok: false, error: 'Add at least one recipient wallet.' }
-  if (mints.length !== recipients.length) {
-    return {
-      ok: false,
-      error: `Scatter needs the same number of NFTs and wallets (${mints.length} NFT${mints.length === 1 ? '' : 's'}, ${recipients.length} wallet${recipients.length === 1 ? '' : 's'}).`,
-    }
-  }
+  if (recipientsRaw.length === 0) return { ok: false, error: 'Add at least one recipient wallet.' }
   if (mints.length > OWL_SEND_MAX_SELECT) {
     return { ok: false, error: `Select at most ${OWL_SEND_MAX_SELECT} NFTs per send.` }
   }
 
-  if (params.randomize !== false) {
-    for (let i = mints.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      const tmp = mints[i]!
-      mints[i] = mints[j]!
-      mints[j] = tmp
+  const randomize = params.randomize !== false
+
+  // Dedupe wallets for distribute mode (preserve first-seen order).
+  const uniqueRecipients: string[] = []
+  const seen = new Set<string>()
+  for (const r of recipientsRaw) {
+    if (seen.has(r)) continue
+    seen.add(r)
+    uniqueRecipients.push(r)
+  }
+
+  if (!randomize) {
+    if (recipientsRaw.length !== mints.length) {
+      return {
+        ok: false,
+        error: `Scatter needs the same number of NFTs and wallets (${mints.length} NFT${mints.length === 1 ? '' : 's'}, ${recipientsRaw.length} wallet${recipientsRaw.length === 1 ? '' : 's'}). Turn on randomize to split NFTs across fewer wallets.`,
+      }
     }
+    const lines: OwlSendLine[] = mints.map((m, i) => ({
+      mint: m.mint,
+      name: m.name,
+      tokenAccount: m.tokenAccount,
+      image: m.image,
+      recipient: recipientsRaw[i]!,
+    }))
+    return { ok: true, lines }
+  }
+
+  if (uniqueRecipients.length > mints.length) {
+    return {
+      ok: false,
+      error: `Too many wallets (${uniqueRecipients.length}) for ${mints.length} NFT${mints.length === 1 ? '' : 's'} — remove extras or select more NFTs.`,
+    }
+  }
+
+  // Shuffle NFT order, then assign round-robin across unique wallets.
+  for (let i = mints.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const tmp = mints[i]!
+    mints[i] = mints[j]!
+    mints[j] = tmp
   }
 
   const lines: OwlSendLine[] = mints.map((m, i) => ({
@@ -64,7 +95,7 @@ export function pairScatterLines(params: {
     name: m.name,
     tokenAccount: m.tokenAccount,
     image: m.image,
-    recipient: recipients[i]!,
+    recipient: uniqueRecipients[i % uniqueRecipients.length]!,
   }))
   return { ok: true, lines }
 }

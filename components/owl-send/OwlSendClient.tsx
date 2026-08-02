@@ -33,6 +33,7 @@ import {
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
 import { assertOwlSendLinesTransferable } from '@/lib/owl-send/assert-nft-transferable'
+import { filterOwlSendPickerNfts } from '@/lib/owl-send/picker-eligibility'
 import {
   buildTokenScatterLines,
   chunkOwlSendBatches,
@@ -87,6 +88,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [tokens, setTokens] = useState<WalletToken[]>([])
   const [loadingAssets, setLoadingAssets] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [hiddenNonTransferableCount, setHiddenNonTransferableCount] = useState(0)
   const [selectedMints, setSelectedMints] = useState<Set<string>>(new Set())
   const [nftSearchQuery, setNftSearchQuery] = useState('')
   const [destination, setDestination] = useState('')
@@ -135,7 +137,15 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       if (list.length === 0) {
         list = await getWalletNfts(connection, publicKey)
       }
-      setNfts(list)
+      const { eligible, hiddenCount } = filterOwlSendPickerNfts(list)
+      setNfts(eligible)
+      setHiddenNonTransferableCount(hiddenCount)
+      setSelectedMints((prev) => {
+        if (prev.size === 0) return prev
+        const allowed = new Set(eligible.map((n) => n.mint))
+        const next = new Set([...prev].filter((m) => allowed.has(m)))
+        return next.size === prev.size ? prev : next
+      })
       const toks = await getWalletTokens(connection, publicKey)
       setTokens(toks)
     } catch (e) {
@@ -151,6 +161,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       setNfts([])
       setTokens([])
       setSelectedMints(new Set())
+      setHiddenNonTransferableCount(0)
     }
   }, [connected, publicKey, loadAssets])
 
@@ -814,12 +825,19 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   </div>
                   <CardDescription>
                     Up to {OWL_SEND_MAX_SELECT} NFTs · {OWL_SEND_MAX_PER_TX} per wallet
-                    approval · nested/frozen NFTs are blocked before approve
+                    approval · nested/staked/frozen NFTs are hidden from this list
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   {loadError ? (
                     <p className="mb-3 text-sm text-red-400">{loadError}</p>
+                  ) : null}
+                  {hiddenNonTransferableCount > 0 ? (
+                    <p className="mb-3 text-xs text-muted-foreground">
+                      Hid {hiddenNonTransferableCount} frozen or staked NFT
+                      {hiddenNonTransferableCount === 1 ? '' : 's'} — unnest/unstake to send
+                      them.
+                    </p>
                   ) : null}
                   {loadingAssets && nfts.length === 0 ? (
                     <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
@@ -857,7 +875,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     {mode === 'send_to_one'
                       ? 'All selected NFTs go to this wallet (batches of 5).'
                       : randomizeScatter
-                        ? `Paste ${selectedNfts.length || 'N'} wallet${selectedNfts.length === 1 ? '' : 's'} — one per NFT (newline, comma, or space). NFTs are shuffled onto that list.`
+                        ? 'Paste one or more wallets (newline, comma, or space). NFTs are shuffled and split across them — e.g. 20 NFTs to 4 wallets.'
                         : 'Enter one wallet under each NFT for an exact 1:1 send.'}
                   </CardDescription>
                 </CardHeader>
@@ -905,15 +923,29 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                           <p
                             className={cn(
                               'text-xs',
-                              activeScatterRecipients.length === selectedNfts.length &&
-                                selectedNfts.length > 0
+                              activeScatterRecipients.length >= 1 && selectedNfts.length > 0
                                 ? 'text-emerald-300'
                                 : 'text-muted-foreground'
                             )}
                           >
-                            {activeScatterRecipients.length} address
-                            {activeScatterRecipients.length === 1 ? '' : 'es'} · need{' '}
-                            {selectedNfts.length} for current selection
+                            {(() => {
+                              const unique = [...new Set(activeScatterRecipients)]
+                              const n = selectedNfts.length
+                              const w = unique.length
+                              if (w < 1 || n < 1) {
+                                return `${activeScatterRecipients.length} address${activeScatterRecipients.length === 1 ? '' : 'es'} · select NFTs to distribute`
+                              }
+                              if (w > n) {
+                                return `${w} wallets · only ${n} NFT${n === 1 ? '' : 's'} selected (too many wallets)`
+                              }
+                              const base = Math.floor(n / w)
+                              const rem = n % w
+                              const spread =
+                                rem === 0
+                                  ? `~${base} each`
+                                  : `${base}–${base + 1} each`
+                              return `${w} wallet${w === 1 ? '' : 's'} · ${n} NFT${n === 1 ? '' : 's'} shuffled · ${spread}`
+                            })()}
                           </p>
                         </div>
                       ) : selectedNfts.length === 0 ? (
