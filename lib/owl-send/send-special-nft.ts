@@ -13,7 +13,6 @@ import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
 import { getPlatformFeeTreasuryWalletAddressClient } from '@/lib/solana/platform-fee-treasury-wallet'
-import { assertNftTransferable } from '@/lib/owl-send/assert-nft-transferable'
 import {
   OWL_SEND_CONFIRM_TIMEOUT_HINT,
   OWL_SEND_CONFIRM_TIMEOUT_MS,
@@ -81,19 +80,7 @@ export async function sendOwlSendSpecialNft(params: {
   }
 
   onPhase?.('building')
-
-  // Classic SPL freeze/delegate check when a token account hint exists (nested/staked).
-  // Core/cNFT may not have an SPL account — ignore not_held and continue special paths.
-  const preflight = await assertNftTransferable({
-    connection,
-    mint,
-    owner,
-    tokenAccount: line.tokenAccount,
-    name: line.name,
-  })
-  if (!preflight.ok && preflight.reason === 'frozen') {
-    return { ok: false, error: preflight.error, failedMints: [mint] }
-  }
+  // Freeze/stake is enforced on-chain by Token Metadata / Core / cNFT transfer ix — no soft-block.
 
   onPhase?.('approving')
 

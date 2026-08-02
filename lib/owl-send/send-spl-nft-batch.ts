@@ -66,19 +66,14 @@ async function resolveHolder(
         try {
           const account = await getAccount(connection, ta, 'processed', programId)
           if (!account.mint.equals(mint) || account.amount < 1n) continue
-          if (account.isFrozen) {
-            const label = name?.trim() || `${mintStr.slice(0, 4)}…${mintStr.slice(-4)}`
-            throw new Error(
-              `${label} is frozen on-chain (Owltopia nest lock or Gen2 Candy Machine mint freeze) — unnest/thaw before sending. A leftover stake delegate after thaw alone does not block sends.`
-            )
-          }
+          // Do not soft-block isFrozen — token program enforces non-transferable accounts.
           return { tokenProgram: programId, tokenAccount: ta }
-        } catch (e) {
-          if (e instanceof Error && /frozen|unnest|thaw/i.test(e.message)) throw e
+        } catch {
+          /* try next program */
         }
       }
-    } catch (e) {
-      if (e instanceof Error && /frozen|unnest|thaw/i.test(e.message)) throw e
+    } catch {
+      /* fall through */
     }
   }
 
@@ -91,9 +86,6 @@ async function resolveHolder(
   })
   if (preflight.ok) {
     return { tokenProgram: preflight.tokenProgram, tokenAccount: preflight.tokenAccount }
-  }
-  if (preflight.reason === 'frozen') {
-    throw new Error(preflight.error)
   }
   return null
 }

@@ -4,8 +4,8 @@
  */
 export function owlSendRetryHint(error: string | null | undefined): string {
   const e = (error ?? '').trim()
-  if (/frozen|unnest|thaw|mint-locked|mint lock|nested/i.test(e)) {
-    return 'Frozen on-chain (Owltopia nest lock or Gen2 Candy Machine mint freeze) — unnest/thaw, then retry. A leftover stake delegate after thaw alone does not block sends.'
+  if (/frozen|Account is frozen|0x11\b|unnest|thaw|mint-locked|mint lock|nested/i.test(e)) {
+    return 'On-chain transfer rejected as frozen. Tap Thaw locks if this is an orphaned Gen2 nest lock, or unnest on Nesting if it is still nested.'
   }
   if (/core|compressed|pnft|transferable spl|could not find|single-nft|alone|multi-send/i.test(e)) {
     return 'This NFT cannot ride in a classic SPL multi-send — deselect it and send it alone (batch of 1).'

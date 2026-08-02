@@ -296,6 +296,63 @@ async function resolveFrozenHolding(
 }
 
 /**
+ * Thaw one Gen2 NFT at its current owner via Candy Machine freezeSolPayment route.
+ * Safe after collection unlock for leftover frozen ATAs; no-ops when already thawed.
+ */
+export async function thawGen2AssetForOwner(params: {
+  mint: string
+  ownerWallet: string
+  ids?: Partial<Gen2FreezeIds>
+}): Promise<{ signature: string | null; thawed: boolean; skipped: boolean; error?: string }> {
+  const mint = params.mint.trim()
+  const ownerWallet = params.ownerWallet.trim()
+  const { candyMachineId, rpcUrl } = resolveGen2FreezeIds(params.ids)
+  const umi = loadGen2GuardAuthorityUmi(rpcUrl)
+  const DEST = resolveGen2FreezeDistributionWallet()
+  const { guard, cm } = await loadGen2CandyGuard(umi, candyMachineId)
+  const tokenStandard =
+    Number(cm.tokenStandard) === TokenStandard.ProgrammableNonFungible
+      ? TokenStandard.ProgrammableNonFungible
+      : TokenStandard.NonFungible
+
+  const holding = await resolveFrozenHolding(umi, mint)
+  if (!holding || !holding.frozen) {
+    return { signature: null, thawed: false, skipped: true }
+  }
+  if (holding.owner !== ownerWallet) {
+    return {
+      signature: null,
+      thawed: false,
+      skipped: false,
+      error: `NFT is held by ${holding.owner.slice(0, 4)}…, not the connected wallet.`,
+    }
+  }
+
+  try {
+    const res = await route(umi, {
+      candyMachine: publicKey(candyMachineId),
+      candyGuard: guard.publicKey,
+      guard: 'freezeSolPayment',
+      group: GEN2_FREEZE_GROUP,
+      routeArgs: {
+        path: 'thaw',
+        destination: publicKey(DEST),
+        nftMint: publicKey(mint),
+        nftOwner: publicKey(ownerWallet),
+        nftTokenStandard: tokenStandard,
+      },
+    }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
+    return { signature: bs58.encode(res.signature), thawed: true, skipped: false }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (isBenignThawSkip(msg)) {
+      return { signature: null, thawed: false, skipped: true }
+    }
+    return { signature: null, thawed: false, skipped: false, error: msg }
+  }
+}
+
+/**
  * Thaw up to `limit` assets. Only sends txs for token accounts that are still frozen on-chain.
  */
 export async function thawGen2AssetBatch(params: {

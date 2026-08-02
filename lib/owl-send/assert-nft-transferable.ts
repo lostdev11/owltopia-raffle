@@ -8,7 +8,7 @@ import {
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
 
-export type NftTransferBlockReason = 'frozen' | 'not_held' | 'invalid'
+export type NftTransferBlockReason = 'not_held' | 'invalid'
 
 export type NftTransferableResult =
   | { ok: true; tokenAccount: PublicKey; tokenProgram: PublicKey }
@@ -21,9 +21,11 @@ function assetLabel(mint: string, name?: string | null): string {
 }
 
 /**
- * Fast preflight: reject **frozen** token accounts (nested / mint-locked).
- * A leftover SPL delegate without freeze (common after Candy Machine thaw) does not block
- * owner transfers — do not treat that as staked/nested.
+ * Resolve a classic SPL / Token-2022 hold for OwlSend.
+ *
+ * Do **not** soft-block on frozen/delegated here — the token program rejects non-transferable
+ * accounts on-chain. Leftover Gen2 CM delegates after thaw are sendable; true freeze/stake
+ * locks fail at simulation/confirm anyway.
  */
 export async function assertNftTransferable(params: {
   connection: Connection
@@ -35,7 +37,6 @@ export async function assertNftTransferable(params: {
   const mintPk = new PublicKey(params.mint)
   const mintStr = mintPk.toBase58()
   const name = params.name
-  const frozenMsg = `${assetLabel(mintStr, name)} is frozen on-chain (Owltopia nest lock or Gen2 Candy Machine mint freeze) — unnest/thaw before sending. A leftover stake delegate after thaw alone does not block sends.`
 
   if (params.tokenAccount && params.tokenAccount !== mintStr) {
     try {
@@ -52,7 +53,7 @@ export async function assertNftTransferable(params: {
         }
       }
       const parsed = (
-        info.value?.data as { parsed?: { info?: Record<string, unknown> } } | undefined
+        info.value?.data as { parsed?: { info?: Record<string, unknown> } | undefined } | undefined
       )?.parsed?.info
       if (!parsed) {
         return {
@@ -86,10 +87,6 @@ export async function assertNftTransferable(params: {
           error: `${assetLabel(mintStr, name)} is not held in your wallet.`,
         }
       }
-      const state = typeof parsed.state === 'string' ? parsed.state.toLowerCase() : ''
-      if (state === 'frozen') {
-        return { ok: false, reason: 'frozen', error: frozenMsg }
-      }
       return {
         ok: true,
         tokenAccount: ta,
@@ -105,9 +102,6 @@ export async function assertNftTransferable(params: {
       const ata = await getAssociatedTokenAddress(mintPk, params.owner, false, programId)
       const account = await getAccount(params.connection, ata, 'processed', programId)
       if (account.amount < 1n) continue
-      if (account.isFrozen) {
-        return { ok: false, reason: 'frozen', error: frozenMsg }
-      }
       return { ok: true, tokenAccount: ata, tokenProgram: programId }
     } catch {
       /* try next program */
@@ -117,41 +111,18 @@ export async function assertNftTransferable(params: {
   return {
     ok: false,
     reason: 'not_held',
-    error: `${assetLabel(mintStr, name)} is not a transferable SPL hold in this wallet (may be Core/cNFT/pNFT — send alone).`,
+    error: `${assetLabel(mintStr, name)} is not a classic SPL hold in this wallet (may be Core/cNFT/pNFT — send alone).`,
   }
 }
 
-/** Preflight every line; returns blocking errors naming each frozen asset. */
-export async function assertOwlSendLinesTransferable(params: {
+/**
+ * Kept for call-site compatibility. Freeze/stake is enforced on-chain at transfer time —
+ * this preflight does not soft-block those states.
+ */
+export async function assertOwlSendLinesTransferable(_params: {
   connection: Connection
   owner: PublicKey
   lines: Array<{ mint: string; tokenAccount?: string | null; name?: string | null }>
 }): Promise<{ ok: true } | { ok: false; error: string; failedMints: string[] }> {
-  const results = await Promise.all(
-    params.lines.map((line) =>
-      assertNftTransferable({
-        connection: params.connection,
-        mint: line.mint,
-        owner: params.owner,
-        tokenAccount: line.tokenAccount,
-        name: line.name,
-      }).then((result) => ({ line, result }))
-    )
-  )
-
-  const failedMints: string[] = []
-  const errors: string[] = []
-  for (const { line, result } of results) {
-    if (!result.ok && result.reason === 'frozen') {
-      failedMints.push(line.mint)
-      errors.push(result.error)
-    }
-  }
-  if (errors.length === 0) return { ok: true }
-  const more = errors.length > 3 ? ` (+${errors.length - 3} more)` : ''
-  return {
-    ok: false,
-    error: `${errors.slice(0, 3).join(' ')}${more}`,
-    failedMints,
-  }
+  return { ok: true }
 }

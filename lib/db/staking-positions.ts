@@ -132,6 +132,24 @@ export async function getActivePositionByAssetIdentifier(
   return data as StakingPositionRow | null
 }
 
+/** Any open nest for this mint across pools (OwlSend thaw safety). */
+export async function getAnyOpenStakingPositionByAssetIdentifier(
+  assetIdentifier: string
+): Promise<StakingPositionRow | null> {
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('staking_positions')
+    .select('*')
+    .eq('asset_identifier', assetIdentifier.trim())
+    .in('status', ['active', 'pending'])
+    .order('staked_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) throw new Error(error.message)
+  return data as StakingPositionRow | null
+}
+
 export async function insertStakingPosition(row: {
   wallet_address: string
   pool_id: string

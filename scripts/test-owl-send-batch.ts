@@ -306,7 +306,7 @@ assert.equal(
     frozen: true,
     delegated: true,
   }),
-  'Frozen (nest/mint lock)'
+  'Marked frozen'
 )
 assert.equal(
   owlSendNftLockLabel({
@@ -356,7 +356,7 @@ assert.equal(merged[0]!.tokenAccount, 'realAta')
 assert.equal(merged[0]!.frozen, false)
 assert.equal(merged[0]!.name, 'Gen2 #1')
 
-assert.match(owlSendRetryHint('Owl #3 is frozen on-chain'), /Frozen on-chain/)
+assert.match(owlSendRetryHint('Owl #3 is frozen on-chain'), /Thaw locks|On-chain transfer rejected/)
 assert.match(owlSendRetryHint('Could not find a transferable SPL'), /batch of 1/)
 assert.match(owlSendRetryHint('User rejected the request'), /Wallet rejected/)
 

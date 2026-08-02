@@ -32,7 +32,6 @@ import {
 } from '@/lib/solana/wallet-tokens'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
-import { assertOwlSendLinesTransferable } from '@/lib/owl-send/assert-nft-transferable'
 import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-locks'
 import { owlSendNftProblemLabel } from '@/lib/owl-send/picker-eligibility'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
@@ -126,6 +125,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [sessionError, setSessionError] = useState<string | null>(null)
   const [sessionNotice, setSessionNotice] = useState<string | null>(null)
   const [preparing, setPreparing] = useState(false)
+  const [thawing, setThawing] = useState(false)
 
   // Tokens tab
   const [tokenMode, setTokenMode] = useState<OwlSendMode>('send_to_one')
@@ -404,6 +404,74 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setSelectedMints(new Set(mints.slice(0, OWL_SEND_MAX_SELECT)))
   }
 
+  /**
+   * Server thaw for Gen2 leftover nest locks / CM mint freezes.
+   * Requires SIWS session matching the connected wallet.
+   */
+  const thawFrozenMints = useCallback(
+    async (
+      mints: string[],
+      opts?: { silent?: boolean }
+    ): Promise<{ ok: boolean; thawedCount: number; error?: string }> => {
+      if (!publicKey || mints.length < 1) return { ok: false, thawedCount: 0, error: 'Nothing to thaw.' }
+      setThawing(true)
+      if (!opts?.silent) {
+        setSessionError(null)
+        setSessionNotice(null)
+      }
+      try {
+        const signedIn = await ensureLedgerSiws()
+        if (!signedIn) {
+          return { ok: false, thawedCount: 0, error: 'Sign in with your wallet to thaw frozen Gen2s.' }
+        }
+        const res = await fetch('/api/owl-send/thaw', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'content-type': 'application/json',
+            'x-connected-wallet': publicKey.toBase58(),
+          },
+          body: JSON.stringify({ mints }),
+        })
+        const data = (await res.json().catch(() => null)) as {
+          ok?: boolean
+          thawedCount?: number
+          error?: string
+          results?: Array<{ mint: string; ok: boolean; kind: string; error?: string }>
+        } | null
+        if (!res.ok) {
+          const err = data?.error || 'Thaw request failed.'
+          if (!opts?.silent) setSessionError(err)
+          return { ok: false, thawedCount: 0, error: err }
+        }
+        const thawedCount = data?.thawedCount ?? 0
+        const activeNest = (data?.results ?? []).find((r) => r.kind === 'active_nest')
+        if (activeNest?.error && !opts?.silent) {
+          setSessionError(activeNest.error)
+        } else if (data?.ok && thawedCount > 0 && !opts?.silent) {
+          setSessionNotice(
+            `Thawed ${thawedCount} Gen2 lock${thawedCount === 1 ? '' : 's'}. Reload and Review send again.`
+          )
+          setRetryMints([])
+        } else if (!data?.ok && data?.error && !opts?.silent) {
+          setSessionError(data.error)
+        }
+        return {
+          ok: data?.ok === true,
+          thawedCount,
+          error: data?.error,
+        }
+      } catch (e) {
+        const err = e instanceof Error ? e.message : 'Thaw failed.'
+        if (!opts?.silent) setSessionError(err)
+        return { ok: false, thawedCount: 0, error: err }
+      } finally {
+        setThawing(false)
+      }
+    },
+    [publicKey, ensureLedgerSiws]
+  )
+
   const prepareNftSend = async () => {
     setSessionError(null)
     setSessionNotice(null)
@@ -480,19 +548,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
     setPreparing(true)
     try {
-      const preflight = await assertOwlSendLinesTransferable({
-        connection,
-        owner: publicKey,
-        lines,
-      })
-      if (!preflight.ok) {
-        setRetryMints(preflight.failedMints)
-        setSessionError(preflight.error)
-        setPreparedLines(null)
-        setBatches([])
-        setBatchProgress([])
-        return
-      }
+      // No soft-block on frozen/delegated — chain rejects non-transferable accounts at send time.
 
       const chunked = chunkOwlSendBatches(lines)
       setPreparedLines(lines)
@@ -522,9 +578,6 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       prev.map((b) => (b.index === batchIndex ? { ...b, status: 'sending', error: undefined } : b))
     )
     setSessionError(null)
-
-    // Skip a second frozen-preflight here — Review send already checked, and send build
-    // re-resolves holders. Duplicate RPC was leaving users stuck before the wallet popup.
 
     const result = await sendOwlSendNftBatch({
       connection,
@@ -1133,8 +1186,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   </div>
                   <CardDescription>
                     Up to {OWL_SEND_MAX_SELECT} NFTs · {OWL_SEND_MAX_PER_TX} per wallet
-                    approval · on-chain frozen assets stay visible and are rejected at send
-                    with a named reason (leftover Gen2 delegates after thaw are fine)
+                    approval · truly frozen/staked assets fail on-chain (no soft block)
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1145,7 +1197,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     <p className="mb-3 text-xs text-muted-foreground">
                       {nfts.length} NFT{nfts.length === 1 ? '' : 's'} in wallet
                       {nfts.some((n) => n.frozen)
-                        ? ` · ${nfts.filter((n) => n.frozen).length} frozen (nest or mint lock; can select; send will explain)`
+                        ? ` · ${nfts.filter((n) => n.frozen).length} marked frozen (informational)`
                         : ''}
                       {retryMints.length > 0
                         ? ` · ${retryMints.length} highlighted from last failed send`
@@ -1744,28 +1796,52 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     </p>
                     <p className="text-xs text-amber-100/80">{owlSendRetryHint(sessionError)}</p>
                     <p className="text-[11px] text-amber-100/60">
-                      Highlighted in amber in Select NFTs above. Gen2 leftover delegates after thaw
-                      are sendable — only a frozen token account blocks transfer.
+                      Highlighted in amber above. OwlSend no longer soft-blocks frozen/delegated
+                      NFTs — if the chain rejects the transfer, use Thaw locks or unnest first.
                     </p>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="mt-1 h-9 min-h-[36px] touch-manipulation px-2 text-amber-100"
-                      onClick={() => {
-                        setSelectedMints((prev) => {
-                          const next = new Set(prev)
-                          for (const m of retryMints) next.delete(m)
-                          return next
-                        })
-                        setRetryMints([])
-                        setPreparedLines(null)
-                        setBatches([])
-                        setBatchProgress([])
-                      }}
-                    >
-                      Deselect problem NFTs
-                    </Button>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="h-10 min-h-[40px] touch-manipulation gap-2"
+                        disabled={thawing || nftSending}
+                        onClick={() => {
+                          void (async () => {
+                            const res = await thawFrozenMints(retryMints)
+                            if (res.thawedCount > 0 || res.ok) {
+                              await loadAssets()
+                              setPreparedLines(null)
+                              setBatches([])
+                              setBatchProgress([])
+                            }
+                          })()
+                        }}
+                      >
+                        {thawing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        Thaw locks &amp; retry
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-10 min-h-[40px] touch-manipulation px-2 text-amber-100"
+                        disabled={thawing}
+                        onClick={() => {
+                          setSelectedMints((prev) => {
+                            const next = new Set(prev)
+                            for (const m of retryMints) next.delete(m)
+                            return next
+                          })
+                          setRetryMints([])
+                          setPreparedLines(null)
+                          setBatches([])
+                          setBatchProgress([])
+                        }}
+                      >
+                        Deselect problem NFTs
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ) : null}
