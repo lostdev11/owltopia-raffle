@@ -52,7 +52,10 @@ import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { formatOwlSendFeeSol, getOwlSendFeeSol } from '@/lib/owl-send/fee'
 import { sendOwlSendNftBatch } from '@/lib/owl-send/send-batch'
 import { sendOwlSendTokenLines, sendOwlSendTokensToOne } from '@/lib/owl-send/send-tokens'
+import { recordOwlSendLedger } from '@/lib/owl-send/record-ledger'
 import { useOwlSendAdminAccess } from '@/lib/owl-send/use-owl-send-admin-access'
+import { OwlSendLedgerPanel } from '@/components/owl-send/OwlSendLedgerPanel'
+import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import { cn } from '@/lib/utils'
 
 type Props = {
@@ -80,6 +83,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const { publicKey, connected, wallet } = useWallet()
   const sendTransaction = useSendTransactionForWallet()
   const access = useOwlSendAdminAccess({ initialViewerIsAdmin, isPublic })
+  const { signIn: siwsSignIn } = useSiwsSignIn()
+  const ensureLedgerSiws = useCallback(() => siwsSignIn(), [siwsSignIn])
 
   const [assetTab, setAssetTab] = useState<OwlSendAssetTab>('nfts')
   const [mode, setMode] = useState<OwlSendMode>('send_to_one')
@@ -117,6 +122,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [tokenSuccessSig, setTokenSuccessSig] = useState<string | null>(null)
   const [tokenSuccessDetail, setTokenSuccessDetail] = useState<string | null>(null)
   const [successPopup, setSuccessPopup] = useState<OwlSendSuccessState>(null)
+  const [ledgerRefreshKey, setLedgerRefreshKey] = useState(0)
 
   const sendCancelledRef = useRef(false)
 
@@ -431,6 +437,19 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         detail: `${lines.length} NFT${lines.length === 1 ? '' : 's'} transferred. Fee paid to Owltopia treasury.`,
         signature: result.signature,
       })
+      void recordOwlSendLedger({
+        fromWallet: publicKey.toBase58(),
+        mode: mode === 'scatter' ? 'nft_scatter' : 'nft_one',
+        assetKind: 'nft',
+        txSignature: result.signature,
+        batchIndex,
+        lines: lines.map((l) => ({
+          recipient: l.recipient,
+          mint: l.mint,
+          name: l.name ?? null,
+        })),
+        ensureSiws: ensureLedgerSiws,
+      }).then(() => setLedgerRefreshKey((k) => k + 1))
       void loadAssets()
     } else {
       setBatchProgress((prev) =>
@@ -540,6 +559,21 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
           detail: `${lines.length} transfer${lines.length === 1 ? '' : 's'} · fee paid to Owltopia treasury.`,
           signature: result.signature,
         })
+        void recordOwlSendLedger({
+          fromWallet: publicKey.toBase58(),
+          mode: 'token_scatter',
+          assetKind: 'token',
+          txSignature: result.signature,
+          batchIndex,
+          lines: lines.map((l) => ({
+            recipient: l.recipient,
+            mint: l.mint,
+            symbol: l.symbol ?? null,
+            amount_raw: l.amountRaw.toString(),
+            decimals: l.decimals,
+          })),
+          ensureSiws: ensureLedgerSiws,
+        }).then(() => setLedgerRefreshKey((k) => k + 1))
         void loadAssets()
       } else {
         setTokenBatchProgress((prev) =>
@@ -622,6 +656,20 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               : `Sent ${lines.length} tokens to ${shorten(tokenDestination.trim())}. Fee paid to Owltopia treasury.`,
           signature: result.signature,
         })
+        void recordOwlSendLedger({
+          fromWallet: publicKey.toBase58(),
+          mode: 'token_one',
+          assetKind: 'token',
+          txSignature: result.signature,
+          lines: lines.map((l) => ({
+            recipient: tokenDestination.trim(),
+            mint: l.mint,
+            symbol: l.symbol ?? null,
+            amount_raw: l.amountRaw.toString(),
+            decimals: l.decimals,
+          })),
+          ensureSiws: ensureLedgerSiws,
+        }).then(() => setLedgerRefreshKey((k) => k + 1))
         setTokenAmounts({})
         void loadAssets()
       } else {
@@ -1503,6 +1551,11 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               {sessionError}
             </p>
           ) : null}
+
+          <OwlSendLedgerPanel
+            wallet={publicKey.toBase58()}
+            refreshKey={ledgerRefreshKey}
+          />
 
           <footer className="sticky bottom-0 z-10 -mx-3 border-t border-white/10 bg-black/90 px-3 py-3 backdrop-blur sm:-mx-4 sm:px-4">
             <p className="text-sm text-muted-foreground">
