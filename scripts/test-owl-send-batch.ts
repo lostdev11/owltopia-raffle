@@ -7,7 +7,10 @@ import {
   buildTokenScatterLines,
   capOwlSendSelection,
   chunkOwlSendBatches,
+  collapseRecipientsToNftScatterPaste,
+  expandNftScatterEntries,
   pairScatterLines,
+  parseNftScatterEntries,
   parseRecipientAddresses,
   parseTokenScatterEntries,
 } from '@/lib/owl-send/batch'
@@ -85,6 +88,78 @@ if (deduped.ok) {
   assert.equal(set.size, 2)
   assert.equal(deduped.lines.filter((l) => l.recipient === 'a').length, 3)
   assert.equal(deduped.lines.filter((l) => l.recipient === 'b').length, 3)
+}
+
+// NFT wallet,count allotments (5 + 1 + 4 = 10)
+const nftCountEntries = parseNftScatterEntries('wA,5\nwB,1\nwC,4')
+assert.equal(nftCountEntries.length, 3)
+assert.equal(nftCountEntries[0]!.count, 5)
+assert.equal(nftCountEntries[1]!.count, 1)
+assert.equal(nftCountEntries[2]!.count, 4)
+assert.deepEqual(expandNftScatterEntries(nftCountEntries), [
+  'wA',
+  'wA',
+  'wA',
+  'wA',
+  'wA',
+  'wB',
+  'wC',
+  'wC',
+  'wC',
+  'wC',
+])
+assert.equal(
+  collapseRecipientsToNftScatterPaste(['wA', 'wA', 'wA', 'wA', 'wA', 'wB', 'wC', 'wC', 'wC', 'wC']),
+  'wA,5\nwB,1\nwC,4'
+)
+
+const weighted = pairScatterLines({
+  mints: Array.from({ length: 10 }, (_, i) => ({ mint: `n${i}` })),
+  entries: nftCountEntries,
+  randomize: true,
+})
+assert.equal(weighted.ok, true)
+if (weighted.ok) {
+  assert.equal(weighted.lines.length, 10)
+  const counts = new Map<string, number>()
+  for (const line of weighted.lines) {
+    counts.set(line.recipient, (counts.get(line.recipient) ?? 0) + 1)
+  }
+  assert.equal(counts.get('wA'), 5)
+  assert.equal(counts.get('wB'), 1)
+  assert.equal(counts.get('wC'), 4)
+}
+
+const weightedMismatch = pairScatterLines({
+  mints: Array.from({ length: 9 }, (_, i) => ({ mint: `n${i}` })),
+  entries: nftCountEntries,
+  randomize: true,
+})
+assert.equal(weightedMismatch.ok, false)
+
+const decimalCount = parseNftScatterEntries('wA,5.5')
+assert.equal(decimalCount.length, 1)
+assert.ok(Number.isNaN(decimalCount[0]!.count))
+const badDecimalPair = pairScatterLines({
+  mints: Array.from({ length: 5 }, (_, i) => ({ mint: `n${i}` })),
+  entries: decimalCount,
+  randomize: true,
+})
+assert.equal(badDecimalPair.ok, false)
+
+// Space-separated count + bare wallet treated as 1 when mixed
+const mixed = parseNftScatterEntries('wA 5\nwB\nwC,4')
+assert.equal(mixed[0]!.count, 5)
+assert.equal(mixed[1]!.count, null)
+assert.equal(mixed[2]!.count, 4)
+const mixedPair = pairScatterLines({
+  mints: Array.from({ length: 10 }, (_, i) => ({ mint: `n${i}` })),
+  entries: mixed,
+  randomize: true,
+})
+assert.equal(mixedPair.ok, true)
+if (mixedPair.ok) {
+  assert.equal(mixedPair.lines.filter((l) => l.recipient === 'wB').length, 1)
 }
 
 const cost = buildOwlSendCostEstimate({ nftCount: 20, batchCount: 4, newAtaCount: 2 })

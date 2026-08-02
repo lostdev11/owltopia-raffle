@@ -36,8 +36,10 @@ import { assertOwlSendLinesTransferable } from '@/lib/owl-send/assert-nft-transf
 import {
   buildTokenScatterLines,
   chunkOwlSendBatches,
+  collapseRecipientsToNftScatterPaste,
+  expandNftScatterEntries,
   pairScatterLines,
-  parseRecipientAddresses,
+  parseNftScatterEntries,
   parseTokenScatterEntries,
   type OwlSendLine,
   type OwlSendTokenScatterLine,
@@ -173,7 +175,14 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     [nfts, selectedMints]
   )
 
-  const scatterRecipients = useMemo(() => parseRecipientAddresses(scatterRaw), [scatterRaw])
+  const nftScatterEntries = useMemo(() => parseNftScatterEntries(scatterRaw), [scatterRaw])
+  const scatterRecipients = useMemo(
+    () =>
+      nftScatterEntries.some((e) => e.count != null && Number.isFinite(e.count))
+        ? expandNftScatterEntries(nftScatterEntries)
+        : nftScatterEntries.map((e) => e.recipient),
+    [nftScatterEntries]
+  )
   const pairedScatterRecipients = useMemo(
     () => selectedNfts.map((n) => (scatterByMint[n.mint] ?? '').trim()).filter(Boolean),
     [selectedNfts, scatterByMint]
@@ -189,16 +198,16 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setBatches([])
     setBatchProgress([])
     if (next) {
-      // Bulk paste: fold per-NFT fields into one list (selection order).
+      // Bulk paste: fold per-NFT fields into wallet / wallet,N list.
       const fromFields = selectedNfts
         .map((n) => (scatterByMint[n.mint] ?? '').trim())
         .filter(Boolean)
       if (fromFields.length > 0) {
-        setScatterRaw(fromFields.join('\n'))
+        setScatterRaw(collapseRecipientsToNftScatterPaste(fromFields))
       }
     } else {
-      // Explicit pairing: map pasted wallets onto each selected NFT.
-      const addrs = parseRecipientAddresses(scatterRaw)
+      // Explicit pairing: expand wallet,N allotments onto each selected NFT.
+      const addrs = expandNftScatterEntries(parseNftScatterEntries(scatterRaw))
       setScatterByMint((prev) => {
         const nextMap: Record<string, string> = { ...prev }
         selectedNfts.forEach((n, i) => {
@@ -310,10 +319,13 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         recipient: dest,
       }))
     } else {
-      let recipients: string[]
-      if (randomizeScatter) {
-        recipients = scatterRecipients
-      } else {
+      const entries = randomizeScatter
+        ? nftScatterEntries
+        : selectedNfts.map((n) => ({
+            recipient: (scatterByMint[n.mint] ?? '').trim(),
+            count: null as number | null,
+          }))
+      if (!randomizeScatter) {
         const missing = selectedNfts.find((n) => !(scatterByMint[n.mint] ?? '').trim())
         if (missing) {
           setSessionError(
@@ -321,7 +333,6 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
           )
           return
         }
-        recipients = selectedNfts.map((n) => (scatterByMint[n.mint] ?? '').trim())
       }
       const paired = pairScatterLines({
         mints: selectedNfts.map((n) => ({
@@ -330,7 +341,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
           tokenAccount: n.tokenAccount,
           image: n.image,
         })),
-        recipients,
+        entries,
         randomize: randomizeScatter,
       })
       if (!paired.ok) {
@@ -834,7 +845,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                 <p className="text-xs text-muted-foreground">
                   {mode === 'send_to_one'
                     ? 'All selected NFTs go to one destination (batches of 5).'
-                    : 'Airdrop mode — paste one wallet per NFT (1:1 pairing).'}
+                    : 'Airdrop mode — paste wallets or wallet,N counts (must sum to selected NFTs).'}
                 </p>
                 {mode === 'send_to_one' && selectedNfts.length >= 2 ? (
                   <button
@@ -922,7 +933,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     {mode === 'send_to_one'
                       ? 'All selected NFTs go to this wallet (batches of 5).'
                       : randomizeScatter
-                        ? 'Paste one or more wallets (newline, comma, or space). NFTs are shuffled and split across them — e.g. 20 NFTs to 4 wallets.'
+                        ? 'Paste wallets (one per line), or wallet,N for exact counts — e.g. walletA,5 then walletB,1. Counts must sum to selected NFTs; otherwise split evenly.'
                         : 'Enter one wallet under each NFT for an exact 1:1 send.'}
                   </CardDescription>
                 </CardHeader>
@@ -964,24 +975,63 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                               setPreparedLines(null)
                             }}
                             rows={5}
-                            placeholder={'wallet1\nwallet2\nwallet3'}
-                            className="w-full rounded-md border border-input bg-black/40 px-3 py-2 font-mono text-sm touch-manipulation"
+                            placeholder={'walletA,5\nwalletB,1\nwalletC,4'}
+                            className="w-full min-h-[120px] rounded-md border border-input bg-black/40 px-3 py-2 font-mono text-sm touch-manipulation"
                           />
                           <p
                             className={cn(
                               'text-xs',
-                              activeScatterRecipients.length >= 1 && selectedNfts.length > 0
-                                ? 'text-emerald-300'
-                                : 'text-muted-foreground'
+                              (() => {
+                                const n = selectedNfts.length
+                                if (nftScatterEntries.length < 1 || n < 1) return 'text-muted-foreground'
+                                const hasInvalid = nftScatterEntries.some(
+                                  (e) => e.count != null && !Number.isFinite(e.count)
+                                )
+                                if (hasInvalid) return 'text-amber-300'
+                                const hasCounts = nftScatterEntries.some(
+                                  (e) => e.count != null && Number.isFinite(e.count)
+                                )
+                                if (hasCounts) {
+                                  const total = nftScatterEntries.reduce(
+                                    (sum, e) => sum + (e.count == null ? 1 : e.count),
+                                    0
+                                  )
+                                  return total === n ? 'text-emerald-300' : 'text-amber-300'
+                                }
+                                const w = new Set(nftScatterEntries.map((e) => e.recipient)).size
+                                return w > n ? 'text-amber-300' : 'text-emerald-300'
+                              })()
                             )}
                           >
                             {(() => {
-                              const unique = [...new Set(activeScatterRecipients)]
                               const n = selectedNfts.length
-                              const w = unique.length
-                              if (w < 1 || n < 1) {
-                                return `${activeScatterRecipients.length} address${activeScatterRecipients.length === 1 ? '' : 'es'} · select NFTs to distribute`
+                              const hasCounts = nftScatterEntries.some(
+                                (e) => e.count != null && Number.isFinite(e.count)
+                              )
+                              const hasInvalid = nftScatterEntries.some(
+                                (e) => e.count != null && !Number.isFinite(e.count)
+                              )
+                              if (hasInvalid) {
+                                return 'NFT counts must be whole numbers (e.g. wallet,5)'
                               }
+                              if (nftScatterEntries.length < 1 || n < 1) {
+                                return `${nftScatterEntries.length} line${nftScatterEntries.length === 1 ? '' : 's'} · select NFTs to distribute`
+                              }
+                              if (hasCounts) {
+                                const total = nftScatterEntries.reduce(
+                                  (sum, e) => sum + (e.count == null ? 1 : e.count),
+                                  0
+                                )
+                                const parts = nftScatterEntries
+                                  .map((e) => `${shorten(e.recipient)}×${e.count == null ? 1 : e.count}`)
+                                  .join(' · ')
+                                if (total !== n) {
+                                  return `${parts} · counts ${total} ≠ ${n} NFTs selected`
+                                }
+                                return `${parts} · ${n} NFT${n === 1 ? '' : 's'} shuffled into allotments`
+                              }
+                              const unique = [...new Set(nftScatterEntries.map((e) => e.recipient))]
+                              const w = unique.length
                               if (w > n) {
                                 return `${w} wallets · only ${n} NFT${n === 1 ? '' : 's'} selected (too many wallets)`
                               }
