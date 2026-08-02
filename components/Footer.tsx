@@ -88,7 +88,7 @@ export function Footer() {
           </p>
           {/* Primary links: glass icon card (mobile-first, always visible) */}
           <div className="w-full flex justify-center px-1">
-            <SocialGlassCard items={glassCardItems} className="w-full max-w-2xl mx-auto glass-icon-card-row glass-icon-card-mobile" />
+            <SocialGlassCard items={glassCardItems} className="w-full max-w-3xl mx-auto glass-icon-card-row glass-icon-card-mobile" />
           </div>
           
           {/* Copyright and Terms Section */}

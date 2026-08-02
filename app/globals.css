@@ -972,7 +972,7 @@ input[type="submit"] {
 .glass-icon-card.glass-icon-card-row ul {
   flex-direction: row;
   justify-content: center;
-  gap: 3.25rem;
+  gap: 2.25rem;
 }
 .glass-icon-card ul li {
   cursor: pointer;
