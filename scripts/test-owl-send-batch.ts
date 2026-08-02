@@ -19,8 +19,11 @@ import {
   collectSentMintsFromBatches,
   collectSentMintsFromLedger,
 } from '@/lib/owl-send/resume'
+import { Keypair } from '@solana/web3.js'
+import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-locks'
 import { owlSendNftLockLabel } from '@/lib/owl-send/picker-eligibility'
+import { owlSendTokenAccountHint } from '@/lib/owl-send/resolve-spl-holder'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
 import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
@@ -357,7 +360,21 @@ assert.equal(merged[0]!.frozen, false)
 assert.equal(merged[0]!.name, 'Gen2 #1')
 
 assert.match(owlSendRetryHint('Owl #3 is frozen on-chain'), /Thaw locks|On-chain transfer rejected/)
-assert.match(owlSendRetryHint('Could not find a transferable SPL'), /batch of 1/)
+assert.match(owlSendRetryHint('Could not find a transferable SPL'), /batch of 1|classic SPL/)
 assert.match(owlSendRetryHint('User rejected the request'), /Wallet rejected/)
+
+{
+  const owner = Keypair.generate().publicKey
+  const mint = Keypair.generate().publicKey
+  const ata = getAssociatedTokenAddressSync(mint, owner, false, TOKEN_PROGRAM_ID).toBase58()
+  assert.equal(
+    owlSendTokenAccountHint({ mint: mint.toBase58(), owner, tokenAccount: mint.toBase58() }),
+    ata
+  )
+  assert.equal(
+    owlSendTokenAccountHint({ mint: mint.toBase58(), owner, tokenAccount: ata }),
+    ata
+  )
+}
 
 console.log('test-owl-send-batch: ok')

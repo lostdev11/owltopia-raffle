@@ -10,7 +10,6 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountInstruction,
   createTransferInstruction,
-  getAccount,
   getAssociatedTokenAddress,
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
@@ -18,7 +17,6 @@ import {
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
 import { getPlatformFeeTreasuryWalletAddressClient } from '@/lib/solana/platform-fee-treasury-wallet'
-import { assertNftTransferable } from '@/lib/owl-send/assert-nft-transferable'
 import {
   OWL_SEND_BUILD_TIMEOUT_HINT,
   OWL_SEND_BUILD_TIMEOUT_MS,
@@ -29,6 +27,7 @@ import {
 import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
 import { OWL_SEND_MAX_PER_TX } from '@/lib/owl-send/constants'
 import type { OwlSendLine } from '@/lib/owl-send/batch'
+import { resolveOwlSendSplHolder } from '@/lib/owl-send/resolve-spl-holder'
 import { sendTransactionWithTimeout } from '@/lib/solana/send-transaction-with-timeout'
 
 export type OwlSendBatchResult =
@@ -47,47 +46,19 @@ type ResolvedHolder = {
   destAta: PublicKey
 }
 
-/**
- * Resolve SPL holder for one NFT. Prefer the picker token-account hint via getAccount
- * (fast). Falls back to assertNftTransferable ATA probe — no heavy wallet scans.
- */
 async function resolveHolder(
   connection: Connection,
   mint: PublicKey,
   owner: PublicKey,
   hintTokenAccount?: string | null,
-  name?: string | null
+  _name?: string | null
 ) {
-  const mintStr = mint.toBase58()
-  if (hintTokenAccount && hintTokenAccount !== mintStr) {
-    try {
-      const ta = new PublicKey(hintTokenAccount)
-      for (const programId of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
-        try {
-          const account = await getAccount(connection, ta, 'processed', programId)
-          if (!account.mint.equals(mint) || account.amount < 1n) continue
-          // Do not soft-block isFrozen — token program enforces non-transferable accounts.
-          return { tokenProgram: programId, tokenAccount: ta }
-        } catch {
-          /* try next program */
-        }
-      }
-    } catch {
-      /* fall through */
-    }
-  }
-
-  const preflight = await assertNftTransferable({
+  return resolveOwlSendSplHolder({
     connection,
-    mint: mintStr,
+    mint,
     owner,
-    tokenAccount: hintTokenAccount,
-    name,
+    hintTokenAccount,
   })
-  if (preflight.ok) {
-    return { tokenProgram: preflight.tokenProgram, tokenAccount: preflight.tokenAccount }
-  }
-  return null
 }
 
 async function buildOwlSendSplNftTransaction(params: {

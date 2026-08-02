@@ -34,6 +34,7 @@ import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWa
 import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
 import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-locks'
 import { owlSendNftProblemLabel } from '@/lib/owl-send/picker-eligibility'
+import { owlSendTokenAccountHint } from '@/lib/owl-send/resolve-spl-holder'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
 import {
   buildTokenScatterLines,
@@ -503,7 +504,11 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       lines = selectedNfts.map((n) => ({
         mint: n.mint,
         name: n.name,
-        tokenAccount: n.tokenAccount,
+        tokenAccount: owlSendTokenAccountHint({
+          mint: n.mint,
+          owner: publicKey,
+          tokenAccount: n.tokenAccount,
+        }),
         image: n.image,
         recipient: dest,
       }))
@@ -527,7 +532,11 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         mints: selectedNfts.map((n) => ({
           mint: n.mint,
           name: n.name,
-          tokenAccount: n.tokenAccount,
+          tokenAccount: owlSendTokenAccountHint({
+            mint: n.mint,
+            owner: publicKey,
+            tokenAccount: n.tokenAccount,
+          }),
           image: n.image,
         })),
         entries,

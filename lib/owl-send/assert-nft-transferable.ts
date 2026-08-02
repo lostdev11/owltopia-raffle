@@ -63,13 +63,6 @@ export async function assertNftTransferable(params: {
         }
       }
       const selectedMint = typeof parsed.mint === 'string' ? parsed.mint : null
-      if (selectedMint !== mintStr) {
-        return {
-          ok: false,
-          reason: 'not_held',
-          error: `${assetLabel(mintStr, name)} is not in the selected token account.`,
-        }
-      }
       const amountRaw =
         typeof parsed.tokenAmount === 'object' && parsed.tokenAmount
           ? (parsed.tokenAmount as { amount?: unknown }).amount
@@ -80,17 +73,13 @@ export async function assertNftTransferable(params: {
           : typeof amountRaw === 'number'
             ? amountRaw
             : 0
-      if (!Number.isFinite(amount) || amount < 1) {
+      // Stale/wrong picker hints must fall through to ATA / mint-filter — do not hard-fail.
+      if (selectedMint === mintStr && Number.isFinite(amount) && amount >= 1) {
         return {
-          ok: false,
-          reason: 'not_held',
-          error: `${assetLabel(mintStr, name)} is not held in your wallet.`,
+          ok: true,
+          tokenAccount: ta,
+          tokenProgram: isT22 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID,
         }
-      }
-      return {
-        ok: true,
-        tokenAccount: ta,
-        tokenProgram: isT22 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID,
       }
     } catch {
       /* fall through to ATA probe */

@@ -32,9 +32,10 @@ export async function sendOwlSendNftBatch(params: {
   })
   if (spl.ok) return spl
 
+  // Only treat holder-resolve / asset-type errors as "needs special path".
+  // Do not remap every failedMints batch (wallet reject, frozen, timeout) as Core/pNFT.
   const needsSpecial =
-    /compressed|core|pnft|token metadata|transferable spl|could not find/i.test(spl.error) ||
-    (spl.failedMints?.length ?? 0) > 0
+    /compressed|core|pnft|token metadata|transferable spl|could not find/i.test(spl.error)
 
   if (needsSpecial && params.lines.length === 1) {
     return sendOwlSendSpecialNft({
@@ -48,10 +49,13 @@ export async function sendOwlSendNftBatch(params: {
   }
 
   if (needsSpecial && params.lines.length > 1) {
+    const names = params.lines
+      .filter((l) => spl.failedMints?.includes(l.mint))
+      .map((l) => l.name?.trim() || `${l.mint.slice(0, 4)}…${l.mint.slice(-4)}`)
+    const label = names.length > 0 ? names.join(', ') : 'One NFT in this batch'
     return {
       ok: false,
-      error:
-        'This batch includes an NFT that cannot share a classic SPL multi-send (Core, compressed, or pNFT). Remove it and send it alone (batches of 1), or send only classic SPL NFTs together.',
+      error: `${label} could not use classic SPL multi-send. Deselect it and send alone (batch of 1), or send only classic SPL NFTs together.`,
       failedMints: spl.failedMints,
     }
   }

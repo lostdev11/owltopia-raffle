@@ -7,8 +7,8 @@ export function owlSendRetryHint(error: string | null | undefined): string {
   if (/frozen|Account is frozen|0x11\b|unnest|thaw|mint-locked|mint lock|nested/i.test(e)) {
     return 'On-chain transfer rejected as frozen. Tap Thaw locks if this is an orphaned Gen2 nest lock, or unnest on Nesting if it is still nested.'
   }
-  if (/core|compressed|pnft|transferable spl|could not find|single-nft|alone|multi-send/i.test(e)) {
-    return 'This NFT cannot ride in a classic SPL multi-send — deselect it and send it alone (batch of 1).'
+  if (/core|compressed|pnft|transferable spl|could not find|single-nft|alone|multi-send|classic spl/i.test(e)) {
+    return 'Could not build a classic SPL multi-send for this NFT — deselect it and send alone (batch of 1), then retry the rest.'
   }
   if (/too large/i.test(e)) {
     return 'Batch too large for one transaction — send fewer NFTs, or send to wallets that already hold the collection.'

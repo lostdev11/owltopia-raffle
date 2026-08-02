@@ -3,6 +3,7 @@ import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
 import { getHeliusRpcUrl } from '@/lib/helius-rpc-url'
 import { enrichWalletNftCollectionNames } from '@/lib/helius/enrich-wallet-nft-collection-names'
+import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-locks'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -184,9 +185,9 @@ async function fetchHeliusWithRetry(rpcUrl: string, body: string): Promise<Respo
  * GET /api/wallet/nfts?wallet=<address>
  * Returns NFTs owned by the wallet using Helius DAS getAssetsByOwner when HELIUS_API_KEY is set.
  * Excludes burned NFTs (drops DAS items with burnt === true; indexer can lag briefly).
- * Attaches DAS ownership.frozen / ownership.delegated so clients can warn or reject sends.
- * On devnet, if DAS returns none, falls back to getParsedTokenAccountsByOwner so NFTs still show
- * (including frozen/delegated rows with flags set).
+ * Attaches DAS ownership.frozen / ownership.delegated for UI hints.
+ * Always overlays getParsedTokenAccountsByOwner ATAs so Gen2/classic SPL sends get real
+ * token accounts (DAS alone sets tokenAccount=mint, which breaks OwlSend multi-send).
  * Raffle creation still rejects staked/delegated SPL holdings at deposit time.
  */
 export async function GET(request: NextRequest) {
@@ -300,10 +301,17 @@ export async function GET(request: NextRequest) {
         }
       })
 
-    // On devnet, Helius DAS often returns no assets; use RPC getParsedTokenAccountsByOwner as fallback
-    if (nfts.length === 0 && isDevnet) {
-      const rpcFallback = await getNftsViaRpcFallback(heliusRpcUrl, wallet)
-      if (rpcFallback.length > 0) nfts = rpcFallback
+    // Overlay real ATAs + freeze state from getParsedTokenAccountsByOwner.
+    // DAS sets tokenAccount=mint for every NFT, which breaks OwlSend Gen2 multi-sends when the
+    // browser RPC overlay is empty/rate-limited (common on mobile).
+    const rpcLocks = await getNftsViaRpcFallback(heliusRpcUrl, wallet)
+    if (nfts.length === 0) {
+      // Devnet DAS is often empty; mainnet empty DAS can also recover from RPC.
+      if (rpcLocks.length > 0) nfts = rpcLocks
+    } else if (rpcLocks.length > 0) {
+      nfts = mergeDasNftsWithOnChainLocks(nfts, rpcLocks)
+    } else if (isDevnet) {
+      /* keep DAS rows */
     }
 
     nfts = await enrichWalletNftCollectionNames(nfts)

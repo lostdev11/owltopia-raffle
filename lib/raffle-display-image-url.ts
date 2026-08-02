@@ -32,6 +32,8 @@ export function isBrowserDirectRaffleImageHost(hostname: string): boolean {
   const h = hostname.toLowerCase()
   if (isDirectRaffleImageHost(h)) return true
   if (/^[^.]+\.ipfs\.(w3s|nftstorage|dweb|storacha)\.link$/.test(h)) return true
+  // Atomic / Gen2 art CDN often 502s when fetched server-side via /api/proxy-image.
+  if (h === 'qwe.atomicsnfts.com' || h.endsWith('.atomicsnfts.com')) return true
   return (
     h === 'ar-io.net' ||
     h === 'arweave.net' ||
@@ -188,9 +190,8 @@ export function proxyThumbImageUrl(
   try {
     const u = new URL(url)
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
-    // Firebase/GCS/Supabase often 404 or block server-side fetches (see isDirectRaffleImageHost);
-    // those hosts stay browser-direct instead of wasting a doomed proxy attempt per thumb.
-    if (isDirectRaffleImageHost(u.hostname)) return null
+    // Hosts that block or 502 server-side fetches stay browser-direct (no wasted proxy trip).
+    if (isBrowserDirectRaffleImageHost(u.hostname)) return null
     return `/api/proxy-image?url=${encodeURIComponent(u.toString())}&w=${w}`
   } catch {
     return null
