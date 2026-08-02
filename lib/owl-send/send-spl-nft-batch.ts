@@ -10,6 +10,7 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountInstruction,
   createTransferInstruction,
+  getAccount,
   getAssociatedTokenAddress,
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
@@ -47,8 +48,8 @@ type ResolvedHolder = {
 }
 
 /**
- * Resolve SPL holder for one NFT. Prefer the picker token-account hint + ATA probe.
- * Avoids heavy getParsedTokenAccountsByOwner scans that hang OwlSend on slow RPCs.
+ * Resolve SPL holder for one NFT. Prefer the picker token-account hint via getAccount
+ * (fast). Falls back to assertNftTransferable ATA probe — no heavy wallet scans.
  */
 async function resolveHolder(
   connection: Connection,
@@ -57,9 +58,33 @@ async function resolveHolder(
   hintTokenAccount?: string | null,
   name?: string | null
 ) {
+  const mintStr = mint.toBase58()
+  if (hintTokenAccount && hintTokenAccount !== mintStr) {
+    try {
+      const ta = new PublicKey(hintTokenAccount)
+      for (const programId of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
+        try {
+          const account = await getAccount(connection, ta, 'processed', programId)
+          if (!account.mint.equals(mint) || account.amount < 1n) continue
+          if (account.isFrozen) {
+            const label = name?.trim() || `${mintStr.slice(0, 4)}…${mintStr.slice(-4)}`
+            throw new Error(
+              `${label} is frozen (nested or mint-locked) — unnest/thaw before sending.`
+            )
+          }
+          return { tokenProgram: programId, tokenAccount: ta }
+        } catch (e) {
+          if (e instanceof Error && /frozen|unnest|thaw/i.test(e.message)) throw e
+        }
+      }
+    } catch (e) {
+      if (e instanceof Error && /frozen|unnest|thaw/i.test(e.message)) throw e
+    }
+  }
+
   const preflight = await assertNftTransferable({
     connection,
-    mint: mint.toBase58(),
+    mint: mintStr,
     owner,
     tokenAccount: hintTokenAccount,
     name,
@@ -211,6 +236,11 @@ async function buildOwlSendSplNftTransaction(params: {
     )
   }
 
+  // Attach blockhash here so Phantom/adapter do not hang on getLatestBlockhash during "approve".
+  tx.feePayer = owner
+  const { blockhash } = await connection.getLatestBlockhash('processed')
+  tx.recentBlockhash = blockhash
+
   return { ok: true, tx, newAtaCount }
 }
 
@@ -254,10 +284,15 @@ export async function sendOwlSendSplNftBatch(params: {
 
   try {
     onPhase?.('approving')
+    // Let React paint "Approve in wallet" before we open the provider (esp. mobile).
+    await new Promise<void>((resolve) => setTimeout(resolve, 50))
     const signature = await sendTransactionWithTimeout(sendTransaction, built.tx, connection, {
-      skipPreflight: false,
-      preflightCommitment: 'confirmed',
+      // Pre-sign simulate is handled (with timeout) in the Phantom path; skip RPC preflight on submit
+      // so a second slow simulate cannot block after the user already approved.
+      skipPreflight: true,
+      preflightCommitment: 'processed',
       maxRetries: 3,
+      timeoutMs: 60_000,
     })
     onPhase?.('confirming')
     await confirmSignatureSuccessOnChain(

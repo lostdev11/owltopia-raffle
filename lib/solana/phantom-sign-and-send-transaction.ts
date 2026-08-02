@@ -64,11 +64,26 @@ async function prepareLegacyTransactionLikeAdapter(
 ): Promise<Transaction> {
   transaction.feePayer = transaction.feePayer || feePayer
   if (!transaction.recentBlockhash) {
-    const { blockhash } = await connection.getLatestBlockhash({
-      commitment: options?.preflightCommitment,
-      minContextSlot: options?.minContextSlot,
-    })
-    transaction.recentBlockhash = blockhash
+    // Prefer processed — faster and enough for wallet prompt; avoid hanging on confirmed.
+    const commitment = options?.preflightCommitment === 'finalized' ? 'confirmed' : 'processed'
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+    try {
+      const { blockhash } = await Promise.race([
+        connection.getLatestBlockhash({
+          commitment,
+          minContextSlot: options?.minContextSlot,
+        }),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(
+            () => reject(new Error('Timed out fetching blockhash. Check WiFi/mobile data and try again.')),
+            12_000
+          )
+        }),
+      ])
+      transaction.recentBlockhash = blockhash
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId)
+    }
   }
   return transaction
 }

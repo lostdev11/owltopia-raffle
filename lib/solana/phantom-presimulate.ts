@@ -4,6 +4,9 @@ import { VersionedTransaction } from '@solana/web3.js'
 export const DEFAULT_PHANTOM_PRESIM_FAIL_PREFIX =
   'Transaction would fail on-chain before wallet approval.'
 
+/** Stuck simulateTransaction must not block the wallet approve popup. */
+export const PHANTOM_PRESIM_TIMEOUT_MS = 8_000
+
 export class PhantomPresimulateError extends Error {
   readonly name = 'PhantomPresimulateError'
   constructor(message: string) {
@@ -26,6 +29,22 @@ export type PhantomPresimulateOptions = {
    * On-chain simulation errors (`sim.value.err`) always throw.
    */
   ignoreRpcErrors?: boolean
+  /** Override default simulate timeout (ms). */
+  timeoutMs?: number
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('presimulate-timeout')), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
 }
 
 /**
@@ -42,15 +61,19 @@ export async function assertTransactionSimulatesClean(
 ): Promise<void> {
   const failPrefix = options?.failMessagePrefix ?? DEFAULT_PHANTOM_PRESIM_FAIL_PREFIX
   const ignoreRpcErrors = options?.ignoreRpcErrors !== false
+  const timeoutMs = options?.timeoutMs ?? PHANTOM_PRESIM_TIMEOUT_MS
 
   try {
     // Prefer VersionedTransaction + SimulateTransactionConfig (sigVerify / replaceRecentBlockhash).
     if (tx instanceof VersionedTransaction) {
-      const sim = await connection.simulateTransaction(tx, {
-        sigVerify: false,
-        commitment: 'confirmed',
-        replaceRecentBlockhash: true,
-      })
+      const sim = await withTimeout(
+        connection.simulateTransaction(tx, {
+          sigVerify: false,
+          commitment: 'confirmed',
+          replaceRecentBlockhash: true,
+        }),
+        timeoutMs
+      )
       if (sim.value.err) {
         const logs = (sim.value.logs ?? []).slice(-10).join('\n')
         throw new PhantomPresimulateError(`${failPrefix}${logs ? `\n${logs}` : ''}`)
@@ -63,13 +86,18 @@ export async function assertTransactionSimulatesClean(
     const legacy = tx as Transaction
     let sim
     try {
-      sim = await connection.simulateTransaction(new VersionedTransaction(legacy.compileMessage()), {
-        sigVerify: false,
-        commitment: 'confirmed',
-        replaceRecentBlockhash: true,
-      })
-    } catch {
-      sim = await connection.simulateTransaction(legacy)
+      sim = await withTimeout(
+        connection.simulateTransaction(new VersionedTransaction(legacy.compileMessage()), {
+          sigVerify: false,
+          commitment: 'confirmed',
+          replaceRecentBlockhash: true,
+        }),
+        timeoutMs
+      )
+    } catch (e) {
+      if (isPhantomPresimulateError(e)) throw e
+      // compile/sim overload failed or timed out — try legacy overload once (also timed).
+      sim = await withTimeout(connection.simulateTransaction(legacy), timeoutMs)
     }
     if (sim.value.err) {
       const logs = (sim.value.logs ?? []).slice(-10).join('\n')
@@ -78,6 +106,6 @@ export async function assertTransactionSimulatesClean(
   } catch (e) {
     if (isPhantomPresimulateError(e)) throw e
     if (!ignoreRpcErrors) throw e
-    // RPC / simulate flakiness must not block a valid Phantom signAndSend prompt.
+    // RPC / simulate flakiness or timeout must not block a valid Phantom signAndSend prompt.
   }
 }
