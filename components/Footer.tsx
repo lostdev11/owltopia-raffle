@@ -2,29 +2,18 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { ExternalLink, Twitter, MessageCircle, FileText, Coins, Info, Trophy, HeartHandshake, Landmark } from 'lucide-react'
+import { Twitter, MessageCircle, FileText, Coins, Info, Trophy, HeartHandshake, Landmark } from 'lucide-react'
 import { MagicEdenIcon } from '@/components/icons/MagicEdenIcon'
+import { OrbisIcon } from '@/components/icons/OrbisIcon'
 import { TensorIcon } from '@/components/icons/TensorIcon'
-import { SocialGlassCard } from '@/components/SocialGlassCard'
+import { SocialGlassCard, type GlassIconItem } from '@/components/SocialGlassCard'
 import { COMMUNITY_DISCORD_INVITE_URL, PLATFORM_NAME } from '@/lib/site-config'
+import {
+  OWLTOPIA_MAGIC_EDEN_COLLECTION_LINKS,
+  OWLTOPIA_ORBIS_COLLECTION_LINKS,
+} from '@/lib/owltopia-marketplace-links'
 
-const externalLinks = [
-  { name: 'X', url: 'https://x.com/Owltopia_sol' },
-  { name: 'Whitepaper', url: 'https://tinyurl.com/owltopia' },
-  { name: 'ME', url: 'https://magiceden.io/marketplace/owltopia' },
-  { name: 'Tensor', url: 'https://www.tensor.trade/trade/owltopia' },
-  { name: 'Discord', url: COMMUNITY_DISCORD_INVITE_URL },
-]
-
-const iconByLink: Record<string, React.ReactNode> = {
-  X: <Twitter className="h-6 w-6" />,
-  Whitepaper: <FileText className="h-6 w-6" />,
-  ME: <MagicEdenIcon className="h-6 w-6" />,
-  Tensor: <TensorIcon className="h-6 w-6" />,
-  Discord: <MessageCircle className="h-6 w-6" />,
-}
-
-const glassCardItems = [
+const glassCardItems: GlassIconItem[] = [
   {
     label: 'How It Works',
     href: '/how-it-works',
@@ -50,12 +39,42 @@ const glassCardItems = [
     href: '/council',
     icon: <Landmark className="h-6 w-6" />,
   },
-  ...externalLinks.map((link) => ({
-    label: link.name,
-    href: link.url,
-    icon: iconByLink[link.name] ?? <ExternalLink className="h-6 w-6" />,
+  {
+    label: 'X',
+    href: 'https://x.com/Owltopia_sol',
+    icon: <Twitter className="h-6 w-6" />,
     external: true,
-  })),
+  },
+  {
+    label: 'Whitepaper',
+    href: 'https://tinyurl.com/owltopia',
+    icon: <FileText className="h-6 w-6" />,
+    external: true,
+  },
+  {
+    label: 'ME',
+    href: 'magic-eden-collections',
+    icon: <MagicEdenIcon className="h-6 w-6" />,
+    submenu: OWLTOPIA_MAGIC_EDEN_COLLECTION_LINKS,
+  },
+  {
+    label: 'Orbis',
+    href: 'orbis-collections',
+    icon: <OrbisIcon className="h-6 w-6" />,
+    submenu: OWLTOPIA_ORBIS_COLLECTION_LINKS,
+  },
+  {
+    label: 'Tensor',
+    href: 'https://www.tensor.trade/trade/owltopia',
+    icon: <TensorIcon className="h-6 w-6" />,
+    external: true,
+  },
+  {
+    label: 'Discord',
+    href: COMMUNITY_DISCORD_INVITE_URL,
+    icon: <MessageCircle className="h-6 w-6" />,
+    external: true,
+  },
 ]
 
 export function Footer() {
