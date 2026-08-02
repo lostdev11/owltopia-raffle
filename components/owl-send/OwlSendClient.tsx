@@ -45,6 +45,17 @@ import {
   type OwlSendTokenScatterLine,
 } from '@/lib/owl-send/batch'
 import {
+  buildResumeRemainingPlan,
+  collectSentMintsFromBatches,
+  collectSentMintsFromLedger,
+} from '@/lib/owl-send/resume'
+import {
+  clearOwlSendNftDraft,
+  loadOwlSendNftDraft,
+  saveOwlSendNftDraft,
+  type OwlSendNftSessionDraft,
+} from '@/lib/owl-send/session-draft'
+import {
   OWL_SEND_MAX_PER_TX,
   OWL_SEND_MAX_SELECT,
   type OwlSendAssetTab,
@@ -53,6 +64,7 @@ import {
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { formatOwlSendFeeSol, getOwlSendFeeSol } from '@/lib/owl-send/fee'
 import { sendOwlSendNftBatch } from '@/lib/owl-send/send-batch'
+import type { OwlSendSendPhase } from '@/lib/owl-send/send-spl-nft-batch'
 import { sendOwlSendTokenLines, sendOwlSendTokensToOne } from '@/lib/owl-send/send-tokens'
 import { recordOwlSendLedger } from '@/lib/owl-send/record-ledger'
 import { useOwlSendAdminAccess } from '@/lib/owl-send/use-owl-send-admin-access'
@@ -107,6 +119,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [activeBatch, setActiveBatch] = useState(0)
   const [retryMints, setRetryMints] = useState<string[]>([])
   const [sessionError, setSessionError] = useState<string | null>(null)
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null)
   const [preparing, setPreparing] = useState(false)
 
   // Tokens tab
@@ -125,6 +138,11 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [tokenSuccessDetail, setTokenSuccessDetail] = useState<string | null>(null)
   const [successPopup, setSuccessPopup] = useState<OwlSendSuccessState>(null)
   const [ledgerRefreshKey, setLedgerRefreshKey] = useState(0)
+  const [sendPhase, setSendPhase] = useState<OwlSendSendPhase | null>(null)
+  const [sendPhaseStartedAt, setSendPhaseStartedAt] = useState<number | null>(null)
+  const [sendElapsedSec, setSendElapsedSec] = useState(0)
+  const [pendingDraft, setPendingDraft] = useState<OwlSendNftSessionDraft | null>(null)
+  const [resuming, setResuming] = useState(false)
 
   const sendCancelledRef = useRef(false)
 
@@ -132,8 +150,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const showAdminPreview = access.isAdmin && !isPublic
   const allowed = access.allowed
 
-  const loadAssets = useCallback(async () => {
-    if (!publicKey) return
+  const loadAssets = useCallback(async (): Promise<WalletNft[]> => {
+    if (!publicKey) return []
     setLoadingAssets(true)
     setLoadError(null)
     try {
@@ -154,8 +172,10 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       })
       const toks = await getWalletTokens(connection, publicKey)
       setTokens(toks)
+      return list
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Failed to load wallet assets')
+      return []
     } finally {
       setLoadingAssets(false)
     }
@@ -167,8 +187,34 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       setNfts([])
       setTokens([])
       setSelectedMints(new Set())
+      setPendingDraft(null)
     }
   }, [connected, publicKey, loadAssets])
+
+  useEffect(() => {
+    if (!publicKey || batches.length > 0) return
+    const draft = loadOwlSendNftDraft(publicKey.toBase58())
+    setPendingDraft(draft)
+  }, [publicKey, batches.length])
+
+  useEffect(() => {
+    if (!publicKey || !preparedLines || batches.length < 1) return
+    const incomplete = batchProgress.some((b) => b.status !== 'done')
+    if (!incomplete) {
+      clearOwlSendNftDraft()
+      return
+    }
+    saveOwlSendNftDraft({
+      version: 1,
+      fromWallet: publicKey.toBase58(),
+      mode,
+      preparedLines,
+      batches,
+      batchProgress,
+      activeBatch,
+      updatedAt: Date.now(),
+    })
+  }, [publicKey, preparedLines, batches, batchProgress, activeBatch, mode])
 
   const selectedNfts = useMemo(
     () => nfts.filter((n) => selectedMints.has(n.mint)),
@@ -236,13 +282,16 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
   const cancelInFlightSend = () => {
     sendCancelledRef.current = true
+    setSendPhase(null)
+    setSendPhaseStartedAt(null)
     setBatchProgress((prev) =>
       prev.map((b) =>
         b.status === 'sending'
           ? {
               ...b,
               status: 'failed',
-              error: 'Cancelled — approve may still complete in your wallet; check Solscan before retrying.',
+              error:
+                'Cancelled — approve may still complete in your wallet; check Solscan before retrying or use Resume remaining.',
             }
           : b
       )
@@ -259,7 +308,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       )
     )
     setTokenBusy(false)
-    setSessionError('Send cancelled. If a wallet popup is still open, reject it.')
+    setSessionError('Send cancelled. If a wallet popup is still open, reject it — then Retry or Resume remaining.')
     setTokenError('Send cancelled. If a wallet popup is still open, reject it.')
   }
 
@@ -286,6 +335,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
   const prepareNftSend = async () => {
     setSessionError(null)
+    setSessionNotice(null)
     setRetryMints([])
     if (!publicKey) {
       setSessionError('Connect your wallet first.')
@@ -395,6 +445,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     if (!lines?.length) return
 
     sendCancelledRef.current = false
+    setSendPhase('building')
+    setSendPhaseStartedAt(Date.now())
     setBatchProgress((prev) =>
       prev.map((b) => (b.index === batchIndex ? { ...b, status: 'sending', error: undefined } : b))
     )
@@ -405,8 +457,14 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       owner: publicKey,
       lines,
     })
-    if (sendCancelledRef.current) return
+    if (sendCancelledRef.current) {
+      setSendPhase(null)
+      setSendPhaseStartedAt(null)
+      return
+    }
     if (!preflight.ok) {
+      setSendPhase(null)
+      setSendPhaseStartedAt(null)
       setBatchProgress((prev) =>
         prev.map((b) =>
           b.index === batchIndex
@@ -425,9 +483,19 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       walletAdapter: wallet?.adapter ?? null,
       sendTransaction,
       lines,
+      onPhase: (phase) => {
+        if (!sendCancelledRef.current) setSendPhase(phase)
+      },
     })
 
-    if (sendCancelledRef.current) return
+    if (sendCancelledRef.current) {
+      setSendPhase(null)
+      setSendPhaseStartedAt(null)
+      return
+    }
+
+    setSendPhase(null)
+    setSendPhaseStartedAt(null)
 
     if (result.ok) {
       setBatchProgress((prev) =>
@@ -480,6 +548,115 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       }
       setSessionError(result.error)
     }
+  }
+
+  const fetchLedgerSentMints = async (wallet: string): Promise<Set<string>> => {
+    try {
+      const res = await fetch('/api/owl-send/ledger?limit=40', {
+        credentials: 'include',
+        headers: { 'x-connected-wallet': wallet },
+        cache: 'no-store',
+      })
+      if (!res.ok) return new Set()
+      const data = (await res.json()) as {
+        sends?: Array<{
+          asset_kind: string
+          created_at: string
+          lines: Array<{ mint?: string | null }>
+        }>
+      }
+      return collectSentMintsFromLedger(data.sends ?? [])
+    } catch {
+      return new Set()
+    }
+  }
+
+  const applyResumePlan = (plan: Extract<ReturnType<typeof buildResumeRemainingPlan>, { ok: true }>) => {
+    setPreparedLines(plan.remaining)
+    setBatches(plan.batches)
+    setBatchProgress(plan.batchProgress)
+    setActiveBatch(0)
+    setSelectedMints(new Set(plan.remaining.map((l) => l.mint)))
+    setRetryMints([])
+    setSessionError(null)
+    setPendingDraft(null)
+    const skipped = plan.skippedSent + plan.skippedNotHeld
+    setSessionNotice(
+      skipped > 0
+        ? `Resumed ${plan.remaining.length} NFT${plan.remaining.length === 1 ? '' : 's'} · skipped ${skipped} already sent or gone from wallet.`
+        : `Ready to send ${plan.remaining.length} remaining NFT${plan.remaining.length === 1 ? '' : 's'}.`
+    )
+  }
+
+  const resumeRemaining = async () => {
+    if (!publicKey || !preparedLines?.length) return
+    setResuming(true)
+    setSessionError(null)
+    setSessionNotice(null)
+    try {
+      const heldList = await loadAssets()
+      const held = new Set(heldList.map((n) => n.mint))
+      const sessionSent = collectSentMintsFromBatches(batches, batchProgress)
+      const ledgerSent = await fetchLedgerSentMints(publicKey.toBase58())
+      const sent = new Set([...sessionSent, ...ledgerSent])
+      const plan = buildResumeRemainingPlan({
+        preparedLines,
+        sentMints: sent,
+        stillHeldMints: held,
+      })
+      if (!plan.ok) {
+        setSessionError(plan.error)
+        return
+      }
+      applyResumePlan(plan)
+    } finally {
+      setResuming(false)
+    }
+  }
+
+  const restorePendingDraft = () => {
+    if (!pendingDraft) return
+    const normalizedProgress = pendingDraft.batchProgress.map((b) =>
+      b.status === 'sending'
+        ? {
+            ...b,
+            status: 'failed' as const,
+            error:
+              'Interrupted — check Solscan for this batch, then Retry or Resume remaining.',
+          }
+        : b
+    )
+    const firstActionable = normalizedProgress.findIndex(
+      (b) => b.status === 'ready' || b.status === 'failed' || b.status === 'pending'
+    )
+    const withReady =
+      firstActionable >= 0 && normalizedProgress[firstActionable]?.status === 'pending'
+        ? normalizedProgress.map((b, i) =>
+            i === firstActionable ? { ...b, status: 'ready' as const } : b
+          )
+        : normalizedProgress
+
+    setMode(pendingDraft.mode)
+    setPreparedLines(pendingDraft.preparedLines)
+    setBatches(pendingDraft.batches)
+    setBatchProgress(withReady)
+    setActiveBatch(
+      firstActionable >= 0
+        ? firstActionable
+        : Math.min(pendingDraft.activeBatch, Math.max(0, withReady.length - 1))
+    )
+    setSelectedMints(new Set(pendingDraft.preparedLines.map((l) => l.mint)))
+    setPendingDraft(null)
+    setAssetTab('nfts')
+    setSessionError(null)
+    setSessionNotice(
+      'Restored unfinished send. Use Resume remaining if some NFTs already left the wallet.'
+    )
+  }
+
+  const dismissPendingDraft = () => {
+    clearOwlSendNftDraft()
+    setPendingDraft(null)
   }
 
   const prepareTokenScatter = () => {
@@ -700,6 +877,32 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const doneCount = batchProgress.filter((b) => b.status === 'done').length
   const allDone = batches.length > 0 && doneCount === batches.length
   const nftSending = batchProgress.some((b) => b.status === 'sending')
+  const canResumeRemaining =
+    Boolean(preparedLines?.length) &&
+    batches.length > 0 &&
+    !allDone &&
+    !nftSending &&
+    (doneCount > 0 || batchProgress.some((b) => b.status === 'failed'))
+
+  useEffect(() => {
+    if (!nftSending || sendPhaseStartedAt == null) {
+      setSendElapsedSec(0)
+      return
+    }
+    const tick = () => setSendElapsedSec(Math.floor((Date.now() - sendPhaseStartedAt) / 1000))
+    tick()
+    const id = window.setInterval(tick, 1000)
+    return () => window.clearInterval(id)
+  }, [nftSending, sendPhaseStartedAt])
+
+  const sendPhaseLabel =
+    sendPhase === 'building'
+      ? 'Building transaction…'
+      : sendPhase === 'approving'
+        ? 'Approve in your wallet…'
+        : sendPhase === 'confirming'
+          ? 'Confirming on-chain…'
+          : 'Waiting on wallet / network…'
   const tokenSending =
     tokenBusy || tokenBatchProgress.some((b) => b.status === 'sending')
   const tokenDoneCount = tokenBatchProgress.filter((b) => b.status === 'done').length
@@ -1145,6 +1348,36 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                 </CardContent>
               </Card>
 
+              {pendingDraft && batches.length === 0 ? (
+                <div className="flex flex-col gap-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-3 text-sm text-sky-50 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs sm:text-sm">
+                    Unfinished send found ({pendingDraft.preparedLines.length} NFTs ·{' '}
+                    {pendingDraft.batchProgress.filter((b) => b.status === 'done').length}/
+                    {pendingDraft.batches.length} batches done). Restore it, then Resume remaining if
+                    needed.
+                  </p>
+                  <div className="flex min-h-[44px] gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="min-h-[44px] flex-1 touch-manipulation sm:flex-none"
+                      onClick={restorePendingDraft}
+                    >
+                      Restore
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="min-h-[44px] flex-1 touch-manipulation sm:flex-none"
+                      onClick={dismissPendingDraft}
+                    >
+                      Dismiss
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
               {batches.length > 0 ? (
                 <Card className="border-white/10 bg-black/40">
                   <CardHeader className="pb-3">
@@ -1176,7 +1409,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                                 Batch {b.index + 1} of {b.total}
                               </span>
                               <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                                {b.status}
+                                {b.status === 'sending' && sendPhase
+                                  ? sendPhase
+                                  : b.status}
                               </span>
                             </div>
                             <p className="mt-1 text-xs text-muted-foreground">
@@ -1187,6 +1422,12 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                               {' · '}
                               {formatOwlSendFeeSol(feeSol * lines.length)} fee
                             </p>
+                            {b.status === 'sending' ? (
+                              <p className="mt-1 text-xs text-sky-200">
+                                {sendPhaseLabel}
+                                {sendElapsedSec > 0 ? ` · ${sendElapsedSec}s` : ''}
+                              </p>
+                            ) : null}
                             {b.signature ? (
                               <div className="mt-2">
                                 <OwlSendSuccessBanner
@@ -1220,46 +1461,69 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                         above for each tx.
                       </div>
                     ) : (
-                      <div className="flex flex-col gap-2 sm:flex-row">
-                        <Button
-                          type="button"
-                          className="min-h-[44px] flex-1 gap-2 touch-manipulation"
-                          disabled={
-                            !batchProgress[activeBatch] ||
-                            batchProgress[activeBatch]?.status === 'sending' ||
-                            batchProgress[activeBatch]?.status === 'done' ||
-                            (batchProgress[activeBatch]?.status !== 'ready' &&
-                              batchProgress[activeBatch]?.status !== 'failed')
-                          }
-                          onClick={() => void runBatch(activeBatch)}
-                        >
-                          {batchProgress[activeBatch]?.status === 'sending' ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Send className="h-4 w-4" />
-                          )}
-                          {batchProgress[activeBatch]?.status === 'failed'
-                            ? `Retry batch ${activeBatch + 1}`
-                            : activeBatch === 0
-                              ? `Start batch 1 of ${batches.length}`
-                              : `Start next batch (${activeBatch + 1} of ${batches.length})`}
-                        </Button>
-                        {nftSending ? (
+                      <div className="flex flex-col gap-2">
+                        <div className="flex flex-col gap-2 sm:flex-row">
                           <Button
                             type="button"
-                            variant="outline"
-                            className="min-h-[44px] touch-manipulation sm:w-auto"
-                            onClick={cancelInFlightSend}
+                            className="min-h-[44px] flex-1 gap-2 touch-manipulation"
+                            disabled={
+                              !batchProgress[activeBatch] ||
+                              batchProgress[activeBatch]?.status === 'sending' ||
+                              batchProgress[activeBatch]?.status === 'done' ||
+                              (batchProgress[activeBatch]?.status !== 'ready' &&
+                                batchProgress[activeBatch]?.status !== 'failed')
+                            }
+                            onClick={() => void runBatch(activeBatch)}
                           >
-                            Cancel
+                            {batchProgress[activeBatch]?.status === 'sending' ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Send className="h-4 w-4" />
+                            )}
+                            {batchProgress[activeBatch]?.status === 'sending'
+                              ? sendPhase === 'confirming'
+                                ? `Confirming batch ${activeBatch + 1}…`
+                                : sendPhase === 'approving'
+                                  ? `Approve batch ${activeBatch + 1} in wallet…`
+                                  : `Sending batch ${activeBatch + 1}…`
+                              : batchProgress[activeBatch]?.status === 'failed'
+                                ? `Retry batch ${activeBatch + 1}`
+                                : activeBatch === 0
+                                  ? `Start batch 1 of ${batches.length}`
+                                  : `Start next batch (${activeBatch + 1} of ${batches.length})`}
+                          </Button>
+                          {nftSending ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="min-h-[44px] touch-manipulation sm:w-auto"
+                              onClick={cancelInFlightSend}
+                            >
+                              Cancel
+                            </Button>
+                          ) : null}
+                        </div>
+                        {canResumeRemaining ? (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="min-h-[44px] w-full gap-2 touch-manipulation"
+                            disabled={resuming}
+                            onClick={() => void resumeRemaining()}
+                          >
+                            {resuming ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : null}
+                            Resume remaining (skip sent)
                           </Button>
                         ) : null}
                       </div>
                     )}
                     {nftSending ? (
                       <p className="text-xs text-muted-foreground">
-                        Waiting on wallet approve / confirm (up to ~90s). Cancel resets this screen —
-                        reject the wallet popup if it is still open.
+                        {sendPhaseLabel} Confirm can take up to ~90s on mobile/busy RPC. Cancel marks
+                        this batch failed — reject any open wallet popup, check Solscan, then Retry
+                        or Resume remaining.
                       </p>
                     ) : null}
                   </CardContent>
@@ -1596,6 +1860,11 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
             </div>
           )}
 
+          {sessionNotice ? (
+            <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+              {sessionNotice}
+            </p>
+          ) : null}
           {sessionError ? (
             <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
               {sessionError}

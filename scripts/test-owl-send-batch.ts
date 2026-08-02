@@ -14,6 +14,11 @@ import {
   parseRecipientAddresses,
   parseTokenScatterEntries,
 } from '@/lib/owl-send/batch'
+import {
+  buildResumeRemainingPlan,
+  collectSentMintsFromBatches,
+  collectSentMintsFromLedger,
+} from '@/lib/owl-send/resume'
 import { owlSendNftLockLabel } from '@/lib/owl-send/picker-eligibility'
 import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
@@ -170,6 +175,66 @@ assert.ok(cost!.rentSolKnown != null && cost!.rentSolKnown > 0)
 assert.equal(canAccessOwlSend({ isAdmin: true, publicOverride: false }), true)
 assert.equal(canAccessOwlSend({ isAdmin: false, publicOverride: false }), false)
 assert.equal(canAccessOwlSend({ isAdmin: false, publicOverride: true }), true)
+
+// Resume remaining: keep recipient pairing, skip sent + not held
+const planLines = [
+  { mint: 'm0', recipient: 'r0' },
+  { mint: 'm1', recipient: 'r1' },
+  { mint: 'm2', recipient: 'r2' },
+  { mint: 'm3', recipient: 'r3' },
+  { mint: 'm4', recipient: 'r4' },
+  { mint: 'm5', recipient: 'r5' },
+]
+const sessionSent = collectSentMintsFromBatches(
+  [planLines.slice(0, 5), planLines.slice(5)],
+  [
+    { index: 0, status: 'done' },
+    { index: 1, status: 'failed' },
+  ]
+)
+assert.equal(sessionSent.size, 5)
+assert.ok(sessionSent.has('m0'))
+assert.ok(!sessionSent.has('m5'))
+
+const ledgerSent = collectSentMintsFromLedger(
+  [
+    {
+      asset_kind: 'nft',
+      created_at: new Date().toISOString(),
+      lines: [{ mint: 'm5' }],
+    },
+    {
+      asset_kind: 'token',
+      created_at: new Date().toISOString(),
+      lines: [{ mint: 'ignored' }],
+    },
+  ],
+  { nowMs: Date.now() }
+)
+assert.ok(ledgerSent.has('m5'))
+assert.ok(!ledgerSent.has('ignored'))
+
+const resume = buildResumeRemainingPlan({
+  preparedLines: planLines,
+  sentMints: new Set(['m0', 'm1', 'm2', 'm3', 'm4']),
+  stillHeldMints: new Set(['m5', 'extra']),
+})
+assert.equal(resume.ok, true)
+if (resume.ok) {
+  assert.equal(resume.remaining.length, 1)
+  assert.equal(resume.remaining[0]!.mint, 'm5')
+  assert.equal(resume.remaining[0]!.recipient, 'r5')
+  assert.equal(resume.batches.length, 1)
+  assert.equal(resume.batchProgress[0]!.status, 'ready')
+  assert.equal(resume.skippedSent, 5)
+}
+
+const resumeEmpty = buildResumeRemainingPlan({
+  preparedLines: planLines,
+  sentMints: new Set(planLines.map((l) => l.mint)),
+  stillHeldMints: new Set(),
+})
+assert.equal(resumeEmpty.ok, false)
 
 const scatterEntries = parseTokenScatterEntries('Aaa\nBbb,10\nCcc 2.5')
 assert.equal(scatterEntries.length, 3)

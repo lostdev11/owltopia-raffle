@@ -30,6 +30,9 @@ export type OwlSendBatchResult =
   | { ok: true; signature: string; newAtaCount: number }
   | { ok: false; error: string; failedMints?: string[] }
 
+/** UI phases while a batch is in flight (wallet approve → RPC confirm). */
+export type OwlSendSendPhase = 'building' | 'approving' | 'confirming'
+
 async function resolveHolder(
   connection: Connection,
   mint: PublicKey,
@@ -76,8 +79,9 @@ export async function sendOwlSendSplNftBatch(params: {
   owner: PublicKey
   sendTransaction: WalletSendTransactionFn
   lines: OwlSendLine[]
+  onPhase?: (phase: OwlSendSendPhase) => void
 }): Promise<OwlSendBatchResult> {
-  const { connection, owner, sendTransaction, lines } = params
+  const { connection, owner, sendTransaction, lines, onPhase } = params
   if (lines.length < 1) return { ok: false, error: 'Nothing to send in this batch.' }
   if (lines.length > OWL_SEND_MAX_PER_TX) {
     return {
@@ -85,6 +89,8 @@ export async function sendOwlSendSplNftBatch(params: {
       error: `This batch has ${lines.length} NFTs — max ${OWL_SEND_MAX_PER_TX} per approval.`,
     }
   }
+
+  onPhase?.('building')
 
   const treasury = getPlatformFeeTreasuryWalletAddressClient()
   const feeLamports = getOwlSendFeeLamportsForCount(lines.length)
@@ -167,11 +173,13 @@ export async function sendOwlSendSplNftBatch(params: {
   }
 
   try {
+    onPhase?.('approving')
     const signature = await sendTransaction(tx, connection, {
       skipPreflight: false,
       preflightCommitment: 'confirmed',
       maxRetries: 3,
     })
+    onPhase?.('confirming')
     await confirmSignatureSuccessOnChain(
       connection,
       signature,

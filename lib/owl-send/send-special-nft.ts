@@ -20,7 +20,7 @@ import {
 } from '@/lib/owl-send/confirm'
 import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
 import type { OwlSendLine } from '@/lib/owl-send/batch'
-import type { OwlSendBatchResult } from '@/lib/owl-send/send-spl-nft-batch'
+import type { OwlSendBatchResult, OwlSendSendPhase } from '@/lib/owl-send/send-spl-nft-batch'
 
 async function sendFeeOnlyTx(params: {
   connection: Connection
@@ -68,8 +68,9 @@ export async function sendOwlSendSpecialNft(params: {
   walletAdapter: WalletAdapter | null
   sendTransaction: WalletSendTransactionFn
   line: OwlSendLine
+  onPhase?: (phase: OwlSendSendPhase) => void
 }): Promise<OwlSendBatchResult> {
-  const { connection, owner, walletAdapter, sendTransaction, line } = params
+  const { connection, owner, walletAdapter, sendTransaction, line, onPhase } = params
   const recipient = line.recipient.trim()
   const mint = line.mint.trim()
   const treasury = getPlatformFeeTreasuryWalletAddressClient()
@@ -78,6 +79,8 @@ export async function sendOwlSendSpecialNft(params: {
   if (!walletAdapter) {
     return { ok: false, error: 'Wallet adapter not ready for this NFT type.', failedMints: [mint] }
   }
+
+  onPhase?.('building')
 
   // Classic SPL freeze/delegate check when a token account hint exists (nested/staked).
   // Core/cNFT may not have an SPL account — ignore not_held and continue special paths.
@@ -92,6 +95,8 @@ export async function sendOwlSendSpecialNft(params: {
     return { ok: false, error: preflight.error, failedMints: [mint] }
   }
 
+  onPhase?.('approving')
+
   // Token Metadata / pNFT — append fee as SOL transfer to treasury in the same UMI builder.
   try {
     const signature = await transferTokenMetadataNftToEscrow({
@@ -103,6 +108,7 @@ export async function sendOwlSendSpecialNft(params: {
       fundsEscrowAddress: feeLamports > 0 ? treasury ?? undefined : undefined,
       sendTransaction,
     })
+    onPhase?.('confirming')
     return { ok: true, signature, newAtaCount: 0 }
   } catch {
     /* try Core */
@@ -118,6 +124,7 @@ export async function sendOwlSendSpecialNft(params: {
       fundsEscrowAddress: feeLamports > 0 ? treasury ?? undefined : undefined,
       sendTransaction,
     })
+    onPhase?.('confirming')
     return { ok: true, signature, newAtaCount: 0 }
   } catch {
     /* try compressed */
@@ -133,6 +140,7 @@ export async function sendOwlSendSpecialNft(params: {
       fundsEscrowAddress: feeLamports > 0 ? treasury ?? undefined : undefined,
       sendTransaction,
     })
+    onPhase?.('confirming')
     return { ok: true, signature, newAtaCount: 0 }
   } catch (e) {
     // Last resort: if asset already moved somehow, don't charge; otherwise surface error.

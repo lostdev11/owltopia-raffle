@@ -7,6 +7,7 @@ import type { OwlSendLine } from '@/lib/owl-send/batch'
 import {
   sendOwlSendSplNftBatch,
   type OwlSendBatchResult,
+  type OwlSendSendPhase,
 } from '@/lib/owl-send/send-spl-nft-batch'
 import { sendOwlSendSpecialNft } from '@/lib/owl-send/send-special-nft'
 
@@ -20,12 +21,14 @@ export async function sendOwlSendNftBatch(params: {
   walletAdapter: WalletAdapter | null
   sendTransaction: WalletSendTransactionFn
   lines: OwlSendLine[]
+  onPhase?: (phase: OwlSendSendPhase) => void
 }): Promise<OwlSendBatchResult> {
   const spl = await sendOwlSendSplNftBatch({
     connection: params.connection,
     owner: params.owner,
     sendTransaction: params.sendTransaction,
     lines: params.lines,
+    onPhase: params.onPhase,
   })
   if (spl.ok) return spl
 
@@ -40,6 +43,7 @@ export async function sendOwlSendNftBatch(params: {
       walletAdapter: params.walletAdapter,
       sendTransaction: params.sendTransaction,
       line: params.lines[0]!,
+      onPhase: params.onPhase,
     })
   }
 
