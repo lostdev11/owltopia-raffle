@@ -21,10 +21,16 @@ import {
 } from '@/lib/owl-send/resume'
 import { Keypair } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token'
-import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-locks'
+import { attributeOwlSendFrozenFailures } from '@/lib/owl-send/attribute-batch-failure'
+import {
+  clearUnconfirmedDasFrozen,
+  mergeDasNftsWithOnChainLocks,
+} from '@/lib/owl-send/merge-onchain-nft-locks'
 import {
   gateOwlSendCnftSelection,
   owlSendNftLockLabel,
+  owlSendSkippedFrozenNotice,
+  partitionOwlSendByFrozen,
 } from '@/lib/owl-send/picker-eligibility'
 import { owlSendTokenAccountHint } from '@/lib/owl-send/resolve-spl-holder'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
@@ -360,7 +366,127 @@ const merged = mergeDasNftsWithOnChainLocks(
 )
 assert.equal(merged[0]!.tokenAccount, 'realAta')
 assert.equal(merged[0]!.frozen, false)
+assert.equal(merged[0]!.delegated, true)
 assert.equal(merged[0]!.name, 'Gen2 #1')
+
+// Overlay present but mint missing → drop DAS stale frozen
+{
+  const dropStale = mergeDasNftsWithOnChainLocks(
+    [
+      {
+        mint: 'missingOnChain',
+        tokenAccount: 'missingOnChain',
+        amount: '1',
+        decimals: 0,
+        metadataUri: null,
+        name: 'Gen2 stale',
+        image: null,
+        collectionName: null,
+        frozen: true,
+        delegated: true,
+      },
+    ],
+    [
+      {
+        mint: 'other',
+        tokenAccount: 'otherAta',
+        amount: '1',
+        decimals: 0,
+        metadataUri: null,
+        name: null,
+        image: null,
+        collectionName: null,
+        frozen: false,
+        delegated: false,
+      },
+    ]
+  )
+  const stale = dropStale.find((n) => n.mint === 'missingOnChain')
+  assert.equal(stale?.frozen, false)
+}
+
+// Overlay empty → clear unconfirmed DAS frozen
+{
+  const cleared = clearUnconfirmedDasFrozen([
+    {
+      mint: 'm1',
+      tokenAccount: 'm1',
+      amount: '1',
+      decimals: 0,
+      metadataUri: null,
+      name: 'G2',
+      image: null,
+      collectionName: null,
+      frozen: true,
+      delegated: true,
+    },
+  ])
+  assert.equal(cleared[0]!.frozen, false)
+  assert.equal(cleared[0]!.delegated, true)
+}
+
+// Partition: skip frozen, keep sendable (leftover CM delegate alone stays sendable)
+{
+  const part = partitionOwlSendByFrozen([
+    {
+      mint: 'sendable',
+      tokenAccount: 'ata1',
+      amount: '1',
+      decimals: 0,
+      metadataUri: null,
+      name: 'Gen2 #289',
+      image: null,
+      collectionName: null,
+      frozen: false,
+      delegated: true,
+    },
+    {
+      mint: 'nested',
+      tokenAccount: 'ata2',
+      amount: '1',
+      decimals: 0,
+      metadataUri: null,
+      name: 'Gen2 #1006',
+      image: null,
+      collectionName: null,
+      frozen: true,
+      delegated: true,
+    },
+  ])
+  assert.equal(part.sendable.length, 1)
+  assert.equal(part.sendable[0]!.mint, 'sendable')
+  assert.equal(part.frozen.length, 1)
+  assert.equal(part.frozen[0]!.mint, 'nested')
+  assert.match(owlSendSkippedFrozenNotice(1, 1), /Continuing with the rest/)
+  assert.match(owlSendSkippedFrozenNotice(2, 0), /unnest on Nesting first/)
+}
+
+// Failure attribution: only frozen mints land in failedMints
+{
+  const attributed = attributeOwlSendFrozenFailures({
+    lines: [
+      { mint: 'ok1', name: 'Gen2 #1' },
+      { mint: 'frozen1', name: 'Gen2 #1006' },
+      { mint: 'ok2', name: 'Gen2 #289' },
+    ],
+    frozenMints: ['frozen1'],
+    baseError: 'Account is frozen',
+  })
+  assert.deepEqual(attributed.failedMints, ['frozen1'])
+  assert.match(attributed.error, /Gen2 #1006/)
+  assert.match(attributed.error, /the others are fine/)
+
+  const noFrozen = attributeOwlSendFrozenFailures({
+    lines: [
+      { mint: 'a', name: 'A' },
+      { mint: 'b', name: 'B' },
+    ],
+    frozenMints: [],
+    baseError: 'Wallet rejected',
+  })
+  assert.deepEqual(noFrozen.failedMints, ['a', 'b'])
+  assert.equal(noFrozen.error, 'Wallet rejected')
+}
 
 assert.match(owlSendRetryHint('Owl #3 is frozen on-chain'), /Thaw locks|On-chain transfer rejected/)
 assert.match(owlSendRetryHint('Could not find a transferable SPL'), /cNFT|alone|Deselect/)

@@ -4,6 +4,9 @@
  */
 export function owlSendRetryHint(error: string | null | undefined): string {
   const e = (error ?? '').trim()
+  if (/remove or unnest|the others are fine/i.test(e)) {
+    return 'Deselect nested/frozen NFTs (or unnest on Nesting), then retry the rest — no thaw needed for sendable Gen2s.'
+  }
   if (/frozen|Account is frozen|0x11\b|unnest|thaw|mint-locked|mint lock|nested/i.test(e)) {
     return 'On-chain transfer rejected as frozen. Tap Thaw locks if this is an orphaned Gen2 nest lock, or unnest on Nesting if it is still nested.'
   }

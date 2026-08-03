@@ -37,6 +37,8 @@ import {
   gateOwlSendCnftSelection,
   isOwlSendCompressedNft,
   owlSendNftProblemLabel,
+  owlSendSkippedFrozenNotice,
+  partitionOwlSendByFrozen,
 } from '@/lib/owl-send/picker-eligibility'
 import {
   Dialog,
@@ -186,9 +188,13 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         includeLocked: true,
         fetchMetadata: api.nfts.length === 0,
       })
+      // Prefer live browser overlay when present; otherwise trust API (already drops
+      // unconfirmed DAS frozen). Empty overlay must not wipe confirmed nest freezes.
       const list =
         api.nfts.length > 0
-          ? mergeDasNftsWithOnChainLocks(api.nfts, onChainLocks)
+          ? onChainLocks.length > 0
+            ? mergeDasNftsWithOnChainLocks(api.nfts, onChainLocks)
+            : api.nfts
           : onChainLocks
       setNfts(list)
       setSelectedMints((prev) => {
@@ -508,7 +514,18 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       return
     }
 
-    const cnftCheck = gateOwlSendCnftSelection(selectedNfts)
+    // Auto-exclude nested/frozen Gen2s so they cannot poison a multi-send batch.
+    const { sendable, frozen: frozenSelected } = partitionOwlSendByFrozen(selectedNfts)
+    if (frozenSelected.length > 0) {
+      setSelectedMints(new Set(sendable.map((n) => n.mint)))
+      if (sendable.length < 1) {
+        setSessionError(owlSendSkippedFrozenNotice(frozenSelected.length, 0))
+        return
+      }
+      setSessionNotice(owlSendSkippedFrozenNotice(frozenSelected.length, sendable.length))
+    }
+
+    const cnftCheck = gateOwlSendCnftSelection(sendable)
     if (!cnftCheck.ok) {
       setCnftGate({
         title: cnftCheck.title,
@@ -529,7 +546,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         setSessionError('Destination is your own wallet.')
         return
       }
-      lines = selectedNfts.map((n) => ({
+      lines = sendable.map((n) => ({
         mint: n.mint,
         name: n.name,
         tokenAccount: owlSendTokenAccountHint({
@@ -543,12 +560,12 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     } else {
       const entries = randomizeScatter
         ? nftScatterEntries
-        : selectedNfts.map((n) => ({
+        : sendable.map((n) => ({
             recipient: (scatterByMint[n.mint] ?? '').trim(),
             count: null as number | null,
           }))
       if (!randomizeScatter) {
-        const missing = selectedNfts.find((n) => !(scatterByMint[n.mint] ?? '').trim())
+        const missing = sendable.find((n) => !(scatterByMint[n.mint] ?? '').trim())
         if (missing) {
           setSessionError(
             `Enter a wallet for ${missing.name?.trim() || shorten(missing.mint)}.`
@@ -557,7 +574,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         }
       }
       const paired = pairScatterLines({
-        mints: selectedNfts.map((n) => ({
+        mints: sendable.map((n) => ({
           mint: n.mint,
           name: n.name,
           tokenAccount: owlSendTokenAccountHint({
@@ -585,8 +602,6 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
     setPreparing(true)
     try {
-      // No soft-block on frozen/delegated — chain rejects non-transferable accounts at send time.
-
       const chunked = chunkOwlSendBatches(lines)
       setPreparedLines(lines)
       setBatches(chunked)
