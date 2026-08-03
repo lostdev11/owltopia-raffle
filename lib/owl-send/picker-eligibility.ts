@@ -26,6 +26,37 @@ export function owlSendNftProblemLabel(
   return owlSendNftLockLabel(nft)
 }
 
+export type OwlSendFrozenPartition = {
+  sendable: WalletNft[]
+  frozen: WalletNft[]
+}
+
+/**
+ * Split a selection so nested/frozen Gen2s never share a multi-send batch with
+ * sendable ones (one frozen account poisons Phantom pre-sim for the whole tx).
+ */
+export function partitionOwlSendByFrozen(selected: WalletNft[]): OwlSendFrozenPartition {
+  const sendable: WalletNft[] = []
+  const frozen: WalletNft[] = []
+  for (const nft of selected) {
+    if (nft.frozen === true) frozen.push(nft)
+    else sendable.push(nft)
+  }
+  return { sendable, frozen }
+}
+
+/** Short Review notice when frozen NFTs were auto-skipped. */
+export function owlSendSkippedFrozenNotice(frozenCount: number, sendableCount: number): string {
+  const skipped =
+    frozenCount === 1
+      ? 'Skipped 1 nested/frozen NFT'
+      : `Skipped ${frozenCount} nested/frozen NFTs`
+  if (sendableCount < 1) {
+    return `${skipped} — unnest on Nesting first, then send.`
+  }
+  return `${skipped} — unnest on Nesting to send those. Continuing with the rest.`
+}
+
 export type OwlSendCnftGate =
   | { ok: true }
   | {

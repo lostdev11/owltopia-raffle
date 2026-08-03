@@ -3,7 +3,10 @@ import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
 import { getHeliusRpcUrl } from '@/lib/helius-rpc-url'
 import { enrichWalletNftCollectionNames } from '@/lib/helius/enrich-wallet-nft-collection-names'
-import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-locks'
+import {
+  clearUnconfirmedDasFrozen,
+  mergeDasNftsWithOnChainLocks,
+} from '@/lib/owl-send/merge-onchain-nft-locks'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -213,8 +216,6 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const isDevnet = /devnet/i.test(heliusRpcUrl)
-
     // Paginate to fetch more NFTs (up to 10 pages × 1000 = 10,000)
     const limitPerPage = 1000
     const maxPages = 10
@@ -309,14 +310,17 @@ export async function GET(request: NextRequest) {
     // Overlay real ATAs + freeze state from getParsedTokenAccountsByOwner.
     // DAS sets tokenAccount=mint for every NFT, which breaks OwlSend Gen2 multi-sends when the
     // browser RPC overlay is empty/rate-limited (common on mobile).
+    // Never keep DAS ownership.frozen without on-chain confirmation — leftover CM delegates
+    // and stale indexer freeze flags falsely block OwlSend Gen2 multi-sends.
     const rpcLocks = await getNftsViaRpcFallback(heliusRpcUrl, wallet)
     if (nfts.length === 0) {
       // Devnet DAS is often empty; mainnet empty DAS can also recover from RPC.
       if (rpcLocks.length > 0) nfts = rpcLocks
     } else if (rpcLocks.length > 0) {
       nfts = mergeDasNftsWithOnChainLocks(nfts, rpcLocks)
-    } else if (isDevnet) {
-      /* keep DAS rows */
+    } else {
+      // Overlay failed/empty — drop unconfirmed DAS frozen (confirm-or-unknown).
+      nfts = clearUnconfirmedDasFrozen(nfts)
     }
 
     nfts = await enrichWalletNftCollectionNames(nfts)
