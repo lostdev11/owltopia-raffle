@@ -22,6 +22,7 @@ import { getSolanaConnection } from '@/lib/solana/connection'
 import { getPartnerProMonthlyQuoteUsdcForDiscordTenant } from '@/lib/db/partner-community-creators-admin'
 import { assertDiscordPartnerCommandAccess } from '@/lib/discord-partner-command-access'
 import { handleDiscordMarketplaceCommand } from '@/lib/discord-marketplace-handle-interaction'
+import { handleDiscordRaffleAlertsCommand } from '@/lib/discord-raffle-alerts-handle-interaction'
 
 const MANAGE_WEBHOOKS_BIT = 1n << 29n
 
@@ -81,7 +82,8 @@ function botInviteUrl(): string | null {
   if (custom) return custom
   const appId = process.env.DISCORD_APPLICATION_ID?.trim()
   if (!appId) return null
-  const perms = '2147485696'
+  // View Channel + Send Messages + Embed Links + Use Application Commands
+  const perms = '2147503104'
   return `https://discord.com/api/oauth2/authorize?client_id=${encodeURIComponent(appId)}&permissions=${perms}&scope=bot%20applications.commands`
 }
 
@@ -130,6 +132,9 @@ export async function handleDiscordApplicationCommand(
   const root = interaction.data?.name
   if (root === 'owltopia-shop') {
     return handleDiscordMarketplaceCommand(interaction)
+  }
+  if (root === 'owltopia-alerts') {
+    return handleDiscordRaffleAlertsCommand(interaction)
   }
   if (root !== 'owltopia-partner') {
     return ephemeral('Unknown command.')

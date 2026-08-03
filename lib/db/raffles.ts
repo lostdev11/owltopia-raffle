@@ -1753,9 +1753,11 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
  */
 export async function promoteDraftRafflesToLive(): Promise<void> {
   const now = new Date().toISOString()
-  const { error } = await getSupabaseAdmin()
+  const admin = getSupabaseAdmin()
+
+  const { data: candidates, error: selectError } = await admin
     .from('raffles')
-    .update({ status: 'live', updated_at: now })
+    .select('id')
     .eq('status', 'draft')
     // NFT raffles start as `draft` and `is_active=false` until the prize is verified in escrow.
     // Only promote drafts to `live` when they are active; otherwise we can end up with a misleading
@@ -1764,9 +1766,42 @@ export async function promoteDraftRafflesToLive(): Promise<void> {
     .lte('start_time', now)
     .gt('end_time', now)
 
+  if (selectError) {
+    console.error('Error selecting draft raffles to promote:', selectError)
+    return
+  }
+
+  const ids = (candidates ?? [])
+    .map((r) => (r as { id?: string }).id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0)
+
+  if (ids.length === 0) return
+
+  const { error } = await admin
+    .from('raffles')
+    .update({ status: 'live', updated_at: now })
+    .in('id', ids)
+
   if (error) {
     console.error('Error promoting draft raffles to live:', error)
     // Don't throw — page can still render; next load or manual fix will correct
+    return
+  }
+
+  try {
+    const { notifyCommunityDiscordRaffleAlerts } = await import('@/lib/discord-raffle-alert-fanout')
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const raffle = await getRaffleById(id)
+          if (raffle) await notifyCommunityDiscordRaffleAlerts(raffle)
+        } catch (e) {
+          console.error('[promoteDraftRafflesToLive] alert fan-out:', id, e)
+        }
+      })
+    )
+  } catch (e) {
+    console.error('[promoteDraftRafflesToLive] alert module:', e)
   }
 }
 

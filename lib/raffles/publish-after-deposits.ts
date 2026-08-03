@@ -1,6 +1,7 @@
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import { allMilestonesDeposited, getMilestonesByRaffleId } from '@/lib/db/raffle-milestones'
 import { recordModerationStrikeOnPublish } from '@/lib/db/creator-moderation'
+import { notifyCommunityDiscordRaffleAlerts } from '@/lib/discord-raffle-alert-fanout'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import {
   raffleModerationListingFeePaid,
@@ -53,6 +54,11 @@ export async function maybePublishRaffleAfterDeposits(raffleId: string): Promise
     status: 'live',
     updated_at: now,
   })
+
+  const published = await getRaffleById(raffleId)
+  if (published) {
+    await notifyCommunityDiscordRaffleAlerts(published)
+  }
   return true
 }
 

@@ -371,6 +371,10 @@ export interface Raffle {
    */
   list_on_platform: boolean
   /**
+   * When set, this public live raffle was already fan-out posted to Discord `/owltopia-alerts` subscribers.
+   */
+  discord_community_alert_posted_at?: string | null
+  /**
    * When true, raffle is shown only under the ".sol domains" hub tab (`?tab=sol-domains`), not Main or Partner.
    * NFT raffles only; use `floor_price` for the listed reference value (no automated SNS/market calls).
    */

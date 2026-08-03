@@ -266,7 +266,44 @@ export const OWLTOPIA_SHOP_SLASH_COMMAND = {
   ],
 } as const
 
+/**
+ * Free platform raffle feed: any server that adds the bot can opt a channel into new public raffle posts.
+ */
+export const OWLTOPIA_ALERTS_SLASH_COMMAND = {
+  name: 'owltopia-alerts',
+  description: 'Get free updates when new public Owltopia raffles go live',
+  type: 1,
+  dm_permission: false,
+  options: [
+    {
+      name: 'enable',
+      description: 'Post new public live raffles to a channel in this server',
+      type: 1,
+      options: [
+        {
+          name: 'channel',
+          description: 'Text channel where raffle alerts should be posted',
+          type: 7,
+          required: true,
+          channel_types: [0, 5],
+        },
+      ],
+    },
+    {
+      name: 'disable',
+      description: 'Stop raffle alert posts in this server',
+      type: 1,
+    },
+    {
+      name: 'status',
+      description: 'Show whether raffle alerts are enabled and which channel',
+      type: 1,
+    },
+  ],
+} as const
+
 export const ALL_DISCORD_SLASH_COMMANDS = [
   OWLTOPIA_PARTNER_SLASH_COMMAND,
   OWLTOPIA_SHOP_SLASH_COMMAND,
+  OWLTOPIA_ALERTS_SLASH_COMMAND,
 ] as const
