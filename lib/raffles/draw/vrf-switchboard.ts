@@ -2,7 +2,13 @@
  * Switchboard On-Demand randomness (commit → reveal) for owltopia-draw-v3-vrf.
  * Platform pays via funds/prize escrow keypair. Pure client path — no custom raffle program yet.
  */
-import { Keypair, PublicKey, Connection } from '@solana/web3.js'
+import {
+  Keypair,
+  PublicKey,
+  Connection,
+  Transaction,
+  VersionedTransaction,
+} from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getFundsEscrowKeypair } from '@/lib/raffles/funds-escrow'
@@ -54,25 +60,25 @@ async function loadSb() {
  * bundling can resolve Wallet as undefined →
  * "(intermediate value).Wallet is not a constructor" and VRF draw fails.
  */
+function isVersionedTransaction(
+  tx: Transaction | VersionedTransaction
+): tx is VersionedTransaction {
+  return 'version' in tx
+}
+
 export function keypairWallet(payer: Keypair) {
   return {
     publicKey: payer.publicKey,
     payer,
-    async signTransaction<T extends { sign?: (signers: Keypair[]) => void; partialSign?: (signer: Keypair) => void }>(
-      tx: T
-    ): Promise<T> {
-      if (typeof tx.sign === 'function' && 'version' in tx) {
+    async signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T> {
+      if (isVersionedTransaction(tx)) {
         tx.sign([payer])
-      } else if (typeof tx.partialSign === 'function') {
-        tx.partialSign(payer)
       } else {
-        throw new Error('Unsupported transaction type for VRF wallet signing')
+        tx.partialSign(payer)
       }
       return tx
     },
-    async signAllTransactions<T extends { sign?: (signers: Keypair[]) => void; partialSign?: (signer: Keypair) => void }>(
-      txs: T[]
-    ): Promise<T[]> {
+    async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
       for (const tx of txs) {
         await this.signTransaction(tx)
       }
