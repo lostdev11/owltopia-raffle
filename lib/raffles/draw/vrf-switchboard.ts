@@ -2,7 +2,13 @@
  * Switchboard On-Demand randomness (commit → reveal) for owltopia-draw-v3-vrf.
  * Platform pays via funds/prize escrow keypair. Pure client path — no custom raffle program yet.
  */
-import { Keypair, PublicKey, Connection } from '@solana/web3.js'
+import {
+  Keypair,
+  PublicKey,
+  Connection,
+  Transaction,
+  VersionedTransaction,
+} from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getFundsEscrowKeypair } from '@/lib/raffles/funds-escrow'
@@ -46,16 +52,44 @@ async function loadSb() {
   return import('@switchboard-xyz/on-demand')
 }
 
-async function loadAnchorWallet(payer: Keypair) {
-  // Bundled with on-demand (anchor 0.31)
-  const anchor = await import('@coral-xyz/anchor-31')
-  return new anchor.Wallet(payer)
+/**
+ * Minimal Anchor Wallet adapter from a Keypair.
+ *
+ * Do NOT use `new (await import('@coral-xyz/anchor-31')).Wallet(payer)`.
+ * Anchor's package.json "browser" build omits NodeWallet, so Next.js server
+ * bundling can resolve Wallet as undefined →
+ * "(intermediate value).Wallet is not a constructor" and VRF draw fails.
+ */
+function isVersionedTransaction(
+  tx: Transaction | VersionedTransaction
+): tx is VersionedTransaction {
+  return 'version' in tx
+}
+
+export function keypairWallet(payer: Keypair) {
+  return {
+    publicKey: payer.publicKey,
+    payer,
+    async signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T> {
+      if (isVersionedTransaction(tx)) {
+        tx.sign([payer])
+      } else {
+        tx.partialSign(payer)
+      }
+      return tx
+    },
+    async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
+      for (const tx of txs) {
+        await this.signTransaction(tx)
+      }
+      return txs
+    },
+  }
 }
 
 async function loadSbProgram(connection: Connection, payer: Keypair) {
   const sb = await loadSb()
-  const wallet = await loadAnchorWallet(payer)
-  return sb.AnchorUtils.loadProgramFromConnection(connection, wallet)
+  return sb.AnchorUtils.loadProgramFromConnection(connection, keypairWallet(payer))
 }
 
 /**

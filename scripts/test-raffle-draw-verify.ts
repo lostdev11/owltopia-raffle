@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { Keypair, Transaction, PublicKey, SystemProgram } from '@solana/web3.js'
 import {
   buildDrawLedger,
   encodeDrawRevealMemo,
@@ -12,6 +13,7 @@ import {
   generateDrawSeed,
   seedFromVrfBytes,
   seedFromVrfHex,
+  keypairWallet,
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
   DRAW_ALGO_V3_VRF,
@@ -206,4 +208,42 @@ const v3Ok = verifyDraw({
 })
 assert.equal(v3Ok.ok, true)
 
-console.log('raffle draw verify ok (v1 + v2 commit–reveal + v3 VRF seed)')
+// --- VRF wallet adapter (Anchor browser build has no Wallet constructor) ---
+async function assertVrfKeypairWallet() {
+  // Reproduce the production failure mode Next.js can hit via package "browser" field.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const browserAnchor = require('@coral-xyz/anchor-31/dist/browser/index.js') as {
+    Wallet?: unknown
+  }
+  assert.equal(typeof browserAnchor.Wallet, 'undefined')
+  assert.throws(() => {
+    // Same shape as the old VRF path: `new (await import(...)).Wallet(payer)`
+    // eslint-disable-next-line no-new, @typescript-eslint/no-explicit-any
+    new (browserAnchor as any).Wallet(Keypair.generate())
+  }, /Wallet is not a constructor/)
+
+  const payer = Keypair.generate()
+  const wallet = keypairWallet(payer)
+  assert.ok(wallet.publicKey.equals(payer.publicKey))
+
+  const tx = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: payer.publicKey,
+      toPubkey: PublicKey.unique(),
+      lamports: 1,
+    })
+  )
+  tx.feePayer = payer.publicKey
+  tx.recentBlockhash = PublicKey.default.toBase58()
+  await wallet.signTransaction(tx)
+  assert.equal(tx.signatures.filter((s) => s.signature != null).length >= 1, true)
+}
+
+assertVrfKeypairWallet()
+  .then(() => {
+    console.log('raffle draw verify ok (v1 + v2 commit–reveal + v3 VRF seed + wallet)')
+  })
+  .catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
