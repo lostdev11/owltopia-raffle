@@ -46,16 +46,44 @@ async function loadSb() {
   return import('@switchboard-xyz/on-demand')
 }
 
-async function loadAnchorWallet(payer: Keypair) {
-  // Bundled with on-demand (anchor 0.31)
-  const anchor = await import('@coral-xyz/anchor-31')
-  return new anchor.Wallet(payer)
+/**
+ * Minimal Anchor Wallet adapter from a Keypair.
+ *
+ * Do NOT use `new (await import('@coral-xyz/anchor-31')).Wallet(payer)`.
+ * Anchor's package.json "browser" build omits NodeWallet, so Next.js server
+ * bundling can resolve Wallet as undefined →
+ * "(intermediate value).Wallet is not a constructor" and VRF draw fails.
+ */
+export function keypairWallet(payer: Keypair) {
+  return {
+    publicKey: payer.publicKey,
+    payer,
+    async signTransaction<T extends { sign?: (signers: Keypair[]) => void; partialSign?: (signer: Keypair) => void }>(
+      tx: T
+    ): Promise<T> {
+      if (typeof tx.sign === 'function' && 'version' in tx) {
+        tx.sign([payer])
+      } else if (typeof tx.partialSign === 'function') {
+        tx.partialSign(payer)
+      } else {
+        throw new Error('Unsupported transaction type for VRF wallet signing')
+      }
+      return tx
+    },
+    async signAllTransactions<T extends { sign?: (signers: Keypair[]) => void; partialSign?: (signer: Keypair) => void }>(
+      txs: T[]
+    ): Promise<T[]> {
+      for (const tx of txs) {
+        await this.signTransaction(tx)
+      }
+      return txs
+    },
+  }
 }
 
 async function loadSbProgram(connection: Connection, payer: Keypair) {
   const sb = await loadSb()
-  const wallet = await loadAnchorWallet(payer)
-  return sb.AnchorUtils.loadProgramFromConnection(connection, wallet)
+  return sb.AnchorUtils.loadProgramFromConnection(connection, keypairWallet(payer))
 }
 
 /**

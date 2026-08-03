@@ -210,14 +210,24 @@ const nextConfig = {
     }
     
     // Externalize Solana packages for server-side builds to avoid bundling issues
-    // This prevents Next.js from trying to bundle these packages incorrectly
+    // This prevents Next.js from trying to bundle these packages incorrectly.
+    // Also externalize Switchboard + its Anchor 0.31 alias so VRF draw uses the
+    // Node CJS build (browser Anchor omits Wallet / NodeWallet).
     if (isServer) {
+      const serverExternals = [
+        '@solana/web3.js',
+        '@solana/spl-token',
+        '@switchboard-xyz/on-demand',
+        '@coral-xyz/anchor-31',
+        '@coral-xyz/anchor',
+      ]
       config.externals = config.externals || []
       if (Array.isArray(config.externals)) {
-        config.externals.push('@solana/web3.js', '@solana/spl-token')
+        config.externals.push(...serverExternals)
       } else if (typeof config.externals === 'object') {
-        config.externals['@solana/web3.js'] = '@solana/web3.js'
-        config.externals['@solana/spl-token'] = '@solana/spl-token'
+        for (const pkg of serverExternals) {
+          config.externals[pkg] = pkg
+        }
       }
     }
     
