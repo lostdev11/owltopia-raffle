@@ -972,7 +972,7 @@ input[type="submit"] {
 .glass-icon-card.glass-icon-card-row ul {
   flex-direction: row;
   justify-content: center;
-  gap: 3.25rem;
+  gap: 2.25rem;
 }
 .glass-icon-card ul li {
   cursor: pointer;
@@ -1012,7 +1012,8 @@ input[type="submit"] {
   align-items: center;
   justify-content: center;
 }
-.glass-icon-iso:hover a > .glass-icon-svg {
+.glass-icon-iso:hover a > .glass-icon-svg,
+.glass-icon-iso:hover button > .glass-icon-svg {
   transform: translateY(-10px);
   border-radius: 100%;
 }
@@ -1096,7 +1097,8 @@ input[type="submit"] {
   .glass-icon-card.glass-icon-card-mobile .glass-icon-iso {
     flex-direction: column;
   }
-  .glass-icon-card.glass-icon-card-mobile .glass-icon-iso a {
+  .glass-icon-card.glass-icon-card-mobile .glass-icon-iso a,
+  .glass-icon-card.glass-icon-card-mobile .glass-icon-iso button {
     flex-shrink: 0;
   }
   .glass-icon-card.glass-icon-card-mobile .glass-icon-iso span.glass-icon-layer {
