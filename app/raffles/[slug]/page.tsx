@@ -27,6 +27,7 @@ import { lookupOrbisNftUrl } from '@/lib/nft-marketplace-orbis'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
+import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 // Force dynamic rendering to prevent caching stale data
 export const dynamic = 'force-dynamic'
@@ -103,11 +104,10 @@ export default async function RaffleDetailPage({
     notFound()
   }
 
-  // Check if raffle has ended and doesn't have a winner yet
-  // Use end_time only: after restore, end_time is the extended time.
+  // Check if raffle has ended and doesn't have a winner yet.
+  // ready_to_draw is due even if end_time was pushed into the future after a failed VRF.
   const now = new Date()
-  const endTimeToCheck = new Date(raffle.end_time)
-  const hasEnded = endTimeToCheck <= now
+  const hasEnded = raffleIsDueForWinnerDraw(raffle, now)
   const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
   // Match `/api/cron/draw-ended-raffles`: draw by status, not `is_active` alone (that flag is mainly for ticket sales).
   // NFT raffles must have prize in escrow before a draw, same as `getEndedRafflesWithoutWinner`.

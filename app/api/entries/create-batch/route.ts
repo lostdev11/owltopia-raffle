@@ -22,7 +22,7 @@ import {
 import { CART_BATCH_MAX_RAFFLES_PER_TX } from '@/lib/cart/constants'
 import { raffleAcceptsSolAndBambooTickets } from '@/lib/raffles/dual-ticket-payment'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
-import { raffleHasEnded, raffleHasStarted } from '@/lib/raffles/purchase-window'
+import { raffleAcceptsTicketPurchases } from '@/lib/raffles/purchase-window'
 
 export const dynamic = 'force-dynamic'
 
@@ -162,7 +162,8 @@ export async function POST(request: NextRequest) {
       if (purchasesBlockedAt) return NextResponse.json(ERROR_BODY, { status: 400 })
 
       // Match raffle detail UI: cart must not buy before scheduled start.
-      if (!raffleHasStarted(raffle) || raffleHasEnded(raffle)) {
+      // Status must remain live — ready_to_draw must not accept more tickets.
+      if (!raffleAcceptsTicketPurchases(raffle)) {
         return NextResponse.json(ERROR_BODY, { status: 400 })
       }
 

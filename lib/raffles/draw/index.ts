@@ -39,6 +39,11 @@ export type { SendDrawRevealResult } from '@/lib/raffles/draw/reveal-tx'
 
 export { seedFromVrfBytes, seedFromVrfHex } from '@/lib/raffles/draw/vrf-seed'
 export {
+  resolveVrfDrawLedger,
+  vrfRequestReachedChain,
+} from '@/lib/raffles/draw/vrf-ledger'
+export type { VrfLedgerSnapshot } from '@/lib/raffles/draw/vrf-ledger'
+export {
   keypairWallet,
   switchboardCommitRandomness,
   switchboardRevealRandomness,

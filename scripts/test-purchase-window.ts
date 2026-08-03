@@ -7,6 +7,9 @@ import {
   raffleHasEnded,
   raffleHasStarted,
   raffleIsWithinPurchaseWindow,
+  raffleAcceptsTicketPurchases,
+  raffleIsDueForWinnerDraw,
+  raffleStatusAllowsTicketPurchases,
 } from '../lib/raffles/purchase-window'
 import { raffleCheckoutBlockedReason } from '../lib/cart/validate-raffle-checkout'
 import { raffleEligibleForReferralFreeEntry } from '../lib/referrals/program'
@@ -115,6 +118,40 @@ assert.equal(
     start_time: past,
     end_time: later,
   }),
+  true
+)
+
+assert.equal(raffleStatusAllowsTicketPurchases({ status: 'live' }), true)
+assert.equal(raffleStatusAllowsTicketPurchases({ status: 'ready_to_draw' }), false)
+assert.equal(raffleStatusAllowsTicketPurchases({ status: 'completed' }), false)
+
+assert.equal(
+  raffleAcceptsTicketPurchases(
+    { start_time: fixedPast, end_time: fixedLater, status: 'live', is_active: true },
+    fixedNow
+  ),
+  true
+)
+assert.equal(
+  raffleAcceptsTicketPurchases(
+    { start_time: fixedPast, end_time: fixedLater, status: 'ready_to_draw', is_active: true },
+    fixedNow
+  ),
+  false,
+  'ready_to_draw must not accept ticket purchases even if end_time is in the future'
+)
+
+assert.equal(
+  raffleIsDueForWinnerDraw({ end_time: fixedLater, status: 'ready_to_draw' }, fixedNow),
+  true,
+  'ready_to_draw is due for draw even when end_time is still in the future'
+)
+assert.equal(
+  raffleIsDueForWinnerDraw({ end_time: fixedLater, status: 'live' }, fixedNow),
+  false
+)
+assert.equal(
+  raffleIsDueForWinnerDraw({ end_time: fixedPast, status: 'live' }, fixedNow),
   true
 )
 

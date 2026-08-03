@@ -20,7 +20,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send, Download, Upload } from 'lucide-react'
+import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send, Download, Upload, Dices } from 'lucide-react'
 import type { Raffle, Entry } from '@/lib/types'
 import type { AdminRole } from '@/lib/db/admins'
 import Link from 'next/link'
@@ -81,6 +81,7 @@ export function AdminRaffleActions({
   const [fixMintInput, setFixMintInput] = useState('')
   const [fixingMint, setFixingMint] = useState(false)
   const [sendingPrizeToWinner, setSendingPrizeToWinner] = useState(false)
+  const [retryingVrf, setRetryingVrf] = useState(false)
   const [imageFallbackInput, setImageFallbackInput] = useState(raffle.image_fallback_url ?? '')
   const [savingImageFallback, setSavingImageFallback] = useState(false)
   const [uploadingImageFallback, setUploadingImageFallback] = useState(false)
@@ -454,6 +455,48 @@ export function AdminRaffleActions({
       })
     } finally {
       setSendingPrizeToWinner(false)
+    }
+  }
+
+  const vrfStatus = (raffle.draw_vrf_status ?? '').trim()
+  const canRetryVrfDraw =
+    isFullAdmin &&
+    !(raffle.winner_wallet ?? '').trim() &&
+    ((raffle.draw_algo ?? '').trim() === 'owltopia-draw-v3-vrf' ||
+      vrfStatus === 'failed' ||
+      vrfStatus === 'pending')
+
+  const handleRetryVrfDraw = async () => {
+    setRetryingVrf(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/admin/raffles/${raffle.id}/retry-vrf-draw`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.ok) {
+        setMessage({
+          type: 'success',
+          text: `VRF draw completed. Winner: ${data.winnerWallet ?? 'selected'}`,
+        })
+        router.refresh()
+      } else {
+        setMessage({
+          type: 'error',
+          text:
+            typeof data?.error === 'string'
+              ? data.error
+              : 'VRF retry did not complete — check draw status',
+        })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'VRF retry failed',
+      })
+    } finally {
+      setRetryingVrf(false)
     }
   }
 
@@ -1618,6 +1661,30 @@ export function AdminRaffleActions({
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
+            )}
+            {canRetryVrfDraw && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  VRF draw {vrfStatus === 'pending' ? 'pending' : vrfStatus === 'failed' ? 'failed' : 'not finished'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Retries Switchboard randomness and selects a winner against the frozen ticket ledger.
+                  If the previous attempt never reached the chain (no VRF request tx), the ledger is
+                  refreshed from current confirmed tickets first.
+                </p>
+                {raffle.draw_vrf_error && (
+                  <p className="text-xs font-mono text-destructive break-all">{raffle.draw_vrf_error}</p>
+                )}
+                <Button
+                  type="button"
+                  className="bg-amber-600 hover:bg-amber-700 touch-manipulation min-h-[44px]"
+                  disabled={retryingVrf}
+                  onClick={handleRetryVrfDraw}
+                >
+                  <Dices className="h-4 w-4 mr-2 shrink-0" />
+                  {retryingVrf ? 'Retrying VRF…' : 'Retry VRF draw'}
+                </Button>
+              </div>
             )}
             {canAdminSendPrizeFromEscrow && (
               <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-2">

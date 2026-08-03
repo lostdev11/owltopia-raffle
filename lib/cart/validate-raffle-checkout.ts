@@ -1,6 +1,10 @@
 import type { Raffle } from '@/lib/types'
 import { nftRaffleExemptFromEscrowRequirement } from '@/lib/raffles/visibility'
-import { raffleHasEnded, raffleHasStarted } from '@/lib/raffles/purchase-window'
+import {
+  raffleHasEnded,
+  raffleHasStarted,
+  raffleStatusAllowsTicketPurchases,
+} from '@/lib/raffles/purchase-window'
 import { isOwlEnabled } from '@/lib/tokens'
 import { raffleAcceptsSolAndBambooTickets } from '@/lib/raffles/dual-ticket-payment'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
@@ -26,6 +30,10 @@ export function raffleCheckoutBlockedReason(
   }
 
   if (!raffle.is_active) return 'This raffle is not active.'
+
+  if (!raffleStatusAllowsTicketPurchases(raffle)) {
+    return 'This raffle is no longer accepting ticket purchases.'
+  }
 
   if (!raffleHasStarted(raffle)) return 'This raffle has not started yet.'
 

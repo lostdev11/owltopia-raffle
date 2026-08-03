@@ -14,6 +14,8 @@ import {
   seedFromVrfBytes,
   seedFromVrfHex,
   keypairWallet,
+  resolveVrfDrawLedger,
+  vrfRequestReachedChain,
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
   DRAW_ALGO_V3_VRF,
@@ -239,9 +241,72 @@ async function assertVrfKeypairWallet() {
   assert.equal(tx.signatures.filter((s) => s.signature != null).length >= 1, true)
 }
 
+// --- VRF ledger refresh when commit never reached chain (decentric-527-2 class) ---
+{
+  const liveEntries = entries.filter((e) => e.status === 'confirmed' && !e.refunded_at)
+  const live = buildDrawLedger(liveEntries)
+  assert.equal(vrfRequestReachedChain({ draw_vrf_account: null, draw_vrf_request_tx: null }), false)
+  assert.equal(
+    vrfRequestReachedChain({
+      draw_vrf_account: 'Rand111111111111111111111111111111111111111',
+      draw_vrf_request_tx: null,
+    }),
+    true
+  )
+
+  // Stale freeze from a Wallet-constructor failure (51 tickets) vs live 5 drawable tickets in fixture:
+  // never reached chain → refresh to current ledger.
+  const refreshed = resolveVrfDrawLedger({
+    raffle: {
+      draw_sold_count: 51,
+      draw_ledger_hash: 'ff323f9376a337f788e6604d394b21fb548729984140befca433948a4a4fb550',
+      draw_vrf_account: null,
+      draw_vrf_request_tx: null,
+    },
+    entries: liveEntries,
+  })
+  assert.ok(!('error' in refreshed))
+  if (!('error' in refreshed)) {
+    assert.equal(refreshed.soldCount, live.soldCount)
+    assert.equal(refreshed.ledgerHash, live.ledgerHash)
+    assert.equal(refreshed.refreshed, true)
+  }
+
+  // Once randomness is on-chain, refuse ledger drift.
+  const refused = resolveVrfDrawLedger({
+    raffle: {
+      draw_sold_count: 51,
+      draw_ledger_hash: 'ff323f9376a337f788e6604d394b21fb548729984140befca433948a4a4fb550',
+      draw_vrf_account: 'Rand111111111111111111111111111111111111111',
+      draw_vrf_request_tx: 'CommitTx1111111111111111111111111111111111111',
+    },
+    entries: liveEntries,
+  })
+  assert.ok('error' in refused)
+  if ('error' in refused) {
+    assert.match(refused.error, /Frozen draw ledger/)
+  }
+
+  // Matching freeze + on-chain request → keep freeze.
+  const kept = resolveVrfDrawLedger({
+    raffle: {
+      draw_sold_count: live.soldCount,
+      draw_ledger_hash: live.ledgerHash,
+      draw_vrf_account: 'Rand111111111111111111111111111111111111111',
+      draw_vrf_request_tx: 'CommitTx1111111111111111111111111111111111111',
+    },
+    entries: liveEntries,
+  })
+  assert.ok(!('error' in kept))
+  if (!('error' in kept)) {
+    assert.equal(kept.refreshed, false)
+    assert.equal(kept.soldCount, live.soldCount)
+  }
+}
+
 assertVrfKeypairWallet()
   .then(() => {
-    console.log('raffle draw verify ok (v1 + v2 commit–reveal + v3 VRF seed + wallet)')
+    console.log('raffle draw verify ok (v1 + v2 commit–reveal + v3 VRF seed + wallet + ledger)')
   })
   .catch((err) => {
     console.error(err)

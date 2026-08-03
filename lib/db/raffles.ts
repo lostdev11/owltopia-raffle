@@ -25,6 +25,7 @@ import {
 } from '@/lib/raffles/list-query-statuses'
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
 import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
 import { getSupabasePublishableKey, getSupabaseSecretKey } from '@/lib/supabase-env'
 import {
@@ -2287,12 +2288,11 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
     })) as Raffle[]
   }
 
-  // Filter to only include raffles where end_time has passed.
-  // Use end_time only: after restore, end_time is the extended time; don't treat as ended until it passes.
+  // Filter to raffles due for draw: end_time passed, OR already marked ready_to_draw
+  // (ready_to_draw must draw even if end_time was incorrectly pushed into the future).
+  // NFT / partner SPL prizes must not progress until escrow deposit is verified.
   const filteredRaffles = raffles.filter(raffle => {
-    const endTime = new Date(raffle.end_time)
-    if (endTime > now) return false
-    // NFT / partner SPL prizes must not progress until escrow deposit is verified.
+    if (!raffleIsDueForWinnerDraw(raffle, now)) return false
     const prizeEscrowPending =
       (raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)) && !raffle.prize_deposited_at
     if (prizeEscrowPending) return false

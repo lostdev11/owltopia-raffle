@@ -507,7 +507,10 @@ export function RaffleDetailClient({
   )
   const needsPayCancellationFee = cancellationFeeApplies && !raffle.cancellation_fee_paid_at
   const isFuture = startTimeMs > nowMs
-  const isActive = startTimeMs <= nowMs && endTimeMs > nowMs && raffle.is_active
+  const statusLive = (raffle.status ?? '').trim().toLowerCase() === 'live'
+  // Sales UI follows schedule + live status (ready_to_draw must not keep selling).
+  const isActive =
+    statusLive && startTimeMs <= nowMs && endTimeMs > nowMs && raffle.is_active
   const purchasesBlocked = !!(raffle as { purchases_blocked_at?: string | null }).purchases_blocked_at
   // Pending escrow: draft + inactive until prize, milestones, and moderation fee are all done.
   // Do not require !prize_deposited_at — otherwise post-prize / pre-milestone drafts show as Ended.
