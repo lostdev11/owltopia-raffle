@@ -27,6 +27,10 @@ import {
 import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
 import { OWL_SEND_MAX_PER_TX } from '@/lib/owl-send/constants'
 import type { OwlSendLine } from '@/lib/owl-send/batch'
+import {
+  attributeOwlSendFrozenFailures,
+  findFrozenOwlSendMints,
+} from '@/lib/owl-send/attribute-batch-failure'
 import { resolveOwlSendSplHolder } from '@/lib/owl-send/resolve-spl-holder'
 import { sendTransactionWithTimeout } from '@/lib/solana/send-transaction-with-timeout'
 
@@ -275,6 +279,20 @@ export async function sendOwlSendSplNftBatch(params: {
         failedMints: lines.map((l) => l.mint),
       }
     }
-    return { ok: false, error: msg || 'Wallet rejected or send failed.', failedMints: lines.map((l) => l.mint) }
+
+    // One frozen Gen2 must not amber-highlight the whole batch of sendable NFTs.
+    const baseError = msg || 'Wallet rejected or send failed.'
+    try {
+      const frozenMints = await findFrozenOwlSendMints({ connection, lines })
+      if (frozenMints.length > 0) {
+        return {
+          ok: false,
+          ...attributeOwlSendFrozenFailures({ lines, frozenMints, baseError }),
+        }
+      }
+    } catch {
+      /* keep full-batch attribution */
+    }
+    return { ok: false, error: baseError, failedMints: lines.map((l) => l.mint) }
   }
 }
