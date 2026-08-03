@@ -1,6 +1,7 @@
 /**
  * Orchestrate Switchboard VRF request/reveal for a raffle draw.
- * Freezes ledger fields before commit; admin retry must reuse the same ledger.
+ * Freezes ledger fields before commit; admin retry must reuse the same ledger
+ * once randomness is on-chain. Pre-chain failures may refresh the ledger.
  */
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import {
@@ -10,12 +11,12 @@ import {
   getRaffleDrawSecret,
   deleteRaffleDrawSecret,
 } from '@/lib/db/raffle-draw-secrets'
-import { buildDrawLedger } from '@/lib/raffles/draw/ledger'
 import {
   switchboardCommitRandomness,
   switchboardRevealRandomness,
   VRF_PROVIDER_SWITCHBOARD,
 } from '@/lib/raffles/draw/vrf-switchboard'
+import { resolveVrfDrawLedger } from '@/lib/raffles/draw/vrf-ledger'
 import { DRAW_ALGO_V3_VRF } from '@/lib/raffles/draw/types'
 import type { DrawEntryLike } from '@/lib/raffles/draw/types'
 import type { Raffle } from '@/lib/types'
@@ -49,14 +50,6 @@ async function patchVrfFields(
   }
 }
 
-function ledgerFromEntries(entries: DrawEntryLike[]) {
-  const ledger = buildDrawLedger(entries)
-  if (ledger.soldCount <= 0) {
-    throw new Error('No drawable tickets')
-  }
-  return ledger
-}
-
 /**
  * Start or resume VRF for a raffle. Does not select the winner — caller runs performDraw + DB winner update.
  * @param forceNewRequest — admin retry: abandon pending account and commit a new one against the same frozen ledger when present.
@@ -70,29 +63,24 @@ export async function runRaffleVrfFlow(params: {
   const { raffle, entries, forceNewRequest = false, revealWaitMs } = params
   const raffleId = raffle.id
 
-  // Prefer frozen ledger from a prior pending attempt (second-round safe: sales already closed at draw time).
-  let soldCount = raffle.draw_sold_count ?? null
-  let ledgerHash = (raffle.draw_ledger_hash ?? '').trim().toLowerCase() || null
-
-  if (soldCount == null || !ledgerHash) {
-    const ledger = ledgerFromEntries(entries)
-    soldCount = ledger.soldCount
-    ledgerHash = ledger.ledgerHash
-  } else {
-    // Sanity: frozen ledger should still match current entries when retrying.
-    const live = ledgerFromEntries(entries)
-    if (live.ledgerHash !== ledgerHash || live.soldCount !== soldCount) {
-      return {
-        status: 'failed',
-        error:
-          'Frozen draw ledger no longer matches confirmed entries — refusing VRF (ticket set changed).',
-        ledgerHash,
-        soldCount,
-        requestTx: raffle.draw_vrf_request_tx,
-        randomnessAccount: raffle.draw_vrf_account,
-      }
+  const ledgerResolution = resolveVrfDrawLedger({
+    raffle,
+    entries,
+    // New commit (including admin force retry after pre-chain failure) may refresh.
+    allowRefreshIfNeverReachedChain: true,
+  })
+  if ('error' in ledgerResolution) {
+    return {
+      status: 'failed',
+      error: ledgerResolution.error,
+      ledgerHash: ledgerResolution.ledgerHash,
+      soldCount: ledgerResolution.soldCount,
+      requestTx: raffle.draw_vrf_request_tx,
+      randomnessAccount: raffle.draw_vrf_account,
     }
   }
+
+  const { soldCount, ledgerHash } = ledgerResolution
 
   const existingStatus = (raffle.draw_vrf_status ?? '').trim()
   const existingAccount = (raffle.draw_vrf_account ?? '').trim()
@@ -111,6 +99,9 @@ export async function runRaffleVrfFlow(params: {
         draw_vrf_provider: VRF_PROVIDER_SWITCHBOARD,
         draw_vrf_status: 'failed',
         draw_vrf_error: commit.error,
+        draw_vrf_account: null,
+        draw_vrf_request_tx: null,
+        draw_vrf_fulfill_tx: null,
         draw_vrf_requested_at: new Date().toISOString(),
       })
       return {

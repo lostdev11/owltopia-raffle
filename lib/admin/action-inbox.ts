@@ -283,7 +283,7 @@ export async function buildAdminActionInbox(now = new Date()): Promise<AdminActi
       severity: 'warning',
       fingerprint: `${r.end_time ?? ''}|${r.updated_at ?? ''}`,
       title: (r.title ?? 'Untitled raffle').trim() || 'Untitled raffle',
-      detail: 'Ended — ready to draw, no winner selected yet',
+      detail: 'Ended — ready to draw, no winner selected yet. Full admin can Force draw on the raffle admin page.',
       href: `/admin/raffles/${r.id}`,
       occurredAt: r.end_time,
     })

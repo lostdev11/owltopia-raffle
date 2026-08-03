@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
@@ -20,11 +20,11 @@ import {
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send, Download, Upload } from 'lucide-react'
+import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send, Download, Upload, Dices } from 'lucide-react'
 import type { Raffle, Entry } from '@/lib/types'
 import type { AdminRole } from '@/lib/db/admins'
 import Link from 'next/link'
-import { getRaffleMinimum } from '@/lib/db/raffles'
+import { getRaffleMinimum, canSelectWinner, calculateTicketsSold } from '@/lib/db/raffles'
 import { raffleAllowsAdminFundsEscrowRefund } from '@/lib/raffles/ticket-escrow-policy'
 import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorder'
 import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
@@ -81,6 +81,10 @@ export function AdminRaffleActions({
   const [fixMintInput, setFixMintInput] = useState('')
   const [fixingMint, setFixingMint] = useState(false)
   const [sendingPrizeToWinner, setSendingPrizeToWinner] = useState(false)
+  const [retryingVrf, setRetryingVrf] = useState(false)
+  const [forceDrawOpen, setForceDrawOpen] = useState(false)
+  const [forceDrawing, setForceDrawing] = useState(false)
+  const [forceDrawBypassMin, setForceDrawBypassMin] = useState(false)
   const [imageFallbackInput, setImageFallbackInput] = useState(raffle.image_fallback_url ?? '')
   const [savingImageFallback, setSavingImageFallback] = useState(false)
   const [uploadingImageFallback, setUploadingImageFallback] = useState(false)
@@ -454,6 +458,108 @@ export function AdminRaffleActions({
       })
     } finally {
       setSendingPrizeToWinner(false)
+    }
+  }
+
+  const vrfStatus = (raffle.draw_vrf_status ?? '').trim()
+  const isVrfRaffle =
+    (raffle.draw_algo ?? '').trim() === 'owltopia-draw-v3-vrf' ||
+    vrfStatus === 'failed' ||
+    vrfStatus === 'pending' ||
+    vrfStatus === 'fulfilled'
+  const canRetryVrfDraw =
+    isFullAdmin &&
+    !(raffle.winner_wallet ?? '').trim() &&
+    ((raffle.draw_algo ?? '').trim() === 'owltopia-draw-v3-vrf' ||
+      vrfStatus === 'failed' ||
+      vrfStatus === 'pending')
+
+  const ticketsSoldForDraw = useMemo(() => calculateTicketsSold(entries), [entries])
+  const canDrawNormally = useMemo(() => canSelectWinner(raffle, entries), [raffle, entries])
+  const minTicketsForDraw = getRaffleMinimum(raffle)
+  const statusForDraw = (raffle.status ?? '').trim().toLowerCase()
+  const canForceDraw =
+    isFullAdmin &&
+    !(raffle.winner_wallet ?? '').trim() &&
+    (statusForDraw === 'live' ||
+      statusForDraw === 'ready_to_draw' ||
+      statusForDraw === 'pending_min_not_met') &&
+    ticketsSoldForDraw > 0 &&
+    !(
+      (raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)) && !raffle.prize_deposited_at
+    )
+
+  const handleRetryVrfDraw = async () => {
+    setRetryingVrf(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/admin/raffles/${raffle.id}/retry-vrf-draw`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.ok) {
+        setMessage({
+          type: 'success',
+          text: `VRF draw completed. Winner: ${data.winnerWallet ?? 'selected'}`,
+        })
+        router.refresh()
+      } else {
+        setMessage({
+          type: 'error',
+          text:
+            typeof data?.error === 'string'
+              ? data.error
+              : 'VRF retry did not complete — check draw status',
+        })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'VRF retry failed',
+      })
+    } finally {
+      setRetryingVrf(false)
+    }
+  }
+
+  const handleForceDraw = async () => {
+    setForceDrawing(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/admin/raffles/${raffle.id}/force-draw`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ forceOverride: forceDrawBypassMin }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && (data.ok || data.success)) {
+        setForceDrawOpen(false)
+        setMessage({
+          type: 'success',
+          text:
+            typeof data.message === 'string'
+              ? data.message
+              : `Winner selected: ${data.winnerWallet ?? 'ok'}`,
+        })
+        router.refresh()
+      } else {
+        setMessage({
+          type: 'error',
+          text:
+            typeof data?.error === 'string'
+              ? data.error
+              : 'Force draw did not complete',
+        })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Force draw failed',
+      })
+    } finally {
+      setForceDrawing(false)
     }
   }
 
@@ -1618,6 +1724,144 @@ export function AdminRaffleActions({
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
+            )}
+            {canForceDraw && (
+              <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 space-y-2">
+                <p className="text-sm font-medium text-sky-800 dark:text-sky-300">
+                  Force draw winner
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  For stuck listings (failed VRF, ready_to_draw with a future end time, cron not
+                  picking up). Runs winner selection now
+                  {isVrfRaffle ? ' and retries Switchboard VRF when needed' : ''}. Does not wait for
+                  end_time.
+                </p>
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                  <dt className="text-muted-foreground">Status</dt>
+                  <dd className="font-mono">{raffle.status ?? '—'}</dd>
+                  <dt className="text-muted-foreground">Tickets sold</dt>
+                  <dd className="font-mono tabular-nums">{ticketsSoldForDraw}</dd>
+                  {minTicketsForDraw != null && (
+                    <>
+                      <dt className="text-muted-foreground">Min tickets</dt>
+                      <dd className="font-mono tabular-nums">
+                        {minTicketsForDraw}
+                        {canDrawNormally ? ' ✓' : ' (not met)'}
+                      </dd>
+                    </>
+                  )}
+                  {isVrfRaffle && (
+                    <>
+                      <dt className="text-muted-foreground">VRF</dt>
+                      <dd className="font-mono break-all">
+                        {vrfStatus || raffle.draw_algo || 'scheduled'}
+                      </dd>
+                    </>
+                  )}
+                </dl>
+                {raffle.draw_vrf_error && (
+                  <p className="text-xs font-mono text-destructive break-all">{raffle.draw_vrf_error}</p>
+                )}
+                <Button
+                  type="button"
+                  className="bg-sky-600 hover:bg-sky-700 touch-manipulation min-h-[44px]"
+                  onClick={() => {
+                    setForceDrawBypassMin(!canDrawNormally)
+                    setForceDrawOpen(true)
+                  }}
+                >
+                  <Dices className="h-4 w-4 mr-2 shrink-0" />
+                  Force draw winner
+                </Button>
+                <Dialog open={forceDrawOpen} onOpenChange={setForceDrawOpen}>
+                  <DialogContent className="max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>Force draw winner?</DialogTitle>
+                      <DialogDescription>
+                        This selects a winner immediately for{' '}
+                        <span className="font-medium text-foreground">{raffle.title}</span> (
+                        {ticketsSoldForDraw} confirmed ticket{ticketsSoldForDraw === 1 ? '' : 's'}
+                        ). {isVrfRaffle ? 'VRF will be retried if needed. ' : ''}
+                        Cannot be undone without voiding the winner.
+                      </DialogDescription>
+                    </DialogHeader>
+                    {!canDrawNormally && (
+                      <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+                        <Switch
+                          id="force-draw-bypass-min"
+                          checked={forceDrawBypassMin}
+                          onCheckedChange={setForceDrawBypassMin}
+                          ariaLabel="Bypass minimum tickets and force draw"
+                        />
+                        <div className="space-y-1">
+                          <Label htmlFor="force-draw-bypass-min" className="text-sm font-medium">
+                            Bypass minimum tickets
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            Threshold not met ({ticketsSoldForDraw}
+                            {minTicketsForDraw != null ? ` / ${minTicketsForDraw}` : ''}). Required to
+                            force a draw below the minimum.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    {canDrawNormally && (
+                      <label className="flex items-start gap-3 text-sm cursor-pointer">
+                        <Switch
+                          id="force-draw-bypass-min-optional"
+                          checked={forceDrawBypassMin}
+                          onCheckedChange={setForceDrawBypassMin}
+                          ariaLabel="Also bypass minimum tickets"
+                        />
+                        <span className="text-muted-foreground text-xs leading-relaxed">
+                          Bypass minimum tickets (optional — threshold is already met)
+                        </span>
+                      </label>
+                    )}
+                    <DialogFooter className="gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => setForceDrawOpen(false)}
+                        disabled={forceDrawing}
+                        className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        className="bg-sky-600 hover:bg-sky-700 touch-manipulation min-h-[44px] w-full sm:w-auto"
+                        disabled={forceDrawing || (!canDrawNormally && !forceDrawBypassMin)}
+                        onClick={handleForceDraw}
+                      >
+                        {forceDrawing ? 'Drawing…' : 'Confirm force draw'}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            )}
+            {canRetryVrfDraw && !canForceDraw && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  VRF draw {vrfStatus === 'pending' ? 'pending' : vrfStatus === 'failed' ? 'failed' : 'not finished'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Retries Switchboard randomness and selects a winner against the frozen ticket ledger.
+                  If the previous attempt never reached the chain (no VRF request tx), the ledger is
+                  refreshed from current confirmed tickets first.
+                </p>
+                {raffle.draw_vrf_error && (
+                  <p className="text-xs font-mono text-destructive break-all">{raffle.draw_vrf_error}</p>
+                )}
+                <Button
+                  type="button"
+                  className="bg-amber-600 hover:bg-amber-700 touch-manipulation min-h-[44px]"
+                  disabled={retryingVrf}
+                  onClick={handleRetryVrfDraw}
+                >
+                  <Dices className="h-4 w-4 mr-2 shrink-0" />
+                  {retryingVrf ? 'Retrying VRF…' : 'Retry VRF draw'}
+                </Button>
+              </div>
             )}
             {canAdminSendPrizeFromEscrow && (
               <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-2">

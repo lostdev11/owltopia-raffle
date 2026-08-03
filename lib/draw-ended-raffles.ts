@@ -19,6 +19,7 @@ import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-esc
 import { buildMinThresholdMissExtensionPatch } from '@/lib/raffles/min-threshold-extension'
 import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
 import type { Raffle } from '@/lib/types'
 
 export type DrawResult = {
@@ -46,8 +47,8 @@ export async function processEndedRaffleByIdIfApplicable(raffleId: string): Prom
   ) {
     return null
   }
-  const now = new Date()
-  if (new Date(raffle.end_time) > now) return null
+  // ready_to_draw is due even if end_time was pushed into the future after a failed draw.
+  if (!raffleIsDueForWinnerDraw(raffle)) return null
   const needsPrizeEscrow =
     (raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)) && !raffle.prize_deposited_at
   if (needsPrizeEscrow) return null
@@ -97,12 +98,27 @@ export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult>
     }
 
     const winnerWallet = await selectWinner(raffle.id)
+    if (winnerWallet) {
+      return {
+        raffleId: raffle.id,
+        raffleTitle: raffle.title,
+        success: true,
+        winnerWallet,
+        error: null,
+      }
+    }
+    const latest = await getRaffleById(raffle.id)
+    const vrfErr = (latest?.draw_vrf_error ?? '').trim()
+    const vrfStatus = (latest?.draw_vrf_status ?? '').trim()
     return {
       raffleId: raffle.id,
       raffleTitle: raffle.title,
-      success: !!winnerWallet,
-      winnerWallet: winnerWallet ?? null,
-      error: winnerWallet ? null : 'No confirmed entries found',
+      success: false,
+      winnerWallet: null,
+      error:
+        vrfStatus === 'failed' || vrfStatus === 'pending'
+          ? vrfErr || `VRF draw ${vrfStatus} — admin can retry`
+          : 'No confirmed entries found or draw did not complete',
     }
   } catch (error) {
     return {
