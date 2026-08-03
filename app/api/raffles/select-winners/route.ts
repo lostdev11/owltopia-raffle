@@ -14,6 +14,7 @@ import { buildMinThresholdMissExtensionPatch } from '@/lib/raffles/min-threshold
 import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
+import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
@@ -42,9 +43,8 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Check if raffle has ended (use end_time only; after restore that is the extended time)
-      const endTimeToCheck = new Date(raffle.end_time)
-      if (endTimeToCheck > new Date()) {
+      // Due for draw: end_time passed, or already marked ready_to_draw (stuck VRF / admin extension).
+      if (!raffleIsDueForWinnerDraw(raffle) && body.forceOverride !== true) {
         return NextResponse.json(
           { error: 'Raffle has not ended yet' },
           { status: 400 }
