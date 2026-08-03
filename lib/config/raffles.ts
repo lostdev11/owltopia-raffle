@@ -1,7 +1,9 @@
+import { OWLTOPIA_GEN2_COLLECTION_MINT } from '@/lib/owltopia-marketplace-links'
+
 /**
  * Platform fee (deducted from every ticket sale).
  * - 2% for allowlisted partner community creators (`partner_community_creators`).
- * - 3% for raffle creators who hold the Owltopia (Owl) NFT.
+ * - 3% for raffle creators who hold Gen 1 or Gen 2 Owltopia Owl NFTs.
  * - 6% for non-holders.
  * Applied at purchase time via getPaymentSplit and at settlement.
  */
@@ -9,13 +11,37 @@ export const PARTNER_COMMUNITY_FEE_BPS = 200 // 2%
 export const HOLDER_FEE_BPS = 300   // 3%
 export const STANDARD_FEE_BPS = 600 // 6%
 
-// Owltopia NFT collection address for holder check (3% vs 6% fee).
+// Owltopia Gen 1 NFT collection address for holder check (3% vs 6% fee).
 // Set via OWLTOPIA_COLLECTION_ADDRESS or NEXT_PUBLIC_OWLTOPIA_COLLECTION_ADDRESS in env.
 const RAW =
   typeof process !== 'undefined' && process.env?.OWLTOPIA_COLLECTION_ADDRESS?.trim() ||
   typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_OWLTOPIA_COLLECTION_ADDRESS?.trim() ||
   ''
 export const OWLTOPIA_COLLECTION_ADDRESS = RAW || 'REPLACE_WITH_COLLECTION'
+
+/**
+ * Mainnet Gen 2 collection mint for raffle holder fee (and related Owltopia holder checks).
+ * Prefer NEXT_PUBLIC_GEN2_COLLECTION_MINT; fall back to the known production mint.
+ * Always mainnet — do not use the Gen2 devnet mint env (same rule as Gen 1 DAS checks).
+ */
+export function resolveGen2HolderFeeCollectionAddress(): string {
+  const fromEnv =
+    (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_GEN2_COLLECTION_MINT?.trim()) || ''
+  return fromEnv || OWLTOPIA_GEN2_COLLECTION_MINT
+}
+
+/** Gen 1 + Gen 2 collection pubkeys that qualify for the 3% raffle creator fee tier. */
+export function getOwltopiaHolderFeeCollectionAddresses(): string[] {
+  const out: string[] = []
+  const add = (addr: string | null | undefined) => {
+    const t = addr?.trim()
+    if (!t || t === 'REPLACE_WITH_COLLECTION') return
+    if (!out.includes(t)) out.push(t)
+  }
+  add(OWLTOPIA_COLLECTION_ADDRESS)
+  add(resolveGen2HolderFeeCollectionAddress())
+  return out
+}
 
 export const BPS_DENOMINATOR = 10_000
 

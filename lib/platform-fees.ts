@@ -1,5 +1,5 @@
 import { PublicKey } from '@solana/web3.js'
-import { OWLTOPIA_COLLECTION_ADDRESS } from '@/lib/config/raffles'
+import { getOwltopiaHolderFeeCollectionAddresses } from '@/lib/config/raffles'
 import { dasAssetBelongsToCollection } from '@/lib/helius/das-asset-collection'
 import { OWLTOPIA_DAS_CACHE_TTL_MS } from '@/lib/dev-budget'
 import { getOwltopiaSnapshotIfFresh, upsertOwltopiaHolderSnapshot } from '@/lib/db/owltopia-holder-snapshot'
@@ -21,6 +21,10 @@ function retryAfterMsFromResponse(res: Response): number {
   return 1_000
 }
 
+function dasAssetBelongsToAnyCollection(item: unknown, collectionAddresses: string[]): boolean {
+  return collectionAddresses.some((addr) => dasAssetBelongsToCollection(item, addr))
+}
+
 export type OwnsOwltopiaOptions = {
   /** When true, always verify against chain/DAS and do not use cache. Use for dashboard and when setting raffle fee. */
   skipCache?: boolean
@@ -37,13 +41,13 @@ export type OwnsOwltopiaOptions = {
 }
 
 /**
- * Check whether a wallet currently owns an NFT from the Owltopia collection.
+ * Check whether a wallet currently owns an NFT from Owltopia Gen 1 or Gen 2.
  *
  * - Runs server-side only.
- * - Uses Helius DAS searchAssets (owner + collection) when HELIUS_API_KEY + collection are set;
+ * - Uses Helius DAS searchAssets (owner + collection) when HELIUS_API_KEY + at least one collection are set;
  *   if that returns no hit, scans the wallet via getAssetsByOwner with sortBy id + after (keyset), up to 50k–200k NFTs.
  * - Uses mainnet Helius for DAS even when SOLANA_RPC_URL is devnet (Owltopia NFTs are mainnet).
- * - Positive holder result requires Helius + OWLTOPIA_COLLECTION_ADDRESS; fungible OWL SPL balance is not used.
+ * - Positive holder result requires Helius + Gen 1 and/or Gen 2 collection addresses; fungible OWL SPL balance is not used.
  * - Validates wallet address format; invalid addresses return false.
  * - Pass { skipCache: true } to force a fresh verification (e.g. dashboard load, creating a raffle).
  * - When skipCache is false, a Supabase row from the last 7 days may short-circuit Helius (see owltopia_holder_snapshots).
@@ -81,11 +85,11 @@ export async function ownsOwltopia(
     }
   }
 
-  const collectionAddress = OWLTOPIA_COLLECTION_ADDRESS?.trim()
+  const collectionAddresses = getOwltopiaHolderFeeCollectionAddresses()
 
   // 1) Helius DAS (mainnet): Owltopia NFTs live on mainnet — use mainnet Helius even if app RPC is devnet.
   const heliusApiKey = process.env.HELIUS_API_KEY?.trim()
-  if (heliusApiKey && collectionAddress && collectionAddress !== 'REPLACE_WITH_COLLECTION') {
+  if (heliusApiKey && collectionAddresses.length > 0) {
     const heliusUrl = `https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(heliusApiKey)}`
 
     const dasOptions = {
@@ -106,64 +110,68 @@ export async function ownsOwltopia(
 
       let skipOwnerScan = false
 
-      for (const tokenType of tokenTypes) {
-        const searchBody = () =>
-          JSON.stringify({
-            jsonrpc: '2.0',
-            id: `owltopia-ownership-search-${tokenType}`,
-            method: 'searchAssets',
-            params: {
-              ownerAddress: normalized,
-              tokenType,
-              page: 1,
-              limit: searchLimit,
-              burnt: false,
-              grouping: ['collection', collectionAddress],
-              options: {
-                showUnverifiedCollections: true,
+      outerSearch: for (const collectionAddress of collectionAddresses) {
+        for (const tokenType of tokenTypes) {
+          const searchBody = () =>
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: `owltopia-ownership-search-${collectionAddress.slice(0, 8)}-${tokenType}`,
+              method: 'searchAssets',
+              params: {
+                ownerAddress: normalized,
+                tokenType,
+                page: 1,
+                limit: searchLimit,
+                burnt: false,
+                grouping: ['collection', collectionAddress],
+                options: {
+                  showUnverifiedCollections: true,
+                },
               },
-            },
-          })
+            })
 
-        let searchRes = await fetch(heliusUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: searchBody(),
-        })
-        if (searchRes.status === 429) {
-          await sleep(retryAfterMsFromResponse(searchRes))
-          searchRes = await fetch(heliusUrl, {
+          let searchRes = await fetch(heliusUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: searchBody(),
           })
-        }
-
-        if (!searchRes.ok) {
           if (searchRes.status === 429) {
-            skipOwnerScan = true
-            console.warn(
-              'Helius searchAssets rate limited after retry; skipping DAS owner scan (holder check inconclusive → not holder)'
-            )
-            break
+            await sleep(retryAfterMsFromResponse(searchRes))
+            searchRes = await fetch(heliusUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: searchBody(),
+            })
           }
-          console.error('Helius searchAssets returned non-OK status', searchRes.status)
-          continue
-        }
 
-        const searchJson: { error?: unknown; result?: { items?: unknown[] } } = await searchRes.json().catch(() => ({}))
-        if (searchJson.error) continue
+          if (!searchRes.ok) {
+            if (searchRes.status === 429) {
+              skipOwnerScan = true
+              console.warn(
+                'Helius searchAssets rate limited after retry; skipping DAS owner scan (holder check inconclusive → not holder)'
+              )
+              break outerSearch
+            }
+            console.error('Helius searchAssets returned non-OK status', searchRes.status)
+            continue
+          }
 
-        const searchItems = searchJson.result?.items
-        if (!Array.isArray(searchItems) || searchItems.length === 0) continue
+          const searchJson: { error?: unknown; result?: { items?: unknown[] } } = await searchRes
+            .json()
+            .catch(() => ({}))
+          if (searchJson.error) continue
 
-        if (searchItems.some((item) => dasAssetBelongsToCollection(item, collectionAddress))) {
-          ownsOwltopiaCache.set(normalized, {
-            value: true,
-            expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
-          })
-          await upsertOwltopiaHolderSnapshot(normalized, true)
-          return true
+          const searchItems = searchJson.result?.items
+          if (!Array.isArray(searchItems) || searchItems.length === 0) continue
+
+          if (searchItems.some((item) => dasAssetBelongsToCollection(item, collectionAddress))) {
+            ownsOwltopiaCache.set(normalized, {
+              value: true,
+              expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
+            })
+            await upsertOwltopiaHolderSnapshot(normalized, true)
+            return true
+          }
         }
       }
 
@@ -179,88 +187,88 @@ export async function ownsOwltopia(
 
       if (!skipOwnerScan)
         for (let batch = 0; batch < maxBatches; batch++) {
-        const params: Record<string, unknown> = {
-          ownerAddress: normalized,
-          limit,
-          sortBy: { sortBy: 'id', sortDirection: 'asc' },
-          options: dasOptions,
-        }
-        if (after) params.after = after
+          const params: Record<string, unknown> = {
+            ownerAddress: normalized,
+            limit,
+            sortBy: { sortBy: 'id', sortDirection: 'asc' },
+            options: dasOptions,
+          }
+          if (after) params.after = after
 
-        let res = await fetch(heliusUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: `owltopia-ownership-${batch}`,
-            method: 'getAssetsByOwner',
-            params,
-          }),
-        })
-
-        if (res.status === 429) {
-          await sleep(retryAfterMsFromResponse(res))
-          res = await fetch(heliusUrl, {
+          let res = await fetch(heliusUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               jsonrpc: '2.0',
-              id: `owltopia-ownership-${batch}-retry`,
+              id: `owltopia-ownership-${batch}`,
               method: 'getAssetsByOwner',
               params,
             }),
           })
-        }
 
-        if (!res.ok) {
-          console.error('Helius getAssetsByOwner returned non-OK status', res.status)
-          ownerScanAborted = true
-          break
-        }
+          if (res.status === 429) {
+            await sleep(retryAfterMsFromResponse(res))
+            res = await fetch(heliusUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: `owltopia-ownership-${batch}-retry`,
+                method: 'getAssetsByOwner',
+                params,
+              }),
+            })
+          }
 
-        const json: { error?: unknown; result?: { items?: unknown[] } } = await res.json().catch(() => ({}))
-        if (json.error) {
-          ownerScanAborted = true
-          break
-        }
+          if (!res.ok) {
+            console.error('Helius getAssetsByOwner returned non-OK status', res.status)
+            ownerScanAborted = true
+            break
+          }
 
-        const items = json.result?.items
-        if (!Array.isArray(items) || items.length === 0) {
-          ownsOwltopiaCache.set(normalized, {
-            value: false,
-            expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
-          })
-          await upsertOwltopiaHolderSnapshot(normalized, false)
-          return false
-        }
+          const json: { error?: unknown; result?: { items?: unknown[] } } = await res.json().catch(() => ({}))
+          if (json.error) {
+            ownerScanAborted = true
+            break
+          }
 
-        for (const item of items) {
-          if (dasAssetBelongsToCollection(item, collectionAddress)) {
+          const items = json.result?.items
+          if (!Array.isArray(items) || items.length === 0) {
             ownsOwltopiaCache.set(normalized, {
-              value: true,
+              value: false,
               expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
             })
-            await upsertOwltopiaHolderSnapshot(normalized, true)
-            return true
+            await upsertOwltopiaHolderSnapshot(normalized, false)
+            return false
           }
-        }
 
-        if (items.length < limit) {
-          ownsOwltopiaCache.set(normalized, {
-            value: false,
-            expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
-          })
-          await upsertOwltopiaHolderSnapshot(normalized, false)
-          return false
-        }
+          for (const item of items) {
+            if (dasAssetBelongsToAnyCollection(item, collectionAddresses)) {
+              ownsOwltopiaCache.set(normalized, {
+                value: true,
+                expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
+              })
+              await upsertOwltopiaHolderSnapshot(normalized, true)
+              return true
+            }
+          }
 
-        const last = items[items.length - 1] as { id?: string }
-        if (typeof last?.id !== 'string' || !last.id) {
-          ownerScanAborted = true
-          break
+          if (items.length < limit) {
+            ownsOwltopiaCache.set(normalized, {
+              value: false,
+              expiresAt: now + OWLTOPIA_DAS_CACHE_TTL_MS,
+            })
+            await upsertOwltopiaHolderSnapshot(normalized, false)
+            return false
+          }
+
+          const last = items[items.length - 1] as { id?: string }
+          if (typeof last?.id !== 'string' || !last.id) {
+            ownerScanAborted = true
+            break
+          }
+          after = last.id
         }
-        after = last.id
-      }
 
       if (!skipOwnerScan && !ownerScanAborted) {
         ownsOwltopiaCache.set(normalized, {
@@ -293,4 +301,3 @@ export async function ownsOwltopia(
   })
   return false
 }
-

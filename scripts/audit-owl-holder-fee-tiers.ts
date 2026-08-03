@@ -12,7 +12,8 @@
  *   npm run audit:owl-tiers
  *
  * Requires: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY, HELIUS_API_KEY,
- *   OWLTOPIA_COLLECTION_ADDRESS (or NEXT_PUBLIC_*), same as production holder checks.
+ *   OWLTOPIA_COLLECTION_ADDRESS (or NEXT_PUBLIC_*) and/or NEXT_PUBLIC_GEN2_COLLECTION_MINT,
+ *   same as production holder checks (Gen 1 or Gen 2 → 3% tier).
  */
 import { loadEnvConfig } from '@next/env'
 import { createClient } from '@supabase/supabase-js'

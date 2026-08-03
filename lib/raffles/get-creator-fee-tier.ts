@@ -14,7 +14,7 @@ export type GetCreatorFeeTierOptions = {
 }
 
 /**
- * Fee tier for the raffle creator: 2% partner allowlist, else 3% Owl holder / 6% standard.
+ * Fee tier for the raffle creator: 2% partner allowlist, else 3% Gen 1/Gen 2 Owl holder / 6% standard.
  * Used to deduct the platform fee from every ticket sale (split at purchase and at settlement).
  */
 export async function getCreatorFeeTier(
