@@ -159,7 +159,7 @@ export function DashboardOverviewSection({
     feeTier.feeBps === 300 ? '3%' : feeTier.feeBps === 600 ? '6%' : `${(feeTier.feeBps / 100).toFixed(1)}%`
   const feeReason =
     feeTier.reason === 'holder'
-      ? 'Owltopia holder rate'
+      ? 'Owltopia Gen 1 / Gen 2 holder rate'
       : feeTier.reason === 'partner_community'
         ? partnerDisplayName
           ? `Partner · ${partnerDisplayName}`

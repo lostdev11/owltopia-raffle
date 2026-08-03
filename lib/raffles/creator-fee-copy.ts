@@ -15,7 +15,7 @@ function reasonLabel(reason: PlatformFeeReason): string {
     case 'partner_community':
       return 'verified partner'
     case 'holder':
-      return 'Owltopia NFT holder'
+      return 'Owltopia Gen 1 / Gen 2 holder'
     default:
       return 'standard creator'
   }
@@ -39,7 +39,7 @@ export function buildCreateRaffleFeeCopy(opts: {
       heading: 'Platform fees',
       lines: [
         ...baseLines,
-        `Rates: ${PARTNER_PCT}% for verified partners, ${HOLDER_PCT}% for Owltopia NFT holders, or ${STANDARD_PCT}% otherwise. Connect your wallet to see your rate.`,
+        `Rates: ${PARTNER_PCT}% for verified partners, ${HOLDER_PCT}% for Owltopia Gen 1 or Gen 2 holders, or ${STANDARD_PCT}% otherwise. Connect your wallet to see your rate.`,
       ],
       yourRate: null,
     }
