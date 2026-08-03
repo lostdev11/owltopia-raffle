@@ -12,8 +12,9 @@ import {
 import { sendOwlSendSpecialNft } from '@/lib/owl-send/send-special-nft'
 
 /**
- * Prefer one SPL multi-transfer + fee. If that fails because assets are not simple SPL,
- * fall back to single-NFT special paths (only when the batch has 1 line).
+ * Prefer one SPL multi-transfer + fee (Gen2 classic NFTs — leftover CM delegates are fine).
+ * Only fall back to Token Metadata / Core / cNFT when the batch is a **single** NFT.
+ * Never require per-NFT approvals for a multi Gen2 batch.
  */
 export async function sendOwlSendNftBatch(params: {
   connection: Connection
@@ -32,8 +33,6 @@ export async function sendOwlSendNftBatch(params: {
   })
   if (spl.ok) return spl
 
-  // Only treat holder-resolve / asset-type errors as "needs special path".
-  // Do not remap every failedMints batch (wallet reject, frozen, timeout) as Core/pNFT.
   const needsSpecial =
     /compressed|core|pnft|token metadata|transferable spl|could not find/i.test(spl.error)
 
@@ -55,7 +54,7 @@ export async function sendOwlSendNftBatch(params: {
     const label = names.length > 0 ? names.join(', ') : 'One NFT in this batch'
     return {
       ok: false,
-      error: `${label} could not use classic SPL multi-send. Deselect it and send alone (batch of 1), or send only classic SPL NFTs together.`,
+      error: `${label} needs a separate send (cNFT / Core / pNFT). Deselect it and send alone.`,
       failedMints: spl.failedMints,
     }
   }

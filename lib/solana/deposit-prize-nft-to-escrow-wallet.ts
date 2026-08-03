@@ -93,8 +93,10 @@ export async function depositPrizeNftToEscrowFromWallet(
           : undefined
       const amount =
         typeof amountRaw === 'string' ? Number(amountRaw) : typeof amountRaw === 'number' ? amountRaw : 0
-      const delegate = typeof info?.delegate === 'string' ? info.delegate : null
-      if (selectedMint === mintPk.toBase58() && amount >= 1 && !delegate) {
+      // Gen2 CM thaw often leaves a leftover delegate — still owner-transferable when not frozen.
+      const state =
+        typeof info?.state === 'string' ? String(info.state).toLowerCase() : ''
+      if (selectedMint === mintPk.toBase58() && amount >= 1 && state !== 'frozen') {
         if (isSplProgram) {
           resolvedHolder = { tokenProgram: TOKEN_PROGRAM_ID, tokenAccount: selectedTokenAccount }
         } else if (isToken2022) {
@@ -109,10 +111,14 @@ export async function depositPrizeNftToEscrowFromWallet(
   for (let attempt = 0; attempt < HOLDER_LOOKUP_MAX_ATTEMPTS; attempt++) {
     if (resolvedHolder) break
     const h = await getNftHolderInWallet(connection, mintPk, publicKey, 'processed')
-    if (h && 'delegated' in h && h.delegated) {
-      return { ok: false, error: 'This NFT is staked or delegated. Unstake it before sending to escrow.' }
-    }
     if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
+      if (h.isFrozen) {
+        return {
+          ok: false,
+          error:
+            'This NFT is frozen on-chain (nested or mint-locked). Unnest/thaw it before sending to escrow. A leftover Gen2 stake delegate alone is fine.',
+        }
+      }
       resolvedHolder = h
       break
     }

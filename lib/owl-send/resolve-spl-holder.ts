@@ -8,6 +8,7 @@ import {
   getAccount,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token'
+import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
 
 export type OwlSendSplHolder = {
   tokenProgram: PublicKey
@@ -122,28 +123,11 @@ export async function resolveOwlSendSplHolder(params: {
     if (t22) return t22
   }
 
-  // 3) Mint-filtered wallet scan (non-ATA holds)
+  // 3) Shared wallet holder lookup (now accepts leftover Gen2 CM delegates).
   try {
-    const byMint = await connection.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed')
-    for (const { pubkey, account } of byMint.value) {
-      const info = account.data?.parsed?.info
-      if (!info || (info.mint as string) !== mintStr) continue
-      const programOwner = account.owner
-      const isT22 = programOwner.equals(TOKEN_2022_PROGRAM_ID)
-      const isSpl = programOwner.equals(TOKEN_PROGRAM_ID)
-      if (!isT22 && !isSpl) continue
-      const amountRaw = info.tokenAmount?.amount
-      const amount =
-        typeof amountRaw === 'string'
-          ? Number(amountRaw)
-          : typeof amountRaw === 'number'
-            ? amountRaw
-            : 0
-      if (!Number.isFinite(amount) || amount < 1) continue
-      return {
-        tokenProgram: isT22 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID,
-        tokenAccount: pubkey,
-      }
+    const h = await getNftHolderInWallet(connection, mint, owner, 'confirmed')
+    if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
+      return { tokenProgram: h.tokenProgram, tokenAccount: h.tokenAccount }
     }
   } catch {
     /* fall through */
@@ -151,5 +135,6 @@ export async function resolveOwlSendSplHolder(params: {
 
   // 4) Last resort: Gen2s are classic ATAs — use derived address when DAS only gave mint.
   // Transfer will fail on-chain if the account is empty; better than false Core/pNFT soft-block.
+  void mintStr
   return { tokenProgram: TOKEN_PROGRAM_ID, tokenAccount: classicAta }
 }

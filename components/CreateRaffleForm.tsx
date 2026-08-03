@@ -884,9 +884,9 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       try {
         const mintPk = new PublicKey(prizeNft.mint)
         const stakedCheck = await getNftHolderInWallet(connection, mintPk, publicKey, 'confirmed')
-        if (stakedCheck && 'delegated' in stakedCheck && stakedCheck.delegated) {
+        if (stakedCheck && 'tokenProgram' in stakedCheck && stakedCheck.isFrozen) {
           alert(
-            'This NFT is staked or delegated. Unstake it before creating a raffle—it cannot be sent to escrow while staked.'
+            'This NFT is frozen on-chain (nested or mint-locked). Unnest/thaw it before creating a raffle. A leftover Gen2 stake delegate alone is fine.'
           )
           return
         }
@@ -1196,14 +1196,14 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             for (let attempt = 0; attempt < HOLDER_LOOKUP_MAX_ATTEMPTS; attempt++) {
               if (resolvedHolder) break
               const h = await getNftHolderInWallet(connection, mintPk, publicKey, 'processed')
-              if (h && 'delegated' in h && h.delegated) {
-                alert(
-                  'This NFT is staked or delegated. Unstake it, then complete the deposit from the raffle page (your draft is saved).'
-                )
-                router.push(`/raffles/${raffle.slug}?deposit=1`)
-                return
-              }
               if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
+                if (h.isFrozen) {
+                  alert(
+                    'This NFT is frozen on-chain (nested or mint-locked). Unnest/thaw it, then complete the deposit from the raffle page (your draft is saved).'
+                  )
+                  router.push(`/raffles/${raffle.slug}?deposit=1`)
+                  return
+                }
                 resolvedHolder = h
                 break
               }

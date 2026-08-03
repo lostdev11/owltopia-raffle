@@ -20,6 +20,9 @@ interface HeliusAsset {
     delegate?: string | null
     owner?: string
   }
+  compression?: {
+    compressed?: boolean
+  }
   collection?: { address?: string; key?: string; name?: string }
   content?: {
     json_uri?: string
@@ -283,6 +286,7 @@ export async function GET(request: NextRequest) {
           item.ownership?.delegated === true ||
           (typeof item.ownership?.delegate === 'string' && item.ownership.delegate.length > 0)
         const iface = typeof item.interface === 'string' ? item.interface : null
+        const compressed = item.compression?.compressed === true
 
         return {
           mint,
@@ -298,6 +302,7 @@ export async function GET(request: NextRequest) {
           frozen,
           delegated,
           interface: iface,
+          compressed,
         }
       })
 

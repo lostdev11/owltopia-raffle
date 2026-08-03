@@ -22,7 +22,10 @@ import {
 import { Keypair } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-locks'
-import { owlSendNftLockLabel } from '@/lib/owl-send/picker-eligibility'
+import {
+  gateOwlSendCnftSelection,
+  owlSendNftLockLabel,
+} from '@/lib/owl-send/picker-eligibility'
 import { owlSendTokenAccountHint } from '@/lib/owl-send/resolve-spl-holder'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
 import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
@@ -360,7 +363,50 @@ assert.equal(merged[0]!.frozen, false)
 assert.equal(merged[0]!.name, 'Gen2 #1')
 
 assert.match(owlSendRetryHint('Owl #3 is frozen on-chain'), /Thaw locks|On-chain transfer rejected/)
-assert.match(owlSendRetryHint('Could not find a transferable SPL'), /batch of 1|classic SPL/)
+assert.match(owlSendRetryHint('Could not find a transferable SPL'), /cNFT|alone|Deselect/)
+
+assert.equal(
+  owlSendNftLockLabel({
+    mint: 'c1',
+    tokenAccount: 'c1',
+    amount: '1',
+    decimals: 0,
+    metadataUri: null,
+    name: 'Compressed',
+    image: null,
+    collectionName: null,
+    compressed: true,
+  }),
+  'cNFT'
+)
+{
+  const gate = gateOwlSendCnftSelection([
+    {
+      mint: 'g2',
+      tokenAccount: 'ata',
+      amount: '1',
+      decimals: 0,
+      metadataUri: null,
+      name: 'Gen2',
+      image: null,
+      collectionName: null,
+      compressed: false,
+    },
+    {
+      mint: 'c1',
+      tokenAccount: 'c1',
+      amount: '1',
+      decimals: 0,
+      metadataUri: null,
+      name: 'cNFT',
+      image: null,
+      collectionName: null,
+      compressed: true,
+    },
+  ])
+  assert.equal(gate.ok, false)
+  if (!gate.ok) assert.match(gate.title, /separately/i)
+}
 assert.match(owlSendRetryHint('User rejected the request'), /Wallet rejected/)
 
 {

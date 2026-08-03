@@ -1978,17 +1978,17 @@ export function RaffleDetailClient({
         }
         return
       }
-      if ('delegated' in holder && holder.delegated) {
-        logEscrowDepositAbort(depositLogCtx, 'nft_delegated_or_staked')
-        setDepositEscrowError(
-          'This NFT is currently staked or delegated. You can unstake and retry in-app, or send it manually to escrow from your wallet app, then paste the transfer signature below and tap Submit signature.'
-        )
-        setShowManualEscrowFallback(true)
-        return
-      }
       if (!('tokenProgram' in holder) || !('tokenAccount' in holder)) {
         logEscrowDepositAbort(depositLogCtx, 'holder_data_incomplete')
         setDepositEscrowError('NFT holder data incomplete. Try again.')
+        return
+      }
+      if (holder.isFrozen) {
+        logEscrowDepositAbort(depositLogCtx, 'nft_frozen_on_chain')
+        setDepositEscrowError(
+          'This NFT is frozen on-chain (nested or mint-locked). Unnest/thaw and retry, or send it manually to escrow and paste the signature. A leftover Gen2 stake delegate alone is fine.'
+        )
+        setShowManualEscrowFallback(true)
         return
       }
       const { tokenProgram, tokenAccount: sourceTokenAccount } = holder

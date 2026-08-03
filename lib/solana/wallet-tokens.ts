@@ -19,9 +19,15 @@ export const NFT_TOKEN_PROGRAM_IDS = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID] a
 export interface NftHolderInWallet {
   tokenProgram: typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID
   tokenAccount: PublicKey
+  /** Leftover Candy Machine / nest delegate may remain; owner can still transfer when not frozen. */
+  hasDelegate?: boolean
+  isFrozen?: boolean
 }
 
-/** Returned when the mint is in the wallet but only in a delegated (staked) account. */
+/**
+ * @deprecated Gen2 CM thaw leaves a delegate without freeze — that is still owner-transferable.
+ * Callers should use {@link NftHolderInWallet.isFrozen} (or on-chain freeze) instead of this shape.
+ */
 export interface NftHolderDelegated {
   delegated: true
 }
@@ -29,7 +35,10 @@ export interface NftHolderDelegated {
 /**
  * Find the token account that holds this mint in the given wallet (SPL Token or Token-2022).
  * Checks mint-filtered RPC first (no truncation), then ATA, then full scan.
- * If the only holding is delegated (staked), returns { delegated: true } so the UI can ask the user to unstake.
+ *
+ * Important: do **not** skip accounts with a leftover delegate. Gen2 freezeSolPayment thaw often
+ * leaves the freeze-escrow delegate set while `isFrozen=false` — those NFTs are sendable.
+ * Only `isFrozen` means nested / mint-locked.
  */
 export async function getNftHolderInWallet(
   connection: Connection,
@@ -38,7 +47,6 @@ export async function getNftHolderInWallet(
   commitment: 'processed' | 'confirmed' | 'finalized' = 'confirmed'
 ): Promise<NftHolderInWallet | NftHolderDelegated | null> {
   const mintStr = mint.toBase58()
-  let foundDelegated = false
 
   // 1) Mint-filtered lookup: returns only accounts holding this mint (avoids truncation when user has many tokens)
   try {
@@ -60,17 +68,22 @@ export async function getNftHolderInWallet(
       const amountNum = Number(amountStr)
       if (!Number.isFinite(amountNum) || amountNum < 1) continue
       const delegate = info.delegate
-      if (delegate && typeof delegate === 'string' && delegate !== '') {
-        foundDelegated = true
-        continue
+      const hasDelegate = Boolean(delegate && typeof delegate === 'string' && delegate !== '')
+      const state = typeof (info as { state?: string }).state === 'string'
+        ? (info as { state?: string }).state!.toLowerCase()
+        : ''
+      return {
+        tokenProgram,
+        tokenAccount: pubkey,
+        hasDelegate,
+        isFrozen: state === 'frozen',
       }
-      return { tokenProgram, tokenAccount: pubkey }
     }
   } catch {
     // RPC error; fall through to ATA and programId scan
   }
 
-  // 2) Check canonical ATAs (SPL and Token-2022)
+  // 2) Check canonical ATAs (SPL and Token-2022) — include delegated Gen2 leftovers.
   for (const programId of NFT_TOKEN_PROGRAM_IDS) {
     try {
       const ata = await getAssociatedTokenAddress(
@@ -82,8 +95,12 @@ export async function getNftHolderInWallet(
       )
       const account = await getAccount(connection, ata, commitment, programId)
       if (account.amount >= 1n) {
-        if (account.delegate) foundDelegated = true
-        else return { tokenProgram: programId, tokenAccount: ata }
+        return {
+          tokenProgram: programId,
+          tokenAccount: ata,
+          hasDelegate: Boolean(account.delegate),
+          isFrozen: account.isFrozen,
+        }
       }
     } catch {
       // ATA not found or wrong program
@@ -106,17 +123,21 @@ export async function getNftHolderInWallet(
         const amountNum = Number(amountStr)
         if (!Number.isFinite(amountNum) || amountNum < 1) continue
         const delegate = info.delegate
-        if (delegate && typeof delegate === 'string' && delegate !== '') {
-          foundDelegated = true
-          continue
+        const hasDelegate = Boolean(delegate && typeof delegate === 'string' && delegate !== '')
+        const state = typeof (info as { state?: string }).state === 'string'
+          ? (info as { state?: string }).state!.toLowerCase()
+          : ''
+        return {
+          tokenProgram: programId,
+          tokenAccount: pubkey,
+          hasDelegate,
+          isFrozen: state === 'frozen',
         }
-        return { tokenProgram: programId, tokenAccount: pubkey }
       }
     } catch {
       // RPC error; continue to next program or return null
     }
   }
-  if (foundDelegated) return { delegated: true }
   return null
 }
 
@@ -222,6 +243,8 @@ export interface WalletNft {
   delegated?: boolean | null
   /** DAS asset interface when known (e.g. ProgrammableNFT, MplCoreAsset). */
   interface?: string | null
+  /** DAS compression.compressed — cNFTs need a special single-NFT send path. */
+  compressed?: boolean | null
 }
 
 /**

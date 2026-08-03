@@ -644,11 +644,11 @@ export async function handleCreateRafflePost(
           const mintPk = new PublicKey(nftMintAddress)
           const creatorPk = new PublicKey(walletAddress)
           const holder = await getNftHolderInWallet(getSolanaReadConnection(), mintPk, creatorPk, 'confirmed')
-          if (holder && 'delegated' in holder && holder.delegated) {
+          if (holder && 'tokenProgram' in holder && holder.isFrozen) {
             return NextResponse.json(
               {
                 error:
-                  'This NFT is staked or delegated. Unstake it before creating a raffle—otherwise it cannot be sent to escrow.',
+                  'This NFT is frozen on-chain (nested or mint-locked). Unnest/thaw it before creating a raffle. A leftover Gen2 stake delegate alone is fine.',
               },
               { status: 400 }
             )

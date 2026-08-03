@@ -33,7 +33,19 @@ import {
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
 import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-locks'
-import { owlSendNftProblemLabel } from '@/lib/owl-send/picker-eligibility'
+import {
+  gateOwlSendCnftSelection,
+  isOwlSendCompressedNft,
+  owlSendNftProblemLabel,
+} from '@/lib/owl-send/picker-eligibility'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { owlSendTokenAccountHint } from '@/lib/owl-send/resolve-spl-holder'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
 import {
@@ -127,6 +139,11 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [sessionNotice, setSessionNotice] = useState<string | null>(null)
   const [preparing, setPreparing] = useState(false)
   const [thawing, setThawing] = useState(false)
+  const [cnftGate, setCnftGate] = useState<{
+    title: string
+    detail: string
+    cnftMints: string[]
+  } | null>(null)
 
   // Tokens tab
   const [tokenMode, setTokenMode] = useState<OwlSendMode>('send_to_one')
@@ -477,6 +494,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setSessionError(null)
     setSessionNotice(null)
     setRetryMints([])
+    setCnftGate(null)
     if (!publicKey) {
       setSessionError('Connect your wallet first.')
       return
@@ -487,6 +505,16 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     }
     if (selectedNfts.length > OWL_SEND_MAX_SELECT) {
       setSessionError(`Select at most ${OWL_SEND_MAX_SELECT} NFTs.`)
+      return
+    }
+
+    const cnftCheck = gateOwlSendCnftSelection(selectedNfts)
+    if (!cnftCheck.ok) {
+      setCnftGate({
+        title: cnftCheck.title,
+        detail: cnftCheck.detail,
+        cnftMints: cnftCheck.cnftMints,
+      })
       return
     }
 
@@ -1063,6 +1091,47 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-3 py-6 sm:px-4 sm:py-10">
       <OwlSendSuccessDialog success={successPopup} onClose={() => setSuccessPopup(null)} />
+      <Dialog
+        open={Boolean(cnftGate)}
+        onOpenChange={(open) => {
+          if (!open) setCnftGate(null)
+        }}
+      >
+        <DialogContent className="border-sky-500/30 bg-[#0c100e] sm:max-w-md">
+          <DialogHeader className="space-y-2 text-left">
+            <DialogTitle className="text-lg text-sky-100">
+              {cnftGate?.title ?? 'Send cNFTs separately'}
+            </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">
+              {cnftGate?.detail}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col gap-2 sm:flex-col">
+            <Button
+              type="button"
+              className="min-h-[44px] w-full touch-manipulation"
+              onClick={() => {
+                const drop = new Set(cnftGate?.cnftMints ?? [])
+                setSelectedMints((prev) => new Set([...prev].filter((m) => !drop.has(m))))
+                setCnftGate(null)
+                setPreparedLines(null)
+                setBatches([])
+                setBatchProgress([])
+              }}
+            >
+              Deselect cNFTs
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="min-h-[44px] w-full touch-manipulation"
+              onClick={() => setCnftGate(null)}
+            >
+              Got it
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <header className="space-y-3">
         <div className="flex items-center gap-2 text-theme-prime">
           <Bird className="h-6 w-6" />
@@ -1206,7 +1275,10 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     <p className="mb-3 text-xs text-muted-foreground">
                       {nfts.length} NFT{nfts.length === 1 ? '' : 's'} in wallet
                       {nfts.some((n) => n.frozen)
-                        ? ` · ${nfts.filter((n) => n.frozen).length} marked frozen (informational)`
+                        ? ` · ${nfts.filter((n) => n.frozen).length} frozen`
+                        : ''}
+                      {nfts.some(isOwlSendCompressedNft)
+                        ? ` · ${nfts.filter(isOwlSendCompressedNft).length} cNFT`
                         : ''}
                       {retryMints.length > 0
                         ? ` · ${retryMints.length} highlighted from last failed send`
