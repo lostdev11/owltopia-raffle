@@ -14,6 +14,11 @@ import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getFundsEscrowKeypair } from '@/lib/raffles/funds-escrow'
 import { getPrizeEscrowKeypair } from '@/lib/raffles/prize-escrow'
 import { seedFromVrfHex, extractVrfValueHex, isSwitchboardRandomnessRevealed } from '@/lib/raffles/draw/vrf-seed'
+import {
+  resolveVrfRevealWaitMs,
+  vrfRevealRetryDelayMs,
+  isSwitchboardGatewayTransientError,
+} from '@/lib/raffles/draw/vrf-retry-policy'
 
 export const VRF_PROVIDER_SWITCHBOARD = 'switchboard' as const
 
@@ -222,7 +227,7 @@ export async function switchboardRevealRandomness(params: {
     }
   }
 
-  const maxWaitMs = params.maxWaitMs ?? 45_000
+  const maxWaitMs = resolveVrfRevealWaitMs(params.maxWaitMs)
   const started = Date.now()
 
   try {
@@ -274,6 +279,7 @@ export async function switchboardRevealRandomness(params: {
 
     let lastErr = 'Randomness not ready'
     let lastRevealSig = ''
+    let attemptIndex = 0
     while (Date.now() - started < maxWaitMs) {
       try {
         // Re-check each iteration — another worker may have revealed.
@@ -338,12 +344,20 @@ export async function switchboardRevealRandomness(params: {
           // ignore
         }
       }
-      await new Promise((r) => setTimeout(r, 2500))
+
+      const delayMs = vrfRevealRetryDelayMs({ attemptIndex, lastError: lastErr })
+      attemptIndex += 1
+      // Stop early when the next sleep would blow the budget with no remaining attempt.
+      if (Date.now() - started + delayMs >= maxWaitMs) break
+      await new Promise((r) => setTimeout(r, delayMs))
     }
 
+    const gatewayHint = isSwitchboardGatewayTransientError(lastErr)
+      ? ' (Switchboard oracle gateway flaky — auto-retry will re-commit if this stays down)'
+      : ''
     return {
       ok: false,
-      error: `VRF reveal timed out after ${maxWaitMs}ms: ${lastErr}`,
+      error: `VRF reveal timed out after ${maxWaitMs}ms: ${lastErr}${gatewayHint}`,
       retryable: true,
     }
   } catch (e) {

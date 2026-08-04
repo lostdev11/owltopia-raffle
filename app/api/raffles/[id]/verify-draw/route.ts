@@ -56,7 +56,7 @@ export async function GET(
             message:
               vrfStatus === 'failed'
                 ? raffle.draw_vrf_error ||
-                  'VRF request failed. An admin can retry against the same frozen ticket ledger.'
+                  'VRF request failed. Cron will auto-retry (fresh Switchboard commit against the frozen ticket ledger); an admin can also retry.'
                 : 'Waiting for Switchboard VRF reveal. The ticket ledger is frozen; randomness is requested on-chain.',
             algo: algoHint || 'owltopia-draw-v3-vrf',
             drawVrfProvider: raffle.draw_vrf_provider ?? 'switchboard',

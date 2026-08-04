@@ -3,6 +3,7 @@
  *
  * DRAW_VRF_ENABLED=true — new raffles use owltopia-draw-v3-vrf (Switchboard) instead of v2 commit–reveal.
  * DRAW_VRF_PILOT_RAFFLE_IDS — comma-separated raffle UUIDs that force VRF even when global flag is off.
+ * DRAW_VRF_REVEAL_WAIT_MS — optional override for Switchboard reveal poll budget (default 75000).
  *
  * Safety: never switches an in-flight v2 commit–reveal raffle to VRF (draw_commit_hash wins).
  */

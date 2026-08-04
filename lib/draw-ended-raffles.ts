@@ -117,7 +117,7 @@ export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult>
       winnerWallet: null,
       error:
         vrfStatus === 'failed' || vrfStatus === 'pending'
-          ? vrfErr || `VRF draw ${vrfStatus} — admin can retry`
+          ? vrfErr || `VRF draw ${vrfStatus} — will auto-retry on cron; admin can also retry`
           : 'No confirmed entries found or draw did not complete',
     }
   } catch (error) {

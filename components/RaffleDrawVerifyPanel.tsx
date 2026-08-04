@@ -240,7 +240,7 @@ export function RaffleDrawVerifyPanel({ raffleId }: { raffleId: string }) {
                     : 'text-amber-600 dark:text-amber-400 font-medium'
                 }
               >
-                {data.status === 'vrf_failed' ? 'VRF draw failed — admin can retry.' : 'VRF draw pending on-chain…'}
+                {data.status === 'vrf_failed' ? 'VRF draw failed — auto-retry pending (admin can also retry).' : 'VRF draw pending on-chain…'}
               </p>
               {data.message && <p className="text-muted-foreground text-xs leading-relaxed">{data.message}</p>}
               {data.drawVrfError && (

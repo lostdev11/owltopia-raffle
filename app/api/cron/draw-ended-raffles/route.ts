@@ -4,12 +4,14 @@ import { processEndedCommunityGiveawaysForAutoDraw } from '@/lib/community-givea
 import { processEndedRafflesWithoutWinners } from '@/lib/draw-ended-raffles'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+/** VRF commit+reveal (Switchboard) needs headroom beyond a 45–75s reveal poll. */
+export const maxDuration = 120
 
 /**
  * GET /api/cron/draw-ended-raffles
  * Called by Vercel Cron: ended ticket raffles (threshold / extensions) and ended community giveaways (past ends_at).
  * Secured by CRON_SECRET (Bearer token in Authorization header).
+ * Auto-recovers failed Switchboard VRF reveals (gateway 503) on subsequent ticks.
  */
 export async function GET(request: NextRequest) {
   const cronAuth = authorizeCronBearer(request)
