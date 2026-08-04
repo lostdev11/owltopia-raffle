@@ -43,7 +43,15 @@ export async function POST(
       )
     }
 
-    const winnerWallet = await selectWinner(raffle.id, false, { forceVrfRetry: true })
+    // Prefer resuming an existing account (may already be revealed on-chain after a
+    // gateway timeout). Fall back to a fresh Switchboard commit against the frozen ledger.
+    const hasVrfAccount = Boolean((raffle.draw_vrf_account ?? '').trim())
+    let winnerWallet = await selectWinner(raffle.id, false, {
+      forceVrfRetry: !hasVrfAccount,
+    })
+    if (!winnerWallet && hasVrfAccount) {
+      winnerWallet = await selectWinner(raffle.id, false, { forceVrfRetry: true })
+    }
     if (!winnerWallet) {
       const latest = await getRaffleById(raffle.id)
       return NextResponse.json(

@@ -60,3 +60,14 @@ export {
   raffleUsesDrawVrf,
   defaultDrawAlgoForCreate,
 } from '@/lib/raffles/draw/config'
+export {
+  DEFAULT_VRF_REVEAL_WAIT_MS,
+  VRF_STALE_REQUEST_MS,
+  resolveVrfRevealWaitMs,
+  isSwitchboardGatewayTransientError,
+  isVrfRevealTimeoutError,
+  isRetryableVrfRevealError,
+  vrfRevealRetryDelayMs,
+  vrfRequestAgeMs,
+  shouldAutoForceNewVrfRequest,
+} from '@/lib/raffles/draw/vrf-retry-policy'

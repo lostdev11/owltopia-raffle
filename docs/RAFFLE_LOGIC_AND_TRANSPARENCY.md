@@ -64,7 +64,7 @@ Implementation: `lib/raffles/min-threshold-extension.ts` (extension), `lib/raffl
   - **v1:** Payments + escrow + reveal memo are on-chain; draw math is publicly re-derivable. Seed is chosen at draw time (not pre-committed).
   - **v2:** Same as v1, plus the community can see `draw_commit_hash` **before** the draw and check that the revealed seed matches it (operator cannot pick a seed after seeing the final ticket ledger without breaking the commit).
   - **Roadmap (v3):** on-chain VRF / raffle program behind the same Verify UX.
-  - **v3 (pilot):** `owltopia-draw-v3-vrf` uses Switchboard on-demand randomness as the seed at draw time (same index math). Enable with `DRAW_VRF_ENABLED` or `DRAW_VRF_PILOT_RAFFLE_IDS`. No VRF on second-round extension or refund paths; admin retries via `POST /api/admin/raffles/[id]/retry-vrf-draw`. Platform pays fees from funds/prize escrow key.
+  - **v3 (pilot):** `owltopia-draw-v3-vrf` uses Switchboard on-demand randomness as the seed at draw time (same index math). Enable with `DRAW_VRF_ENABLED` or `DRAW_VRF_PILOT_RAFFLE_IDS`. No VRF on second-round extension or refund paths. Reveal polls the Switchboard oracle gateway (transient 503s are expected); cron auto-resumes and re-commits against the frozen ledger after a failed reveal, and admins can still call `POST /api/admin/raffles/[id]/retry-vrf-draw`. Platform pays fees from funds/prize escrow key.
 
 Legacy raffles drawn before this change have no seed fields and show as `legacy_draw` in the verify API.
 

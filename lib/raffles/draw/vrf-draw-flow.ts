@@ -2,6 +2,11 @@
  * Orchestrate Switchboard VRF request/reveal for a raffle draw.
  * Freezes ledger fields before commit; admin retry must reuse the same ledger
  * once randomness is on-chain. Pre-chain failures may refresh the ledger.
+ *
+ * Resilience: Switchboard oracle gateways sometimes return 503 during reveal.
+ * We resume pending accounts first; when a prior attempt already failed with a
+ * transient gateway/timeout error we do a short on-chain check then re-commit
+ * against the frozen ledger so cron recovers without an admin babysit.
  */
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import {
@@ -17,9 +22,17 @@ import {
   VRF_PROVIDER_SWITCHBOARD,
 } from '@/lib/raffles/draw/vrf-switchboard'
 import { resolveVrfDrawLedger } from '@/lib/raffles/draw/vrf-ledger'
+import {
+  isRetryableVrfRevealError,
+  resolveVrfRevealWaitMs,
+  shouldAutoForceNewVrfRequest,
+} from '@/lib/raffles/draw/vrf-retry-policy'
 import { DRAW_ALGO_V3_VRF } from '@/lib/raffles/draw/types'
 import type { DrawEntryLike } from '@/lib/raffles/draw/types'
 import type { Raffle } from '@/lib/types'
+
+/** Short poll when a prior attempt already failed — mainly catches already-revealed accounts. */
+const RESUME_AFTER_FAILURE_WAIT_MS = 15_000
 
 export type VrfFlowResult =
   | {
@@ -50,6 +63,93 @@ async function patchVrfFields(
   }
 }
 
+async function commitAndReveal(params: {
+  raffleId: string
+  soldCount: number
+  ledgerHash: string
+  revealWaitMs?: number
+}): Promise<VrfFlowResult> {
+  const { raffleId, soldCount, ledgerHash, revealWaitMs } = params
+  const commit = await switchboardCommitRandomness()
+  if (!commit.ok) {
+    await patchVrfFields(raffleId, {
+      draw_algo: DRAW_ALGO_V3_VRF,
+      draw_sold_count: soldCount,
+      draw_ledger_hash: ledgerHash,
+      draw_vrf_provider: VRF_PROVIDER_SWITCHBOARD,
+      draw_vrf_status: 'failed',
+      draw_vrf_error: commit.error,
+      draw_vrf_account: null,
+      draw_vrf_request_tx: null,
+      draw_vrf_fulfill_tx: null,
+      draw_vrf_requested_at: new Date().toISOString(),
+    })
+    return {
+      status: 'failed',
+      error: commit.error,
+      ledgerHash,
+      soldCount,
+    }
+  }
+
+  await upsertRaffleDrawSecret(
+    raffleId,
+    encodeVrfAccountSecret(commit.randomnessSecretKeyBase58)
+  )
+  await patchVrfFields(raffleId, {
+    draw_algo: DRAW_ALGO_V3_VRF,
+    draw_sold_count: soldCount,
+    draw_ledger_hash: ledgerHash,
+    draw_vrf_provider: VRF_PROVIDER_SWITCHBOARD,
+    draw_vrf_status: 'pending',
+    draw_vrf_account: commit.randomnessAccount,
+    draw_vrf_request_tx: commit.commitTx,
+    draw_vrf_fulfill_tx: null,
+    draw_vrf_error: null,
+    draw_vrf_requested_at: new Date().toISOString(),
+    draw_vrf_fulfilled_at: null,
+  })
+
+  const reveal = await switchboardRevealRandomness({
+    randomnessAccount: commit.randomnessAccount,
+    randomnessSecretKeyBase58: commit.randomnessSecretKeyBase58,
+    maxWaitMs: resolveVrfRevealWaitMs(revealWaitMs),
+  })
+
+  if (!reveal.ok) {
+    await patchVrfFields(raffleId, {
+      draw_vrf_status: 'failed',
+      draw_vrf_error: reveal.error,
+    })
+    return {
+      status: reveal.retryable ? 'pending' : 'failed',
+      error: reveal.error,
+      ledgerHash,
+      soldCount,
+      requestTx: commit.commitTx,
+      randomnessAccount: commit.randomnessAccount,
+    }
+  }
+
+  await deleteRaffleDrawSecret(raffleId)
+  await patchVrfFields(raffleId, {
+    draw_vrf_status: 'fulfilled',
+    draw_vrf_fulfill_tx: reveal.revealTx,
+    draw_vrf_fulfilled_at: new Date().toISOString(),
+    draw_vrf_error: null,
+  })
+
+  return {
+    status: 'fulfilled',
+    drawSeed: reveal.drawSeed,
+    ledgerHash,
+    soldCount,
+    fulfillTx: reveal.revealTx,
+    requestTx: commit.commitTx,
+    randomnessAccount: commit.randomnessAccount,
+  }
+}
+
 /**
  * Start or resume VRF for a raffle. Does not select the winner — caller runs performDraw + DB winner update.
  * @param forceNewRequest — admin retry: abandon pending account and commit a new one against the same frozen ledger when present.
@@ -60,8 +160,16 @@ export async function runRaffleVrfFlow(params: {
   forceNewRequest?: boolean
   revealWaitMs?: number
 }): Promise<VrfFlowResult> {
-  const { raffle, entries, forceNewRequest = false, revealWaitMs } = params
+  const { raffle, entries, revealWaitMs } = params
   const raffleId = raffle.id
+
+  const autoForce = shouldAutoForceNewVrfRequest({
+    drawVrfStatus: raffle.draw_vrf_status,
+    drawVrfAccount: raffle.draw_vrf_account,
+    drawVrfError: raffle.draw_vrf_error,
+    drawVrfRequestedAt: raffle.draw_vrf_requested_at,
+  })
+  const forceNewRequest = params.forceNewRequest === true || autoForce
 
   const ledgerResolution = resolveVrfDrawLedger({
     raffle,
@@ -84,90 +192,17 @@ export async function runRaffleVrfFlow(params: {
 
   const existingStatus = (raffle.draw_vrf_status ?? '').trim()
   const existingAccount = (raffle.draw_vrf_account ?? '').trim()
+  const priorError = (raffle.draw_vrf_error ?? '').trim()
+  const priorFailedTransient =
+    existingStatus === 'failed' && isRetryableVrfRevealError(priorError)
+
   const canResume =
     !forceNewRequest &&
     existingAccount &&
     (existingStatus === 'pending' || existingStatus === 'failed')
 
   if (!canResume) {
-    const commit = await switchboardCommitRandomness()
-    if (!commit.ok) {
-      await patchVrfFields(raffleId, {
-        draw_algo: DRAW_ALGO_V3_VRF,
-        draw_sold_count: soldCount,
-        draw_ledger_hash: ledgerHash,
-        draw_vrf_provider: VRF_PROVIDER_SWITCHBOARD,
-        draw_vrf_status: 'failed',
-        draw_vrf_error: commit.error,
-        draw_vrf_account: null,
-        draw_vrf_request_tx: null,
-        draw_vrf_fulfill_tx: null,
-        draw_vrf_requested_at: new Date().toISOString(),
-      })
-      return {
-        status: 'failed',
-        error: commit.error,
-        ledgerHash,
-        soldCount,
-      }
-    }
-
-    await upsertRaffleDrawSecret(
-      raffleId,
-      encodeVrfAccountSecret(commit.randomnessSecretKeyBase58)
-    )
-    await patchVrfFields(raffleId, {
-      draw_algo: DRAW_ALGO_V3_VRF,
-      draw_sold_count: soldCount,
-      draw_ledger_hash: ledgerHash,
-      draw_vrf_provider: VRF_PROVIDER_SWITCHBOARD,
-      draw_vrf_status: 'pending',
-      draw_vrf_account: commit.randomnessAccount,
-      draw_vrf_request_tx: commit.commitTx,
-      draw_vrf_fulfill_tx: null,
-      draw_vrf_error: null,
-      draw_vrf_requested_at: new Date().toISOString(),
-      draw_vrf_fulfilled_at: null,
-    })
-
-    const reveal = await switchboardRevealRandomness({
-      randomnessAccount: commit.randomnessAccount,
-      randomnessSecretKeyBase58: commit.randomnessSecretKeyBase58,
-      maxWaitMs: revealWaitMs,
-    })
-
-    if (!reveal.ok) {
-      await patchVrfFields(raffleId, {
-        draw_vrf_status: 'failed',
-        draw_vrf_error: reveal.error,
-      })
-      return {
-        status: reveal.retryable ? 'pending' : 'failed',
-        error: reveal.error,
-        ledgerHash,
-        soldCount,
-        requestTx: commit.commitTx,
-        randomnessAccount: commit.randomnessAccount,
-      }
-    }
-
-    await deleteRaffleDrawSecret(raffleId)
-    await patchVrfFields(raffleId, {
-      draw_vrf_status: 'fulfilled',
-      draw_vrf_fulfill_tx: reveal.revealTx,
-      draw_vrf_fulfilled_at: new Date().toISOString(),
-      draw_vrf_error: null,
-    })
-
-    return {
-      status: 'fulfilled',
-      drawSeed: reveal.drawSeed,
-      ledgerHash,
-      soldCount,
-      fulfillTx: reveal.revealTx,
-      requestTx: commit.commitTx,
-      randomnessAccount: commit.randomnessAccount,
-    }
+    return commitAndReveal({ raffleId, soldCount, ledgerHash, revealWaitMs })
   }
 
   // Resume pending/failed reveal
@@ -178,20 +213,21 @@ export async function runRaffleVrfFlow(params: {
       draw_vrf_status: 'failed',
       draw_vrf_error: 'Missing VRF account secret for pending request — use admin retry',
     })
-    return {
-      status: 'failed',
-      error: 'Missing VRF account secret for pending request — use admin retry',
-      ledgerHash,
-      soldCount,
-      requestTx: raffle.draw_vrf_request_tx,
-      randomnessAccount: existingAccount,
-    }
+    // Secret lost but ledger is frozen — safe to request fresh randomness.
+    return commitAndReveal({ raffleId, soldCount, ledgerHash, revealWaitMs })
   }
+
+  // After a known gateway/timeout failure, only spend a short budget checking
+  // whether the account was revealed elsewhere; then re-commit in this invocation.
+  const resumeWaitMs = priorFailedTransient
+    ? Math.min(RESUME_AFTER_FAILURE_WAIT_MS, resolveVrfRevealWaitMs(revealWaitMs))
+    : resolveVrfRevealWaitMs(revealWaitMs)
 
   const reveal = await switchboardRevealRandomness({
     randomnessAccount: existingAccount,
     randomnessSecretKeyBase58: secret,
-    maxWaitMs: revealWaitMs,
+    maxWaitMs: resumeWaitMs,
+    knownRevealTx: raffle.draw_vrf_fulfill_tx,
   })
 
   if (!reveal.ok) {
@@ -199,6 +235,17 @@ export async function runRaffleVrfFlow(params: {
       draw_vrf_status: 'failed',
       draw_vrf_error: reveal.error,
     })
+
+    // Only re-commit in-process when we already knew the prior attempt failed
+    // (short resume budget). A first full-budget timeout must return so the next
+    // cron/admin call can recover without blowing serverless maxDuration.
+    if (priorFailedTransient && isRetryableVrfRevealError(reveal.error)) {
+      console.warn(
+        `[runRaffleVrfFlow] prior VRF failure for ${raffleId}; committing fresh VRF after short resume: ${reveal.error}`
+      )
+      return commitAndReveal({ raffleId, soldCount, ledgerHash, revealWaitMs })
+    }
+
     return {
       status: reveal.retryable ? 'pending' : 'failed',
       error: reveal.error,

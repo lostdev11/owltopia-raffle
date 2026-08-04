@@ -18,6 +18,12 @@ import {
   keypairWallet,
   resolveVrfDrawLedger,
   vrfRequestReachedChain,
+  isSwitchboardGatewayTransientError,
+  isVrfRevealTimeoutError,
+  isRetryableVrfRevealError,
+  resolveVrfRevealWaitMs,
+  vrfRevealRetryDelayMs,
+  shouldAutoForceNewVrfRequest,
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
   DRAW_ALGO_V3_VRF,
@@ -207,6 +213,69 @@ assert.equal(
   isSwitchboardRandomnessRevealed({ revealSlot: { toNumber: () => 99 }, value: null }),
   true
 )
+
+// --- VRF reveal resilience policy (gateway 503 / timeout auto-recovery) ---
+{
+  assert.equal(
+    isSwitchboardGatewayTransientError(
+      'Gateway: fetchRandomnessReveal failed (status 503, code ERR_BAD_RESPONSE)'
+    ),
+    true
+  )
+  assert.equal(
+    isVrfRevealTimeoutError(
+      'VRF reveal timed out after 45000ms: Gateway: fetchRandomnessReveal failed (status 503, code ERR_BAD_RESPONSE)'
+    ),
+    true
+  )
+  assert.equal(
+    isRetryableVrfRevealError(
+      'VRF reveal timed out after 75000ms: Gateway: fetchRandomnessReveal failed (status 503, code ERR_BAD_RESPONSE)'
+    ),
+    true
+  )
+  assert.equal(isSwitchboardGatewayTransientError('Account does not exist'), false)
+  assert.ok(resolveVrfRevealWaitMs() >= 10_000)
+  assert.equal(resolveVrfRevealWaitMs(12_000), 12_000)
+  assert.ok(vrfRevealRetryDelayMs({ attemptIndex: 0, lastError: 'status 503' }) >= 4000)
+  assert.ok(
+    vrfRevealRetryDelayMs({ attemptIndex: 0, lastError: 'Randomness not ready' }) <
+      vrfRevealRetryDelayMs({ attemptIndex: 0, lastError: 'status 503' })
+  )
+
+  const now = Date.parse('2026-08-04T17:00:00.000Z')
+  assert.equal(
+    shouldAutoForceNewVrfRequest({
+      drawVrfStatus: 'failed',
+      drawVrfAccount: 'Rand111111111111111111111111111111111111111',
+      drawVrfError:
+        'VRF reveal timed out after 45000ms: Gateway: fetchRandomnessReveal failed (status 503, code ERR_BAD_RESPONSE)',
+      drawVrfRequestedAt: '2026-08-04T16:50:00.000Z',
+      nowMs: now,
+    }),
+    true
+  )
+  assert.equal(
+    shouldAutoForceNewVrfRequest({
+      drawVrfStatus: 'pending',
+      drawVrfAccount: 'Rand111111111111111111111111111111111111111',
+      drawVrfError: null,
+      drawVrfRequestedAt: '2026-08-04T16:59:00.000Z',
+      nowMs: now,
+    }),
+    false
+  )
+  assert.equal(
+    shouldAutoForceNewVrfRequest({
+      drawVrfStatus: 'failed',
+      drawVrfAccount: 'Rand111111111111111111111111111111111111111',
+      drawVrfError: 'Missing VRF account secret for pending request — use admin retry',
+      drawVrfRequestedAt: '2026-08-04T16:59:30.000Z',
+      nowMs: now,
+    }),
+    true
+  )
+}
 
 const v3Draw = performDraw(entries, { algo: DRAW_ALGO_V3_VRF, drawSeed: vrfSeed })
 assert.equal(v3Draw.algo, DRAW_ALGO_V3_VRF)
