@@ -10,6 +10,8 @@ export type RecordOwlSendLedgerParams = {
   txSignature: string
   lines: OwlSendLedgerLine[]
   batchIndex?: number | null
+  /** Owltopia holder discount used when building the fee ix (bps). */
+  feeDiscountBps?: number
   /**
    * Optional: ensure SIWS cookie matches fromWallet (sign message / memo-tx).
    * Called when session is missing or for a different wallet. Return true if signed in.
@@ -28,7 +30,10 @@ export async function recordOwlSendLedger(params: RecordOwlSendLedgerParams): Pr
     }
     if (sessionWallet !== params.fromWallet) return
 
-    const feeLamports = getOwlSendFeeLamportsForCount(params.lines.length)
+    const feeLamports = getOwlSendFeeLamportsForCount(
+      params.lines.length,
+      params.feeDiscountBps ?? 0
+    )
     const post = () =>
       fetch('/api/owl-send/ledger', {
         method: 'POST',

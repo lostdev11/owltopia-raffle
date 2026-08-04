@@ -79,7 +79,8 @@ import {
   type OwlSendMode,
 } from '@/lib/owl-send/constants'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
-import { formatOwlSendFeeSol, getOwlSendFeeSol } from '@/lib/owl-send/fee'
+import { formatOwlSendFeeSol, getOwlSendFeeSol, getOwlSendFeeSolForDiscount } from '@/lib/owl-send/fee'
+import type { OwlSendHolderRoleName } from '@/lib/owl-send/holder-discount'
 import { sendOwlSendNftBatch } from '@/lib/owl-send/send-batch'
 import type { OwlSendSendPhase } from '@/lib/owl-send/send-spl-nft-batch'
 import { sendOwlSendTokenLines, sendOwlSendTokensToOne } from '@/lib/owl-send/send-tokens'
@@ -88,6 +89,15 @@ import { useOwlSendAdminAccess } from '@/lib/owl-send/use-owl-send-admin-access'
 import { OwlSendLedgerPanel } from '@/components/owl-send/OwlSendLedgerPanel'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import { cn } from '@/lib/utils'
+
+type HolderFeeQuote = {
+  discountBps: number
+  discountPercent: number
+  roleName: OwlSendHolderRoleName | null
+  gen1Count: number
+  gen2Count: number
+  checkAvailable: boolean
+}
 
 type Props = {
   /** Server session admin hint; client also verifies via SIWS + /api/admin/check. */
@@ -168,10 +178,14 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [sendElapsedSec, setSendElapsedSec] = useState(0)
   const [pendingDraft, setPendingDraft] = useState<OwlSendNftSessionDraft | null>(null)
   const [resuming, setResuming] = useState(false)
+  const [holderFee, setHolderFee] = useState<HolderFeeQuote | null>(null)
+  const [holderFeeLoading, setHolderFeeLoading] = useState(false)
 
   const sendCancelledRef = useRef(false)
 
-  const feeSol = getOwlSendFeeSol()
+  const discountBps = holderFee?.discountBps ?? 0
+  const feeSol = getOwlSendFeeSolForDiscount(discountBps)
+  const baseFeeSol = getOwlSendFeeSol()
   const showAdminPreview = access.isAdmin && !isPublic
   const allowed = access.allowed
 
@@ -223,6 +237,46 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       setPendingDraft(null)
     }
   }, [connected, publicKey, loadAssets])
+
+  useEffect(() => {
+    if (!connected || !publicKey) {
+      setHolderFee(null)
+      setHolderFeeLoading(false)
+      return
+    }
+    const wallet = publicKey.toBase58()
+    let cancelled = false
+    setHolderFeeLoading(true)
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/owl-send/holder-fee?wallet=${encodeURIComponent(wallet)}&lines=1`,
+          { cache: 'no-store' }
+        )
+        if (!res.ok) {
+          if (!cancelled) setHolderFee(null)
+          return
+        }
+        const data = (await res.json()) as Partial<HolderFeeQuote>
+        if (cancelled) return
+        setHolderFee({
+          discountBps: typeof data.discountBps === 'number' ? data.discountBps : 0,
+          discountPercent: typeof data.discountPercent === 'number' ? data.discountPercent : 0,
+          roleName: (data.roleName as OwlSendHolderRoleName | null) ?? null,
+          gen1Count: typeof data.gen1Count === 'number' ? data.gen1Count : 0,
+          gen2Count: typeof data.gen2Count === 'number' ? data.gen2Count : 0,
+          checkAvailable: data.checkAvailable !== false,
+        })
+      } catch {
+        if (!cancelled) setHolderFee(null)
+      } finally {
+        if (!cancelled) setHolderFeeLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [connected, publicKey])
 
   useEffect(() => {
     if (!publicKey || batches.length > 0) return
@@ -365,6 +419,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       return buildOwlSendCostEstimate({
         nftCount: preparedLines.length,
         batchCount: Math.max(1, batches.length),
+        discountBps,
       })
     }
     const count = selectedNfts.length
@@ -372,8 +427,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     return buildOwlSendCostEstimate({
       nftCount: count,
       batchCount: Math.ceil(count / OWL_SEND_MAX_PER_TX),
+      discountBps,
     })
-  }, [preparedLines, batches.length, selectedNfts.length])
+  }, [preparedLines, batches.length, selectedNfts.length, discountBps])
 
   const cancelInFlightSend = () => {
     sendCancelledRef.current = true
@@ -637,6 +693,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       walletAdapter: wallet?.adapter ?? null,
       sendTransaction,
       lines,
+      feeDiscountBps: discountBps,
       onPhase: (phase) => {
         if (!sendCancelledRef.current) setSendPhase(phase)
       },
@@ -676,6 +733,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         assetKind: 'nft',
         txSignature: result.signature,
         batchIndex,
+        feeDiscountBps: discountBps,
         lines: lines.map((l) => ({
           recipient: l.recipient,
           mint: l.mint,
@@ -880,6 +938,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         owner: publicKey,
         sendTransaction,
         lines,
+        feeDiscountBps: discountBps,
       })
       if (sendCancelledRef.current) return
       if (result.ok) {
@@ -907,6 +966,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
           assetKind: 'token',
           txSignature: result.signature,
           batchIndex,
+          feeDiscountBps: discountBps,
           lines: lines.map((l) => ({
             recipient: l.recipient,
             mint: l.mint,
@@ -980,6 +1040,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         recipient: tokenDestination.trim(),
         sendTransaction,
         lines,
+        feeDiscountBps: discountBps,
       })
       if (sendCancelledRef.current) return
       if (result.ok) {
@@ -1003,6 +1064,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
           mode: 'token_one',
           assetKind: 'token',
           txSignature: result.signature,
+          feeDiscountBps: discountBps,
           lines: lines.map((l) => ({
             recipient: tokenDestination.trim(),
             mint: l.mint,
@@ -1025,8 +1087,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const currentBatchCost = useMemo(() => {
     const lines = batches[activeBatch]
     if (!lines?.length) return null
-    return buildOwlSendCostEstimate({ nftCount: lines.length, batchCount: 1 })
-  }, [batches, activeBatch])
+    return buildOwlSendCostEstimate({ nftCount: lines.length, batchCount: 1, discountBps })
+  }, [batches, activeBatch, discountBps])
 
   const doneCount = batchProgress.filter((b) => b.status === 'done').length
   const allDone = batches.length > 0 && doneCount === batches.length
@@ -1155,9 +1217,31 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         <p className="max-w-xl text-sm text-muted-foreground sm:text-base">
           Send NFTs and tokens for{' '}
           <span className="font-semibold text-theme-prime">{formatOwlSendFeeSol(feeSol)}</span> Owl
-          fee each — cheaper than FoxySend. Solana rent is shown separately when a recipient needs a
-          new token account.
+          fee each
+          {discountBps > 0 ? (
+            <>
+              {' '}
+              <span className="text-theme-prime/90">
+                ({holderFee?.discountPercent ?? discountBps / 100}% holder discount
+                {holderFee?.roleName ? ` · ${holderFee.roleName}` : ''})
+              </span>
+            </>
+          ) : null}
+          {' '}
+          — cheaper than FoxySend. Owltopia Gen1/Gen2 holders get up to 50% off. Solana rent is shown
+          separately when a recipient needs a new token account.
         </p>
+        {connected && publicKey && (holderFeeLoading || holderFee) ? (
+          <p className="text-xs text-muted-foreground">
+            {holderFeeLoading
+              ? 'Checking Owltopia holder discount…'
+              : holderFee && discountBps > 0
+                ? `Holder rate: ${formatOwlSendFeeSol(feeSol)} / send (was ${formatOwlSendFeeSol(baseFeeSol)}) · Gen1 ${holderFee.gen1Count} · Gen2 ${holderFee.gen2Count}`
+                : holderFee && !holderFee.checkAvailable
+                  ? 'Holder discount check unavailable — standard Owl fee applies.'
+                  : `Standard Owl fee ${formatOwlSendFeeSol(baseFeeSol)} / send · hold Gen1 or Gen2 for up to 50% off.`}
+          </p>
+        ) : null}
         {showAdminPreview ? (
           <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
             <Shield className="mt-0.5 h-4 w-4 shrink-0" />

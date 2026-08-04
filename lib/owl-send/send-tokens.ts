@@ -44,6 +44,8 @@ export async function sendOwlSendTokenLines(params: {
   recipient?: string
   sendTransaction: WalletSendTransactionFn
   lines: OwlSendTokenLine[]
+  /** Owltopia holder discount (bps). */
+  feeDiscountBps?: number
 }): Promise<OwlSendBatchResult> {
   const { connection, owner, sendTransaction, lines } = params
   if (lines.length < 1) return { ok: false, error: 'Select at least one token amount to send.' }
@@ -55,7 +57,7 @@ export async function sendOwlSendTokenLines(params: {
   }
 
   const treasury = getPlatformFeeTreasuryWalletAddressClient()
-  const feeLamports = getOwlSendFeeLamportsForCount(lines.length)
+  const feeLamports = getOwlSendFeeLamportsForCount(lines.length, params.feeDiscountBps ?? 0)
   if (feeLamports > 0 && !treasury) {
     return { ok: false, error: 'OwlSend fee treasury is not configured.' }
   }
@@ -142,6 +144,7 @@ export async function sendOwlSendTokensToOne(params: {
   recipient: string
   sendTransaction: WalletSendTransactionFn
   lines: OwlSendTokenLine[]
+  feeDiscountBps?: number
 }): Promise<OwlSendBatchResult> {
   return sendOwlSendTokenLines({
     connection: params.connection,
@@ -149,5 +152,6 @@ export async function sendOwlSendTokensToOne(params: {
     recipient: params.recipient,
     sendTransaction: params.sendTransaction,
     lines: params.lines,
+    feeDiscountBps: params.feeDiscountBps,
   })
 }

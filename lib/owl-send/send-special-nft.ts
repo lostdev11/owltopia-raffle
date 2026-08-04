@@ -25,9 +25,10 @@ async function sendFeeOnlyTx(params: {
   connection: Connection
   owner: PublicKey
   sendTransaction: WalletSendTransactionFn
+  feeDiscountBps?: number
 }): Promise<{ ok: true; signature: string } | { ok: false; error: string }> {
   const treasury = getPlatformFeeTreasuryWalletAddressClient()
-  const feeLamports = getOwlSendFeeLamportsForCount(1)
+  const feeLamports = getOwlSendFeeLamportsForCount(1, params.feeDiscountBps ?? 0)
   if (feeLamports <= 0) return { ok: true, signature: '' }
   if (!treasury) {
     return { ok: false, error: 'OwlSend fee treasury is not configured.' }
@@ -68,12 +69,14 @@ export async function sendOwlSendSpecialNft(params: {
   sendTransaction: WalletSendTransactionFn
   line: OwlSendLine
   onPhase?: (phase: OwlSendSendPhase) => void
+  /** Owltopia holder discount (bps). */
+  feeDiscountBps?: number
 }): Promise<OwlSendBatchResult> {
   const { connection, owner, walletAdapter, sendTransaction, line, onPhase } = params
   const recipient = line.recipient.trim()
   const mint = line.mint.trim()
   const treasury = getPlatformFeeTreasuryWalletAddressClient()
-  const feeLamports = getOwlSendFeeLamportsForCount(1)
+  const feeLamports = getOwlSendFeeLamportsForCount(1, params.feeDiscountBps ?? 0)
 
   if (!walletAdapter) {
     return { ok: false, error: 'Wallet adapter not ready for this NFT type.', failedMints: [mint] }

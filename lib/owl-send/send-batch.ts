@@ -23,6 +23,8 @@ export async function sendOwlSendNftBatch(params: {
   sendTransaction: WalletSendTransactionFn
   lines: OwlSendLine[]
   onPhase?: (phase: OwlSendSendPhase) => void
+  /** Owltopia holder discount (bps). */
+  feeDiscountBps?: number
 }): Promise<OwlSendBatchResult> {
   const spl = await sendOwlSendSplNftBatch({
     connection: params.connection,
@@ -30,6 +32,7 @@ export async function sendOwlSendNftBatch(params: {
     sendTransaction: params.sendTransaction,
     lines: params.lines,
     onPhase: params.onPhase,
+    feeDiscountBps: params.feeDiscountBps,
   })
   if (spl.ok) return spl
 
@@ -44,6 +47,7 @@ export async function sendOwlSendNftBatch(params: {
       sendTransaction: params.sendTransaction,
       line: params.lines[0]!,
       onPhase: params.onPhase,
+      feeDiscountBps: params.feeDiscountBps,
     })
   }
 
