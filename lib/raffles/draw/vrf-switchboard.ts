@@ -115,15 +115,38 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
     const queue = await sb.getDefaultQueue(rpcUrl)
     const queuePubkey = queue.pubkey
 
-    const rngKp = Keypair.generate()
-    const [randomness, createIx] = await sb.Randomness.create(
-      program,
-      rngKp,
-      queuePubkey,
-      payer.publicKey
-    )
-    const commitIx = await randomness.commitIx(queuePubkey)
+    // Must pass payer as commit authority. Bare `commitIx(queue)` calls loadData()
+    // on the randomness account before create is on-chain →
+    // "Account does not exist or has no data <pubkey>".
+    // createAndCommitIxs does this correctly; keep an explicit fallback.
+    let randomness: InstanceType<typeof sb.Randomness>
+    let rngKp: Keypair
+    let createIx: Awaited<ReturnType<typeof sb.Randomness.create>>[1]
+    let commitIx: Awaited<ReturnType<InstanceType<typeof sb.Randomness>['commitIx']>>
+    if (typeof sb.Randomness.createAndCommitIxs === 'function') {
+      const [account, accountKp, ixs] = await sb.Randomness.createAndCommitIxs(
+        program,
+        queuePubkey,
+        payer.publicKey
+      )
+      randomness = account
+      rngKp = accountKp
+      createIx = ixs[0]!
+      commitIx = ixs[1]!
+    } else {
+      rngKp = Keypair.generate()
+      const created = await sb.Randomness.create(
+        program,
+        rngKp,
+        queuePubkey,
+        payer.publicKey
+      )
+      randomness = created[0]
+      createIx = created[1]
+      commitIx = await randomness.commitIx(queuePubkey, payer.publicKey)
+    }
 
+    // Create must land before commit (commitIx accounts assume the account exists).
     const createTx = await sb.asV0Tx({
       connection,
       ixs: [createIx],
@@ -171,9 +194,13 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
       seedSlot,
     }
   } catch (e) {
+    const raw = e instanceof Error ? e.message : 'Switchboard commit failed'
+    const hint = /Account does not exist or has no data/i.test(raw)
+      ? ' (Switchboard randomness commit failed before/while creating the on-chain account — retry Force draw; if this persists, check RPC cluster matches mainnet and escrow can pay rent)'
+      : ''
     return {
       ok: false,
-      error: e instanceof Error ? e.message : 'Switchboard commit failed',
+      error: `${raw}${hint}`,
     }
   }
 }

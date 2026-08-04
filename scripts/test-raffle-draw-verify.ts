@@ -304,9 +304,44 @@ async function assertVrfKeypairWallet() {
   }
 }
 
+// --- Switchboard commitIx must receive authority before account exists on-chain ---
+async function assertVrfCommitIxNeedsAuthority() {
+  // Networked regression: reproduces the Force-draw error
+  // "Account does not exist or has no data <pubkey>" when commitIx() omits authority.
+  if (process.env.SKIP_SWITCHBOARD_NETWORK_TEST === '1') {
+    console.log('skip Switchboard network commitIx check (SKIP_SWITCHBOARD_NETWORK_TEST=1)')
+    return
+  }
+  const sb = await import('@switchboard-xyz/on-demand')
+  const connection = new (await import('@solana/web3.js')).Connection(
+    'https://api.mainnet-beta.solana.com',
+    'confirmed'
+  )
+  const payer = Keypair.generate()
+  const wallet = keypairWallet(payer)
+  const program = await sb.AnchorUtils.loadProgramFromConnection(connection, wallet)
+  const queue = await sb.getDefaultQueue(connection.rpcEndpoint)
+  const rngKp = Keypair.generate()
+  const [randomness] = await sb.Randomness.create(
+    program,
+    rngKp,
+    queue.pubkey,
+    payer.publicKey
+  )
+  await assert.rejects(
+    () => randomness.commitIx(queue.pubkey),
+    /Account does not exist or has no data/
+  )
+  const commitIx = await randomness.commitIx(queue.pubkey, payer.publicKey)
+  assert.ok(commitIx.keys?.length >= 1)
+}
+
 assertVrfKeypairWallet()
+  .then(() => assertVrfCommitIxNeedsAuthority())
   .then(() => {
-    console.log('raffle draw verify ok (v1 + v2 commit–reveal + v3 VRF seed + wallet + ledger)')
+    console.log(
+      'raffle draw verify ok (v1 + v2 commit–reveal + v3 VRF seed + wallet + ledger + commitIx)'
+    )
   })
   .catch((err) => {
     console.error(err)
