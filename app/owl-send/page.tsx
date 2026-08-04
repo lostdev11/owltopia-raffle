@@ -8,7 +8,7 @@ import { PLATFORM_NAME, getSiteBaseUrl } from '@/lib/site-config'
 
 const SITE_URL = getSiteBaseUrl()
 const DESCRIPTION =
-  'Send Solana NFTs and tokens with a 0.001 SOL Owl fee — OwlSend on Owltopia.'
+  'Send Solana NFTs and tokens with a 0.001 SOL Owl fee (Owltopia holders up to 50% off) — OwlSend on Owltopia.'
 /** Dedicated OwlSend link-preview art (`public/owl-send-og.png`). Bump `v` when the asset changes. */
 const OG_IMAGE_URL = `${SITE_URL}/owl-send-og.png?v=1`
 const OG_IMAGE_DIMS = { width: 1024, height: 682 } as const

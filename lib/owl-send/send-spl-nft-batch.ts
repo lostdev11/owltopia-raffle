@@ -69,13 +69,15 @@ async function buildOwlSendSplNftTransaction(params: {
   connection: Connection
   owner: PublicKey
   lines: OwlSendLine[]
+  /** Owltopia holder discount (bps). */
+  feeDiscountBps?: number
 }): Promise<
   | { ok: true; tx: Transaction; newAtaCount: number }
   | { ok: false; error: string; failedMints: string[] }
 > {
   const { connection, owner, lines } = params
   const treasury = getPlatformFeeTreasuryWalletAddressClient()
-  const feeLamports = getOwlSendFeeLamportsForCount(lines.length)
+  const feeLamports = getOwlSendFeeLamportsForCount(lines.length, params.feeDiscountBps ?? 0)
   if (feeLamports > 0 && !treasury) {
     return {
       ok: false,
@@ -221,6 +223,8 @@ export async function sendOwlSendSplNftBatch(params: {
   sendTransaction: WalletSendTransactionFn
   lines: OwlSendLine[]
   onPhase?: (phase: OwlSendSendPhase) => void
+  /** Owltopia holder discount (bps). */
+  feeDiscountBps?: number
 }): Promise<OwlSendBatchResult> {
   const { connection, owner, sendTransaction, lines, onPhase } = params
   if (lines.length < 1) return { ok: false, error: 'Nothing to send in this batch.' }
@@ -236,7 +240,12 @@ export async function sendOwlSendSplNftBatch(params: {
   let built: Awaited<ReturnType<typeof buildOwlSendSplNftTransaction>>
   try {
     built = await withOwlSendTimeout(
-      buildOwlSendSplNftTransaction({ connection, owner, lines }),
+      buildOwlSendSplNftTransaction({
+        connection,
+        owner,
+        lines,
+        feeDiscountBps: params.feeDiscountBps,
+      }),
       OWL_SEND_BUILD_TIMEOUT_MS,
       OWL_SEND_BUILD_TIMEOUT_HINT
     )

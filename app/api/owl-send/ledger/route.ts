@@ -11,6 +11,7 @@ import {
   type OwlSendLedgerMode,
 } from '@/lib/db/owl-send-ledger'
 import { verifyOwlSendLedgerTx } from '@/lib/owl-send/verify-ledger-tx'
+import { resolveOwlSendHolderFeeQuote } from '@/lib/owl-send/holder-fee-quote'
 
 export const dynamic = 'force-dynamic'
 
@@ -144,20 +145,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'At least one valid line (recipient + mint) required' }, { status: 400 })
     }
 
-    const feeLamports =
-      typeof body.feeLamports === 'number' && Number.isFinite(body.feeLamports)
-        ? Math.max(0, Math.floor(body.feeLamports))
-        : null
     const batchIndex =
       typeof body.batchIndex === 'number' && Number.isFinite(body.batchIndex)
         ? Math.max(0, Math.floor(body.batchIndex))
         : null
 
+    // Server-recomputed expected fee (holder discount). Client feeLamports is not trusted.
+    const feeQuote = await resolveOwlSendHolderFeeQuote({
+      wallet: session.wallet,
+      lineCount: lines.length,
+      skipCache: true,
+    })
+    const expectedFeeLamports = feeQuote.feeLamportsTotal
+
     const verified = await verifyOwlSendLedgerTx({
       signature: txSignature,
       fromWallet: session.wallet,
       lines,
-      feeLamports,
+      feeLamports: expectedFeeLamports,
     })
     if (!verified.ok) {
       return NextResponse.json({ error: verified.error }, { status: 400 })
@@ -173,7 +178,7 @@ export async function POST(request: NextRequest) {
       txSignature,
       recipientCount,
       assetCount,
-      feeLamports,
+      feeLamports: expectedFeeLamports,
       batchIndex,
       lines,
     })

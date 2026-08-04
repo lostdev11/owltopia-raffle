@@ -2,12 +2,17 @@ import {
   OWL_SEND_ATA_RENT_SOL,
   OWL_SEND_NETWORK_FEE_SOL_PER_APPROVAL,
 } from '@/lib/owl-send/constants'
-import { formatOwlSendFeeSol, getOwlSendFeeSol } from '@/lib/owl-send/fee'
+import { formatOwlSendFeeSol, getOwlSendFeeSol, getOwlSendFeeSolForDiscount } from '@/lib/owl-send/fee'
+import { clampOwlSendDiscountBps } from '@/lib/owl-send/holder-discount'
 
 export type OwlSendCostEstimate = {
   nftCount: number
   batchCount: number
   feePerNftSol: number
+  /** Base (undiscounted) per-line fee. */
+  baseFeePerNftSol: number
+  discountBps: number
+  discountPercent: number
   platformFeeSol: number
   /** Estimated rent if every line needs a new ATA (upper bound when unknown). */
   rentSolMax: number
@@ -29,11 +34,15 @@ export function buildOwlSendCostEstimate(params: {
   batchCount: number
   /** When known from preflight; null = show max (assume all need ATA). */
   newAtaCount?: number | null
+  /** Owltopia holder discount in basis points (0–10000). */
+  discountBps?: number
 }): OwlSendCostEstimate | null {
   const nftCount = Math.max(0, Math.floor(params.nftCount))
   if (nftCount < 1) return null
   const batchCount = Math.max(1, Math.floor(params.batchCount))
-  const feePerNftSol = getOwlSendFeeSol()
+  const discountBps = clampOwlSendDiscountBps(params.discountBps ?? 0)
+  const baseFeePerNftSol = getOwlSendFeeSol()
+  const feePerNftSol = getOwlSendFeeSolForDiscount(discountBps)
   const platformFeeSol = feePerNftSol * nftCount
   const rentSolMax = OWL_SEND_ATA_RENT_SOL * nftCount
   const newAtaCountKnown =
@@ -59,10 +68,16 @@ export function buildOwlSendCostEstimate(params: {
       ? `~${formatOwlSendFeeSol(totalSolKnown)}`
       : `~${formatOwlSendFeeSol(platformFeeSol + networkFeeSol)} + rent if needed`
 
+  const discountNote =
+    discountBps > 0 ? ` · ${discountBps / 100}% holder discount` : ''
+
   return {
     nftCount,
     batchCount,
     feePerNftSol,
+    baseFeePerNftSol,
+    discountBps,
+    discountPercent: discountBps / 100,
     platformFeeSol,
     rentSolMax,
     rentSolKnown,
@@ -70,7 +85,7 @@ export function buildOwlSendCostEstimate(params: {
     networkFeeSol,
     totalSolKnown,
     totalSolMax,
-    feeLabel: `${formatOwlSendFeeSol(platformFeeSol)} Owl fee (${nftCount} × ${formatOwlSendFeeSol(feePerNftSol)})`,
+    feeLabel: `${formatOwlSendFeeSol(platformFeeSol)} Owl fee (${nftCount} × ${formatOwlSendFeeSol(feePerNftSol)})${discountNote}`,
     rentLabel,
     networkLabel: `~${formatOwlSendFeeSol(networkFeeSol)} network`,
     totalLabel,
@@ -81,10 +96,12 @@ export function buildOwlSendCostEstimate(params: {
 export function buildBatchCostEstimate(params: {
   nftCountInBatch: number
   newAtaCount?: number | null
+  discountBps?: number
 }): OwlSendCostEstimate | null {
   return buildOwlSendCostEstimate({
     nftCount: params.nftCountInBatch,
     batchCount: 1,
     newAtaCount: params.newAtaCount,
+    discountBps: params.discountBps,
   })
 }
