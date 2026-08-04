@@ -99,9 +99,23 @@ export async function POST(
     const isVrf =
       (raffle.draw_algo ?? '').trim() === DRAW_ALGO_V3_VRF || raffleUsesDrawVrf(raffle)
 
-    const winnerWallet = await selectWinner(raffle.id, forceOverride, {
-      forceVrfRetry: isVrf,
+    // Prefer resuming an existing VRF account (may already be revealed on-chain).
+    // Only force a brand-new Switchboard request when explicitly requested or there is no account.
+    const hasVrfAccount = Boolean((raffle.draw_vrf_account ?? '').trim())
+    const forceNewVrf = body.forceNewVrf === true || (isVrf && !hasVrfAccount)
+
+    let winnerWallet = await selectWinner(raffle.id, forceOverride, {
+      forceVrfRetry: forceNewVrf,
     })
+
+    // Resume path needs the stored randomness secret. If it was lost, fall back to a new VRF request.
+    if (!winnerWallet && isVrf && hasVrfAccount && !forceNewVrf) {
+      const mid = await getRaffleById(raffle.id)
+      const err = (mid?.draw_vrf_error ?? '').trim()
+      if (/Missing VRF account secret/i.test(err)) {
+        winnerWallet = await selectWinner(raffle.id, forceOverride, { forceVrfRetry: true })
+      }
+    }
 
     if (!winnerWallet) {
       const latest = await getRaffleById(raffle.id)

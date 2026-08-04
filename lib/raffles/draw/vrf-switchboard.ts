@@ -13,7 +13,7 @@ import { getSolanaConnection } from '@/lib/solana/connection'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getFundsEscrowKeypair } from '@/lib/raffles/funds-escrow'
 import { getPrizeEscrowKeypair } from '@/lib/raffles/prize-escrow'
-import { seedFromVrfHex } from '@/lib/raffles/draw/vrf-seed'
+import { seedFromVrfHex, extractVrfValueHex, isSwitchboardRandomnessRevealed } from '@/lib/raffles/draw/vrf-seed'
 
 export const VRF_PROVIDER_SWITCHBOARD = 'switchboard' as const
 
@@ -210,6 +210,8 @@ export async function switchboardRevealRandomness(params: {
   randomnessSecretKeyBase58: string
   /** Wait/retry budget for oracle generation (ms). */
   maxWaitMs?: number
+  /** Optional known reveal tx (e.g. when recovering an already-revealed account). */
+  knownRevealTx?: string | null
 }): Promise<SwitchboardVrfRevealResult> {
   const payer = resolveVrfPayer()
   if (!payer) {
@@ -241,9 +243,43 @@ export async function switchboardRevealRandomness(params: {
 
     const randomness = new sb.Randomness(program, accountPk)
 
+    const readRevealedValue = async (
+      revealTx: string
+    ): Promise<SwitchboardVrfRevealResult | null> => {
+      const data = await randomness.loadData()
+      if (!isSwitchboardRandomnessRevealed(data)) return null
+      const fromAccount = extractVrfValueHex(data.value)
+      if (fromAccount) {
+        return {
+          ok: true,
+          provider: VRF_PROVIDER_SWITCHBOARD,
+          randomnessAccount: accountPk.toBase58(),
+          revealTx,
+          valueHex: fromAccount,
+          drawSeed: seedFromVrfHex(fromAccount),
+        }
+      }
+      return null
+    }
+
+    // Already revealed on-chain (common after a prior attempt where inspect failed).
+    try {
+      const existing = await readRevealedValue(
+        (params.knownRevealTx ?? '').trim() || ''
+      )
+      if (existing) return existing
+    } catch {
+      // Account may not be ready yet — fall through to reveal loop.
+    }
+
     let lastErr = 'Randomness not ready'
+    let lastRevealSig = ''
     while (Date.now() - started < maxWaitMs) {
       try {
+        // Re-check each iteration — another worker may have revealed.
+        const raced = await readRevealedValue(lastRevealSig)
+        if (raced) return raced
+
         const revealIx = await randomness.revealIx(payer.publicKey)
         const revealTx = await sb.asV0Tx({
           connection,
@@ -258,53 +294,51 @@ export async function switchboardRevealRandomness(params: {
           maxRetries: 3,
         })
         await connection.confirmTransaction(revealSig, 'confirmed')
+        lastRevealSig = revealSig
 
-        const inspected = await sb.inspectSolanaRandomness({
-          randomnessId: accountPk,
-          solanaRPCUrl: rpcUrl,
-        })
-        const valueHex =
-          (inspected as { state?: { valueHex?: string } })?.state?.valueHex ||
-          (inspected as { valueHex?: string })?.valueHex ||
-          ''
-        if (!valueHex) {
-          // Fallback: loadData
-          const data = await randomness.loadData()
-          const raw =
-            data?.value ??
-            data?.currentValue ??
-            data?.result ??
-            null
-          if (raw && (Buffer.isBuffer(raw) || raw instanceof Uint8Array || Array.isArray(raw))) {
-            const hex = Buffer.from(raw as Uint8Array).toString('hex')
+        // Prefer on-chain account data. inspectSolanaRandomness often throws
+        // "Invalid account discriminator" after reveal (oracle field cleared).
+        const fromChain = await readRevealedValue(revealSig)
+        if (fromChain) return fromChain
+
+        try {
+          const inspected = await sb.inspectSolanaRandomness({
+            randomnessId: accountPk,
+            solanaRPCUrl: rpcUrl,
+          })
+          const valueHex =
+            (inspected as { state?: { valueHex?: string } })?.state?.valueHex ||
+            (inspected as { valueHex?: string })?.valueHex ||
+            ''
+          if (valueHex) {
             return {
               ok: true,
               provider: VRF_PROVIDER_SWITCHBOARD,
               randomnessAccount: accountPk.toBase58(),
               revealTx: revealSig,
-              valueHex: hex,
-              drawSeed: seedFromVrfHex(hex),
+              valueHex,
+              drawSeed: seedFromVrfHex(valueHex),
             }
           }
-          return {
-            ok: false,
-            error: 'Reveal succeeded but valueHex missing from inspection',
-            retryable: true,
-          }
+        } catch (inspectErr) {
+          lastErr =
+            inspectErr instanceof Error
+              ? `inspect failed after reveal: ${inspectErr.message}`
+              : 'inspect failed after reveal'
         }
 
-        return {
-          ok: true,
-          provider: VRF_PROVIDER_SWITCHBOARD,
-          randomnessAccount: accountPk.toBase58(),
-          revealTx: revealSig,
-          valueHex,
-          drawSeed: seedFromVrfHex(valueHex),
-        }
+        lastErr = 'Reveal tx landed but value not readable yet'
       } catch (e) {
         lastErr = e instanceof Error ? e.message : 'Reveal attempt failed'
-        await new Promise((r) => setTimeout(r, 2500))
+        // If revealIx fails because oracle was cleared, check whether value is already set.
+        try {
+          const recovered = await readRevealedValue(lastRevealSig)
+          if (recovered) return recovered
+        } catch {
+          // ignore
+        }
       }
+      await new Promise((r) => setTimeout(r, 2500))
     }
 
     return {

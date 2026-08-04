@@ -37,7 +37,7 @@ export type { PerformDrawOptions } from '@/lib/raffles/draw/perform-draw'
 export { sendDrawRevealMemoTransaction } from '@/lib/raffles/draw/reveal-tx'
 export type { SendDrawRevealResult } from '@/lib/raffles/draw/reveal-tx'
 
-export { seedFromVrfBytes, seedFromVrfHex } from '@/lib/raffles/draw/vrf-seed'
+export { seedFromVrfBytes, seedFromVrfHex, extractVrfValueHex, isSwitchboardRandomnessRevealed } from '@/lib/raffles/draw/vrf-seed'
 export {
   resolveVrfDrawLedger,
   vrfRequestReachedChain,

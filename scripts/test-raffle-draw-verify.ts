@@ -13,6 +13,8 @@ import {
   generateDrawSeed,
   seedFromVrfBytes,
   seedFromVrfHex,
+  extractVrfValueHex,
+  isSwitchboardRandomnessRevealed,
   keypairWallet,
   resolveVrfDrawLedger,
   vrfRequestReachedChain,
@@ -189,6 +191,22 @@ const vrfSeed = seedFromVrfBytes(vrfBytes)
 assert.equal(vrfSeed.length, 64)
 assert.equal(seedFromVrfHex(vrfSeed), vrfSeed)
 assert.equal(seedFromVrfHex('0x' + vrfSeed), vrfSeed)
+
+// Revealed Switchboard value is often a number[] (Anchor decode) — not Buffer/Uint8Array.
+const revealedArr = Array.from({ length: 32 }, (_, i) => (i === 0 ? 155 : i + 40))
+assert.equal(
+  extractVrfValueHex(revealedArr),
+  '9b292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f4041424344454647'
+)
+assert.equal(extractVrfValueHex(Buffer.alloc(32, 0)), null)
+assert.equal(extractVrfValueHex(null), null)
+assert.equal(isSwitchboardRandomnessRevealed({ revealSlot: 0, value: Buffer.alloc(32, 0) }), false)
+assert.equal(isSwitchboardRandomnessRevealed({ revealSlot: 437080823, value: Buffer.alloc(32, 0) }), true)
+assert.equal(isSwitchboardRandomnessRevealed({ revealSlot: 0, value: revealedArr }), true)
+assert.equal(
+  isSwitchboardRandomnessRevealed({ revealSlot: { toNumber: () => 99 }, value: null }),
+  true
+)
 
 const v3Draw = performDraw(entries, { algo: DRAW_ALGO_V3_VRF, drawSeed: vrfSeed })
 assert.equal(v3Draw.algo, DRAW_ALGO_V3_VRF)
