@@ -69,6 +69,7 @@ import {
 } from '@/lib/owl-send/batch'
 import {
   buildResumeRemainingPlan,
+  buildResumeSkippingFrozenPlan,
   collectSentMintsFromBatches,
   collectSentMintsFromLedger,
 } from '@/lib/owl-send/resume'
@@ -719,15 +720,90 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
   const runBatch = async (batchIndex: number) => {
     if (!publicKey || !preparedLines) return
-    const lines = batches[batchIndex]
+    let workingPrepared = preparedLines
+    let workingBatches = batches
+    let workingProgress = batchProgress
+    let workingIndex = batchIndex
+    let lines = workingBatches[workingIndex]
     if (!lines?.length) return
+
+    // Before every attempt (including Retry): drop nested/frozen so we never replay the
+    // same poison Gen2 batch. Thawed leftover CM delegates stay.
+    try {
+      const frozenInBatch = await findFrozenOwlSendMints({
+        connection,
+        owner: publicKey,
+        lines,
+      })
+      // Also scan the whole remaining plan — frozen mints in later approvals poison Retry loops too.
+      const allPendingLines = workingBatches.flatMap((batch, i) => {
+        const st = workingProgress[i]?.status
+        if (st === 'done') return []
+        return batch
+      })
+      const frozenInPlan =
+        allPendingLines.length > 0
+          ? await findFrozenOwlSendMints({
+              connection,
+              owner: publicKey,
+              lines: allPendingLines,
+            })
+          : []
+      const pickerFrozen = nfts.filter((n) => n.frozen === true).map((n) => n.mint)
+      const frozenSet = new Set(
+        [...frozenInBatch, ...frozenInPlan, ...pickerFrozen].map((m) => m.trim())
+      )
+      if (frozenSet.size > 0) {
+        const plan = buildResumeSkippingFrozenPlan({
+          preparedLines: workingPrepared,
+          batches: workingBatches,
+          batchProgress: workingProgress,
+          frozenMints: frozenSet,
+        })
+        if (!plan.ok) {
+          setBatchProgress((prev) =>
+            prev.map((b) =>
+              b.index === workingIndex
+                ? { ...b, status: 'failed', error: plan.error, failedMints: [...frozenSet] }
+                : b
+            )
+          )
+          setRetryMints([...frozenSet])
+          setSessionError(plan.error)
+          return
+        }
+        if (plan.skippedFrozen > 0) {
+          workingPrepared = plan.remaining
+          workingBatches = plan.batches
+          workingProgress = plan.batchProgress
+          workingIndex = 0
+          lines = workingBatches[0] ?? []
+          setPreparedLines(workingPrepared)
+          setBatches(workingBatches)
+          setBatchProgress(workingProgress)
+          setActiveBatch(0)
+          setSelectedMints(new Set(workingPrepared.map((l) => l.mint)))
+          setRetryMints([...frozenSet])
+          setSessionNotice(
+            `Skipped ${plan.skippedFrozen} nested/frozen NFT${plan.skippedFrozen === 1 ? '' : 's'} — sending the rest. Thaw locks / unnest those separately.`
+          )
+          setNfts((prev) =>
+            prev.map((n) => (frozenSet.has(n.mint) ? { ...n, frozen: true } : n))
+          )
+          if (!lines.length) return
+        }
+      }
+    } catch {
+      /* proceed with original lines */
+    }
 
     sendCancelledRef.current = false
     setSendPhase('building')
     setSendPhaseStartedAt(Date.now())
-    setBatchProgress((prev) =>
-      prev.map((b) => (b.index === batchIndex ? { ...b, status: 'sending', error: undefined } : b))
+    workingProgress = workingProgress.map((b) =>
+      b.index === workingIndex ? { ...b, status: 'sending', error: undefined } : b
     )
+    setBatchProgress(workingProgress)
     setSessionError(null)
 
     const result = await sendOwlSendNftBatch({
@@ -752,20 +828,23 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setSendPhaseStartedAt(null)
 
     if (result.ok) {
-      setBatchProgress((prev) =>
-        prev.map((b) =>
-          b.index === batchIndex
-            ? { ...b, status: 'done', signature: result.signature }
-            : b.index === batchIndex + 1 && b.status === 'pending'
-              ? { ...b, status: 'ready' }
-              : b
-        )
+      const nextProgress = workingProgress.map((b) =>
+        b.index === workingIndex
+          ? { ...b, status: 'done' as const, signature: result.signature }
+          : b.index === workingIndex + 1 && b.status === 'pending'
+            ? { ...b, status: 'ready' as const }
+            : b
       )
-      if (batchIndex + 1 < batches.length) setActiveBatch(batchIndex + 1)
+      setBatchProgress(nextProgress)
+      setBatches(workingBatches)
+      setPreparedLines(workingPrepared)
+      if (workingIndex + 1 < workingBatches.length) setActiveBatch(workingIndex + 1)
+      const sent = new Set(lines.map((l) => l.mint))
+      setRetryMints((prev) => prev.filter((m) => !sent.has(m)))
       setSuccessPopup({
         title:
-          batches.length > 1
-            ? `Batch ${batchIndex + 1} of ${batches.length} sent`
+          workingBatches.length > 1
+            ? `Batch ${workingIndex + 1} of ${workingBatches.length} sent`
             : 'NFTs sent successfully',
         detail: `${lines.length} NFT${lines.length === 1 ? '' : 's'} transferred. Fee paid to Owltopia treasury.`,
         signature: result.signature,
@@ -775,7 +854,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         mode: mode === 'scatter' ? 'nft_scatter' : 'nft_one',
         assetKind: 'nft',
         txSignature: result.signature,
-        batchIndex,
+        batchIndex: workingIndex,
         feeDiscountBps: discountBps,
         lines: lines.map((l) => ({
           recipient: l.recipient,
@@ -786,18 +865,21 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       }).then(() => setLedgerRefreshKey((k) => k + 1))
       void loadAssets()
     } else {
-      setBatchProgress((prev) =>
-        prev.map((b) =>
-          b.index === batchIndex
+      setBatches(workingBatches)
+      setPreparedLines(workingPrepared)
+      setBatchProgress(
+        workingProgress.map((b) =>
+          b.index === workingIndex
             ? {
                 ...b,
-                status: 'failed',
+                status: 'failed' as const,
                 error: result.error,
                 failedMints: result.failedMints,
               }
             : b
         )
       )
+      setActiveBatch(workingIndex)
       if (result.failedMints?.length) {
         setRetryMints((prev) => [...new Set([...prev, ...result.failedMints!])])
       }
@@ -2011,7 +2093,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                                   ? `Approve in wallet (${activeBatch + 1} of ${batches.length})…`
                                   : `Sending ${activeBatch + 1} of ${batches.length}…`
                               : batchProgress[activeBatch]?.status === 'failed'
-                                ? `Retry ${activeBatch + 1} of ${batches.length}`
+                                ? isOwlSendFrozenTransferError(sessionError ?? '')
+                                  ? `Skip frozen & retry ${activeBatch + 1}`
+                                  : `Retry ${activeBatch + 1} of ${batches.length}`
                                 : batches.length === 1
                                   ? 'Are you sure? Send'
                                   : activeBatch === 0
@@ -2101,9 +2185,14 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                               const res = await thawFrozenMints(retryMints)
                               if (res.thawedCount > 0 || res.ok) {
                                 await loadAssets()
-                                setPreparedLines(null)
-                                setBatches([])
-                                setBatchProgress([])
+                                setSessionNotice(
+                                  res.thawedCount > 0
+                                    ? `Thawed ${res.thawedCount} NFT${res.thawedCount === 1 ? '' : 's'}. Tap Retry to send the rest (frozen ones are skipped automatically).`
+                                    : 'Those NFTs were already thawed on-chain. Tap Retry — nested/frozen ones are skipped automatically.'
+                                )
+                                setSessionError(null)
+                              } else if (res.error) {
+                                setSessionError(res.error)
                               }
                             })()
                           }}

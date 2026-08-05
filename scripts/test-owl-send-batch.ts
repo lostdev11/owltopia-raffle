@@ -16,6 +16,7 @@ import {
 } from '@/lib/owl-send/batch'
 import {
   buildResumeRemainingPlan,
+  buildResumeSkippingFrozenPlan,
   collectSentMintsFromBatches,
   collectSentMintsFromLedger,
 } from '@/lib/owl-send/resume'
@@ -246,6 +247,44 @@ if (resume.ok) {
   assert.equal(resume.batches.length, 1)
   assert.equal(resume.batchProgress[0]!.status, 'ready')
   assert.equal(resume.skippedSent, 5)
+}
+
+{
+  const skipFrozen = buildResumeSkippingFrozenPlan({
+    preparedLines: planLines,
+    batches: [planLines.slice(0, 5), planLines.slice(5)],
+    batchProgress: [
+      { index: 0, status: 'failed' },
+      { index: 1, status: 'pending' },
+    ],
+    frozenMints: ['m0', 'm5'],
+  })
+  assert.equal(skipFrozen.ok, true)
+  if (skipFrozen.ok) {
+    assert.equal(skipFrozen.skippedFrozen, 2)
+    assert.deepEqual(
+      skipFrozen.remaining.map((l) => l.mint),
+      ['m1', 'm2', 'm3', 'm4']
+    )
+    assert.equal(skipFrozen.batches.length, 1)
+  }
+
+  const allFrozen = buildResumeSkippingFrozenPlan({
+    preparedLines: [
+      { mint: 'f1', recipient: 'r' },
+      { mint: 'f2', recipient: 'r' },
+    ],
+    batches: [
+      [
+        { mint: 'f1', recipient: 'r' },
+        { mint: 'f2', recipient: 'r' },
+      ],
+    ],
+    batchProgress: [{ index: 0, status: 'failed' }],
+    frozenMints: ['f1', 'f2'],
+  })
+  assert.equal(allFrozen.ok, false)
+  if (!allFrozen.ok) assert.match(allFrozen.error, /Thaw locks|nested\/frozen/)
 }
 
 const resumeEmpty = buildResumeRemainingPlan({
