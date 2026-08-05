@@ -570,9 +570,9 @@ assert.match(owlSendRetryHint('Owl #3 is frozen on-chain'), /Thaw locks|On-chain
 assert.match(owlSendRetryHint('Could not find a transferable SPL'), /cNFT|alone|Deselect/)
 assert.match(
   owlSendRetryHint('Could not establish connection. Receiving end does not exist.'),
-  /Open Phantom|unreachable|reconnect/
+  /Open your wallet|Jupiter|unreachable|reconnect/
 )
-assert.match(owlSendRetryHint(owlSendWalletExtensionHint()), /Open Phantom|unreachable/)
+assert.match(owlSendRetryHint(owlSendWalletExtensionHint('Jupiter')), /Jupiter|unreachable|globe/)
 assert.equal(isOwlSendWalletExtensionError('Could not establish connection. Receiving end does not exist.'), true)
 assert.equal(isOwlSendWalletExtensionError('Account is frozen'), false)
 assert.equal(isOwlSendFrozenTransferError('Account is frozen'), true)

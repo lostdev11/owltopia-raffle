@@ -23,6 +23,11 @@ export function isOwlSendFrozenTransferError(message: string): boolean {
   )
 }
 
-export function owlSendWalletExtensionHint(): string {
-  return walletExtensionUnreachableHint()
+export function owlSendWalletExtensionHint(walletName?: string | null): string {
+  return walletExtensionUnreachableHint(walletName)
+}
+
+export function walletAdapterLooksLikeJupiter(adapterName: string | null | undefined): boolean {
+  const n = (adapterName ?? '').toLowerCase()
+  return n === 'jupiter' || n.includes('jupiter')
 }

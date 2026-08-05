@@ -55,7 +55,9 @@ import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
 import {
   isOwlSendFrozenTransferError,
   isOwlSendWalletExtensionError,
+  walletAdapterLooksLikeJupiter,
 } from '@/lib/owl-send/wallet-send-errors'
+import { isJupiterBrowser } from '@/lib/utils'
 import {
   buildTokenScatterLines,
   chunkOwlSendBatches,
@@ -129,6 +131,10 @@ function shorten(addr: string): string {
 export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const { connection } = useConnection()
   const { publicKey, connected, wallet } = useWallet()
+  const walletName = wallet?.adapter?.name ? String(wallet.adapter.name) : 'wallet'
+  const usingJupiter =
+    walletAdapterLooksLikeJupiter(walletName) ||
+    (typeof window !== 'undefined' && isJupiterBrowser())
   const sendTransaction = useSendTransactionForWallet()
   const access = useOwlSendAdminAccess({ initialViewerIsAdmin, isPublic })
   const { signIn: siwsSignIn } = useSiwsSignIn()
@@ -2061,6 +2067,15 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       </p>
                     ) : null}
 
+                    {usingJupiter && !allDone ? (
+                      <p className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-50">
+                        Connected with <span className="font-semibold">Jupiter</span>. Approve in
+                        the Jupiter sheet (Mobile: keep owltopia.xyz open in the Jupiter globe
+                        browser). Gen2 may show revoke + transfer — that clears leftover mint
+                        locks, not a stake.
+                      </p>
+                    ) : null}
+
                     {allDone ? (
                       <div className="flex items-center gap-2 text-sm text-emerald-300">
                         <CheckCircle2 className="h-4 w-4" /> All approvals confirmed — open Solscan
@@ -2140,7 +2155,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                         {sendPhase === 'building'
                           ? 'Preparing the transaction (RPC). Your wallet popup opens next — usually within a few seconds.'
                           : sendPhase === 'approving'
-                            ? 'Check Phantom/Solflare for the approve prompt (mobile: open the wallet app). If nothing appears, Cancel and Retry.'
+                            ? usingJupiter
+                              ? 'Check Jupiter for the approve prompt (Mobile: stay in the Jupiter globe browser). If nothing appears, Cancel, reconnect Jupiter, then Retry.'
+                              : `Check ${walletName} for the approve prompt (mobile: open the wallet app). If nothing appears, Cancel and Retry.`
                             : 'Confirming on-chain can take up to ~90s on mobile/busy RPC.'}{' '}
                         Cancel marks this approval failed — reject any open wallet popup, check
                         Solscan, then Retry or Resume remaining.
@@ -2168,10 +2185,18 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       {owlSendRetryHint(
                         sessionError ||
                           batchProgress[activeBatch]?.error ||
-                          'Wallet did not approve — open Phantom, unlock, refresh this page, reconnect, then Retry.'
+                          (usingJupiter
+                            ? 'Jupiter did not approve — open Jupiter, unlock, hard-refresh owltopia.xyz in the Jupiter globe browser, reconnect, then Retry.'
+                            : `Wallet did not approve — open ${walletName}, unlock, refresh this page, reconnect, then Retry.`)
                       )}
                     </p>
-                    {isOwlSendWalletExtensionError(
+                    {usingJupiter ? (
+                      <p className="text-[11px] text-amber-100/60">
+                        Using Jupiter: Gen2 leftover Candy Machine delegates can look scary in the
+                        preview — OwlSend revokes them in the same approval, then transfers. Stay on
+                        owltopia.xyz inside Jupiter&apos;s in-app browser.
+                      </p>
+                    ) : isOwlSendWalletExtensionError(
                       sessionError || batchProgress[activeBatch]?.error || ''
                     ) ? (
                       <p className="text-[11px] text-amber-100/60">
@@ -2188,7 +2213,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     ) : (
                       <p className="text-[11px] text-amber-100/60">
                         Gen2 leftover delegates are revoked in the same approval as the transfer.
-                        If the wallet popup still does not open: unlock Phantom, hard-refresh,
+                        If the wallet popup still does not open: unlock {walletName}, hard-refresh,
                         reconnect, then Retry.
                       </p>
                     )}

@@ -29,7 +29,7 @@ function mapWalletSendError(err: unknown, isMobile: boolean): Error {
   if (we?.name === 'AbortError' || errorMessage.includes('abort')) {
     return new Error(
       isMobile
-        ? 'Wallet approval timed out. Open your wallet app, approve the transfer, or reconnect and try again.'
+        ? 'Wallet approval timed out. Open your wallet app (Jupiter / Phantom / Solflare), approve the transfer, or reconnect and try again.'
         : 'Wallet approval timed out. Check your wallet extension for a pending request, or reconnect and try again.'
     )
   }

@@ -357,7 +357,7 @@ export async function sendOwlSendSplNftBatch(params: {
     if (isOwlSendWalletExtensionError(msg)) {
       return {
         ok: false,
-        error: owlSendWalletExtensionHint(),
+        error: owlSendWalletExtensionHint(params.walletAdapter?.name ?? null),
         // Do not amber-highlight sendable Gen2s for a Phantom channel failure.
         failedMints: [],
       }
