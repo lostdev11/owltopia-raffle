@@ -7,6 +7,7 @@ import {
   clearUnconfirmedDasFrozen,
   mergeDasNftsWithOnChainLocks,
 } from '@/lib/owl-send/merge-onchain-nft-locks'
+import { fetchNftLockOverlayByDerivedAtasRpc } from '@/lib/owl-send/overlay-derived-atas'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -307,20 +308,28 @@ export async function GET(request: NextRequest) {
         }
       })
 
-    // Overlay real ATAs + freeze state from getParsedTokenAccountsByOwner.
-    // DAS sets tokenAccount=mint for every NFT, which breaks OwlSend Gen2 multi-sends when the
-    // browser RPC overlay is empty/rate-limited (common on mobile).
-    // Never keep DAS ownership.frozen without on-chain confirmation — leftover CM delegates
-    // and stale indexer freeze flags falsely block OwlSend Gen2 multi-sends.
-    const rpcLocks = await getNftsViaRpcFallback(heliusRpcUrl, wallet)
+    // Overlay real ATAs + freeze state.
+    // Prefer derived ATAs for the DAS mint list — getParsedTokenAccountsByOwner truncates on
+    // large wallets (1000+ NFTs) and was wiping Gen2 freezes + leaving tokenAccount=mint.
+    const derivedLocks = await fetchNftLockOverlayByDerivedAtasRpc({
+      rpcUrl: heliusRpcUrl,
+      owner: wallet,
+      mints: nfts.map((n) => n.mint),
+    })
     if (nfts.length === 0) {
-      // Devnet DAS is often empty; mainnet empty DAS can also recover from RPC.
+      // Devnet DAS is often empty; mainnet empty DAS can also recover from RPC owner-scan.
+      const rpcLocks = await getNftsViaRpcFallback(heliusRpcUrl, wallet)
       if (rpcLocks.length > 0) nfts = rpcLocks
-    } else if (rpcLocks.length > 0) {
-      nfts = mergeDasNftsWithOnChainLocks(nfts, rpcLocks)
+    } else if (derivedLocks.length > 0) {
+      nfts = mergeDasNftsWithOnChainLocks(nfts, derivedLocks)
     } else {
-      // Overlay failed/empty — drop unconfirmed DAS frozen (confirm-or-unknown).
-      nfts = clearUnconfirmedDasFrozen(nfts)
+      // Derived overlay failed — try owner-scan, then drop unconfirmed DAS frozen.
+      const rpcLocks = await getNftsViaRpcFallback(heliusRpcUrl, wallet)
+      if (rpcLocks.length > 0) {
+        nfts = mergeDasNftsWithOnChainLocks(nfts, rpcLocks)
+      } else {
+        nfts = clearUnconfirmedDasFrozen(nfts)
+      }
     }
 
     nfts = await enrichWalletNftCollectionNames(nfts)

@@ -8,12 +8,12 @@ export function isOwlSendCompressedNft(nft: WalletNft): boolean {
 }
 
 /**
- * Informational picker badge — frozen and cNFT, same light treatment.
- * OwlSend does not soft-block on leftover Gen2 delegates.
+ * Informational picker badge — only true on-chain freeze (nested / mint-locked).
+ * Leftover Gen2 Candy Machine delegates after thaw are NOT nested and must not look staked.
  */
 export function owlSendNftLockLabel(nft: WalletNft): string | null {
   if (isOwlSendCompressedNft(nft)) return 'cNFT'
-  if (nft.frozen === true) return 'Marked frozen'
+  if (nft.frozen === true) return 'Nested / frozen'
   return null
 }
 
