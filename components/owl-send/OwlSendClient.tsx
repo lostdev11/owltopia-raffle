@@ -20,6 +20,7 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { OwlSendSuccessBanner } from '@/components/owl-send/OwlSendSuccessBanner'
 import {
   OwlSendSuccessDialog,
+  owlSendSuccessItemsFromNftLines,
   type OwlSendSuccessState,
 } from '@/components/owl-send/OwlSendSuccessDialog'
 import { fetchWalletNftsWithRetry } from '@/lib/solana/fetch-wallet-nfts-api'
@@ -847,13 +848,20 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       if (workingIndex + 1 < workingBatches.length) setActiveBatch(workingIndex + 1)
       const sent = new Set(lines.map((l) => l.mint))
       setRetryMints((prev) => prev.filter((m) => !sent.has(m)))
+      const successItems = owlSendSuccessItemsFromNftLines(lines, {
+        showRecipient: mode === 'scatter',
+      })
       setSuccessPopup({
         title:
           workingBatches.length > 1
             ? `Batch ${workingIndex + 1} of ${workingBatches.length} sent`
             : 'NFTs sent successfully',
-        detail: `${lines.length} NFT${lines.length === 1 ? '' : 's'} transferred. Fee paid to Owltopia treasury.`,
+        detail:
+          mode === 'scatter'
+            ? `${lines.length} NFT${lines.length === 1 ? '' : 's'} transferred. Fee paid to Owltopia treasury.`
+            : `${lines.length} NFT${lines.length === 1 ? '' : 's'} → ${shorten(lines[0]?.recipient ?? '')}. Fee paid to Owltopia treasury.`,
         signature: result.signature,
+        items: successItems,
       })
       void recordOwlSendLedger({
         fromWallet: publicKey.toBase58(),
@@ -2050,6 +2058,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                                   }
                                   signature={b.signature}
                                   detail={`${lines.length} NFT${lines.length === 1 ? '' : 's'} transferred.`}
+                                  items={owlSendSuccessItemsFromNftLines(lines, {
+                                    showRecipient: mode === 'scatter',
+                                  })}
                                 />
                               </div>
                             ) : null}
