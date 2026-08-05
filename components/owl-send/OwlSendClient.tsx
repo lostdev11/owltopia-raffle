@@ -869,43 +869,82 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     }
   }
 
-  const restorePendingDraft = () => {
-    if (!pendingDraft) return
-    const normalizedProgress = pendingDraft.batchProgress.map((b) =>
-      b.status === 'sending'
-        ? {
-            ...b,
-            status: 'failed' as const,
-            error:
-              'Interrupted — check Solscan for this batch, then Retry or Resume remaining.',
-          }
-        : b
-    )
-    const firstActionable = normalizedProgress.findIndex(
-      (b) => b.status === 'ready' || b.status === 'failed' || b.status === 'pending'
-    )
-    const withReady =
-      firstActionable >= 0 && normalizedProgress[firstActionable]?.status === 'pending'
-        ? normalizedProgress.map((b, i) =>
-            i === firstActionable ? { ...b, status: 'ready' as const } : b
-          )
-        : normalizedProgress
+  const frozenNftCount = useMemo(() => nfts.filter((n) => n.frozen === true).length, [nfts])
 
-    setMode(pendingDraft.mode)
-    setPreparedLines(pendingDraft.preparedLines)
-    setBatches(pendingDraft.batches)
-    setBatchProgress(withReady)
-    setActiveBatch(
-      firstActionable >= 0
-        ? firstActionable
-        : Math.min(pendingDraft.activeBatch, Math.max(0, withReady.length - 1))
+  const deselectFrozenNfts = () => {
+    setSelectedMints((prev) => {
+      const next = new Set(prev)
+      for (const n of nfts) {
+        if (n.frozen === true) next.delete(n.mint)
+      }
+      return next
+    })
+    setRetryMints((prev) => prev.filter((m) => !nfts.some((n) => n.mint === m && n.frozen)))
+    setSessionNotice(
+      frozenNftCount > 0
+        ? `Deselected ${frozenNftCount} nested/frozen NFT${frozenNftCount === 1 ? '' : 's'}. Send the rest, or Thaw locks / unnest those first.`
+        : null
     )
-    setSelectedMints(new Set(pendingDraft.preparedLines.map((l) => l.mint)))
+  }
+
+  const restorePendingDraft = async () => {
+    if (!pendingDraft || !publicKey) return
+    const draft = pendingDraft
+
+    // Drop nested/frozen mints from old drafts — restoring them used to replay the same
+    // no-popup failures after Gen2 freeze flags were fixed.
+    let remainingLines = draft.preparedLines
+    try {
+      const liveFrozen = new Set(
+        await findFrozenOwlSendMints({
+          connection,
+          owner: publicKey,
+          lines: draft.preparedLines,
+        })
+      )
+      for (const n of nfts) {
+        if (n.frozen === true) liveFrozen.add(n.mint)
+      }
+      if (liveFrozen.size > 0) {
+        remainingLines = draft.preparedLines.filter((l) => !liveFrozen.has(l.mint.trim()))
+      }
+    } catch {
+      const frozenSet = new Set(nfts.filter((n) => n.frozen).map((n) => n.mint))
+      if (frozenSet.size > 0) {
+        remainingLines = draft.preparedLines.filter((l) => !frozenSet.has(l.mint.trim()))
+      }
+    }
+
+    if (remainingLines.length < 1) {
+      clearOwlSendNftDraft()
+      setPendingDraft(null)
+      setSessionError(
+        'That unfinished send only had nested/frozen NFTs left. Thaw locks or unnest them, then start a new send.'
+      )
+      return
+    }
+
+    const skippedFrozen = draft.preparedLines.length - remainingLines.length
+    const newBatches = chunkOwlSendBatches(remainingLines)
+    const newProgress = newBatches.map((_, index) => ({
+      index,
+      total: newBatches.length,
+      status: (index === 0 ? 'ready' : 'pending') as 'ready' | 'pending',
+    }))
+
+    setMode(draft.mode)
+    setPreparedLines(remainingLines)
+    setBatches(newBatches)
+    setBatchProgress(newProgress)
+    setActiveBatch(0)
+    setSelectedMints(new Set(remainingLines.map((l) => l.mint)))
     setPendingDraft(null)
     setAssetTab('nfts')
     setSessionError(null)
     setSessionNotice(
-      'Restored unfinished send. Use Resume remaining if some NFTs already left the wallet.'
+      skippedFrozen > 0
+        ? `Restored ${remainingLines.length} sendable NFT${remainingLines.length === 1 ? '' : 's'} · skipped ${skippedFrozen} nested/frozen. Use Resume remaining if some already left the wallet.`
+        : 'Restored unfinished send. Use Resume remaining if some NFTs already left the wallet.'
     )
   }
 
@@ -1417,9 +1456,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   {!loadingAssets && nfts.length > 0 ? (
                     <p className="mb-3 text-xs text-muted-foreground">
                       {nfts.length} NFT{nfts.length === 1 ? '' : 's'} in wallet
-                      {nfts.some((n) => n.frozen)
-                        ? ` · ${nfts.filter((n) => n.frozen).length} frozen`
-                        : ''}
+                      {frozenNftCount > 0 ? ` · ${frozenNftCount} nested/frozen` : ''}
                       {nfts.some(isOwlSendCompressedNft)
                         ? ` · ${nfts.filter(isOwlSendCompressedNft).length} cNFT`
                         : ''}
@@ -1427,6 +1464,25 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                         ? ` · ${retryMints.length} highlighted from last failed send`
                         : ''}
                     </p>
+                  ) : null}
+                  {frozenNftCount > 0 ? (
+                    <div className="mb-3 flex flex-col gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-50 sm:flex-row sm:items-center sm:justify-between">
+                      <p>
+                        <span className="font-semibold">{frozenNftCount} nested/frozen</span>{' '}
+                        (often Gen2 nest locks) will be skipped at Review — they cannot open a
+                        wallet approve. Deselect them, or Thaw locks / unnest first. Leftover CM
+                        delegates alone are fine.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        className="min-h-[40px] shrink-0 touch-manipulation"
+                        onClick={deselectFrozenNfts}
+                      >
+                        Deselect nested/frozen
+                      </Button>
+                    </div>
                   ) : null}
                   {loadingAssets && nfts.length === 0 ? (
                     <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
@@ -1821,15 +1877,15 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   <p className="text-xs sm:text-sm">
                     Unfinished send found ({pendingDraft.preparedLines.length} NFTs ·{' '}
                     {pendingDraft.batchProgress.filter((b) => b.status === 'done').length}/
-                    {pendingDraft.batches.length} batches done). Restore it, then Resume remaining if
-                    needed.
+                    {pendingDraft.batches.length} batches done). Restore strips nested/frozen Gen2s
+                    automatically — or Dismiss and start fresh after a hard refresh.
                   </p>
                   <div className="flex min-h-[44px] gap-2">
                     <Button
                       type="button"
                       size="sm"
                       className="min-h-[44px] flex-1 touch-manipulation sm:flex-none"
-                      onClick={restorePendingDraft}
+                      onClick={() => void restorePendingDraft()}
                     >
                       Restore
                     </Button>
