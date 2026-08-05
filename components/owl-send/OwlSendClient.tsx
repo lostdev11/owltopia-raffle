@@ -51,6 +51,10 @@ import {
 import { owlSendTokenAccountHint } from '@/lib/owl-send/resolve-spl-holder'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
 import {
+  isOwlSendFrozenTransferError,
+  isOwlSendWalletExtensionError,
+} from '@/lib/owl-send/wallet-send-errors'
+import {
   buildTokenScatterLines,
   chunkOwlSendBatches,
   collapseRecipientsToNftScatterPaste,
@@ -1975,32 +1979,43 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       {retryNftLabels.join(', ')}
                     </p>
                     <p className="text-xs text-amber-100/80">{owlSendRetryHint(sessionError)}</p>
-                    <p className="text-[11px] text-amber-100/60">
-                      Highlighted in amber above. OwlSend no longer soft-blocks frozen/delegated
-                      NFTs — if the chain rejects the transfer, use Thaw locks or unnest first.
-                    </p>
+                    {isOwlSendWalletExtensionError(sessionError ?? '') ? (
+                      <p className="text-[11px] text-amber-100/60">
+                        Highlighted in amber above. This failed because the wallet extension was
+                        unreachable — not because these NFTs are frozen. Unlock Phantom, refresh,
+                        reconnect, then Retry.
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-amber-100/60">
+                        Highlighted in amber above. OwlSend no longer soft-blocks frozen/delegated
+                        NFTs — if the chain rejects the transfer, use Thaw locks or unnest first.
+                      </p>
+                    )}
                     <div className="flex flex-wrap gap-2 pt-1">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        className="h-10 min-h-[40px] touch-manipulation gap-2"
-                        disabled={thawing || nftSending}
-                        onClick={() => {
-                          void (async () => {
-                            const res = await thawFrozenMints(retryMints)
-                            if (res.thawedCount > 0 || res.ok) {
-                              await loadAssets()
-                              setPreparedLines(null)
-                              setBatches([])
-                              setBatchProgress([])
-                            }
-                          })()
-                        }}
-                      >
-                        {thawing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        Thaw locks &amp; retry
-                      </Button>
+                      {isOwlSendFrozenTransferError(sessionError ?? '') &&
+                      !isOwlSendWalletExtensionError(sessionError ?? '') ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="h-10 min-h-[40px] touch-manipulation gap-2"
+                          disabled={thawing || nftSending}
+                          onClick={() => {
+                            void (async () => {
+                              const res = await thawFrozenMints(retryMints)
+                              if (res.thawedCount > 0 || res.ok) {
+                                await loadAssets()
+                                setPreparedLines(null)
+                                setBatches([])
+                                setBatchProgress([])
+                              }
+                            })()
+                          }}
+                        >
+                          {thawing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                          Thaw locks &amp; retry
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="ghost"

@@ -33,6 +33,7 @@ export async function sendOwlSendNftBatch(params: {
     lines: params.lines,
     onPhase: params.onPhase,
     feeDiscountBps: params.feeDiscountBps,
+    walletAdapter: params.walletAdapter,
   })
   if (spl.ok) return spl
 

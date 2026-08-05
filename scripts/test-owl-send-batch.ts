@@ -34,6 +34,11 @@ import {
 } from '@/lib/owl-send/picker-eligibility'
 import { owlSendTokenAccountHint } from '@/lib/owl-send/resolve-spl-holder'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
+import {
+  isOwlSendFrozenTransferError,
+  isOwlSendWalletExtensionError,
+  owlSendWalletExtensionHint,
+} from '@/lib/owl-send/wallet-send-errors'
 import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { getOwlSendFeeLamportsForCount, getOwlSendFeeSol } from '@/lib/owl-send/fee'
@@ -490,6 +495,15 @@ assert.equal(merged[0]!.name, 'Gen2 #1')
 
 assert.match(owlSendRetryHint('Owl #3 is frozen on-chain'), /Thaw locks|On-chain transfer rejected/)
 assert.match(owlSendRetryHint('Could not find a transferable SPL'), /cNFT|alone|Deselect/)
+assert.match(
+  owlSendRetryHint('Could not establish connection. Receiving end does not exist.'),
+  /Open Phantom|unreachable|reconnect/
+)
+assert.match(owlSendRetryHint(owlSendWalletExtensionHint()), /Open Phantom|unreachable/)
+assert.equal(isOwlSendWalletExtensionError('Could not establish connection. Receiving end does not exist.'), true)
+assert.equal(isOwlSendWalletExtensionError('Account is frozen'), false)
+assert.equal(isOwlSendFrozenTransferError('Account is frozen'), true)
+assert.equal(isOwlSendFrozenTransferError(owlSendWalletExtensionHint()), false)
 
 assert.equal(
   owlSendNftLockLabel({

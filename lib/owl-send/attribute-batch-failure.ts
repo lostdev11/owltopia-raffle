@@ -1,7 +1,13 @@
 'use client'
 
 import { Connection, PublicKey } from '@solana/web3.js'
-import { AccountLayout, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token'
+import {
+  AccountLayout,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddressSync,
+} from '@solana/spl-token'
 import type { OwlSendLine } from '@/lib/owl-send/batch'
 
 /** SPL AccountState.Frozen */
@@ -53,25 +59,64 @@ function decodeFrozen(data: Buffer | Uint8Array | undefined): boolean {
   }
 }
 
+function classicAtaForMint(mint: string, owner: PublicKey): PublicKey | null {
+  try {
+    return getAssociatedTokenAddressSync(
+      new PublicKey(mint),
+      owner,
+      false,
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    )
+  } catch {
+    return null
+  }
+}
+
 /**
  * Read freeze state for OwlSend batch source token accounts (one RPC).
- * Uses line.tokenAccount hints when they look like real ATAs; otherwise skips.
+ * Prefers real ATA hints; when DAS left tokenAccount=mint, derives the classic Gen2 ATA.
  */
 export async function findFrozenOwlSendMints(params: {
   connection: Connection
   lines: OwlSendLine[]
+  /** Required to derive classic ATAs when DAS left tokenAccount=mint. */
+  owner?: PublicKey
+  /** Optional pre-resolved source token accounts (mint → ATA). */
+  resolvedTokenAccounts?: Map<string, PublicKey>
 }): Promise<string[]> {
-  const { connection, lines } = params
+  const { connection, lines, owner, resolvedTokenAccounts } = params
   const lookups: Array<{ mint: string; tokenAccount: PublicKey }> = []
+  const seen = new Set<string>()
 
   for (const line of lines) {
     const mint = line.mint.trim()
+    if (!mint || seen.has(mint)) continue
+
+    const resolved = resolvedTokenAccounts?.get(mint)
+    if (resolved) {
+      lookups.push({ mint, tokenAccount: resolved })
+      seen.add(mint)
+      continue
+    }
+
     const hint = line.tokenAccount?.trim() || ''
-    if (!hint || hint === mint) continue
-    try {
-      lookups.push({ mint, tokenAccount: new PublicKey(hint) })
-    } catch {
-      /* invalid hint */
+    if (hint && hint !== mint) {
+      try {
+        lookups.push({ mint, tokenAccount: new PublicKey(hint) })
+        seen.add(mint)
+        continue
+      } catch {
+        /* fall through to derive */
+      }
+    }
+
+    if (owner) {
+      const ata = classicAtaForMint(mint, owner)
+      if (ata) {
+        lookups.push({ mint, tokenAccount: ata })
+        seen.add(mint)
+      }
     }
   }
 

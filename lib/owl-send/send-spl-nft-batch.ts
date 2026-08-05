@@ -6,6 +6,7 @@ import {
   SystemProgram,
   Transaction,
 } from '@solana/web3.js'
+import type { WalletAdapter } from '@solana/wallet-adapter-base'
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountInstruction,
@@ -32,6 +33,12 @@ import {
   findFrozenOwlSendMints,
 } from '@/lib/owl-send/attribute-batch-failure'
 import { resolveOwlSendSplHolder } from '@/lib/owl-send/resolve-spl-holder'
+import {
+  isOwlSendFrozenTransferError,
+  isOwlSendWalletExtensionError,
+  owlSendWalletExtensionHint,
+} from '@/lib/owl-send/wallet-send-errors'
+import { assertWalletReadyForSigning } from '@/lib/solana/assert-wallet-ready-for-signing'
 import { sendTransactionWithTimeout } from '@/lib/solana/send-transaction-with-timeout'
 
 export type OwlSendBatchResult =
@@ -152,6 +159,28 @@ async function buildOwlSendSplNftTransaction(params: {
     resolved.push(result.value)
   }
 
+  // Fail during "building" if any source ATA is frozen — do not enter "Approve in wallet"
+  // (Phantom pre-sim would reject and never show a popup, which looks like a wallet bug).
+  const resolvedTokenAccounts = new Map(
+    resolved.map((r) => [r.line.mint.trim(), r.tokenAccount] as const)
+  )
+  const frozenMints = await findFrozenOwlSendMints({
+    connection,
+    lines,
+    owner,
+    resolvedTokenAccounts,
+  })
+  if (frozenMints.length > 0) {
+    return {
+      ok: false,
+      ...attributeOwlSendFrozenFailures({
+        lines,
+        frozenMints,
+        baseError: 'Account is frozen',
+      }),
+    }
+  }
+
   // One RPC for all destination ATAs (processed = faster; missing → create ATA ix).
   const destInfos = await connection.getMultipleAccountsInfo(
     resolved.map((r) => r.destAta),
@@ -225,6 +254,8 @@ export async function sendOwlSendSplNftBatch(params: {
   onPhase?: (phase: OwlSendSendPhase) => void
   /** Owltopia holder discount (bps). */
   feeDiscountBps?: number
+  /** When set, fail fast if Phantom's injected provider is unreachable (no popup). */
+  walletAdapter?: WalletAdapter | null
 }): Promise<OwlSendBatchResult> {
   const { connection, owner, sendTransaction, lines, onPhase } = params
   if (lines.length < 1) return { ok: false, error: 'Nothing to send in this batch.' }
@@ -259,6 +290,14 @@ export async function sendOwlSendSplNftBatch(params: {
   }
 
   try {
+    // Catch broken Phantom extension before we paint "Approve in wallet…" with no popup.
+    await assertWalletReadyForSigning({
+      connected: true,
+      publicKey: owner,
+      walletAdapter: params.walletAdapter ?? null,
+      connection,
+    })
+
     onPhase?.('approving')
     // Let React paint "Approve in wallet" before we open the provider (esp. mobile).
     await new Promise<void>((resolve) => setTimeout(resolve, 50))
@@ -289,19 +328,32 @@ export async function sendOwlSendSplNftBatch(params: {
       }
     }
 
-    // One frozen Gen2 must not amber-highlight the whole batch of sendable NFTs.
-    const baseError = msg || 'Wallet rejected or send failed.'
-    try {
-      const frozenMints = await findFrozenOwlSendMints({ connection, lines })
-      if (frozenMints.length > 0) {
-        return {
-          ok: false,
-          ...attributeOwlSendFrozenFailures({ lines, frozenMints, baseError }),
-        }
+    if (isOwlSendWalletExtensionError(msg)) {
+      return {
+        ok: false,
+        error: owlSendWalletExtensionHint(),
+        failedMints: lines.map((l) => l.mint),
       }
-    } catch {
-      /* keep full-batch attribution */
     }
+
+    const baseError = msg || 'Wallet rejected or send failed.'
+
+    // Only re-attribute to frozen mints when the failure itself looks like a freeze reject.
+    // Wallet/extension/timeout errors must not be blamed on a coincidental frozen NFT.
+    if (isOwlSendFrozenTransferError(baseError)) {
+      try {
+        const frozenMints = await findFrozenOwlSendMints({ connection, lines, owner })
+        if (frozenMints.length > 0) {
+          return {
+            ok: false,
+            ...attributeOwlSendFrozenFailures({ lines, frozenMints, baseError }),
+          }
+        }
+      } catch {
+        /* keep full-batch attribution */
+      }
+    }
+
     return { ok: false, error: baseError, failedMints: lines.map((l) => l.mint) }
   }
 }
