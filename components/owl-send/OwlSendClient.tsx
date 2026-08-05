@@ -2150,30 +2150,55 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                 </Card>
               ) : null}
 
-              {retryMints.length > 0 ? (
+              {retryMints.length > 0 ||
+              batchProgress[activeBatch]?.status === 'failed' ||
+              sessionError ? (
                 <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <div className="min-w-0 space-y-1">
-                    <p className="font-semibold">Retry list</p>
-                    <p className="text-xs font-medium text-amber-50">
-                      {retryNftLabels.join(', ')}
+                    <p className="font-semibold">
+                      {retryMints.length > 0 ? 'Retry list' : 'Send failed'}
                     </p>
-                    <p className="text-xs text-amber-100/80">{owlSendRetryHint(sessionError)}</p>
-                    {isOwlSendWalletExtensionError(sessionError ?? '') ? (
+                    {retryMints.length > 0 ? (
+                      <p className="text-xs font-medium text-amber-50">
+                        {retryNftLabels.join(', ')}
+                      </p>
+                    ) : null}
+                    <p className="text-xs text-amber-100/80">
+                      {owlSendRetryHint(
+                        sessionError ||
+                          batchProgress[activeBatch]?.error ||
+                          'Wallet did not approve — open Phantom, unlock, refresh this page, reconnect, then Retry.'
+                      )}
+                    </p>
+                    {isOwlSendWalletExtensionError(
+                      sessionError || batchProgress[activeBatch]?.error || ''
+                    ) ? (
                       <p className="text-[11px] text-amber-100/60">
-                        Highlighted in amber above. This failed because the wallet extension was
-                        unreachable — not because these NFTs are frozen. Unlock Phantom, refresh,
-                        reconnect, then Retry.
+                        This is a wallet-extension problem, not a bad Gen2. Leftover Candy Machine
+                        delegates are cleared automatically on the next Retry.
+                      </p>
+                    ) : isOwlSendFrozenTransferError(
+                        sessionError || batchProgress[activeBatch]?.error || ''
+                      ) ? (
+                      <p className="text-[11px] text-amber-100/60">
+                        Only truly nested/frozen Gen2s need Thaw locks or Unnest. Leftover CM
+                        delegates alone are fine and are revoked in the send transaction.
                       </p>
                     ) : (
                       <p className="text-[11px] text-amber-100/60">
-                        Highlighted in amber above. OwlSend no longer soft-blocks frozen/delegated
-                        NFTs — if the chain rejects the transfer, use Thaw locks or unnest first.
+                        Gen2 leftover delegates are revoked in the same approval as the transfer.
+                        If the wallet popup still does not open: unlock Phantom, hard-refresh,
+                        reconnect, then Retry.
                       </p>
                     )}
                     <div className="flex flex-wrap gap-2 pt-1">
-                      {isOwlSendFrozenTransferError(sessionError ?? '') &&
-                      !isOwlSendWalletExtensionError(sessionError ?? '') ? (
+                      {isOwlSendFrozenTransferError(
+                        sessionError || batchProgress[activeBatch]?.error || ''
+                      ) &&
+                      !isOwlSendWalletExtensionError(
+                        sessionError || batchProgress[activeBatch]?.error || ''
+                      ) ? (
                         <Button
                           type="button"
                           variant="secondary"
@@ -2201,26 +2226,28 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                           Thaw locks &amp; retry
                         </Button>
                       ) : null}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-10 min-h-[40px] touch-manipulation px-2 text-amber-100"
-                        disabled={thawing}
-                        onClick={() => {
-                          setSelectedMints((prev) => {
-                            const next = new Set(prev)
-                            for (const m of retryMints) next.delete(m)
-                            return next
-                          })
-                          setRetryMints([])
-                          setPreparedLines(null)
-                          setBatches([])
-                          setBatchProgress([])
-                        }}
-                      >
-                        Deselect problem NFTs
-                      </Button>
+                      {retryMints.length > 0 ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-10 min-h-[40px] touch-manipulation px-2 text-amber-100"
+                          disabled={thawing}
+                          onClick={() => {
+                            setSelectedMints((prev) => {
+                              const next = new Set(prev)
+                              for (const m of retryMints) next.delete(m)
+                              return next
+                            })
+                            setRetryMints([])
+                            setPreparedLines(null)
+                            setBatches([])
+                            setBatchProgress([])
+                          }}
+                        >
+                          Deselect problem NFTs
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
                 </div>
