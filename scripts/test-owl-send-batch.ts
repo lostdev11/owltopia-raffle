@@ -34,6 +34,11 @@ import {
 } from '@/lib/owl-send/picker-eligibility'
 import { owlSendTokenAccountHint } from '@/lib/owl-send/resolve-spl-holder'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
+import {
+  isOwlSendFrozenTransferError,
+  isOwlSendWalletExtensionError,
+  owlSendWalletExtensionHint,
+} from '@/lib/owl-send/wallet-send-errors'
 import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { getOwlSendFeeLamportsForCount, getOwlSendFeeSol } from '@/lib/owl-send/fee'
@@ -318,7 +323,7 @@ assert.equal(
     frozen: true,
     delegated: true,
   }),
-  'Marked frozen'
+  'Nested / frozen'
 )
 assert.equal(
   owlSendNftLockLabel({
@@ -369,9 +374,9 @@ assert.equal(merged[0]!.frozen, false)
 assert.equal(merged[0]!.delegated, true)
 assert.equal(merged[0]!.name, 'Gen2 #1')
 
-// Overlay present but mint missing → drop DAS stale frozen
+// Truncated overlay (low coverage) → keep DAS frozen for mints the scan missed
 {
-  const dropStale = mergeDasNftsWithOnChainLocks(
+  const keepStale = mergeDasNftsWithOnChainLocks(
     [
       {
         mint: 'missingOnChain',
@@ -401,8 +406,42 @@ assert.equal(merged[0]!.name, 'Gen2 #1')
       },
     ]
   )
-  const stale = dropStale.find((n) => n.mint === 'missingOnChain')
-  assert.equal(stale?.frozen, false)
+  const stale = keepStale.find((n) => n.mint === 'missingOnChain')
+  assert.equal(stale?.frozen, true)
+
+  // Complete overlay (caller opts in) → clear DAS frozen for missing rows
+  const dropStale = mergeDasNftsWithOnChainLocks(
+    [
+      {
+        mint: 'missingOnChain',
+        tokenAccount: 'missingOnChain',
+        amount: '1',
+        decimals: 0,
+        metadataUri: null,
+        name: 'Gen2 stale',
+        image: null,
+        collectionName: null,
+        frozen: true,
+        delegated: true,
+      },
+    ],
+    [
+      {
+        mint: 'other',
+        tokenAccount: 'otherAta',
+        amount: '1',
+        decimals: 0,
+        metadataUri: null,
+        name: null,
+        image: null,
+        collectionName: null,
+        frozen: false,
+        delegated: false,
+      },
+    ],
+    { treatMissingAsThawed: true }
+  )
+  assert.equal(dropStale.find((n) => n.mint === 'missingOnChain')?.frozen, false)
 }
 
 // Overlay empty → clear unconfirmed DAS frozen
@@ -490,6 +529,15 @@ assert.equal(merged[0]!.name, 'Gen2 #1')
 
 assert.match(owlSendRetryHint('Owl #3 is frozen on-chain'), /Thaw locks|On-chain transfer rejected/)
 assert.match(owlSendRetryHint('Could not find a transferable SPL'), /cNFT|alone|Deselect/)
+assert.match(
+  owlSendRetryHint('Could not establish connection. Receiving end does not exist.'),
+  /Open Phantom|unreachable|reconnect/
+)
+assert.match(owlSendRetryHint(owlSendWalletExtensionHint()), /Open Phantom|unreachable/)
+assert.equal(isOwlSendWalletExtensionError('Could not establish connection. Receiving end does not exist.'), true)
+assert.equal(isOwlSendWalletExtensionError('Account is frozen'), false)
+assert.equal(isOwlSendFrozenTransferError('Account is frozen'), true)
+assert.equal(isOwlSendFrozenTransferError(owlSendWalletExtensionHint()), false)
 
 assert.equal(
   owlSendNftLockLabel({

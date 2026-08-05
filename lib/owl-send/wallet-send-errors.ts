@@ -1,0 +1,28 @@
+import {
+  isWalletExtensionUnreachableError,
+  walletExtensionUnreachableHint,
+} from '@/lib/solana/wallet-extension-errors'
+
+/** @deprecated Prefer isWalletExtensionUnreachableError — kept for OwlSend call sites. */
+export function isOwlSendWalletExtensionError(message: string): boolean {
+  return isWalletExtensionUnreachableError(message)
+}
+
+/** True when the failure is an on-chain freeze / nest lock (safe to attribute to specific mints). */
+export function isOwlSendFrozenTransferError(message: string): boolean {
+  const m = (message ?? '').toLowerCase()
+  return (
+    m.includes('account is frozen') ||
+    m.includes('frozen') ||
+    m.includes('0x11') ||
+    m.includes('nested/frozen') ||
+    m.includes('unnest') ||
+    m.includes('thaw') ||
+    m.includes('mint-locked') ||
+    m.includes('mint lock')
+  )
+}
+
+export function owlSendWalletExtensionHint(): string {
+  return walletExtensionUnreachableHint()
+}

@@ -1,5 +1,9 @@
 import type { Connection, SendOptions, Transaction, TransactionSignature, VersionedTransaction } from '@solana/web3.js'
 import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
+import {
+  isWalletExtensionUnreachableError,
+  walletExtensionUnreachableHint,
+} from '@/lib/solana/wallet-extension-errors'
 import { isMobileDevice } from '@/lib/utils'
 
 /**
@@ -28,6 +32,10 @@ function mapWalletSendError(err: unknown, isMobile: boolean): Error {
         ? 'Wallet approval timed out. Open your wallet app, approve the transfer, or reconnect and try again.'
         : 'Wallet approval timed out. Check your wallet extension for a pending request, or reconnect and try again.'
     )
+  }
+
+  if (isWalletExtensionUnreachableError(errorMessage)) {
+    return new Error(walletExtensionUnreachableHint())
   }
 
   const isUserRejection =

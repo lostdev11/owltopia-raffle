@@ -378,7 +378,7 @@ function WalletNftPickerBody({
           {pageItems.map((nft) => {
             const selected = isSelected(nft.mint)
             const problem = problemMints?.has(nft.mint) === true
-            const badge = statusLabel?.(nft) ?? (nft.frozen ? 'Marked frozen' : null)
+            const badge = statusLabel?.(nft) ?? (nft.frozen ? 'Nested / frozen' : null)
             const atCap = multi && !selected && maxSelect != null && selectedCount >= maxSelect
             return (
               <button
@@ -418,7 +418,7 @@ function WalletNftPickerBody({
           {pageItems.map((nft) => {
             const selected = isSelected(nft.mint)
             const problem = problemMints?.has(nft.mint) === true
-            const badge = statusLabel?.(nft) ?? (nft.frozen ? 'Marked frozen' : null)
+            const badge = statusLabel?.(nft) ?? (nft.frozen ? 'Nested / frozen' : null)
             const atCap = multi && !selected && maxSelect != null && selectedCount >= maxSelect
             return (
               <li key={`${nft.tokenAccount}-${nft.mint}`}>

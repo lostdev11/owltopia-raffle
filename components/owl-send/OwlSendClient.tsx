@@ -33,6 +33,8 @@ import {
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
 import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-locks'
+import { fetchNftLockOverlayByDerivedAtas } from '@/lib/owl-send/overlay-derived-atas'
+import { findFrozenOwlSendMints } from '@/lib/owl-send/attribute-batch-failure'
 import {
   gateOwlSendCnftSelection,
   isOwlSendCompressedNft,
@@ -50,6 +52,10 @@ import {
 } from '@/components/ui/dialog'
 import { owlSendTokenAccountHint } from '@/lib/owl-send/resolve-spl-holder'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
+import {
+  isOwlSendFrozenTransferError,
+  isOwlSendWalletExtensionError,
+} from '@/lib/owl-send/wallet-send-errors'
 import {
   buildTokenScatterLines,
   chunkOwlSendBatches,
@@ -196,18 +202,23 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     try {
       const walletAddr = publicKey.toBase58()
       const api = await fetchWalletNftsWithRetry(walletAddr)
-      // Live SPL freeze/ATA overlay — DAS often uses mint as tokenAccount and can leave
-      // stale ownership.frozen after Gen2 Candy Machine thaw (looks “staked” when it isn’t).
-      const onChainLocks = await getWalletNfts(connection, publicKey, {
-        includeLocked: true,
-        fetchMetadata: api.nfts.length === 0,
-      })
-      // Prefer live browser overlay when present; otherwise trust API (already drops
-      // unconfirmed DAS frozen). Empty overlay must not wipe confirmed nest freezes.
+      // Derived ATA overlay — owner-scan getParsedTokenAccountsByOwner truncates on large
+      // wallets and was wiping Gen2 freezes (tokenAccount stayed mint, frozen=false).
+      const onChainLocks =
+        api.nfts.length > 0
+          ? await fetchNftLockOverlayByDerivedAtas({
+              connection,
+              owner: publicKey,
+              mints: api.nfts.map((n) => n.mint),
+            })
+          : await getWalletNfts(connection, publicKey, {
+              includeLocked: true,
+              fetchMetadata: true,
+            })
       const list =
         api.nfts.length > 0
           ? onChainLocks.length > 0
-            ? mergeDasNftsWithOnChainLocks(api.nfts, onChainLocks)
+            ? mergeDasNftsWithOnChainLocks(api.nfts, onChainLocks, { treatMissingAsThawed: true })
             : api.nfts
           : onChainLocks
       setNfts(list)
@@ -571,7 +582,39 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     }
 
     // Auto-exclude nested/frozen Gen2s so they cannot poison a multi-send batch.
-    const { sendable, frozen: frozenSelected } = partitionOwlSendByFrozen(selectedNfts)
+    // Prefer picker flags, then confirm with a live derived-ATA freeze read (large wallets
+    // used to lose freeze flags when owner-scan RPCs truncated).
+    let { sendable, frozen: frozenSelected } = partitionOwlSendByFrozen(selectedNfts)
+    try {
+      const liveFrozen = new Set(
+        await findFrozenOwlSendMints({
+          connection,
+          owner: publicKey,
+          lines: sendable.map((n) => ({
+            mint: n.mint,
+            recipient: publicKey.toBase58(),
+            tokenAccount: n.tokenAccount,
+            name: n.name,
+          })),
+        })
+      )
+      if (liveFrozen.size > 0) {
+        const stillSendable: WalletNft[] = []
+        const extraFrozen: WalletNft[] = []
+        for (const n of sendable) {
+          if (liveFrozen.has(n.mint)) extraFrozen.push({ ...n, frozen: true })
+          else stillSendable.push(n)
+        }
+        sendable = stillSendable
+        frozenSelected = [...frozenSelected, ...extraFrozen]
+        setNfts((prev) =>
+          prev.map((n) => (liveFrozen.has(n.mint) ? { ...n, frozen: true } : n))
+        )
+      }
+    } catch {
+      /* keep partition flags */
+    }
+
     if (frozenSelected.length > 0) {
       setSelectedMints(new Set(sendable.map((n) => n.mint)))
       if (sendable.length < 1) {
@@ -1363,7 +1406,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   </div>
                   <CardDescription>
                     Up to {OWL_SEND_MAX_SELECT} NFTs · {OWL_SEND_MAX_PER_TX} per wallet
-                    approval · truly frozen/staked assets fail on-chain (no soft block)
+                    approval · only Nested/frozen assets fail on-chain (leftover Gen2 CM
+                    delegates after thaw are fine)
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1975,32 +2019,43 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       {retryNftLabels.join(', ')}
                     </p>
                     <p className="text-xs text-amber-100/80">{owlSendRetryHint(sessionError)}</p>
-                    <p className="text-[11px] text-amber-100/60">
-                      Highlighted in amber above. OwlSend no longer soft-blocks frozen/delegated
-                      NFTs — if the chain rejects the transfer, use Thaw locks or unnest first.
-                    </p>
+                    {isOwlSendWalletExtensionError(sessionError ?? '') ? (
+                      <p className="text-[11px] text-amber-100/60">
+                        Highlighted in amber above. This failed because the wallet extension was
+                        unreachable — not because these NFTs are frozen. Unlock Phantom, refresh,
+                        reconnect, then Retry.
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-amber-100/60">
+                        Highlighted in amber above. OwlSend no longer soft-blocks frozen/delegated
+                        NFTs — if the chain rejects the transfer, use Thaw locks or unnest first.
+                      </p>
+                    )}
                     <div className="flex flex-wrap gap-2 pt-1">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        className="h-10 min-h-[40px] touch-manipulation gap-2"
-                        disabled={thawing || nftSending}
-                        onClick={() => {
-                          void (async () => {
-                            const res = await thawFrozenMints(retryMints)
-                            if (res.thawedCount > 0 || res.ok) {
-                              await loadAssets()
-                              setPreparedLines(null)
-                              setBatches([])
-                              setBatchProgress([])
-                            }
-                          })()
-                        }}
-                      >
-                        {thawing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        Thaw locks &amp; retry
-                      </Button>
+                      {isOwlSendFrozenTransferError(sessionError ?? '') &&
+                      !isOwlSendWalletExtensionError(sessionError ?? '') ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="h-10 min-h-[40px] touch-manipulation gap-2"
+                          disabled={thawing || nftSending}
+                          onClick={() => {
+                            void (async () => {
+                              const res = await thawFrozenMints(retryMints)
+                              if (res.thawedCount > 0 || res.ok) {
+                                await loadAssets()
+                                setPreparedLines(null)
+                                setBatches([])
+                                setBatchProgress([])
+                              }
+                            })()
+                          }}
+                        >
+                          {thawing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                          Thaw locks &amp; retry
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="ghost"
