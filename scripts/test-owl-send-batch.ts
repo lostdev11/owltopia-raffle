@@ -20,7 +20,7 @@ import {
   collectSentMintsFromBatches,
   collectSentMintsFromLedger,
 } from '@/lib/owl-send/resume'
-import { Keypair } from '@solana/web3.js'
+import { Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { attributeOwlSendFrozenFailures } from '@/lib/owl-send/attribute-batch-failure'
 import {
@@ -41,10 +41,14 @@ import {
   owlSendWalletExtensionHint,
 } from '@/lib/owl-send/wallet-send-errors'
 import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
+import {
+  OWL_SEND_COMPUTE_UNIT_LIMIT,
+  owlSendTxHasComputeBudget,
+  prependOwlSendComputeBudget,
+} from '@/lib/owl-send/compute-budget'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { getOwlSendFeeLamportsForCount, getOwlSendFeeSol } from '@/lib/owl-send/fee'
 import { canAccessOwlSend } from '@/lib/owl-send/access'
-import { LAMPORTS_PER_SOL } from '@solana/web3.js'
 
 assert.equal(OWL_SEND_MAX_PER_TX, 5)
 assert.equal(OWL_SEND_MAX_SELECT, 20)
@@ -621,6 +625,24 @@ assert.equal(
   if (!gate.ok) assert.match(gate.title, /separately/i)
 }
 assert.match(owlSendRetryHint('User rejected the request'), /Wallet rejected/)
+
+{
+  const tx = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: Keypair.generate().publicKey,
+      toPubkey: Keypair.generate().publicKey,
+      lamports: 1,
+    })
+  )
+  assert.equal(owlSendTxHasComputeBudget(tx), false)
+  prependOwlSendComputeBudget(tx)
+  assert.equal(owlSendTxHasComputeBudget(tx), true)
+  assert.equal(tx.instructions.length, 3)
+  assert.ok(OWL_SEND_COMPUTE_UNIT_LIMIT > 200_000)
+  // idempotent
+  prependOwlSendComputeBudget(tx)
+  assert.equal(tx.instructions.length, 3)
+}
 
 {
   const owner = Keypair.generate().publicKey

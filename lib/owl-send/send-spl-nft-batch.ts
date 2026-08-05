@@ -27,6 +27,7 @@ import {
   OWL_SEND_CONFIRM_TIMEOUT_MS,
   withOwlSendTimeout,
 } from '@/lib/owl-send/confirm'
+import { prependOwlSendComputeBudget } from '@/lib/owl-send/compute-budget'
 import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
 import { OWL_SEND_MAX_PER_TX } from '@/lib/owl-send/constants'
 import type { OwlSendLine } from '@/lib/owl-send/batch'
@@ -41,6 +42,10 @@ import {
   owlSendWalletExtensionHint,
 } from '@/lib/owl-send/wallet-send-errors'
 import { assertWalletReadyForSigning } from '@/lib/solana/assert-wallet-ready-for-signing'
+import {
+  assertTransactionSimulatesClean,
+  isPhantomPresimulateError,
+} from '@/lib/solana/phantom-presimulate'
 import { sendTransactionWithTimeout } from '@/lib/solana/send-transaction-with-timeout'
 
 export type OwlSendBatchResult =
@@ -260,12 +265,29 @@ async function buildOwlSendSplNftTransaction(params: {
     )
   }
 
+  // Raise CU above the 200k default — revoke+ATA+transfer×5 otherwise fails wallet sim
+  // (Jupiter/Phantom never show approve).
+  prependOwlSendComputeBudget(tx)
+
   // Attach blockhash here so Phantom/adapter do not hang on getLatestBlockhash during "approve".
   tx.feePayer = owner
   const { blockhash } = await connection.getLatestBlockhash('processed')
   tx.recentBlockhash = blockhash
 
   return { ok: true, tx, newAtaCount }
+}
+
+function humanizeOwlSendSendError(msg: string): string {
+  const m = (msg ?? '').toLowerCase()
+  if (
+    m.includes('computational budget') ||
+    m.includes('programfailedtocomplete') ||
+    m.includes('exceeded cu') ||
+    m.includes('exceeded the compute')
+  ) {
+    return 'This approval needs more compute than Solana\'s default budget. Hard-refresh OwlSend and retry — batches now request a higher compute limit.'
+  }
+  return msg
 }
 
 /**
@@ -324,11 +346,43 @@ export async function sendOwlSendSplNftBatch(params: {
       connection,
     })
 
+    // Simulate for every wallet (not only Phantom) so Jupiter does not silently
+    // skip the approve sheet on a doomed batch (frozen / CU / bad accounts).
+    try {
+      await assertTransactionSimulatesClean(connection, built.tx, {
+        failMessagePrefix: 'This send would fail on-chain before wallet approval. ',
+        ignoreRpcErrors: true,
+      })
+    } catch (e) {
+      if (isPhantomPresimulateError(e)) {
+        const simMsg = humanizeOwlSendSendError(e.message)
+        if (isOwlSendFrozenTransferError(simMsg)) {
+          try {
+            const frozenMints = await findFrozenOwlSendMints({ connection, lines, owner })
+            if (frozenMints.length > 0) {
+              return {
+                ok: false,
+                ...attributeOwlSendFrozenFailures({
+                  lines,
+                  frozenMints,
+                  baseError: simMsg,
+                }),
+              }
+            }
+          } catch {
+            /* fall through */
+          }
+        }
+        return { ok: false, error: simMsg, failedMints: [] }
+      }
+      throw e
+    }
+
     onPhase?.('approving')
     // Let React paint "Approve in wallet" before we open the provider (esp. mobile).
     await new Promise<void>((resolve) => setTimeout(resolve, 50))
     const signature = await sendTransactionWithTimeout(sendTransaction, built.tx, connection, {
-      // Pre-sign simulate is handled (with timeout) in the Phantom path; skip RPC preflight on submit
+      // Pre-sign simulate is handled above / in the Phantom path; skip RPC preflight on submit
       // so a second slow simulate cannot block after the user already approved.
       skipPreflight: true,
       preflightCommitment: 'processed',
@@ -344,7 +398,7 @@ export async function sendOwlSendSplNftBatch(params: {
     )
     return { ok: true, signature, newAtaCount: built.newAtaCount }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = humanizeOwlSendSendError(e instanceof Error ? e.message : String(e))
     if (/too large|versionedtransaction too large|transaction too large/i.test(msg)) {
       return {
         ok: false,

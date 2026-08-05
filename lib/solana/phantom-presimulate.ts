@@ -14,7 +14,7 @@ export class PhantomPresimulateError extends Error {
   }
 }
 
-export function isPhantomPresimulateError(err: unknown): boolean {
+export function isPhantomPresimulateError(err: unknown): err is PhantomPresimulateError {
   return err instanceof PhantomPresimulateError
 }
 

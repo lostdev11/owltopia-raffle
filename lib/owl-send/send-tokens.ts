@@ -21,6 +21,7 @@ import {
   OWL_SEND_CONFIRM_TIMEOUT_HINT,
   OWL_SEND_CONFIRM_TIMEOUT_MS,
 } from '@/lib/owl-send/confirm'
+import { prependOwlSendComputeBudget } from '@/lib/owl-send/compute-budget'
 import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
 import { OWL_SEND_MAX_PER_TX } from '@/lib/owl-send/constants'
 import type { OwlSendBatchResult } from '@/lib/owl-send/send-spl-nft-batch'
@@ -118,6 +119,8 @@ export async function sendOwlSendTokenLines(params: {
       })
     )
   }
+
+  prependOwlSendComputeBudget(tx)
 
   try {
     const signature = await sendTransaction(tx, connection, {
