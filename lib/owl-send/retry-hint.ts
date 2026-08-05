@@ -9,7 +9,7 @@ import {
 export function owlSendRetryHint(error: string | null | undefined): string {
   const e = (error ?? '').trim()
   if (isOwlSendWalletExtensionError(e)) {
-    return 'Open Phantom, unlock it, refresh this page, reconnect your wallet, then retry — the approve popup cannot open while the extension is unreachable.'
+    return 'Open your wallet (Jupiter / Phantom / Solflare), unlock it, refresh this page, reconnect, then retry — the approve popup cannot open while the wallet is unreachable. On Jupiter Mobile use the in-app globe browser.'
   }
   if (/remove or unnest|the others are fine/i.test(e)) {
     return 'Deselect nested/frozen NFTs (or unnest on Nesting), then retry the rest — no thaw needed for sendable Gen2s.'

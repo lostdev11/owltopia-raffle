@@ -1,6 +1,6 @@
 /**
- * Detect Phantom / browser-extension channel failures that prevent the approve
- * popup from appearing (service worker dead, extension reload, etc.).
+ * Detect browser-extension / mobile-wallet channel failures that prevent the approve
+ * popup from appearing (service worker dead, extension reload, WebView gap, etc.).
  */
 export function isWalletExtensionUnreachableError(message: string): boolean {
   const m = (message ?? '').toLowerCase()
@@ -11,13 +11,18 @@ export function isWalletExtensionUnreachableError(message: string): boolean {
     m.includes('extension context invalidated') ||
     m.includes('wallet app is not reachable') ||
     m.includes('adapter is not ready') ||
-    (m.includes('phantom') && (m.includes('not reachable') || m.includes('reconnect')))
+    (m.includes('phantom') && (m.includes('not reachable') || m.includes('reconnect'))) ||
+    (m.includes('jupiter') && (m.includes('not reachable') || m.includes('reconnect')))
   )
 }
 
-export function walletExtensionUnreachableHint(): string {
+/** User-facing hint — wallet-agnostic (Phantom, Jupiter, Solflare, …). */
+export function walletExtensionUnreachableHint(walletName?: string | null): string {
+  const name = (walletName ?? '').trim()
+  const label = name || 'your wallet'
   return (
-    'Phantom (or your wallet extension) is not reachable — the approve popup cannot open. ' +
-    'Open Phantom, unlock it, refresh this page, reconnect, then retry.'
+    `${label} is not reachable — the approve popup cannot open. ` +
+    `Open ${label}, unlock it, hard-refresh this page, reconnect, then retry. ` +
+    `On Jupiter Mobile: use the in-app globe browser on owltopia.xyz (not Safari/Chrome alone).`
   )
 }
