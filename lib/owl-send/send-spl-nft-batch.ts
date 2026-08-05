@@ -9,7 +9,9 @@ import {
 import type { WalletAdapter } from '@solana/wallet-adapter-base'
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  AccountLayout,
   createAssociatedTokenAccountInstruction,
+  createRevokeInstruction,
   createTransferInstruction,
   getAssociatedTokenAddress,
   TOKEN_2022_PROGRAM_ID,
@@ -161,15 +163,35 @@ async function buildOwlSendSplNftTransaction(params: {
 
   // Fail during "building" if any source ATA is frozen — do not enter "Approve in wallet"
   // (Phantom pre-sim would reject and never show a popup, which looks like a wallet bug).
-  const resolvedTokenAccounts = new Map(
-    resolved.map((r) => [r.line.mint.trim(), r.tokenAccount] as const)
+  const sourceInfos = await connection.getMultipleAccountsInfo(
+    resolved.map((r) => r.tokenAccount),
+    'processed'
   )
-  const frozenMints = await findFrozenOwlSendMints({
-    connection,
-    lines,
-    owner,
-    resolvedTokenAccounts,
-  })
+  const frozenMints: string[] = []
+  const revokeIndexes = new Set<number>()
+  const ACCOUNT_STATE_FROZEN = 2
+  for (let i = 0; i < resolved.length; i++) {
+    const info = sourceInfos[i]
+    const r = resolved[i]!
+    if (!info) continue
+    const isTokenProg =
+      info.owner.equals(TOKEN_PROGRAM_ID) || info.owner.equals(TOKEN_2022_PROGRAM_ID)
+    if (!isTokenProg || info.data.length < AccountLayout.span) continue
+    try {
+      const decoded = AccountLayout.decode(info.data)
+      if (Number(decoded.state) === ACCOUNT_STATE_FROZEN) {
+        frozenMints.push(r.line.mint.trim())
+        continue
+      }
+      // Gen2 freezeSolPayment thaw often leaves a dead CM freeze-escrow delegate.
+      // Revoke in the same approval so wallets/Blowfish don't treat it as still staked.
+      if (decoded.delegateOption && decoded.delegate) {
+        revokeIndexes.add(i)
+      }
+    } catch {
+      /* ignore decode errors */
+    }
+  }
   if (frozenMints.length > 0) {
     return {
       ok: false,
@@ -210,6 +232,10 @@ async function buildOwlSendSplNftTransaction(params: {
         )
       )
       newAtaCount += 1
+    }
+
+    if (revokeIndexes.has(i)) {
+      tx.add(createRevokeInstruction(r.tokenAccount, owner, [], r.tokenProgram))
     }
 
     tx.add(
@@ -332,7 +358,16 @@ export async function sendOwlSendSplNftBatch(params: {
       return {
         ok: false,
         error: owlSendWalletExtensionHint(),
-        failedMints: lines.map((l) => l.mint),
+        // Do not amber-highlight sendable Gen2s for a Phantom channel failure.
+        failedMints: [],
+      }
+    }
+
+    if (/timed out|timeout|AbortError|wallet approval/i.test(msg)) {
+      return {
+        ok: false,
+        error: msg,
+        failedMints: [],
       }
     }
 
@@ -354,6 +389,8 @@ export async function sendOwlSendSplNftBatch(params: {
       }
     }
 
-    return { ok: false, error: baseError, failedMints: lines.map((l) => l.mint) }
+    // Generic wallet/send failure — keep the error, but don't mark leftover CM-delegate
+    // Gen2s as "problem NFTs" unless we proved a specific mint failed.
+    return { ok: false, error: baseError, failedMints: [] }
   }
 }
