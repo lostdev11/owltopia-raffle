@@ -3068,6 +3068,7 @@ export function DashboardNestingClient() {
             ledger_sync_failed?: boolean
             total_claimed?: number
             claim_count?: number
+            skipped_lock_count?: number
             claims?: Array<{
               position_id: string
               claimed?: number
@@ -3146,6 +3147,7 @@ export function DashboardNestingClient() {
                 transaction_signature: pending.transaction_signature,
                 execution: { path: 'onchain_transfer' as const },
                 ledger_recovered: true,
+                skipped_lock_count: 0,
               }
             }
             setActionError(
@@ -3205,18 +3207,28 @@ export function DashboardNestingClient() {
         typeof claimJson.claim_count === 'number' && Number.isFinite(claimJson.claim_count)
           ? claimJson.claim_count
           : claimableNestCount
+      const skippedLocks =
+        typeof claimJson.skipped_lock_count === 'number' && claimJson.skipped_lock_count > 0
+          ? claimJson.skipped_lock_count
+          : 0
       const totalLabel = total.toLocaleString(undefined, { maximumFractionDigits: 6 })
+      const skipHint =
+        skippedLocks > 0
+          ? ` Skipped ${skippedLocks} nest${skippedLocks === 1 ? '' : 's'} that still need Finish opening (lock not on-chain yet).`
+          : ''
       setSuccessNotice({
         placement: 'modal',
         title: 'Claim successful',
         message:
           claimJson.execution?.path === 'database_only'
-            ? `${totalLabel} OWL recorded from ${count} nests.`
-            : `${totalLabel} OWL sent to your wallet from ${count} nests.`,
+            ? `${totalLabel} OWL recorded from ${count} nests.${skipHint}`
+            : `${totalLabel} OWL sent to your wallet from ${count} nests.${skipHint}`,
         hint:
           claimJson.execution?.path === 'database_only'
             ? 'Your nest balances are updated. New rewards will accrue as usual.'
-            : 'Check your wallet balance — one combined payout for all nests.',
+            : skippedLocks > 0
+              ? 'Check your wallet for the OWL payout. Finish opening any skipped nests, then claim those separately.'
+              : 'Check your wallet balance — one combined payout for all nests.',
       })
     } catch (e) {
       if (e instanceof Error && e.message === 'claim-all') throw e

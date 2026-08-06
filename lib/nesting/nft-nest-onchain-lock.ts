@@ -1,7 +1,7 @@
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
 import { markPositionUnstaked } from '@/lib/db/staking-positions'
-import { StakingUserError } from '@/lib/nesting/errors'
+import { StakingUserError, isStakingUserError } from '@/lib/nesting/errors'
 import { nestingNftAssetLabels } from '@/lib/nesting/gen1-staking-pools'
 import {
   assertWalletNftFrozenForNesting,
@@ -204,6 +204,38 @@ export async function verifyActiveNestLocksForClaimAll(
   positions: StakingPositionRow[],
   poolById: Map<string, StakingPoolRow>
 ): Promise<void> {
+  const result = await partitionClaimAllNestsByLockEligibility(positions, poolById)
+  if (result.skipped.length === 0) return
+  const first = result.skipped[0]!
+  throw new StakingUserError(first.message, first.status, {
+    code: first.code ?? 'nest_lock_ineligible',
+    asset_id: first.assetId,
+    skipped_count: result.skipped.length,
+    eligible_count: result.eligible.length,
+  })
+}
+
+export type ClaimAllLockSkip = {
+  positionId: string
+  assetId: string | null
+  message: string
+  status: number
+  code?: string
+}
+
+export type ClaimAllLockPartition = {
+  eligible: StakingPositionRow[]
+  skipped: ClaimAllLockSkip[]
+}
+
+/**
+ * Claim all: verify locks per nest. Unlocked / unfinished nests are skipped so one bad perch
+ * does not block OWL payout for the rest (fee already paid for the full set still covers).
+ */
+export async function partitionClaimAllNestsByLockEligibility(
+  positions: StakingPositionRow[],
+  poolById: Map<string, StakingPoolRow>
+): Promise<ClaimAllLockPartition> {
   const rowsToVerify = positions.filter((row) => {
     const pool = poolById.get(row.pool_id)
     return (
@@ -211,24 +243,61 @@ export async function verifyActiveNestLocksForClaimAll(
       (positionRequiresOnChainNftFreezeLock(row, pool) || positionRequiresSoftNestOwnership(row, pool))
     )
   })
+  const noVerifyNeeded = positions.filter((row) => !rowsToVerify.some((r) => r.id === row.id))
 
   const concurrency = claimAllLockVerifyConcurrency(rowsToVerify.length)
   const chunkDelayMs = claimAllLockChunkDelayMs(rowsToVerify.length)
+  const eligible: StakingPositionRow[] = [...noVerifyNeeded]
+  const skipped: ClaimAllLockSkip[] = []
 
   for (let i = 0; i < rowsToVerify.length; i += concurrency) {
     if (i > 0) await sleepMs(chunkDelayMs)
     const chunk = rowsToVerify.slice(i, i + concurrency)
-    await Promise.all(
+    const outcomes = await Promise.all(
       chunk.map(async (row) => {
         const rowPool = poolById.get(row.pool_id)
         if (!rowPool) {
-          throw new StakingUserError('Pool not found', 400)
+          return {
+            row,
+            ok: false as const,
+            skip: {
+              positionId: row.id,
+              assetId: row.asset_identifier?.trim() || null,
+              message: 'Pool not found',
+              status: 400,
+              code: 'pool_not_found',
+            },
+          }
         }
-        await assertActiveNftNestOnChainLock(row, rowPool, {
-          allowOwnerThawedForClaim: true,
-          closeSoftNestIfSold: true,
-        })
+        try {
+          await assertActiveNftNestOnChainLock(row, rowPool, {
+            allowOwnerThawedForClaim: true,
+            closeSoftNestIfSold: true,
+          })
+          return { row, ok: true as const }
+        } catch (e) {
+          if (isStakingUserError(e)) {
+            return {
+              row,
+              ok: false as const,
+              skip: {
+                positionId: row.id,
+                assetId: row.asset_identifier?.trim() || null,
+                message: e.message,
+                status: e.status,
+                code: typeof e.extra?.code === 'string' ? e.extra.code : undefined,
+              },
+            }
+          }
+          throw e
+        }
       })
     )
+    for (const outcome of outcomes) {
+      if (outcome.ok) eligible.push(outcome.row)
+      else skipped.push(outcome.skip)
+    }
   }
+
+  return { eligible, skipped }
 }
