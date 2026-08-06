@@ -95,3 +95,52 @@ export async function appendStakingPlatformFeePositionIds(
     throw new Error(error.message)
   }
 }
+
+/**
+ * Recent claim-fee payments for a wallet that still have unused nest capacity
+ * (paid more units than nests already linked). Used to recover after OWL payout failure.
+ */
+export async function listClaimPlatformFeesWithSpareCapacity(params: {
+  wallet: string
+  minSpareUnits: number
+  newerThanIso: string
+  limit?: number
+}): Promise<StakingPlatformFeePaymentRow[]> {
+  const wallet = params.wallet.trim()
+  const minSpare = Math.max(1, Math.floor(params.minSpareUnits))
+  const limit = Math.min(20, Math.max(1, params.limit ?? 10))
+  if (!wallet) return []
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('staking_platform_fee_payments')
+    .select('*')
+    .eq('wallet_address', wallet)
+    .eq('action', 'claim')
+    .gte('created_at', params.newerThanIso)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    console.error('[staking-platform-fee-payments] listSpareCapacity:', error.message)
+    return []
+  }
+
+  const rows: StakingPlatformFeePaymentRow[] = []
+  for (const dataRow of data ?? []) {
+    const positionIds = Array.isArray(dataRow.position_ids)
+      ? dataRow.position_ids.map(String)
+      : []
+    const units = Number(dataRow.units)
+    if (!Number.isFinite(units) || units - positionIds.length < minSpare) continue
+    rows.push({
+      tx_signature: String(dataRow.tx_signature),
+      wallet_address: String(dataRow.wallet_address),
+      action: dataRow.action as StakingPlatformFeePaymentRow['action'],
+      units,
+      lamports: Number(dataRow.lamports),
+      position_ids: positionIds,
+      created_at: String(dataRow.created_at),
+    })
+  }
+  return rows
+}

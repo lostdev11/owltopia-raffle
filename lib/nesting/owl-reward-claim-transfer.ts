@@ -167,11 +167,30 @@ export async function tryTransferOwlRewardClaim(params: {
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'processed')
       return { kind: 'sent', signature }
     } catch (e) {
-      lastError = e instanceof Error ? e.message : 'OWL reward transfer failed'
-      const canRetry = isBlockhashExpiryError(lastError) && attempt < maxAttempts
+      const raw = e instanceof Error ? e.message : 'OWL reward transfer failed'
+      lastError = friendlyOwlTransferError(raw)
+      const canRetry = isBlockhashExpiryError(raw) && attempt < maxAttempts
       if (!canRetry) break
       // Signature never landed (null status / expiry) — safe to rebuild with a new blockhash.
     }
   }
-  return { kind: 'failed', error: lastError }
+  return { kind: 'failed', error: friendlyOwlTransferError(lastError) }
+}
+
+function friendlyOwlTransferError(raw: string): string {
+  const m = raw.toLowerCase()
+  if (
+    m.includes('insufficient funds') ||
+    m.includes('insufficient lamports') ||
+    m.includes('custom program error: 0x1')
+  ) {
+    return 'OWL reward treasury could not complete the transfer (insufficient SOL for fees or insufficient OWL balance). Support needs to fund the reward treasury, then you can claim again without paying another platform fee.'
+  }
+  if (m.includes('block height exceeded') || m.includes('blockhash not found')) {
+    return 'OWL transfer timed out before confirmation. Your platform fee is still valid — tap Claim again without paying again.'
+  }
+  if (m.includes('node is behind') || m.includes('429') || m.includes('rate limit')) {
+    return 'RPC was temporarily overloaded while sending OWL. Your platform fee is still valid — wait a moment and tap Claim again.'
+  }
+  return raw || 'OWL reward transfer failed'
 }
