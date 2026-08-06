@@ -3147,6 +3147,7 @@ export function DashboardNestingClient() {
                 transaction_signature: pending.transaction_signature,
                 execution: { path: 'onchain_transfer' as const },
                 ledger_recovered: true,
+                skipped_lock_count: 0,
               }
             }
             setActionError(
