@@ -47,7 +47,7 @@ import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 import { isOpeningNftNestAbortable } from '@/lib/nesting/position-lifecycle'
 import {
   assertActiveNftNestOnChainLock,
-  verifyActiveNestLocksForClaimAll,
+  partitionClaimAllNestsByLockEligibility,
   assertPoolConfiguredForOnChainNftFreeze,
 } from '@/lib/nesting/nft-nest-onchain-lock'
 import { assertAdminOnlyStakingPoolAccess } from '@/lib/nesting/gen1-staking-pools'
@@ -466,13 +466,49 @@ export async function executeClaimAll(params: {
     }
   }
 
-  await verifyActiveNestLocksForClaimAll(rowsToVerify, poolById)
+  const lockPartition = await partitionClaimAllNestsByLockEligibility(rowsToVerify, poolById)
+  const eligibleIds = new Set(lockPartition.eligible.map((r) => r.id))
+  const claimPlans = plans.filter((p) => eligibleIds.has(p.positionId))
+  const skippedLocks = lockPartition.skipped
+
+  if (claimPlans.length === 0) {
+    const sample = skippedLocks[0]?.message?.trim()
+    throw new StakingUserError(
+      sample
+        ? `${sample}${
+            skippedLocks.length > 1
+              ? ` (${skippedLocks.length} nests need a restored lock — Finish opening or contact support.)`
+              : ''
+          }`
+        : 'None of your claimable nests have a valid on-chain lock. Finish opening those nests, or contact support.',
+      400,
+      {
+        code: 'claim_all_no_eligible_locks',
+        skipped_count: skippedLocks.length,
+        skipped_position_ids: skippedLocks.map((s) => s.positionId),
+      }
+    )
+  }
+
+  const claimableTotal = claimPlans.reduce((sum, p) => sum + p.payoutAmount, 0)
+  if (!meetsMinOwlClaimThreshold(claimableTotal)) {
+    throw new StakingUserError(
+      `After skipping ${skippedLocks.length} unlocked nest(s), only ${claimableTotal.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL remains claimable (need at least ${MIN_OWL_CLAIMABLE_TO_CLAIM} OWL). Finish opening those nests, then Claim all again — your platform fee can be reused.`,
+      400,
+      {
+        code: 'claim_all_below_min_after_lock_skip',
+        skipped_count: skippedLocks.length,
+        claimable_after_skip: claimableTotal,
+        skipped_position_ids: skippedLocks.map((s) => s.positionId),
+      }
+    )
+  }
 
   const feeParams = await resolveStakingPlatformFeeSignature({
     wallet: params.wallet,
     action: 'claim' as const,
     feeSignature: params.platform_fee_signature,
-    positionIds: plans.map((p) => p.positionId),
+    positionIds: claimPlans.map((p) => p.positionId),
   })
   await validateStakingPlatformFeeLinked(feeParams)
 
@@ -496,11 +532,19 @@ export async function executeClaimAll(params: {
     const result = await executeChunkedBatchOwlClaims({
       wallet: params.wallet,
       pool,
-      plans,
+      plans: claimPlans,
     })
 
     await commitStakingPlatformFeeLinked(feeParams)
-    return result
+    return {
+      ...result,
+      skipped_lock_count: skippedLocks.length,
+      skipped_locks: skippedLocks.map((s) => ({
+        position_id: s.positionId,
+        asset_id: s.assetId,
+        reason: s.message,
+      })),
+    }
   } catch (e) {
     // Partial Claim-all already sent OWL for some batches: still record the fee for completed
     // nests so a retry can append remaining ids to the same payment instead of charging again.

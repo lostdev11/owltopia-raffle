@@ -49,6 +49,9 @@ export async function POST(request: NextRequest) {
       transaction_signature: txSig || null,
       transaction_signatures: txSigs,
       batch_count: result.batch_count ?? 1,
+      skipped_lock_count:
+        typeof result.skipped_lock_count === 'number' ? result.skipped_lock_count : 0,
+      skipped_locks: Array.isArray(result.skipped_locks) ? result.skipped_locks : [],
       execution: {
         path: result.execution_path,
       },
