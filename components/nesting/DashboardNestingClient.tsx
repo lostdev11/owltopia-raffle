@@ -61,6 +61,8 @@ import {
   type PendingClaimPlatformFee,
 } from '@/lib/nesting/pending-claim-platform-fee'
 
+const PENDING_CLAIM_LEDGER_STORAGE_KEY = 'owl_pending_claim_ledger_sync_v1'
+
 type PendingClaimLedgerSync = {
   transaction_signature: string
   claims: Array<{ position_id: string; amount: number; claimed_rewards_total: number }>
