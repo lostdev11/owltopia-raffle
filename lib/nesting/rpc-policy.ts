@@ -1,11 +1,14 @@
 /**
- * Owl Nesting + Solana RPC usage policy (low Helius / credit usage).
+ * Nesting RPC usage policy (low Helius / credit usage).
  *
  * - **No** wallet-wide token or NFT holder scans in nesting flows.
  * - **No** client or server polling loops; optional manual or cron "reconcile" uses a small bounded batch.
  * - **Do** use a single `getTransaction` / `getParsedTransaction` per user-submitted signature to verify.
  * - **Do** prefer `getNestingReadConnection()` (see `lib/solana/nesting/client.ts`) for read-only tx/account fetches
  *   when `SOLANA_RPC_READ_URL` is set, to leave primary RPC for sends and archival if needed.
+ * - **Exception (claim fee recovery):** when a claim request arrives without a fee signature, a one-shot
+ *   bounded `getSignaturesForAddress` (≤20, last 48h) may recover a paid-but-unlinked platform fee so the
+ *   user is not charged again after a failed OWL payout. Same pattern as candy-machine mint recovery.
  * - **Future:** program log subscription or webhook indexer — not implemented here; still avoid continuous polling.
  */
 

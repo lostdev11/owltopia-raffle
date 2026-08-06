@@ -52,19 +52,21 @@ import {
 } from '@/lib/nesting/staking-platform-fee'
 import type { StakingPlatformFeeTxConfig } from '@/lib/nesting/client/staking-platform-fee-tx'
 
+import {
+  claimRetryWithoutRepayMessage,
+  parsePendingClaimPlatformFee,
+  pendingClaimPlatformFeeCovers,
+  PENDING_CLAIM_FEE_LEGACY_SESSION_KEY,
+  PENDING_CLAIM_FEE_STORAGE_KEY,
+  type PendingClaimPlatformFee,
+} from '@/lib/nesting/pending-claim-platform-fee'
+
 const PENDING_CLAIM_LEDGER_STORAGE_KEY = 'owl_pending_claim_ledger_sync_v1'
-const PENDING_CLAIM_FEE_STORAGE_KEY = 'owl_pending_claim_platform_fee_v1'
 
 type PendingClaimLedgerSync = {
   transaction_signature: string
   claims: Array<{ position_id: string; amount: number; claimed_rewards_total: number }>
   total_claimed: number
-}
-
-type PendingClaimPlatformFee = {
-  wallet: string
-  signature: string
-  units: number
 }
 import { PositionCard } from '@/components/nesting/PositionCard'
 import { NftPerchGroupedNestCard } from '@/components/nesting/NftPerchGroupedNestCard'
@@ -1730,20 +1732,29 @@ export function DashboardNestingClient() {
   const readPendingClaimPlatformFee = useCallback(
     (unitsNeeded: number): string | null => {
       if (typeof window === 'undefined' || !publicKey) return null
+      const wallet = publicKey.toBase58()
       try {
-        const raw = sessionStorage.getItem(PENDING_CLAIM_FEE_STORAGE_KEY)
-        if (!raw) return null
-        const parsed = JSON.parse(raw) as PendingClaimPlatformFee
-        if (
-          parsed.wallet !== publicKey.toBase58() ||
-          typeof parsed.signature !== 'string' ||
-          !parsed.signature.trim() ||
-          !Number.isFinite(parsed.units) ||
-          parsed.units < unitsNeeded
-        ) {
+        const fromLocal = localStorage.getItem(PENDING_CLAIM_FEE_STORAGE_KEY)
+        let parsed = fromLocal ? parsePendingClaimPlatformFee(JSON.parse(fromLocal)) : null
+
+        if (!parsed) {
+          const legacy = sessionStorage.getItem(PENDING_CLAIM_FEE_LEGACY_SESSION_KEY)
+          if (legacy) {
+            parsed = parsePendingClaimPlatformFee(JSON.parse(legacy))
+            if (parsed) {
+              localStorage.setItem(
+                PENDING_CLAIM_FEE_STORAGE_KEY,
+                JSON.stringify({ ...parsed, savedAtMs: parsed.savedAtMs || Date.now() })
+              )
+              sessionStorage.removeItem(PENDING_CLAIM_FEE_LEGACY_SESSION_KEY)
+            }
+          }
+        }
+
+        if (!parsed || !pendingClaimPlatformFeeCovers(parsed, wallet, unitsNeeded)) {
           return null
         }
-        return parsed.signature.trim()
+        return parsed.signature
       } catch {
         return null
       }
@@ -1758,15 +1769,26 @@ export function DashboardNestingClient() {
         wallet: publicKey.toBase58(),
         signature: signature.trim(),
         units,
+        savedAtMs: Date.now(),
       }
-      sessionStorage.setItem(PENDING_CLAIM_FEE_STORAGE_KEY, JSON.stringify(payload))
+      localStorage.setItem(PENDING_CLAIM_FEE_STORAGE_KEY, JSON.stringify(payload))
+      try {
+        sessionStorage.removeItem(PENDING_CLAIM_FEE_LEGACY_SESSION_KEY)
+      } catch {
+        /* ignore */
+      }
     },
     [publicKey]
   )
 
   const clearPendingClaimPlatformFee = useCallback(() => {
     if (typeof window === 'undefined') return
-    sessionStorage.removeItem(PENDING_CLAIM_FEE_STORAGE_KEY)
+    localStorage.removeItem(PENDING_CLAIM_FEE_STORAGE_KEY)
+    try {
+      sessionStorage.removeItem(PENDING_CLAIM_FEE_LEGACY_SESSION_KEY)
+    } catch {
+      /* ignore */
+    }
   }, [])
 
   const sendMplCoreFreezeDelegateApproval = useCallback(
@@ -2750,11 +2772,19 @@ export function DashboardNestingClient() {
         async execute() {
           let platformFeeSig: string | null = null
           if (platformFeeActive) {
-            setPosSubPhase(positionId, 'claim', 'awaiting_wallet_signature')
-            platformFeeSig = await sendStakingPlatformFee(1)
-            // Fee is signed/confirmed; the wallet is done. Reflect server-side work so
-            // the user does not think another wallet approval is pending and re-pay the fee.
-            setPosSubPhase(positionId, 'claim', 'submitting')
+            const reusedFee = readPendingClaimPlatformFee(1)
+            if (reusedFee) {
+              platformFeeSig = reusedFee
+              setPosSubPhase(positionId, 'claim', 'submitting')
+            } else {
+              setPosSubPhase(positionId, 'claim', 'awaiting_wallet_signature')
+              platformFeeSig = await sendStakingPlatformFee(1)
+              // Keep fee for retry if OWL payout fails after the wallet approval.
+              savePendingClaimPlatformFee(platformFeeSig, 1)
+              // Fee is signed/confirmed; the wallet is done. Reflect server-side work so
+              // the user does not think another wallet approval is pending and re-pay the fee.
+              setPosSubPhase(positionId, 'claim', 'submitting')
+            }
           }
           const result = await fetchNestingJson<{
             error?: string
@@ -2778,9 +2808,10 @@ export function DashboardNestingClient() {
           })
           if (result.status === 0 && !result.ok) {
             setActionError(
-              result.clientTimeout
+              (result.clientTimeout
                 ? nestingFetchTimeoutMessage('claim')
-                : nestingFetchNetworkErrorMessage('claim')
+                : nestingFetchNetworkErrorMessage('claim')) +
+                (platformFeeSig ? ` ${claimRetryWithoutRepayMessage(1)}` : '')
             )
             throw new Error('claim')
           }
@@ -2794,9 +2825,21 @@ export function DashboardNestingClient() {
                 : typeof json.error === 'string'
                   ? json.error
                   : 'Claim failed'
-            setActionError(err)
+            const feeRejected =
+              err.toLowerCase().includes('platform fee') ||
+              err.toLowerCase().includes('fee payment') ||
+              err.toLowerCase().includes('fee transaction')
+            if (feeRejected) {
+              clearPendingClaimPlatformFee()
+              setActionError(err)
+            } else {
+              setActionError(
+                platformFeeSig ? `${err} ${claimRetryWithoutRepayMessage(1)}` : err
+              )
+            }
             throw new Error('claim')
           }
+          clearPendingClaimPlatformFee()
           if (typeof json.claimed_rewards_total === 'number' && Number.isFinite(json.claimed_rewards_total)) {
             claimedRewardsTotal = json.claimed_rewards_total
           }
@@ -3046,9 +3089,12 @@ export function DashboardNestingClient() {
           })
           if (result.status === 0 && !result.ok) {
             setActionError(
-              result.clientTimeout
+              (result.clientTimeout
                 ? nestingFetchTimeoutMessage('claim')
-                : nestingFetchNetworkErrorMessage('claim')
+                : nestingFetchNetworkErrorMessage('claim')) +
+                (platformFeeSig
+                  ? ` ${claimRetryWithoutRepayMessage(claimPlans.length)}`
+                  : '')
             )
             throw new Error('claim-all')
           }
@@ -3114,8 +3160,16 @@ export function DashboardNestingClient() {
               err.toLowerCase().includes('platform fee') ||
               err.toLowerCase().includes('fee payment') ||
               err.toLowerCase().includes('fee transaction')
-            if (feeRejected) clearPendingClaimPlatformFee()
-            setActionError(err)
+            if (feeRejected) {
+              clearPendingClaimPlatformFee()
+              setActionError(err)
+            } else {
+              setActionError(
+                platformFeeSig
+                  ? `${err} ${claimRetryWithoutRepayMessage(claimPlans.length)}`
+                  : err
+              )
+            }
             throw new Error('claim-all')
           }
           if (typeof window !== 'undefined') {

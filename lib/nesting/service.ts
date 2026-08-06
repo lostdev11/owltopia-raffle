@@ -56,6 +56,7 @@ import { assertNftEligibleForPoolStake } from '@/lib/nesting/nft-lock-service'
 import {
   commitStakingPlatformFeeLinked,
   requireStakingPlatformFeeLinked,
+  resolveStakingPlatformFeeSignature,
   validateStakingPlatformFeeLinked,
 } from '@/lib/nesting/link-staking-platform-fee'
 
@@ -397,12 +398,12 @@ export async function executeClaim(params: {
     })
   }
 
-  const feeParams = {
+  const feeParams = await resolveStakingPlatformFeeSignature({
     wallet: params.wallet,
     action: 'claim' as const,
     feeSignature: params.platform_fee_signature,
     positionIds: [position_id],
-  }
+  })
   await validateStakingPlatformFeeLinked(feeParams)
 
   const adapter = resolveMutationAdapter(pool)
@@ -467,12 +468,12 @@ export async function executeClaimAll(params: {
 
   await verifyActiveNestLocksForClaimAll(rowsToVerify, poolById)
 
-  const feeParams = {
+  const feeParams = await resolveStakingPlatformFeeSignature({
     wallet: params.wallet,
     action: 'claim' as const,
     feeSignature: params.platform_fee_signature,
     positionIds: plans.map((p) => p.positionId),
-  }
+  })
   await validateStakingPlatformFeeLinked(feeParams)
 
   const rewardToken = (pool.reward_token ?? '').trim().toUpperCase()
