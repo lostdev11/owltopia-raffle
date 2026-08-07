@@ -337,50 +337,67 @@ const tooMany = buildTokenScatterLines({
 })
 assert.equal(tooMany.ok, false)
 
-// Badge only for frozen (true nest lock); leftover CM delegates are not nested
-assert.equal(
-  owlSendNftLockLabel({
-    mint: 'm',
-    tokenAccount: 't',
-    amount: '1',
-    decimals: 0,
-    metadataUri: null,
-    name: null,
-    image: null,
-    collectionName: null,
-    frozen: false,
-    delegated: true,
-  }),
-  null
-)
-assert.equal(
-  owlSendNftLockLabel({
-    mint: 'm',
-    tokenAccount: 't',
-    amount: '1',
-    decimals: 0,
-    metadataUri: null,
-    name: null,
-    image: null,
-    collectionName: null,
-    frozen: true,
-    delegated: true,
-  }),
-  'Nested / frozen'
-)
-assert.equal(
-  owlSendNftLockLabel({
-    mint: 'm',
-    tokenAccount: 't',
-    amount: '1',
-    decimals: 0,
-    metadataUri: null,
-    name: null,
-    image: null,
-    collectionName: null,
-  }),
-  null
-)
+  // Badge only for frozen (true nest lock); leftover CM delegates are not nested.
+  // pNFT freeze-without-delegate must not look nested.
+  assert.equal(
+    owlSendNftLockLabel({
+      mint: 'm',
+      tokenAccount: 't',
+      amount: '1',
+      decimals: 0,
+      metadataUri: null,
+      name: null,
+      image: null,
+      collectionName: null,
+      frozen: false,
+      delegated: true,
+    }),
+    null
+  )
+  assert.equal(
+    owlSendNftLockLabel({
+      mint: 'm',
+      tokenAccount: 't',
+      amount: '1',
+      decimals: 0,
+      metadataUri: null,
+      name: null,
+      image: null,
+      collectionName: null,
+      frozen: true,
+      delegated: true,
+    }),
+    'Nested / frozen'
+  )
+  assert.equal(
+    owlSendNftLockLabel({
+      mint: 'meego',
+      tokenAccount: 't',
+      amount: '1',
+      decimals: 0,
+      metadataUri: null,
+      name: null,
+      image: null,
+      collectionName: null,
+      frozen: true,
+      delegated: false,
+      interface: 'ProgrammableNFT',
+    }),
+    null
+  )
+  assert.equal(
+    owlSendNftLockLabel({
+      mint: 'm',
+      tokenAccount: 't',
+      amount: '1',
+      decimals: 0,
+      metadataUri: null,
+      name: null,
+      image: null,
+      collectionName: null,
+    }),
+    null
+  )
 
 const merged = mergeDasNftsWithOnChainLocks(
   [

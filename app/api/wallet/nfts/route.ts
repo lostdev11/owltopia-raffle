@@ -195,7 +195,7 @@ async function fetchHeliusWithRetry(rpcUrl: string, body: string): Promise<Respo
  * Attaches DAS ownership.frozen / ownership.delegated for UI hints.
  * Always overlays getParsedTokenAccountsByOwner ATAs so Gen2/classic SPL sends get real
  * token accounts (DAS alone sets tokenAccount=mint, which breaks OwlSend multi-send).
- * Raffle creation still rejects staked/delegated SPL holdings at deposit time.
+ * Raffle create rejects true nest/stake locks (freeze+delegate for pNFTs; freeze for classic).
  */
 export async function GET(request: NextRequest) {
   try {

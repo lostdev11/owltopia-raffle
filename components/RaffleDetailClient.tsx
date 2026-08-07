@@ -122,6 +122,7 @@ import {
 } from '@solana/spl-token'
 import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
 import { getFungibleHolderInWallet, getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
+import { isNftHolderTransferLocked } from '@/lib/solana/nft-transfer-lock'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import {
   isMplCoreNoApprovalsError,
@@ -1986,10 +1987,17 @@ export function RaffleDetailClient({
         setDepositEscrowError('NFT holder data incomplete. Try again.')
         return
       }
-      if (holder.isFrozen) {
+      if (
+        await isNftHolderTransferLocked({
+          connection,
+          mint,
+          holder,
+          commitment: 'confirmed',
+        })
+      ) {
         logEscrowDepositAbort(depositLogCtx, 'nft_frozen_on_chain')
         setDepositEscrowError(
-          'This NFT is frozen on-chain (nested or mint-locked). Unnest/thaw and retry, or send it manually to escrow and paste the signature. A leftover Gen2 stake delegate alone is fine.'
+          'This NFT is frozen on-chain (nested or mint-locked). Unnest/thaw and retry, or send it manually to escrow and paste the signature. A leftover Gen2 stake delegate alone is fine. Programmable NFTs (pNFTs) that only show frozen without a lock delegate are transferable.'
         )
         setShowManualEscrowFallback(true)
         return

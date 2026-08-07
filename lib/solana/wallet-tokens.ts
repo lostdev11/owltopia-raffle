@@ -21,6 +21,10 @@ export interface NftHolderInWallet {
   tokenAccount: PublicKey
   /** Leftover Candy Machine / nest delegate may remain; owner can still transfer when not frozen. */
   hasDelegate?: boolean
+  /**
+   * SPL token-account frozen flag. For pNFTs this can be true without a stake/nest lock —
+   * use {@link isNftHolderTransferLocked} before blocking raffle create/deposit.
+   */
   isFrozen?: boolean
 }
 
@@ -38,7 +42,8 @@ export interface NftHolderDelegated {
  *
  * Important: do **not** skip accounts with a leftover delegate. Gen2 freezeSolPayment thaw often
  * leaves the freeze-escrow delegate set while `isFrozen=false` — those NFTs are sendable.
- * Only `isFrozen` means nested / mint-locked.
+ * For classic NFTs, `isFrozen` means nested / mint-locked. For pNFTs, freeze alone is often
+ * rule-set state — use {@link isNftHolderTransferLocked} (freeze + delegate) for raffle gates.
  */
 export async function getNftHolderInWallet(
   connection: Connection,
@@ -237,9 +242,13 @@ export interface WalletNft {
   collectionMint?: string | null
   /** Token-metadata symbol when resolved (e.g. client RPC path). */
   symbol?: string | null
-  /** DAS / parsed token account: frozen (nested, stake lock, or pNFT). */
+  /**
+   * DAS / parsed token account: frozen.
+   * For pNFTs this can be true without a true stake/nest lock — see
+   * {@link isWalletNftTransferLocked} in `nft-transfer-lock.ts` (needs freeze + delegate).
+   */
   frozen?: boolean | null
-  /** DAS / parsed token account: delegated (staked or nested). */
+  /** DAS / parsed token account: delegated (staked, nested, or leftover CM). */
   delegated?: boolean | null
   /** DAS asset interface when known (e.g. ProgrammableNFT, MplCoreAsset). */
   interface?: string | null
@@ -421,7 +430,11 @@ export async function getWalletNfts(
         ? (info as { state?: string }).state!.toLowerCase()
         : ''
       const frozen = state === 'frozen'
-      if (!includeLocked && (delegated || frozen)) continue
+      // True transfer locks are freeze+delegate (Gen2 nest / CM freeze escrow / pNFT stake).
+      // Exclude only those when includeLocked is false. Keep:
+      // - leftover CM delegate without freeze (sendable)
+      // - pNFT freeze without lock delegate (transferable via Token Metadata)
+      if (!includeLocked && frozen && delegated) continue
       const rawDecimals = info.tokenAmount?.decimals
       const decimals = typeof rawDecimals === 'number' && !Number.isNaN(rawDecimals) ? rawDecimals : Number(rawDecimals ?? 9)
       const amount = String(info.tokenAmount?.amount ?? '0')

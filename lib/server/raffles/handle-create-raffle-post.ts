@@ -13,6 +13,10 @@ import { requireSession } from '@/lib/auth-server'
 import { isOwlEnabled } from '@/lib/tokens'
 import { getSolanaReadConnection } from '@/lib/solana/connection'
 import { getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
+import {
+  isNftHolderTransferLocked,
+  NFT_TRANSFER_LOCKED_RAFFLE_MESSAGE,
+} from '@/lib/solana/nft-transfer-lock'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import type { Raffle, RaffleCurrency, ThemeAccent } from '@/lib/types'
 import { THEME_ACCENT_VALUES } from '@/lib/types'
@@ -643,12 +647,21 @@ export async function handleCreateRafflePost(
         try {
           const mintPk = new PublicKey(nftMintAddress)
           const creatorPk = new PublicKey(walletAddress)
-          const holder = await getNftHolderInWallet(getSolanaReadConnection(), mintPk, creatorPk, 'confirmed')
-          if (holder && 'tokenProgram' in holder && holder.isFrozen) {
+          const connection = getSolanaReadConnection()
+          const holder = await getNftHolderInWallet(connection, mintPk, creatorPk, 'confirmed')
+          if (
+            holder &&
+            'tokenProgram' in holder &&
+            (await isNftHolderTransferLocked({
+              connection,
+              mint: mintPk,
+              holder,
+              commitment: 'confirmed',
+            }))
+          ) {
             return NextResponse.json(
               {
-                error:
-                  'This NFT is frozen on-chain (nested or mint-locked). Unnest/thaw it before creating a raffle. A leftover Gen2 stake delegate alone is fine.',
+                error: NFT_TRANSFER_LOCKED_RAFFLE_MESSAGE,
               },
               { status: 400 }
             )

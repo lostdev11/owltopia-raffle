@@ -17,6 +17,11 @@ import {
 } from '@solana/spl-token'
 import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
 import { getFungibleHolderInWallet, getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
+import {
+  isNftHolderTransferLocked,
+  isProgrammableNftInterface,
+  NFT_TRANSFER_LOCKED_RAFFLE_MESSAGE,
+} from '@/lib/solana/nft-transfer-lock'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import {
   isMplCoreNoApprovalsError,
@@ -884,10 +889,18 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       try {
         const mintPk = new PublicKey(prizeNft.mint)
         const stakedCheck = await getNftHolderInWallet(connection, mintPk, publicKey, 'confirmed')
-        if (stakedCheck && 'tokenProgram' in stakedCheck && stakedCheck.isFrozen) {
-          alert(
-            'This NFT is frozen on-chain (nested or mint-locked). Unnest/thaw it before creating a raffle. A leftover Gen2 stake delegate alone is fine.'
-          )
+        if (
+          stakedCheck &&
+          'tokenProgram' in stakedCheck &&
+          (await isNftHolderTransferLocked({
+            connection,
+            mint: mintPk,
+            holder: stakedCheck,
+            programmableNftHint: isProgrammableNftInterface(prizeNft.interface) ? true : null,
+            commitment: 'confirmed',
+          }))
+        ) {
+          alert(NFT_TRANSFER_LOCKED_RAFFLE_MESSAGE)
           return
         }
       } catch {
@@ -1182,11 +1195,29 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                       ? amountRaw
                       : 0
                 const delegate = typeof info?.delegate === 'string' ? info.delegate : null
-                if (selectedMint === mintPk.toBase58() && amount >= 1 && !delegate) {
+                const hasDelegate = Boolean(delegate)
+                const state =
+                  typeof (info as { state?: string } | null)?.state === 'string'
+                    ? String((info as { state?: string }).state).toLowerCase()
+                    : ''
+                const isFrozen = state === 'frozen'
+                const programmableHint = isProgrammableNftInterface(prizeNft.interface)
+                const locked = isFrozen && (programmableHint ? hasDelegate : true)
+                if (selectedMint === mintPk.toBase58() && amount >= 1 && !locked) {
                   if (isSplProgram) {
-                    resolvedHolder = { tokenProgram: TOKEN_PROGRAM_ID, tokenAccount: selectedTokenAccount }
+                    resolvedHolder = {
+                      tokenProgram: TOKEN_PROGRAM_ID,
+                      tokenAccount: selectedTokenAccount,
+                      hasDelegate,
+                      isFrozen,
+                    }
                   } else if (isToken2022) {
-                    resolvedHolder = { tokenProgram: TOKEN_2022_PROGRAM_ID, tokenAccount: selectedTokenAccount }
+                    resolvedHolder = {
+                      tokenProgram: TOKEN_2022_PROGRAM_ID,
+                      tokenAccount: selectedTokenAccount,
+                      hasDelegate,
+                      isFrozen,
+                    }
                   }
                 }
               } catch {
@@ -1197,7 +1228,15 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               if (resolvedHolder) break
               const h = await getNftHolderInWallet(connection, mintPk, publicKey, 'processed')
               if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
-                if (h.isFrozen) {
+                if (
+                  await isNftHolderTransferLocked({
+                    connection,
+                    mint: mintPk,
+                    holder: h,
+                    programmableNftHint: isProgrammableNftInterface(prizeNft.interface) ? true : null,
+                    commitment: 'processed',
+                  })
+                ) {
                   alert(
                     'This NFT is frozen on-chain (nested or mint-locked). Unnest/thaw it, then complete the deposit from the raffle page (your draft is saved).'
                   )
@@ -2092,7 +2131,8 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm">
                 <p className="font-medium text-amber-700 dark:text-amber-400">Be careful when selecting an NFT</p>
                 <p className="text-muted-foreground mt-0.5">
-                  Only choose an NFT you intend to give away. Staked or delegated NFTs cannot be used until you unstake them.
+                  Only choose an NFT you intend to give away. Nested or stake-locked NFTs cannot be used until you
+                  unnest them. Programmable NFTs (pNFTs) that only show frozen without a lock delegate are fine.
                 </p>
               </div>
               <Button
