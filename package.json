@@ -50,6 +50,8 @@
     "test:nesting-batch-size-error": "npx --yes tsx scripts/test-nesting-batch-size-error.ts",
     "test:owl-send-batch": "npx --yes tsx scripts/test-owl-send-batch.ts",
     "test:owl-send-holder-discount": "npx --yes tsx scripts/test-owl-send-holder-discount.ts",
+    "test:packs-open-rng": "npx --yes tsx scripts/test-packs-open-rng.ts",
+    "packs:ev-simulator": "npx --yes tsx scripts/packs-ev-simulator.ts",
     "test:partner-nest-pool": "npx --yes tsx scripts/test-partner-nest-pool.ts",
     "test:if-chain-rarity": "npx --yes tsx scripts/verify-if-chain-rarity.ts",
     "test:if-chain-cycle": "npx --yes tsx scripts/verify-if-chain-cycle.ts",
