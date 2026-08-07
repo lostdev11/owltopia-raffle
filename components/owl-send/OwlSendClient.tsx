@@ -43,6 +43,7 @@ import {
   owlSendSkippedFrozenNotice,
   partitionOwlSendByFrozen,
 } from '@/lib/owl-send/picker-eligibility'
+import { isWalletNftTransferLocked } from '@/lib/solana/nft-transfer-lock'
 import {
   Dialog,
   DialogContent,
@@ -756,7 +757,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               lines: allPendingLines,
             })
           : []
-      const pickerFrozen = nfts.filter((n) => n.frozen === true).map((n) => n.mint)
+      const pickerFrozen = nfts.filter((n) => isWalletNftTransferLocked(n)).map((n) => n.mint)
       const frozenSet = new Set(
         [...frozenInBatch, ...frozenInPlan, ...pickerFrozen].map((m) => m.trim())
       )
@@ -965,17 +966,19 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     }
   }
 
-  const frozenNftCount = useMemo(() => nfts.filter((n) => n.frozen === true).length, [nfts])
+  const frozenNftCount = useMemo(() => nfts.filter((n) => isWalletNftTransferLocked(n)).length, [nfts])
 
   const deselectFrozenNfts = () => {
     setSelectedMints((prev) => {
       const next = new Set(prev)
       for (const n of nfts) {
-        if (n.frozen === true) next.delete(n.mint)
+        if (isWalletNftTransferLocked(n)) next.delete(n.mint)
       }
       return next
     })
-    setRetryMints((prev) => prev.filter((m) => !nfts.some((n) => n.mint === m && n.frozen)))
+    setRetryMints((prev) =>
+      prev.filter((m) => !nfts.some((n) => n.mint === m && isWalletNftTransferLocked(n)))
+    )
     setSessionNotice(
       frozenNftCount > 0
         ? `Deselected ${frozenNftCount} nested/frozen NFT${frozenNftCount === 1 ? '' : 's'}. Send the rest, or Thaw locks / unnest those first.`
@@ -999,13 +1002,13 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         })
       )
       for (const n of nfts) {
-        if (n.frozen === true) liveFrozen.add(n.mint)
+        if (isWalletNftTransferLocked(n)) liveFrozen.add(n.mint)
       }
       if (liveFrozen.size > 0) {
         remainingLines = draft.preparedLines.filter((l) => !liveFrozen.has(l.mint.trim()))
       }
     } catch {
-      const frozenSet = new Set(nfts.filter((n) => n.frozen).map((n) => n.mint))
+      const frozenSet = new Set(nfts.filter((n) => isWalletNftTransferLocked(n)).map((n) => n.mint))
       if (frozenSet.size > 0) {
         remainingLines = draft.preparedLines.filter((l) => !frozenSet.has(l.mint.trim()))
       }

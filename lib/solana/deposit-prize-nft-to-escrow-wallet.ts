@@ -31,6 +31,10 @@ import {
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
 import { getNftHolderInWallet, type NftHolderInWallet, type WalletNft } from '@/lib/solana/wallet-tokens'
+import {
+  isNftHolderTransferLocked,
+  isProgrammableNftInterface,
+} from '@/lib/solana/nft-transfer-lock'
 
 export type SendTxFn = WalletSendTransactionFn
 
@@ -94,13 +98,31 @@ export async function depositPrizeNftToEscrowFromWallet(
       const amount =
         typeof amountRaw === 'string' ? Number(amountRaw) : typeof amountRaw === 'number' ? amountRaw : 0
       // Gen2 CM thaw often leaves a leftover delegate — still owner-transferable when not frozen.
+      // pNFTs often show state=frozen without a lock delegate — still transferable via Token Metadata.
       const state =
         typeof info?.state === 'string' ? String(info.state).toLowerCase() : ''
-      if (selectedMint === mintPk.toBase58() && amount >= 1 && state !== 'frozen') {
+      const delegate = typeof info?.delegate === 'string' ? info.delegate : null
+      const hasDelegate = Boolean(delegate)
+      const isFrozen = state === 'frozen'
+      const programmableHint = isProgrammableNftInterface(selectedNft.interface)
+      const locked =
+        isFrozen &&
+        (programmableHint ? hasDelegate : true)
+      if (selectedMint === mintPk.toBase58() && amount >= 1 && !locked) {
         if (isSplProgram) {
-          resolvedHolder = { tokenProgram: TOKEN_PROGRAM_ID, tokenAccount: selectedTokenAccount }
+          resolvedHolder = {
+            tokenProgram: TOKEN_PROGRAM_ID,
+            tokenAccount: selectedTokenAccount,
+            hasDelegate,
+            isFrozen,
+          }
         } else if (isToken2022) {
-          resolvedHolder = { tokenProgram: TOKEN_2022_PROGRAM_ID, tokenAccount: selectedTokenAccount }
+          resolvedHolder = {
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            tokenAccount: selectedTokenAccount,
+            hasDelegate,
+            isFrozen,
+          }
         }
       }
     } catch {
@@ -112,11 +134,19 @@ export async function depositPrizeNftToEscrowFromWallet(
     if (resolvedHolder) break
     const h = await getNftHolderInWallet(connection, mintPk, publicKey, 'processed')
     if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
-      if (h.isFrozen) {
+      if (
+        await isNftHolderTransferLocked({
+          connection,
+          mint: mintPk,
+          holder: h,
+          programmableNftHint: isProgrammableNftInterface(selectedNft.interface) ? true : null,
+          commitment: 'processed',
+        })
+      ) {
         return {
           ok: false,
           error:
-            'This NFT is frozen on-chain (nested or mint-locked). Unnest/thaw it before sending to escrow. A leftover Gen2 stake delegate alone is fine.',
+            'This NFT is frozen on-chain (nested or mint-locked). Unnest/thaw it before sending to escrow. A leftover Gen2 stake delegate alone is fine. Programmable NFTs (pNFTs) that only show frozen without a lock delegate are transferable.',
         }
       }
       resolvedHolder = h

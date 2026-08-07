@@ -1,4 +1,5 @@
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
+import { isWalletNftTransferLocked } from '@/lib/solana/nft-transfer-lock'
 
 /** Compressed NFT from DAS `compression.compressed` (or interface hint). */
 export function isOwlSendCompressedNft(nft: WalletNft): boolean {
@@ -8,12 +9,13 @@ export function isOwlSendCompressedNft(nft: WalletNft): boolean {
 }
 
 /**
- * Informational picker badge — only true on-chain freeze (nested / mint-locked).
- * Leftover Gen2 Candy Machine delegates after thaw are NOT nested and must not look staked.
+ * Informational picker badge — only true nest/stake locks.
+ * Leftover Gen2 Candy Machine delegates after thaw are NOT nested.
+ * pNFTs that look frozen without a lock delegate are still transferable.
  */
 export function owlSendNftLockLabel(nft: WalletNft): string | null {
   if (isOwlSendCompressedNft(nft)) return 'cNFT'
-  if (nft.frozen === true) return 'Nested / frozen'
+  if (isWalletNftTransferLocked(nft)) return 'Nested / frozen'
   return null
 }
 
@@ -34,12 +36,13 @@ export type OwlSendFrozenPartition = {
 /**
  * Split a selection so nested/frozen Gen2s never share a multi-send batch with
  * sendable ones (one frozen account poisons Phantom pre-sim for the whole tx).
+ * pNFT freeze-without-delegate stays sendable (Token Metadata / special path).
  */
 export function partitionOwlSendByFrozen(selected: WalletNft[]): OwlSendFrozenPartition {
   const sendable: WalletNft[] = []
   const frozen: WalletNft[] = []
   for (const nft of selected) {
-    if (nft.frozen === true) frozen.push(nft)
+    if (isWalletNftTransferLocked(nft)) frozen.push(nft)
     else sendable.push(nft)
   }
   return { sendable, frozen }

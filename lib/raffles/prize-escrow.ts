@@ -38,6 +38,7 @@ import { getAssetWithProof, mplBubblegum } from '@metaplex-foundation/mpl-bubble
 import { buildBubblegumLeafTransferBuilder } from '@/lib/solana/bubblegum-leaf-transfer'
 import { trySendSplNftViaTokenMetadataFromEscrow } from '@/lib/solana/token-metadata-prize-payout'
 import { umiSignatureToBase58 } from '@/lib/solana/umi-signature'
+import { tokenRecordAccountExists } from '@/lib/solana/nft-transfer-lock'
 import { fetchAsset, fetchAssetV1, transferV1 } from '@metaplex-foundation/mpl-core'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -228,6 +229,12 @@ export async function assertEscrowSplPrizeNotFrozen(
     const acc = await getAccount(connection, ata, 'confirmed', tokenProgram)
     if (acc.amount < NFT_AMOUNT) return { blocked: false }
     if (acc.isFrozen) {
+      // pNFTs sit frozen in escrow under Token Metadata rule sets; payout uses transferV1.
+      // Do not block verify on that freeze when a Token Record exists (or escrow is freeze authority).
+      const isPnft = await tokenRecordAccountExists(connection, mint, ata, 'confirmed')
+      if (isPnft) {
+        return { blocked: false }
+      }
       const mintInfo = await getMint(connection, mint, 'confirmed', tokenProgram)
       const fa = mintInfo.freezeAuthority
       if (fa && fa.equals(keypair.publicKey)) {
