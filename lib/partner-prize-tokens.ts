@@ -94,6 +94,18 @@ const PG1MT_DEFINITION: PartnerPrizeTokenDefinition = {
   defaultImagePath: '/icon.png',
 }
 
+/** GOATS OF SOLANA (mainnet SPL). Partner Pro prize + ticket currency. */
+const GOATS_MINT_MAINNET = 'BBLpindmy8n5ACcYyQmwsZbsT651g9u7C8TdKcgFBAGS'
+
+const GOATS_DEFINITION: PartnerPrizeTokenDefinition = {
+  currencyCode: 'GOATS',
+  displayLabel: 'GOATS OF SOLANA',
+  mint: GOATS_MINT_MAINNET,
+  tokenProgram: 'spl',
+  decimals: 9,
+  defaultImagePath: '/goats-prize.png',
+}
+
 const PARTNERS: PartnerPrizeTokenDefinition[] = [
   TRQ_DEFINITION,
   USDC_DEFINITION,
@@ -101,6 +113,7 @@ const PARTNERS: PartnerPrizeTokenDefinition[] = [
   CANE_DEFINITION,
   BAMBOO_DEFINITION,
   PG1MT_DEFINITION,
+  GOATS_DEFINITION,
 ]
 
 /**

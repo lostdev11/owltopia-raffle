@@ -93,6 +93,10 @@ import {
   BAMBOO_TICKET_CURRENCY,
   canWalletUseBambooTicketCurrency,
 } from '@/lib/raffles/bamboo-ticket-currency'
+import {
+  GOATS_TICKET_CURRENCY,
+  canWalletUseGoatsTicketCurrency,
+} from '@/lib/raffles/goats-ticket-currency'
 import { buildMilestoneBonusRulesCopy, MILESTONE_BETA_NOTICE } from '@/lib/raffles/milestones/copy'
 import { MILESTONE_MAX_PER_RAFFLE, MILESTONE_MAX_PRIZE_SOL, milestoneMaxPrizeUsdc } from '@/lib/raffles/milestones/constants'
 import type { Raffle, RaffleMilestone, RaffleMilestoneWinnerMode, RaffleMilestoneTriggerType } from '@/lib/types'
@@ -374,6 +378,9 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   const canUseBambooTicketCurrency =
     viewerIsAdmin === true ||
     (publicKey ? canWalletUseBambooTicketCurrency(publicKey.toBase58()) : false)
+  const canUseGoatsTicketCurrency =
+    viewerIsAdmin === true ||
+    (publicKey ? canWalletUseGoatsTicketCurrency(publicKey.toBase58()) : false)
 
   useEffect(() => {
     partnerModeDefaultAppliedRef.current = false
@@ -413,6 +420,13 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       setRaffleCurrency('SOL')
     }
   }, [raffleCurrency, canUseBambooTicketCurrency])
+
+  useEffect(() => {
+    if (raffleCurrency !== GOATS_TICKET_CURRENCY) return
+    if (!canUseGoatsTicketCurrency) {
+      setRaffleCurrency('SOL')
+    }
+  }, [raffleCurrency, canUseGoatsTicketCurrency])
 
   useEffect(() => {
     if (tokenPrizeCurrency !== 'OWL') return
@@ -2206,10 +2220,15 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                     Bamboo (BAMBOO) — Partner Pro allowlisted wallet
                   </option>
                 )}
+                {canUseGoatsTicketCurrency ? (
+                  <option value={GOATS_TICKET_CURRENCY}>GOATS OF SOLANA (GOATS)</option>
+                ) : null}
               </select>
-              {(canUseBambooTicketCurrency || (partnerDiscordLinked && partnerCreateMode)) && (
+              {(canUseBambooTicketCurrency ||
+                canUseGoatsTicketCurrency ||
+                (partnerDiscordLinked && partnerCreateMode)) && (
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  {canUseBambooTicketCurrency ? (
+                  {canUseBambooTicketCurrency || canUseGoatsTicketCurrency ? (
                     <>
                       Extra ticket currencies in this menu are allowlisted to approved partner creator wallets only —
                       other hosts do not see them.
