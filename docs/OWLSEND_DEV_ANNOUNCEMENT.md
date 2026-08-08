@@ -1,7 +1,8 @@
 # OwlSend — Announcement (ready to post)
 
 Paste as one Discord Broadcast and/or Owl Vision announcement.
-Go live: `OWL_SEND_PUBLIC=true` + `NEXT_PUBLIC_OWL_SEND_PUBLIC=true`
+
+**Go live (Vercel):** set `OWL_SEND_PUBLIC=true` and `NEXT_PUBLIC_OWL_SEND_PUBLIC=true` on Production (+ Preview), then **Redeploy Production** (`NEXT_PUBLIC_*` is build-time). Confirm fee treasury is already set (`NEXT_PUBLIC_OWL_PLATFORM_FEE_TREASURY_WALLET`). Helper: `npm run vercel:owl-send:go-live`. Verify: `npm run check:owl-send-live`.
 
 ---
 
