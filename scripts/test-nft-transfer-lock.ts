@@ -8,7 +8,7 @@ import {
   isSplNftTransferLocked,
   isWalletNftTransferLocked,
 } from '@/lib/solana/nft-transfer-lock'
-import { owlSendNftLockLabel, partitionOwlSendByFrozen } from '@/lib/owl-send/picker-eligibility'
+import { owlSendNftLockLabel, partitionOwlSendByFrozen, gateOwlSendPnftSelection, partitionLiveFrozenForOwlSend } from '@/lib/owl-send/picker-eligibility'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
 
 function baseNft(overrides: Partial<WalletNft> = {}): WalletNft {
@@ -59,7 +59,7 @@ const meego = baseNft({
   interface: 'ProgrammableNFT',
 })
 assert.equal(isWalletNftTransferLocked(meego), false)
-assert.equal(owlSendNftLockLabel(meego), null)
+assert.equal(owlSendNftLockLabel(meego), 'pNFT')
 
 // Nested Gen2: frozen + delegate → locked badge
 const nested = baseNft({
@@ -90,5 +90,31 @@ assert.equal(part.frozen.length, 1)
 assert.equal(part.frozen[0]!.mint, 'nested')
 assert.ok(part.sendable.some((n) => n.interface === 'ProgrammableNFT'))
 assert.ok(part.sendable.some((n) => n.mint === 'leftover'))
+
+// Live freeze overlay must not nest-lock pNFT freeze-without-delegate (ARC report)
+{
+  const live = partitionLiveFrozenForOwlSend({
+    candidates: [meego, nested, leftoverCm],
+    liveFrozenMints: ['meego', 'nested'],
+  })
+  assert.ok(live.sendable.some((n) => n.mint === 'meego'))
+  assert.ok(live.sendable.some((n) => n.mint === 'leftover'))
+  assert.equal(live.frozen.length, 1)
+  assert.equal(live.frozen[0]!.mint, 'nested')
+}
+
+{
+  const mix = gateOwlSendPnftSelection([meego, leftoverCm])
+  assert.equal(mix.ok, false)
+  if (!mix.ok) assert.match(mix.title, /pNFT/i)
+  const alone = gateOwlSendPnftSelection([meego])
+  assert.equal(alone.ok, true)
+  const multi = gateOwlSendPnftSelection([
+    meego,
+    baseNft({ mint: 'meego2', frozen: true, delegated: false, interface: 'ProgrammableNFT' }),
+  ])
+  assert.equal(multi.ok, false)
+  if (!multi.ok) assert.match(multi.title, /one at a time/i)
+}
 
 console.log('test-nft-transfer-lock: ok')

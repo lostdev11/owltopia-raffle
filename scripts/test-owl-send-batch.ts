@@ -29,6 +29,7 @@ import {
 } from '@/lib/owl-send/merge-onchain-nft-locks'
 import {
   gateOwlSendCnftSelection,
+  gateOwlSendPnftSelection,
   owlSendNftLockLabel,
   owlSendSkippedFrozenNotice,
   partitionOwlSendByFrozen,
@@ -404,7 +405,7 @@ assert.equal(tooMany.ok, false)
       delegated: false,
       interface: 'ProgrammableNFT',
     }),
-    null
+    'pNFT'
   )
   assert.equal(
     owlSendNftLockLabel({

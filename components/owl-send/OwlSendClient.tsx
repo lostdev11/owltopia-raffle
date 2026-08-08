@@ -37,10 +37,11 @@ import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-l
 import { fetchNftLockOverlayByDerivedAtas } from '@/lib/owl-send/overlay-derived-atas'
 import { findFrozenOwlSendMints } from '@/lib/owl-send/attribute-batch-failure'
 import {
-  gateOwlSendCnftSelection,
+  gateOwlSendSpecialAssetSelection,
   isOwlSendCompressedNft,
   owlSendNftProblemLabel,
   owlSendSkippedFrozenNotice,
+  partitionLiveFrozenForOwlSend,
   partitionOwlSendByFrozen,
 } from '@/lib/owl-send/picker-eligibility'
 import { isWalletNftTransferLocked } from '@/lib/solana/nft-transfer-lock'
@@ -607,30 +608,30 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     // used to lose freeze flags when owner-scan RPCs truncated).
     let { sendable, frozen: frozenSelected } = partitionOwlSendByFrozen(selectedNfts)
     try {
-      const liveFrozen = new Set(
-        await findFrozenOwlSendMints({
-          connection,
-          owner: publicKey,
-          lines: sendable.map((n) => ({
-            mint: n.mint,
-            recipient: publicKey.toBase58(),
-            tokenAccount: n.tokenAccount,
-            name: n.name,
-          })),
+      const liveFrozen = await findFrozenOwlSendMints({
+        connection,
+        owner: publicKey,
+        lines: sendable.map((n) => ({
+          mint: n.mint,
+          recipient: publicKey.toBase58(),
+          tokenAccount: n.tokenAccount,
+          name: n.name,
+        })),
+      })
+      if (liveFrozen.length > 0) {
+        // Do not treat pNFT rule-set freeze (no lock delegate) as nested Gen2 locks.
+        const livePart = partitionLiveFrozenForOwlSend({
+          candidates: sendable,
+          liveFrozenMints: liveFrozen,
         })
-      )
-      if (liveFrozen.size > 0) {
-        const stillSendable: WalletNft[] = []
-        const extraFrozen: WalletNft[] = []
-        for (const n of sendable) {
-          if (liveFrozen.has(n.mint)) extraFrozen.push({ ...n, frozen: true })
-          else stillSendable.push(n)
+        sendable = livePart.sendable
+        if (livePart.frozen.length > 0) {
+          frozenSelected = [...frozenSelected, ...livePart.frozen]
+          const nestLocked = new Set(livePart.frozen.map((n) => n.mint))
+          setNfts((prev) =>
+            prev.map((n) => (nestLocked.has(n.mint) ? { ...n, frozen: true } : n))
+          )
         }
-        sendable = stillSendable
-        frozenSelected = [...frozenSelected, ...extraFrozen]
-        setNfts((prev) =>
-          prev.map((n) => (liveFrozen.has(n.mint) ? { ...n, frozen: true } : n))
-        )
       }
     } catch {
       /* keep partition flags */
@@ -645,12 +646,12 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       setSessionNotice(owlSendSkippedFrozenNotice(frozenSelected.length, sendable.length))
     }
 
-    const cnftCheck = gateOwlSendCnftSelection(sendable)
-    if (!cnftCheck.ok) {
+    const specialGate = gateOwlSendSpecialAssetSelection(sendable)
+    if (!specialGate.ok) {
       setCnftGate({
-        title: cnftCheck.title,
-        detail: cnftCheck.detail,
-        cnftMints: cnftCheck.cnftMints,
+        title: specialGate.title,
+        detail: specialGate.detail,
+        cnftMints: specialGate.cnftMints,
       })
       return
     }
@@ -1370,7 +1371,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         <DialogContent className="border-sky-500/30 bg-[#0c100e] sm:max-w-md">
           <DialogHeader className="space-y-2 text-left">
             <DialogTitle className="text-lg text-sky-100">
-              {cnftGate?.title ?? 'Send cNFTs separately'}
+              {cnftGate?.title ?? 'Send separately'}
             </DialogTitle>
             <DialogDescription className="text-sm text-muted-foreground">
               {cnftGate?.detail}
