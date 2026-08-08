@@ -37,8 +37,8 @@ import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-l
 import { fetchNftLockOverlayByDerivedAtas } from '@/lib/owl-send/overlay-derived-atas'
 import { findFrozenOwlSendMints } from '@/lib/owl-send/attribute-batch-failure'
 import {
-  gateOwlSendSpecialAssetSelection,
   isOwlSendCompressedNft,
+  isOwlSendProgrammableNft,
   owlSendNftProblemLabel,
   owlSendSkippedFrozenNotice,
   partitionLiveFrozenForOwlSend,
@@ -90,6 +90,12 @@ import {
   type OwlSendAssetTab,
   type OwlSendMode,
 } from '@/lib/owl-send/constants'
+import {
+  isOwlSendCoreNft,
+  owlSendKindByMintFromNfts,
+  packOwlSendApprovalQueue,
+  previewOwlSendApprovalQueue,
+} from '@/lib/owl-send/approval-queue'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { formatOwlSendFeeSol, getOwlSendFeeSol, getOwlSendFeeSolForDiscount } from '@/lib/owl-send/fee'
 import type { OwlSendHolderRoleName } from '@/lib/owl-send/holder-discount'
@@ -129,6 +135,9 @@ type BatchProgress = {
   signature?: string
   error?: string
   failedMints?: string[]
+  /** Approval queue metadata (mixed-asset POC). */
+  kindLabel?: string
+  why?: string
 }
 
 function shorten(addr: string): string {
@@ -447,6 +456,11 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setRandomizeScatter(next)
   }
 
+  const approvalPreview = useMemo(
+    () => previewOwlSendApprovalQueue(selectedNfts),
+    [selectedNfts]
+  )
+
   const cost = useMemo(() => {
     if (preparedLines && preparedLines.length > 0) {
       return buildOwlSendCostEstimate({
@@ -459,10 +473,10 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     if (count < 1) return null
     return buildOwlSendCostEstimate({
       nftCount: count,
-      batchCount: Math.ceil(count / OWL_SEND_MAX_PER_TX),
+      batchCount: Math.max(1, approvalPreview.totalApprovals),
       discountBps,
     })
-  }, [preparedLines, batches.length, selectedNfts.length, discountBps])
+  }, [preparedLines, batches.length, selectedNfts.length, approvalPreview.totalApprovals, discountBps])
 
   const cancelInFlightSend = () => {
     sendCancelledRef.current = true
@@ -646,16 +660,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       setSessionNotice(owlSendSkippedFrozenNotice(frozenSelected.length, sendable.length))
     }
 
-    const specialGate = gateOwlSendSpecialAssetSelection(sendable)
-    if (!specialGate.ok) {
-      setCnftGate({
-        title: specialGate.title,
-        detail: specialGate.detail,
-        cnftMints: specialGate.cnftMints,
-      })
-      return
-    }
-
+    // Mixed bag OK — auto-split into kind-pure approvals (classic / pNFT / Core / cNFT).
     let lines: OwlSendLine[]
     if (mode === 'send_to_one') {
       const dest = destination.trim()
@@ -723,14 +728,18 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
     setPreparing(true)
     try {
-      const chunked = chunkOwlSendBatches(lines)
+      const kindByMint = owlSendKindByMintFromNfts(sendable)
+      const queue = packOwlSendApprovalQueue({ lines, kindByMint })
+      const chunked = queue.map((q) => q.lines)
       setPreparedLines(lines)
       setBatches(chunked)
       setBatchProgress(
-        chunked.map((_, i) => ({
+        queue.map((q, i) => ({
           index: i,
-          total: chunked.length,
+          total: queue.length,
           status: i === 0 ? 'ready' : 'pending',
+          kindLabel: q.kindLabel,
+          why: q.why,
         }))
       )
       setActiveBatch(0)
@@ -772,7 +781,21 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
           : []
       const pickerFrozen = nfts.filter((n) => isWalletNftTransferLocked(n)).map((n) => n.mint)
       const frozenSet = new Set(
-        [...frozenInBatch, ...frozenInPlan, ...pickerFrozen].map((m) => m.trim())
+        [...frozenInBatch, ...frozenInPlan, ...pickerFrozen]
+          .map((m) => m.trim())
+          .filter((mint) => {
+            const nft = nfts.find((n) => n.mint.trim() === mint)
+            if (!nft) return true
+            // pNFT/Core/cNFT freezes are not Gen2 nest locks — don't strip them from the queue.
+            if (
+              isOwlSendProgrammableNft(nft) ||
+              isOwlSendCompressedNft(nft) ||
+              isOwlSendCoreNft(nft)
+            ) {
+              return false
+            }
+            return true
+          })
       )
       if (frozenSet.size > 0) {
         const plan = buildResumeSkippingFrozenPlan({
@@ -795,8 +818,18 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         }
         if (plan.skippedFrozen > 0) {
           workingPrepared = plan.remaining
-          workingBatches = plan.batches
-          workingProgress = plan.batchProgress
+          const queue = packOwlSendApprovalQueue({
+            lines: workingPrepared,
+            kindByMint: owlSendKindByMintFromNfts(nfts),
+          })
+          workingBatches = queue.map((q) => q.lines)
+          workingProgress = queue.map((q, index) => ({
+            index,
+            total: queue.length,
+            status: (index === 0 ? 'ready' : 'pending') as 'ready' | 'pending',
+            kindLabel: q.kindLabel,
+            why: q.why,
+          }))
           workingIndex = 0
           lines = workingBatches[0] ?? []
           setPreparedLines(workingPrepared)
@@ -937,9 +970,21 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   }
 
   const applyResumePlan = (plan: Extract<ReturnType<typeof buildResumeRemainingPlan>, { ok: true }>) => {
+    const queue = packOwlSendApprovalQueue({
+      lines: plan.remaining,
+      kindByMint: owlSendKindByMintFromNfts(nfts),
+    })
     setPreparedLines(plan.remaining)
-    setBatches(plan.batches)
-    setBatchProgress(plan.batchProgress)
+    setBatches(queue.map((q) => q.lines))
+    setBatchProgress(
+      queue.map((q, index) => ({
+        index,
+        total: queue.length,
+        status: (index === 0 ? 'ready' : 'pending') as 'ready' | 'pending',
+        kindLabel: q.kindLabel,
+        why: q.why,
+      }))
+    )
     setActiveBatch(0)
     setSelectedMints(new Set(plan.remaining.map((l) => l.mint)))
     setRetryMints([])
@@ -1037,11 +1082,20 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     }
 
     const skippedFrozen = draft.preparedLines.length - remainingLines.length
-    const newBatches = chunkOwlSendBatches(remainingLines)
-    const newProgress = newBatches.map((_, index) => ({
+    const restoreNfts = nfts.filter((n) =>
+      remainingLines.some((l) => l.mint.trim() === n.mint.trim())
+    )
+    const queue = packOwlSendApprovalQueue({
+      lines: remainingLines,
+      kindByMint: owlSendKindByMintFromNfts(restoreNfts.length > 0 ? restoreNfts : nfts),
+    })
+    const newBatches = queue.map((q) => q.lines)
+    const newProgress = queue.map((q, index) => ({
       index,
-      total: newBatches.length,
+      total: queue.length,
       status: (index === 0 ? 'ready' : 'pending') as 'ready' | 'pending',
+      kindLabel: q.kindLabel,
+      why: q.why,
     }))
 
     setMode(draft.mode)
@@ -1979,8 +2033,24 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       <p className="pt-1 font-semibold text-white">Total {cost.totalLabel}</p>
                       {cost.batchCount > 1 ? (
                         <p className="text-xs text-muted-foreground">
-                          {cost.batchCount} wallet approvals · {OWL_SEND_MAX_PER_TX} NFTs each
+                          {cost.batchCount} wallet approvals · we auto-split by NFT type
                         </p>
+                      ) : null}
+                      {selectedNfts.length > 0 && batches.length === 0 ? (
+                        <div className="rounded-md border border-white/10 bg-black/30 px-3 py-2 text-xs text-muted-foreground">
+                          <p className="font-medium text-white/90">{approvalPreview.summary}</p>
+                          {approvalPreview.byKind.length > 1 ||
+                          approvalPreview.byKind.some((k) => k.kind !== 'classic') ? (
+                            <ul className="mt-1.5 space-y-0.5">
+                              {approvalPreview.byKind.map((k) => (
+                                <li key={k.kind}>
+                                  {k.count}× {k.kind === 'classic' ? 'classic' : k.kind}
+                                  {k.approvals > 1 ? ` · ${k.approvals} approvals` : ''} — {k.why}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
                       ) : null}
                     </div>
                   ) : null}
@@ -2036,8 +2106,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     <CardTitle className="text-base">Confirm send</CardTitle>
                     <CardDescription>
                       {preparedLines?.length} NFT{preparedLines?.length === 1 ? '' : 's'} ·{' '}
-                      {batches.length} wallet approval{batches.length === 1 ? '' : 's'} · confirm
-                      each one so they don’t fire back-to-back
+                      {batches.length} wallet approval{batches.length === 1 ? '' : 's'} · auto-split by
+                      type — confirm each so they don’t fire back-to-back
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
@@ -2059,6 +2129,11 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                             <div className="flex items-center justify-between gap-2">
                               <span className="font-semibold">
                                 Approval {b.index + 1} of {b.total}
+                                {b.kindLabel ? (
+                                  <span className="ml-1.5 font-normal text-muted-foreground">
+                                    · {b.kindLabel}
+                                  </span>
+                                ) : null}
                               </span>
                               <span className="text-xs uppercase tracking-wide text-muted-foreground">
                                 {b.status === 'sending' && sendPhase
@@ -2066,6 +2141,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                                   : b.status}
                               </span>
                             </div>
+                            {b.why ? (
+                              <p className="mt-0.5 text-[11px] text-muted-foreground/90">{b.why}</p>
+                            ) : null}
                             <p className="mt-1 text-xs text-muted-foreground">
                               {lines.length} NFT{lines.length === 1 ? '' : 's'}
                               {mode === 'scatter'
