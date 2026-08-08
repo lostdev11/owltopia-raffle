@@ -9,6 +9,14 @@ export const OWL_SEND_MAX_SELECT = 20
 /** Max NFTs (and Scatter wallets) per wallet approval / transaction. */
 export const OWL_SEND_MAX_PER_TX = 5
 
+/**
+ * POC caps for special asset kinds (Token Metadata / Core / cNFT).
+ * Classic SPL still uses {@link OWL_SEND_MAX_PER_TX}. Raise after sim soak.
+ */
+export const OWL_SEND_MAX_PNFT_PER_TX = 1
+export const OWL_SEND_MAX_CORE_PER_TX = 1
+export const OWL_SEND_MAX_CNFT_PER_TX = 1
+
 /** Approximate ATA rent when recipient needs a new token account. */
 export const OWL_SEND_ATA_RENT_SOL = 0.00203928
 
