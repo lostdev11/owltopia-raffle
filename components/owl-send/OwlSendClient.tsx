@@ -1421,9 +1421,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               </span>
             </>
           ) : null}
-          {' '}
-          — cheaper than FoxySend. Owltopia Gen1/Gen2 holders get up to 50% off. Solana rent is shown
-          separately when a recipient needs a new token account.
+          . Owltopia Gen1/Gen2 holders get up to 50% off. Solana rent is shown separately when a
+          recipient needs a new token account.
         </p>
         {connected && publicKey && (holderFeeLoading || holderFee) ? (
           <p className="text-xs text-muted-foreground">
