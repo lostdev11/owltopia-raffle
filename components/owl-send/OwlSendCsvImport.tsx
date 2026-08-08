@@ -1,7 +1,7 @@
 'use client'
 
 import { useId, useRef, useState } from 'react'
-import { Download, FileUp, HelpCircle, Loader2, Shield, X } from 'lucide-react'
+import { CheckCircle2, Download, FileUp, HelpCircle, Loader2, Shield, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
@@ -13,13 +13,13 @@ import {
 import { cn } from '@/lib/utils'
 import {
   isLikelyCsvFile,
+  lintOwlSendCsv,
   OWL_SEND_AIRDROP_CSV_FILENAME,
   OWL_SEND_AIRDROP_CSV_HREF,
   OWL_SEND_CSV_FORMAT_HINT_NFT,
   OWL_SEND_CSV_FORMAT_HINT_TOKEN,
   owlSendCsvEntriesToNftPaste,
   owlSendCsvEntriesToTokenPaste,
-  parseOwlSendCsv,
   type OwlSendCsvKind,
   type OwlSendCsvParseResult,
 } from '@/lib/owl-send/csv-import'
@@ -35,58 +35,77 @@ type Props = {
 }
 
 /**
- * CSV airdrop import for OwlSend Scatter.
- * Validates the file before applying into the recipient paste field.
+ * Simple CSV lint for OwlSend Scatter (upload → lint → fill recipients).
+ * Intentionally lightweight: no upload to server, just format + wallet checks.
  */
 export function OwlSendCsvImport({ kind, adminTest, disabled, onApply, className }: Props) {
   const inputId = useId()
   const fileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
-  const [preview, setPreview] = useState<OwlSendCsvParseResult | null>(null)
+  const [lint, setLint] = useState<OwlSendCsvParseResult | null>(null)
   const [fileLabel, setFileLabel] = useState<string | null>(null)
-  const [localError, setLocalError] = useState<string | null>(null)
 
   const formatHint = kind === 'nft' ? OWL_SEND_CSV_FORMAT_HINT_NFT : OWL_SEND_CSV_FORMAT_HINT_TOKEN
 
-  const clearPreview = () => {
-    setPreview(null)
+  const clearLint = () => {
+    setLint(null)
     setFileLabel(null)
-    setLocalError(null)
     if (fileRef.current) fileRef.current.value = ''
   }
 
-  const readFile = async (file: File) => {
-    setLocalError(null)
-    setPreview(null)
+  const applyResult = (result: OwlSendCsvParseResult) => {
+    if (!result.ok || result.entries.length < 1) return
+    const paste =
+      kind === 'nft'
+        ? owlSendCsvEntriesToNftPaste(result.entries)
+        : owlSendCsvEntriesToTokenPaste(result.entries)
+    onApply(paste, result)
+    clearLint()
+  }
+
+  const lintFile = async (file: File) => {
+    setLint(null)
     if (!isLikelyCsvFile(file)) {
-      setLocalError('Choose a .csv file (download airdrop.csv for the format).')
+      setLint({
+        ok: false,
+        error: 'Not a CSV — use airdrop.csv (or any .csv with a wallet column).',
+        entries: [],
+        rowErrors: [],
+        warnings: [],
+        walletColumnIndex: null,
+        headers: null,
+        truncated: false,
+      })
       return
     }
     setBusy(true)
     setFileLabel(file.name)
     try {
       const text = await file.text()
-      const result = parseOwlSendCsv({ raw: text, kind, maxEntries: OWL_SEND_MAX_SELECT })
-      setPreview(result)
-      if (!result.ok) {
-        setLocalError(result.error)
+      const result = lintOwlSendCsv({ raw: text, kind, maxEntries: OWL_SEND_MAX_SELECT })
+      setLint(result)
+      // Clean lint → apply immediately (simple path).
+      if (result.ok && result.rowErrors.length === 0 && result.warnings.length === 0) {
+        applyResult(result)
       }
     } catch {
-      setLocalError('Could not read that file. Try saving as UTF-8 CSV.')
+      setLint({
+        ok: false,
+        error: 'Could not read that file. Save as UTF-8 CSV and try again.',
+        entries: [],
+        rowErrors: [],
+        warnings: [],
+        walletColumnIndex: null,
+        headers: null,
+        truncated: false,
+      })
     } finally {
       setBusy(false)
     }
   }
 
-  const apply = () => {
-    if (!preview?.ok || preview.entries.length < 1) return
-    const paste =
-      kind === 'nft'
-        ? owlSendCsvEntriesToNftPaste(preview.entries)
-        : owlSendCsvEntriesToTokenPaste(preview.entries)
-    onApply(paste, preview)
-    clearPreview()
-  }
+  const cleanPass =
+    lint?.ok === true && lint.rowErrors.length === 0 && lint.warnings.length === 0
 
   return (
     <div
@@ -99,7 +118,7 @@ export function OwlSendCsvImport({ kind, adminTest, disabled, onApply, className
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Label htmlFor={inputId} className="text-sm font-medium text-white">
-            Import CSV
+            CSV lint
           </Label>
           {adminTest ? (
             <span className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-100">
@@ -127,7 +146,7 @@ export function OwlSendCsvImport({ kind, adminTest, disabled, onApply, className
                   {formatHint}
                 </pre>
                 <p className="mt-1 text-zinc-400">
-                  Max {OWL_SEND_MAX_SELECT} wallets per session. File is checked before apply.
+                  Simple lint before send — max {OWL_SEND_MAX_SELECT} wallets / session.
                 </p>
               </TooltipContent>
             </Tooltip>
@@ -145,8 +164,7 @@ export function OwlSendCsvImport({ kind, adminTest, disabled, onApply, className
 
       {adminTest ? (
         <p className="text-xs text-amber-100/80">
-          Production admin preview — enable for everyone with{' '}
-          <code className="text-[10px]">OWL_SEND_CSV_PUBLIC=true</code>.
+          Admin lint preview — public with <code className="text-[10px]">OWL_SEND_CSV_PUBLIC=true</code>.
         </p>
       ) : null}
 
@@ -160,7 +178,7 @@ export function OwlSendCsvImport({ kind, adminTest, disabled, onApply, className
           disabled={disabled || busy}
           onChange={(e) => {
             const file = e.target.files?.[0]
-            if (file) void readFile(file)
+            if (file) void lintFile(file)
           }}
         />
         <Button
@@ -172,78 +190,80 @@ export function OwlSendCsvImport({ kind, adminTest, disabled, onApply, className
           onClick={() => fileRef.current?.click()}
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
-          Choose CSV
+          Lint CSV
         </Button>
         {fileLabel ? (
           <span className="truncate font-mono text-xs text-muted-foreground">{fileLabel}</span>
         ) : (
-          <span className="text-xs text-muted-foreground">.csv · validated before send</span>
+          <span className="text-xs text-muted-foreground">Pick airdrop.csv · lint before send</span>
         )}
       </div>
 
-      {localError && !preview?.ok ? (
-        <p className="text-sm text-red-300" role="alert">
-          {localError}
-        </p>
-      ) : null}
-
-      {preview ? (
+      {lint ? (
         <div className="space-y-2 rounded-md border border-white/10 bg-black/40 px-3 py-2">
-          {preview.ok ? (
+          {lint.ok ? (
             <>
-              <p className="text-sm text-emerald-200">
-                {preview.entries.length} valid wallet
-                {preview.entries.length === 1 ? '' : 's'}
-                {preview.rowErrors.length > 0
-                  ? ` · ${preview.rowErrors.length} skipped`
-                  : ''}
-                {preview.truncated ? ' · truncated to session max' : ''}
+              <p
+                className={cn(
+                  'flex items-center gap-1.5 text-sm',
+                  cleanPass ? 'text-emerald-200' : 'text-amber-100'
+                )}
+              >
+                {cleanPass ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : null}
+                {cleanPass ? 'Lint passed' : 'Lint passed with notes'} · {lint.entries.length}{' '}
+                wallet{lint.entries.length === 1 ? '' : 's'}
+                {lint.rowErrors.length > 0 ? ` · ${lint.rowErrors.length} skipped` : ''}
+                {lint.truncated ? ' · truncated' : ''}
               </p>
-              {preview.warnings.map((w) => (
+              {lint.warnings.map((w) => (
                 <p key={w} className="text-xs text-amber-200">
                   {w}
                 </p>
               ))}
-              {preview.rowErrors.length > 0 ? (
+              {lint.rowErrors.length > 0 ? (
                 <ul className="max-h-24 space-y-0.5 overflow-y-auto text-xs text-red-200/90">
-                  {preview.rowErrors.slice(0, 8).map((e) => (
+                  {lint.rowErrors.slice(0, 8).map((e) => (
                     <li key={`${e.row}-${e.message}`}>
                       Row {e.row}: {e.message}
                     </li>
                   ))}
-                  {preview.rowErrors.length > 8 ? (
-                    <li>…and {preview.rowErrors.length - 8} more</li>
+                  {lint.rowErrors.length > 8 ? (
+                    <li>…and {lint.rowErrors.length - 8} more</li>
                   ) : null}
                 </ul>
               ) : null}
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  className="min-h-[40px] touch-manipulation"
-                  disabled={disabled}
-                  onClick={apply}
-                >
-                  Apply to recipients
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="min-h-[40px] gap-1 touch-manipulation"
-                  onClick={clearPreview}
-                >
-                  <X className="h-3.5 w-3.5" />
-                  Clear
-                </Button>
-              </div>
+              {!cleanPass ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="min-h-[40px] touch-manipulation"
+                    disabled={disabled}
+                    onClick={() => applyResult(lint)}
+                  >
+                    Apply valid wallets
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="min-h-[40px] gap-1 touch-manipulation"
+                    onClick={clearLint}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    Clear
+                  </Button>
+                </div>
+              ) : null}
             </>
           ) : (
             <>
-              <p className="text-sm text-red-300">{preview.error}</p>
-              {preview.rowErrors.length > 0 ? (
+              <p className="text-sm text-red-300" role="alert">
+                Lint failed — {lint.error}
+              </p>
+              {lint.rowErrors.length > 0 ? (
                 <ul className="max-h-24 space-y-0.5 overflow-y-auto text-xs text-red-200/90">
-                  {preview.rowErrors.slice(0, 8).map((e) => (
+                  {lint.rowErrors.slice(0, 8).map((e) => (
                     <li key={`${e.row}-${e.message}`}>
                       Row {e.row}: {e.message}
                     </li>
@@ -255,7 +275,7 @@ export function OwlSendCsvImport({ kind, adminTest, disabled, onApply, className
                 size="sm"
                 variant="ghost"
                 className="min-h-[40px] gap-1 touch-manipulation"
-                onClick={clearPreview}
+                onClick={clearLint}
               >
                 <X className="h-3.5 w-3.5" />
                 Clear

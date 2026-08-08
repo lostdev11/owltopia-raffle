@@ -1,5 +1,8 @@
 /**
- * OwlSend airdrop CSV import — client-side parse + validate before Scatter send.
+ * OwlSend airdrop CSV — client-side lint before Scatter send.
+ *
+ * Keep this a simple lint (ARC): check the file is a proper CSV with valid
+ * wallets before anything runs. No server upload, no campaign engine.
  *
  * Expected shapes (see /owl-send/airdrop.csv):
  * - wallet
@@ -138,7 +141,8 @@ export type ParseOwlSendCsvParams = {
 }
 
 /**
- * Parse + validate an airdrop CSV. Safe to call before any send / Apply.
+ * Parse + lint an airdrop CSV. Safe to call before any send / Apply.
+ * Returns ok=false on hard failures; ok=true with rowErrors for soft skips.
  */
 export function parseOwlSendCsv(params: ParseOwlSendCsvParams): OwlSendCsvParseResult {
   const max = params.maxEntries ?? OWL_SEND_MAX_SELECT
@@ -320,6 +324,9 @@ export function parseOwlSendCsv(params: ParseOwlSendCsvParams): OwlSendCsvParseR
     truncated,
   }
 }
+
+/** Alias — CSV check is intentionally a simple lint before send. */
+export const lintOwlSendCsv = parseOwlSendCsv
 
 /** Turn validated entries into NFT Scatter paste text. */
 export function owlSendCsvEntriesToNftPaste(entries: OwlSendCsvEntry[]): string {

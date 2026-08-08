@@ -117,6 +117,17 @@ assert.equal(isLikelyCsvFile({ name: 'photo.png', type: 'image/png' }), false)
 }
 
 {
+  // Clean lint path: no row errors / warnings
+  const clean = parseOwlSendCsv({
+    raw: `wallet\n${w1}\n${w2}\n`,
+    kind: 'nft',
+  })
+  assert.equal(clean.ok, true)
+  assert.equal(clean.rowErrors.length, 0)
+  assert.equal(clean.warnings.length, 0)
+}
+
+{
   const many = Array.from({ length: 25 }, () => Keypair.generate().publicKey.toBase58())
   const capped = parseOwlSendCsv({
     raw: ['wallet', ...many].join('\n'),
