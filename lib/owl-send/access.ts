@@ -3,6 +3,9 @@
  *
  * Default: admin-only.
  * Go live: set `OWL_SEND_PUBLIC=true` and `NEXT_PUBLIC_OWL_SEND_PUBLIC=true`.
+ *
+ * CSV airdrop import is gated separately so admins can test on production first:
+ * Default: admin-only. Go live: `OWL_SEND_CSV_PUBLIC=true` + `NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC=true`.
  */
 
 function readBoolean(raw: string | undefined, fallback: boolean): boolean {
@@ -34,5 +37,29 @@ export function canAccessOwlSend(params: {
 }): boolean {
   const isPublic =
     typeof params.publicOverride === 'boolean' ? params.publicOverride : isOwlSendPublic()
+  return isPublic || params.isAdmin
+}
+
+/** When false (default), only site admins may use OwlSend CSV airdrop import. */
+export function isOwlSendCsvPublic(): boolean {
+  if (typeof process === 'undefined') return false
+  return readBoolean(
+    process.env.OWL_SEND_CSV_PUBLIC ?? process.env.NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC,
+    false
+  )
+}
+
+/** Client-safe CSV public flag (NEXT_PUBLIC only). */
+export function isOwlSendCsvPublicClient(): boolean {
+  if (typeof process === 'undefined') return false
+  return readBoolean(process.env.NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC, false)
+}
+
+export function canAccessOwlSendCsv(params: {
+  isAdmin: boolean
+  publicOverride?: boolean
+}): boolean {
+  const isPublic =
+    typeof params.publicOverride === 'boolean' ? params.publicOverride : isOwlSendCsvPublic()
   return isPublic || params.isAdmin
 }

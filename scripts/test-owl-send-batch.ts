@@ -3,6 +3,8 @@
  * Run: npx tsx scripts/test-owl-send-batch.ts
  */
 import assert from 'node:assert/strict'
+import { Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from '@solana/web3.js'
+import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import {
   buildTokenScatterLines,
   capOwlSendSelection,
@@ -20,8 +22,6 @@ import {
   collectSentMintsFromBatches,
   collectSentMintsFromLedger,
 } from '@/lib/owl-send/resume'
-import { Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from '@solana/web3.js'
-import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { attributeOwlSendFrozenFailures } from '@/lib/owl-send/attribute-batch-failure'
 import {
   clearUnconfirmedDasFrozen,
@@ -48,7 +48,7 @@ import {
 } from '@/lib/owl-send/compute-budget'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { getOwlSendFeeLamportsForCount, getOwlSendFeeSol } from '@/lib/owl-send/fee'
-import { canAccessOwlSend } from '@/lib/owl-send/access'
+import { canAccessOwlSend, canAccessOwlSendCsv } from '@/lib/owl-send/access'
 
 assert.equal(OWL_SEND_MAX_PER_TX, 5)
 assert.equal(OWL_SEND_MAX_SELECT, 20)
@@ -199,6 +199,9 @@ assert.ok(cost!.rentSolKnown != null && cost!.rentSolKnown > 0)
 assert.equal(canAccessOwlSend({ isAdmin: true, publicOverride: false }), true)
 assert.equal(canAccessOwlSend({ isAdmin: false, publicOverride: false }), false)
 assert.equal(canAccessOwlSend({ isAdmin: false, publicOverride: true }), true)
+assert.equal(canAccessOwlSendCsv({ isAdmin: true, publicOverride: false }), true)
+assert.equal(canAccessOwlSendCsv({ isAdmin: false, publicOverride: false }), false)
+assert.equal(canAccessOwlSendCsv({ isAdmin: false, publicOverride: true }), true)
 
 // Resume remaining: keep recipient pairing, skip sent + not held
 const planLines = [

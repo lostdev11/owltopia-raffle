@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Bird,
   CheckCircle2,
+  FileUp,
   Loader2,
   Send,
   Shield,
@@ -97,7 +98,12 @@ import type { OwlSendSendPhase } from '@/lib/owl-send/send-spl-nft-batch'
 import { sendOwlSendTokenLines, sendOwlSendTokensToOne } from '@/lib/owl-send/send-tokens'
 import { recordOwlSendLedger } from '@/lib/owl-send/record-ledger'
 import { useOwlSendAdminAccess } from '@/lib/owl-send/use-owl-send-admin-access'
+import {
+  canAccessOwlSendCsv,
+  isOwlSendCsvPublicClient,
+} from '@/lib/owl-send/access'
 import { OwlSendLedgerPanel } from '@/components/owl-send/OwlSendLedgerPanel'
+import { OwlSendCsvImport } from '@/components/owl-send/OwlSendCsvImport'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import { cn } from '@/lib/utils'
 
@@ -195,6 +201,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [resuming, setResuming] = useState(false)
   const [holderFee, setHolderFee] = useState<HolderFeeQuote | null>(null)
   const [holderFeeLoading, setHolderFeeLoading] = useState(false)
+  /** Admins opt into CSV import on production before CSV is public. */
+  const [csvAdminTestEnabled, setCsvAdminTestEnabled] = useState(false)
 
   const sendCancelledRef = useRef(false)
 
@@ -203,6 +211,15 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const baseFeeSol = getOwlSendFeeSol()
   const showAdminPreview = access.isAdmin && !isPublic
   const allowed = access.allowed
+  const csvPublic = isOwlSendCsvPublicClient()
+  const canUseCsv = canAccessOwlSendCsv({
+    isAdmin: access.isAdmin,
+    publicOverride: csvPublic,
+  })
+  /** Admin-only gate: opt-in button before the importer appears on production. */
+  const showCsvAdminTestButton = canUseCsv && !csvPublic && !csvAdminTestEnabled
+  const csvImportVisible = canUseCsv && (csvPublic || csvAdminTestEnabled)
+  const csvAdminTest = !csvPublic && access.isAdmin
 
   const loadAssets = useCallback(async (): Promise<WalletNft[]> => {
     if (!publicKey) return []
@@ -1697,6 +1714,31 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       {randomizeScatter ? (
                         <div className="space-y-1.5">
                           <Label htmlFor="owl-send-scatter">Recipient wallets</Label>
+                          {showCsvAdminTestButton ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="mb-2 min-h-[40px] w-full gap-2 border-amber-500/40 text-amber-100 touch-manipulation sm:w-auto"
+                              onClick={() => setCsvAdminTestEnabled(true)}
+                            >
+                              <Shield className="h-4 w-4" />
+                              <FileUp className="h-4 w-4" />
+                              Admin test: CSV import
+                            </Button>
+                          ) : null}
+                          {csvImportVisible ? (
+                            <OwlSendCsvImport
+                              kind="nft"
+                              adminTest={csvAdminTest}
+                              disabled={nftSending}
+                              className="mb-2"
+                              onApply={(paste) => {
+                                setScatterRaw(paste)
+                                setPreparedLines(null)
+                              }}
+                            />
+                          ) : null}
                           <textarea
                             id="owl-send-scatter"
                             value={scatterRaw}
@@ -2495,6 +2537,32 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="owl-send-token-scatter">Recipients</Label>
+                      {showCsvAdminTestButton ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="mb-2 min-h-[40px] w-full gap-2 border-amber-500/40 text-amber-100 touch-manipulation sm:w-auto"
+                          onClick={() => setCsvAdminTestEnabled(true)}
+                        >
+                          <Shield className="h-4 w-4" />
+                          <FileUp className="h-4 w-4" />
+                          Admin test: CSV import
+                        </Button>
+                      ) : null}
+                      {csvImportVisible ? (
+                        <OwlSendCsvImport
+                          kind="token"
+                          adminTest={csvAdminTest}
+                          disabled={tokenSending}
+                          className="mb-2"
+                          onApply={(paste) => {
+                            setTokenScatterRaw(paste)
+                            setTokenBatches([])
+                            setTokenBatchProgress([])
+                          }}
+                        />
+                      ) : null}
                       <textarea
                         id="owl-send-token-scatter"
                         value={tokenScatterRaw}
