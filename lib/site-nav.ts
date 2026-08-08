@@ -115,11 +115,14 @@ export const COMMUNITY_NAV_GROUP: SiteNavGroup = {
     {
       href: '/owl-send',
       label: 'OwlSend',
-      description: 'Send NFTs & tokens — 0.001 SOL fee (admin preview)',
+      description: 'Send NFTs & tokens — 0.001 SOL fee',
       icon: Send,
     },
   ],
 }
+
+const OWL_SEND_NAV_DESCRIPTION_PUBLIC = 'Send NFTs & tokens — 0.001 SOL fee'
+const OWL_SEND_NAV_DESCRIPTION_PREVIEW = 'Send NFTs & tokens — 0.001 SOL fee (admin preview)'
 
 export const OWLS_NAV_GROUP: SiteNavGroup = {
   id: 'owls',
@@ -199,12 +202,25 @@ export function isPathInNavGroup(pathname: string, group: SiteNavGroup): boolean
   )
 }
 
-/** Hide OwlSend from Community nav during admin-only preview. */
+/** Hide OwlSend from Community nav during admin-only preview; label by public gate. */
 export function filterCommunityNavItems(options: {
   showOwlSend: boolean
+  /** When false (admin preview), keep the "(admin preview)" subtitle. */
+  owlSendPublic?: boolean
 }): SiteNavItem[] {
-  if (options.showOwlSend) return COMMUNITY_NAV_GROUP.items
-  return COMMUNITY_NAV_GROUP.items.filter((item) => item.href !== '/owl-send')
+  const items = options.showOwlSend
+    ? COMMUNITY_NAV_GROUP.items
+    : COMMUNITY_NAV_GROUP.items.filter((item) => item.href !== '/owl-send')
+  const owlSendPublic = options.owlSendPublic === true
+  return items.map((item) => {
+    if (item.href !== '/owl-send') return item
+    return {
+      ...item,
+      description: owlSendPublic
+        ? OWL_SEND_NAV_DESCRIPTION_PUBLIC
+        : OWL_SEND_NAV_DESCRIPTION_PREVIEW,
+    }
+  })
 }
 
 /** Admin menu items are admin-only. Create Raffle is no longer here (see CREATE_RAFFLE_NAV_ITEM). */
