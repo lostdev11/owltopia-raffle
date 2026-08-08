@@ -48,7 +48,7 @@ import {
 } from '@/lib/owl-send/compute-budget'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { getOwlSendFeeLamportsForCount, getOwlSendFeeSol } from '@/lib/owl-send/fee'
-import { canAccessOwlSend, canAccessOwlSendCsv } from '@/lib/owl-send/access'
+import { canAccessOwlSend, canAccessOwlSendCsv, isOwlSendCsvPublicClient } from '@/lib/owl-send/access'
 
 assert.equal(OWL_SEND_MAX_PER_TX, 5)
 assert.equal(OWL_SEND_MAX_SELECT, 20)
@@ -202,6 +202,24 @@ assert.equal(canAccessOwlSend({ isAdmin: false, publicOverride: true }), true)
 assert.equal(canAccessOwlSendCsv({ isAdmin: true, publicOverride: false }), true)
 assert.equal(canAccessOwlSendCsv({ isAdmin: false, publicOverride: false }), false)
 assert.equal(canAccessOwlSendCsv({ isAdmin: false, publicOverride: true }), true)
+
+// CSV follows OwlSend public when CSV env is unset (client helper shape).
+{
+  const prevCsv = process.env.NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC
+  const prevOwl = process.env.NEXT_PUBLIC_OWL_SEND_PUBLIC
+  delete process.env.NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC
+  process.env.NEXT_PUBLIC_OWL_SEND_PUBLIC = 'true'
+  assert.equal(isOwlSendCsvPublicClient(), true)
+  process.env.NEXT_PUBLIC_OWL_SEND_PUBLIC = 'false'
+  assert.equal(isOwlSendCsvPublicClient(), false)
+  process.env.NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC = 'false'
+  process.env.NEXT_PUBLIC_OWL_SEND_PUBLIC = 'true'
+  assert.equal(isOwlSendCsvPublicClient(), false)
+  if (prevCsv === undefined) delete process.env.NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC
+  else process.env.NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC = prevCsv
+  if (prevOwl === undefined) delete process.env.NEXT_PUBLIC_OWL_SEND_PUBLIC
+  else process.env.NEXT_PUBLIC_OWL_SEND_PUBLIC = prevOwl
+}
 
 // Resume remaining: keep recipient pairing, skip sent + not held
 const planLines = [

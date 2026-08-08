@@ -1696,6 +1696,20 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     </div>
                   ) : (
                     <div className="space-y-3">
+                      {csvImportVisible ? (
+                        <OwlSendCsvImport
+                          kind="nft"
+                          disabled={nftSending}
+                          onApply={(paste) => {
+                            setScatterRaw(paste)
+                            setPreparedLines(null)
+                            // Keep Randomize on for wallet,count airdrops (ARC format).
+                            if (!randomizeScatter) {
+                              setRandomizeScatterMode(true)
+                            }
+                          }}
+                        />
+                      ) : null}
                       <label className="flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground touch-manipulation">
                         <input
                           type="checkbox"
@@ -1709,17 +1723,6 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       {randomizeScatter ? (
                         <div className="space-y-1.5">
                           <Label htmlFor="owl-send-scatter">Recipient wallets</Label>
-                          {csvImportVisible ? (
-                            <OwlSendCsvImport
-                              kind="nft"
-                              disabled={nftSending}
-                              className="mb-2"
-                              onApply={(paste) => {
-                                setScatterRaw(paste)
-                                setPreparedLines(null)
-                              }}
-                            />
-                          ) : null}
                           <textarea
                             id="owl-send-scatter"
                             value={scatterRaw}
@@ -1728,7 +1731,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                               setPreparedLines(null)
                             }}
                             rows={5}
-                            placeholder={'walletA,5\nwalletB,1\nwalletC,4'}
+                            placeholder={
+                              '6JKC…86UjU,2\nFpW7…4FMnR,3\n(no header — wallet,count per line)'
+                            }
                             className="w-full min-h-[120px] rounded-md border border-input bg-black/40 px-3 py-2 font-mono text-sm touch-manipulation"
                           />
                           <p
