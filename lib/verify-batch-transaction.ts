@@ -306,7 +306,7 @@ export async function verifyBatchPaidEntries(
         mergedSplit
       )
     }
-    if (currencyNorm === 'OWL' || currencyNorm === 'BAMBOO') {
+    if (currencyNorm === 'OWL' || currencyNorm === 'BAMBOO' || currencyNorm === 'GOATS') {
       const tokenInfo = getTokenInfo(currencyNorm)
       if (!tokenInfo.mintAddress) {
         return { valid: false, error: `${currencyNorm} mint address not configured` }

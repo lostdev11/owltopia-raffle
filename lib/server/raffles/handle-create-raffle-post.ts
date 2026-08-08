@@ -61,6 +61,7 @@ import { getCreatorModerationCreateContext } from '@/lib/db/creator-moderation'
 import { listingFeeSolForStrikeCount } from '@/lib/raffles/creator-moderation-policy'
 import { getMilestonesByRaffleId, insertRaffleMilestones } from '@/lib/db/raffle-milestones'
 import { BAMBOO_TICKET_CURRENCY, canWalletUseBambooTicketCurrency } from '@/lib/raffles/bamboo-ticket-currency'
+import { GOATS_TICKET_CURRENCY, canWalletUseGoatsTicketCurrency } from '@/lib/raffles/goats-ticket-currency'
 import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
 
 /** Same as /api/me/dashboard — client sends the adapter’s pubkey so we can reject stale SIWS sessions after wallet switches. */
@@ -308,6 +309,8 @@ export async function handleCreateRafflePost(
     const adminRole = await getAdminRole(walletAddress)
     const canCreateBambooTicketRaffle =
       adminRole !== null || canWalletUseBambooTicketCurrency(walletAddress)
+    const canCreateGoatsTicketRaffle =
+      adminRole !== null || canWalletUseGoatsTicketCurrency(walletAddress)
 
     let promoXHandle: string | null = null
     if (body.promo_x_handle !== undefined && body.promo_x_handle !== null && body.promo_x_handle !== '') {
@@ -324,10 +327,11 @@ export async function handleCreateRafflePost(
       promoXHandle = parsedPromo.value
     }
 
-    // Ticket currency: SOL/USDC for everyone; OWL when configured; Bamboo is supported but permission-gated below.
+    // Ticket currency: SOL/USDC for everyone; OWL when configured; Bamboo/GOATS are supported but permission-gated below.
     const validCurrencies: string[] = ['USDC', 'SOL']
     if (isOwlEnabled()) validCurrencies.push('OWL')
     validCurrencies.push(BAMBOO_TICKET_CURRENCY)
+    validCurrencies.push(GOATS_TICKET_CURRENCY)
     if (requestedCurrency && !validCurrencies.includes(requestedCurrency)) {
       return NextResponse.json(
         { error: `Currency must be one of: ${validCurrencies.join(', ')}` },
@@ -414,6 +418,15 @@ export async function handleCreateRafflePost(
         {
           error:
             'Bamboo ticket currency is only available to the PNDA Partner Pro creator wallet and platform admins.',
+        },
+        { status: 403 }
+      )
+    }
+    if (effectiveTicketCurrency === GOATS_TICKET_CURRENCY && !canCreateGoatsTicketRaffle) {
+      return NextResponse.json(
+        {
+          error:
+            'GOATS ticket currency is only available to the Goats of Solana Partner Pro creator wallet and platform admins.',
         },
         { status: 403 }
       )

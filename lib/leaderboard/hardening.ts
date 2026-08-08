@@ -83,6 +83,9 @@ export function leaderboardMinTicketPriceForCurrency(currency: string): number {
   if (c === 'BAMBOO') {
     return parseFloatEnv('LEADERBOARD_MIN_TICKET_PRICE_BAMBOO', defaultMinTicketBambooFromSol())
   }
+  if (c === 'GOATS') {
+    return parseFloatEnv('LEADERBOARD_MIN_TICKET_PRICE_GOATS', defaultMinTicketBambooFromSol())
+  }
   return Number.POSITIVE_INFINITY
 }
 
