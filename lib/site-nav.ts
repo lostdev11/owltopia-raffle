@@ -6,6 +6,7 @@ import {
   HeartHandshake,
   Landmark,
   LayoutDashboard,
+  Package,
   Plus,
   Rocket,
   Send,
@@ -118,6 +119,12 @@ export const COMMUNITY_NAV_GROUP: SiteNavGroup = {
       description: 'Send NFTs & tokens — 0.001 SOL fee',
       icon: Send,
     },
+    {
+      href: '/packs',
+      label: 'Owl Packs',
+      description: 'Rip packs — every open wins OWL, SOL, or NFT',
+      icon: Package,
+    },
   ],
 }
 
@@ -192,6 +199,12 @@ export const ADMIN_NAV_GROUP: SiteNavGroup = {
       label: 'OwlSend',
       description: 'Admin test bench for NFT/token sends',
       icon: Send,
+    },
+    {
+      href: '/admin/packs',
+      label: 'Packs',
+      description: 'Pack vault, inventory, and pause controls',
+      icon: Package,
     },
   ],
 }
