@@ -1712,7 +1712,6 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                           {csvImportVisible ? (
                             <OwlSendCsvImport
                               kind="nft"
-                              adminTest={csvAdminTest}
                               disabled={nftSending}
                               className="mb-2"
                               onApply={(paste) => {
@@ -2522,7 +2521,6 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       {csvImportVisible ? (
                         <OwlSendCsvImport
                           kind="token"
-                          adminTest={csvAdminTest}
                           disabled={tokenSending}
                           className="mb-2"
                           onApply={(paste) => {
