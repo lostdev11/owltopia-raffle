@@ -121,13 +121,17 @@ export function Header() {
     [showOwlVision, adminRole]
   )
 
-  const showOwlSendNav = isOwlSendPublicClient() || showOwlVision
+  const owlSendPublic = isOwlSendPublicClient()
+  const showOwlSendNav = owlSendPublic || showOwlVision
   const communityNavGroup = useMemo<SiteNavGroup>(
     () => ({
       ...COMMUNITY_NAV_GROUP,
-      items: filterCommunityNavItems({ showOwlSend: showOwlSendNav }),
+      items: filterCommunityNavItems({
+        showOwlSend: showOwlSendNav,
+        owlSendPublic,
+      }),
     }),
-    [showOwlSendNav]
+    [owlSendPublic, showOwlSendNav]
   )
 
   const mobileNavGroups = useMemo(
