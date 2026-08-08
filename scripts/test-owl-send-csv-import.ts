@@ -37,6 +37,19 @@ assert.equal(isLikelyCsvFile({ name: 'list.TXT', type: 'text/plain' }), true)
 assert.equal(isLikelyCsvFile({ name: 'photo.png', type: 'image/png' }), false)
 
 {
+  // ARC format: no header, wallet + number sent
+  const arcStyle = parseOwlSendCsv({
+    raw: `${w1},5\n${w2},1\n${w3},3\n`,
+    kind: 'nft',
+  })
+  assert.equal(arcStyle.ok, true)
+  assert.equal(arcStyle.headers, null)
+  assert.equal(arcStyle.entries.length, 3)
+  assert.equal(arcStyle.entries[0]!.count, 5)
+  assert.equal(owlSendCsvEntriesToNftPaste(arcStyle.entries), `${w1},5\n${w2},1\n${w3},3`)
+}
+
+{
   const empty = parseOwlSendCsv({ raw: '  \n  ', kind: 'nft' })
   assert.equal(empty.ok, false)
   assert.match(empty.error ?? '', /empty/i)
