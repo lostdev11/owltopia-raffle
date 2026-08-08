@@ -4,10 +4,10 @@
  * Keep this a simple lint (ARC): check the file is a proper CSV with valid
  * wallets before anything runs. No server upload, no campaign engine.
  *
- * Expected shapes (see /owl-send/airdrop.csv):
- * - wallet
- * - wallet,count   (NFT scatter allotments)
- * - wallet,amount  (token scatter per-wallet amounts)
+ * Expected shapes (see /owl-send/airdrop.csv) — no header required:
+ * - wallet,count   (NFT: wallet + number sent)
+ * - wallet,amount  (token: wallet + number sent)
+ * Headers like wallet,count still accepted if present.
  */
 
 import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
@@ -356,14 +356,12 @@ export function isLikelyCsvFile(file: { name?: string; type?: string }): boolean
   )
 }
 
-export const OWL_SEND_CSV_FORMAT_HINT_NFT = `Header optional. Use:
-wallet
-or
+export const OWL_SEND_CSV_FORMAT_HINT_NFT = `No header needed.
 wallet,count
-Example file: airdrop.csv`
+(one wallet + number sent per line)
+Example: airdrop.csv`
 
-export const OWL_SEND_CSV_FORMAT_HINT_TOKEN = `Header optional. Use:
-wallet
-or
+export const OWL_SEND_CSV_FORMAT_HINT_TOKEN = `No header needed.
 wallet,amount
-Example file: airdrop.csv`
+(one wallet + number sent per line)
+Example: airdrop.csv`

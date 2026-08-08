@@ -47,6 +47,7 @@ import {
   isPhantomPresimulateError,
 } from '@/lib/solana/phantom-presimulate'
 import { sendTransactionWithTimeout } from '@/lib/solana/send-transaction-with-timeout'
+import { tokenRecordAccountExists } from '@/lib/solana/nft-transfer-lock'
 
 export type OwlSendBatchResult =
   | { ok: true; signature: string; newAtaCount: number }
@@ -166,13 +167,14 @@ async function buildOwlSendSplNftTransaction(params: {
     resolved.push(result.value)
   }
 
-  // Fail during "building" if any source ATA is frozen — do not enter "Approve in wallet"
-  // (Phantom pre-sim would reject and never show a popup, which looks like a wallet bug).
+  // Fail during "building" if any source ATA is nest-locked frozen — do not enter
+  // "Approve in wallet". pNFT rule-set freeze (Token Record) is NOT a nest lock —
+  // route those to the Token Metadata special path instead of "Account is frozen".
   const sourceInfos = await connection.getMultipleAccountsInfo(
     resolved.map((r) => r.tokenAccount),
     'processed'
   )
-  const frozenMints: string[] = []
+  const frozenCandidates: string[] = []
   const revokeIndexes = new Set<number>()
   const ACCOUNT_STATE_FROZEN = 2
   for (let i = 0; i < resolved.length; i++) {
@@ -185,7 +187,7 @@ async function buildOwlSendSplNftTransaction(params: {
     try {
       const decoded = AccountLayout.decode(info.data)
       if (Number(decoded.state) === ACCOUNT_STATE_FROZEN) {
-        frozenMints.push(r.line.mint.trim())
+        frozenCandidates.push(r.line.mint.trim())
         continue
       }
       // Gen2 freezeSolPayment thaw often leaves a dead CM freeze-escrow delegate.
@@ -197,14 +199,52 @@ async function buildOwlSendSplNftTransaction(params: {
       /* ignore decode errors */
     }
   }
-  if (frozenMints.length > 0) {
-    return {
-      ok: false,
-      ...attributeOwlSendFrozenFailures({
-        lines,
-        frozenMints,
-        baseError: 'Account is frozen',
-      }),
+  if (frozenCandidates.length > 0) {
+    const nestLocked: string[] = []
+    const pnftFrozen: string[] = []
+    await Promise.all(
+      frozenCandidates.map(async (mint) => {
+        const row = resolved.find((r) => r.line.mint.trim() === mint)
+        if (!row) {
+          nestLocked.push(mint)
+          return
+        }
+        try {
+          const isPnft = await tokenRecordAccountExists(
+            connection,
+            row.mintPk,
+            row.tokenAccount,
+            'processed'
+          )
+          if (isPnft) pnftFrozen.push(mint)
+          else nestLocked.push(mint)
+        } catch {
+          nestLocked.push(mint)
+        }
+      })
+    )
+    if (nestLocked.length > 0) {
+      return {
+        ok: false,
+        ...attributeOwlSendFrozenFailures({
+          lines,
+          frozenMints: nestLocked,
+          baseError: 'Account is frozen',
+        }),
+      }
+    }
+    if (pnftFrozen.length > 0) {
+      const labels = lines
+        .filter((l) => pnftFrozen.includes(l.mint.trim()))
+        .map((l) => l.name?.trim() || `${l.mint.slice(0, 4)}…${l.mint.slice(-4)}`)
+      return {
+        ok: false,
+        error:
+          pnftFrozen.length === 1 && lines.length === 1
+            ? `${labels[0] ?? 'This NFT'} is a pNFT (Token Metadata) — use the single-NFT send path.`
+            : `${labels.join(', ') || 'pNFT(s)'} need a separate pNFT send (Token Metadata). Deselect and send alone.`,
+        failedMints: pnftFrozen,
+      }
     }
   }
 

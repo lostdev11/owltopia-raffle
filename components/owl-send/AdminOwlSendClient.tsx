@@ -125,9 +125,8 @@ export function AdminOwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               Tokens → Scatter — paste wallets (or wallet,amount) and confirm Solscan success
             </ChecklistItem>
             <ChecklistItem>
-              Scatter → <strong>Admin test: CSV import</strong> → <strong>Lint CSV</strong> with
-              airdrop.csv (simple lint before send; gated until{' '}
-              <code className="text-xs">OWL_SEND_CSV_PUBLIC=true</code>)
+              Scatter → <strong>Lint CSV</strong> with airdrop.csv (no header; wallet,count). Paste
+              into the textarea also works if upload is unavailable.
             </ChecklistItem>
             <ChecklistItem>
               Confirm fee treasury receives {formatOwlSendFeeSol(feeSol)} per line

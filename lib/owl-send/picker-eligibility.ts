@@ -1,11 +1,19 @@
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
-import { isWalletNftTransferLocked } from '@/lib/solana/nft-transfer-lock'
+import {
+  isProgrammableNftInterface,
+  isWalletNftTransferLocked,
+} from '@/lib/solana/nft-transfer-lock'
 
 /** Compressed NFT from DAS `compression.compressed` (or interface hint). */
 export function isOwlSendCompressedNft(nft: WalletNft): boolean {
   if (nft.compressed === true) return true
   const iface = (nft.interface ?? '').toLowerCase()
   return iface.includes('compressed')
+}
+
+/** Metaplex programmable NFT — needs Token Metadata path, not classic SPL multi-send. */
+export function isOwlSendProgrammableNft(nft: WalletNft): boolean {
+  return isProgrammableNftInterface(nft.interface)
 }
 
 /**
@@ -15,6 +23,7 @@ export function isOwlSendCompressedNft(nft: WalletNft): boolean {
  */
 export function owlSendNftLockLabel(nft: WalletNft): string | null {
   if (isOwlSendCompressedNft(nft)) return 'cNFT'
+  if (isOwlSendProgrammableNft(nft)) return 'pNFT'
   if (isWalletNftTransferLocked(nft)) return 'Nested / frozen'
   return null
 }
@@ -48,6 +57,32 @@ export function partitionOwlSendByFrozen(selected: WalletNft[]): OwlSendFrozenPa
   return { sendable, frozen }
 }
 
+/**
+ * After a live ATA freeze read: keep pNFT freeze-without-delegate as sendable.
+ * Classic SPL frozen (or pNFT with a lock delegate) stay nest-locked.
+ */
+export function partitionLiveFrozenForOwlSend(params: {
+  candidates: WalletNft[]
+  liveFrozenMints: Iterable<string>
+}): OwlSendFrozenPartition {
+  const frozenSet = new Set([...params.liveFrozenMints].map((m) => m.trim()).filter(Boolean))
+  const sendable: WalletNft[] = []
+  const frozen: WalletNft[] = []
+  for (const nft of params.candidates) {
+    if (!frozenSet.has(nft.mint.trim())) {
+      sendable.push(nft)
+      continue
+    }
+    // Live freeze + known pNFT without lock delegate → Token Metadata path, not nest lock.
+    if (isOwlSendProgrammableNft(nft) && nft.delegated !== true) {
+      sendable.push(nft)
+      continue
+    }
+    frozen.push({ ...nft, frozen: true })
+  }
+  return { sendable, frozen }
+}
+
 /** Short Review notice when frozen NFTs were auto-skipped. */
 export function owlSendSkippedFrozenNotice(frozenCount: number, sendableCount: number): string {
   const skipped =
@@ -60,7 +95,7 @@ export function owlSendSkippedFrozenNotice(frozenCount: number, sendableCount: n
   return `${skipped} — unnest on Nesting to send those. Continuing with the rest.`
 }
 
-export type OwlSendCnftGate =
+export type OwlSendAssetGate =
   | { ok: true }
   | {
       ok: false
@@ -70,11 +105,14 @@ export type OwlSendCnftGate =
       cnftMints: string[]
     }
 
+/** @deprecated alias — same shape as {@link OwlSendAssetGate}. */
+export type OwlSendCnftGate = OwlSendAssetGate
+
 /**
  * cNFTs cannot share a classic SPL multi-send with Gen2/SPL NFTs, and multi-cNFT
  * needs one-at-a-time special path. Gate at Review — popup, not wall of helper text.
  */
-export function gateOwlSendCnftSelection(selected: WalletNft[]): OwlSendCnftGate {
+export function gateOwlSendCnftSelection(selected: WalletNft[]): OwlSendAssetGate {
   const cnfts = selected.filter(isOwlSendCompressedNft)
   if (cnfts.length === 0) return { ok: true }
 
@@ -100,4 +138,44 @@ export function gateOwlSendCnftSelection(selected: WalletNft[]): OwlSendCnftGate
   }
 
   return { ok: true }
+}
+
+/**
+ * pNFTs use Token Metadata (not classic SPL multi-transfer). Gate mixes + multi-select
+ * at Review so we never call a frozen SPL ATA a “nest lock” mid-send.
+ */
+export function gateOwlSendPnftSelection(selected: WalletNft[]): OwlSendAssetGate {
+  const pnfts = selected.filter(isOwlSendProgrammableNft)
+  if (pnfts.length === 0) return { ok: true }
+
+  const others = selected.filter((n) => !isOwlSendProgrammableNft(n))
+  const pnftMints = pnfts.map((n) => n.mint)
+
+  if (others.length > 0) {
+    return {
+      ok: false,
+      title: 'Send pNFTs separately',
+      detail: `${pnfts.length} pNFT${pnfts.length === 1 ? '' : 's'} selected with other NFTs. Deselect pNFTs for this batch, or send only pNFTs (one at a time).`,
+      cnftMints: pnftMints,
+    }
+  }
+
+  if (pnfts.length > 1) {
+    return {
+      ok: false,
+      title: 'pNFTs: one at a time',
+      detail:
+        'Programmable NFTs need their own send (Token Metadata). Keep one selected, then Review again.',
+      cnftMints: pnftMints,
+    }
+  }
+
+  return { ok: true }
+}
+
+/** Run cNFT then pNFT gates (first failure wins). */
+export function gateOwlSendSpecialAssetSelection(selected: WalletNft[]): OwlSendAssetGate {
+  const cnft = gateOwlSendCnftSelection(selected)
+  if (!cnft.ok) return cnft
+  return gateOwlSendPnftSelection(selected)
 }
