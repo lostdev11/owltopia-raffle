@@ -10,6 +10,8 @@
     "vercel:check": "node scripts/vercel-cli-check.mjs",
     "vercel:whoami": "vercel whoami --non-interactive",
     "vercel:env:ls": "vercel env ls --non-interactive",
+    "vercel:owl-send:go-live": "node scripts/go-live-owl-send-vercel.mjs",
+    "check:owl-send-live": "node scripts/check-owl-send-live.mjs",
     "check:funds-escrow": "node scripts/check-funds-escrow-api.mjs",
     "check:treasury-signing": "node --env-file=.env.local scripts/check-treasury-signing.mjs",
     "send:legacy-buyout-refund": "npx --yes tsx --env-file=.env.local scripts/send-legacy-buyout-refund.mjs",
