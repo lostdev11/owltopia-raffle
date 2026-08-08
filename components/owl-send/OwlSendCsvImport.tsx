@@ -1,7 +1,7 @@
 'use client'
 
 import { useId, useRef, useState } from 'react'
-import { CheckCircle2, Download, FileUp, HelpCircle, Loader2, Shield, X } from 'lucide-react'
+import { CheckCircle2, Download, FileUp, HelpCircle, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
@@ -27,8 +27,8 @@ import { OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
 
 type Props = {
   kind: OwlSendCsvKind
-  /** Admin-only production test (CSV not public yet). */
-  adminTest: boolean
+  /** Reserved: admin-only production preview (styling kept neutral). */
+  adminTest?: boolean
   disabled?: boolean
   onApply: (pasteText: string, result: OwlSendCsvParseResult) => void
   className?: string
@@ -38,7 +38,7 @@ type Props = {
  * Simple CSV lint for OwlSend Scatter (upload → lint → fill recipients).
  * Intentionally lightweight: no upload to server, just format + wallet checks.
  */
-export function OwlSendCsvImport({ kind, adminTest, disabled, onApply, className }: Props) {
+export function OwlSendCsvImport({ kind, disabled, onApply, className }: Props) {
   const inputId = useId()
   const fileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
@@ -110,8 +110,7 @@ export function OwlSendCsvImport({ kind, adminTest, disabled, onApply, className
   return (
     <div
       className={cn(
-        'space-y-2 rounded-lg border px-3 py-3',
-        adminTest ? 'border-amber-500/30 bg-amber-500/5' : 'border-white/10 bg-black/20',
+        'space-y-2 rounded-lg border border-white/10 bg-black/20 px-3 py-3',
         className
       )}
     >
@@ -120,12 +119,6 @@ export function OwlSendCsvImport({ kind, adminTest, disabled, onApply, className
           <Label htmlFor={inputId} className="text-sm font-medium text-white">
             CSV lint
           </Label>
-          {adminTest ? (
-            <span className="inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-100">
-              <Shield className="h-3 w-3" />
-              Admin test
-            </span>
-          ) : null}
           <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -161,12 +154,6 @@ export function OwlSendCsvImport({ kind, adminTest, disabled, onApply, className
           {OWL_SEND_AIRDROP_CSV_FILENAME}
         </a>
       </div>
-
-      {adminTest ? (
-        <p className="text-xs text-amber-100/80">
-          Admin lint preview — public with <code className="text-[10px]">OWL_SEND_CSV_PUBLIC=true</code>.
-        </p>
-      ) : null}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <input
