@@ -4,8 +4,8 @@
  * Default: admin-only.
  * Go live: set `OWL_SEND_PUBLIC=true` and `NEXT_PUBLIC_OWL_SEND_PUBLIC=true`.
  *
- * CSV airdrop import is gated separately so admins can test on production first:
- * Default: admin-only. Go live: `OWL_SEND_CSV_PUBLIC=true` + `NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC=true`.
+ * CSV airdrop import: follows OwlSend public by default. Override with
+ * `OWL_SEND_CSV_PUBLIC` / `NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC` if needed.
  */
 
 function readBoolean(raw: string | undefined, fallback: boolean): boolean {
@@ -40,19 +40,27 @@ export function canAccessOwlSend(params: {
   return isPublic || params.isAdmin
 }
 
-/** When false (default), only site admins may use OwlSend CSV airdrop import. */
+/**
+ * CSV import visibility. Explicit `OWL_SEND_CSV_PUBLIC` wins; otherwise same as OwlSend public
+ * so core-team testers see Lint CSV without a second env flip.
+ */
 export function isOwlSendCsvPublic(): boolean {
   if (typeof process === 'undefined') return false
-  return readBoolean(
-    process.env.OWL_SEND_CSV_PUBLIC ?? process.env.NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC,
-    false
-  )
+  const explicit = process.env.OWL_SEND_CSV_PUBLIC ?? process.env.NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC
+  if (explicit != null && explicit.trim() !== '') {
+    return readBoolean(explicit, true)
+  }
+  return isOwlSendPublic()
 }
 
-/** Client-safe CSV public flag (NEXT_PUBLIC only). */
+/** Client-safe CSV public flag — explicit NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC, else OwlSend public. */
 export function isOwlSendCsvPublicClient(): boolean {
   if (typeof process === 'undefined') return false
-  return readBoolean(process.env.NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC, false)
+  const explicit = process.env.NEXT_PUBLIC_OWL_SEND_CSV_PUBLIC
+  if (explicit != null && explicit.trim() !== '') {
+    return readBoolean(explicit, true)
+  }
+  return isOwlSendPublicClient()
 }
 
 export function canAccessOwlSendCsv(params: {
