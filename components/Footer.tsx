@@ -2,7 +2,7 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { Twitter, MessageCircle, FileText, Coins, Info, Trophy, HeartHandshake, Landmark, Package } from 'lucide-react'
+import { Twitter, MessageCircle, FileText, Coins, Info, Trophy, HeartHandshake, Landmark } from 'lucide-react'
 import { MagicEdenIcon } from '@/components/icons/MagicEdenIcon'
 import { OrbisIcon } from '@/components/icons/OrbisIcon'
 import { TensorIcon } from '@/components/icons/TensorIcon'
@@ -28,11 +28,6 @@ const glassCardItems: GlassIconItem[] = [
     label: 'Nesting',
     href: '/nesting',
     icon: <Coins className="h-6 w-6" />,
-  },
-  {
-    label: 'Owl Packs',
-    href: '/packs',
-    icon: <Package className="h-6 w-6" />,
   },
   {
     label: 'Partner program',

@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import {
   deletePartnerCommunityCreator,
-  getPartnerCommunityCreatorByWallet,
-  renamePartnerCommunityCreatorWallet,
   updatePartnerCommunityCreator,
 } from '@/lib/db/partner-community-creators-admin'
 import { clearPartnerCommunityWalletCache } from '@/lib/raffles/partner-communities'
@@ -33,10 +31,7 @@ function walletFromParams(params: { wallet: string }): string | null {
 
 /**
  * PATCH /api/admin/partner-community-creators/[wallet]
- * Body: { display_label?, sort_order?, is_active?, partner_tier?, discord_partner_tenant_id?,
- *         partner_pro_monthly_quote_usdc?, new_creator_wallet? }
- * `new_creator_wallet` renames the allowlist primary key (copy + delete). Other fields apply to
- * the resulting wallet after rename when both are sent in one request.
+ * Body: { display_label?, sort_order?, is_active? }
  */
 export async function PATCH(request: NextRequest, context: { params: Promise<{ wallet: string }> }) {
   try {
@@ -50,27 +45,6 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ w
     }
 
     const body = await request.json().catch(() => ({}))
-    let workingWallet = creator_wallet
-
-    if ('new_creator_wallet' in body) {
-      if (typeof body.new_creator_wallet !== 'string') {
-        return NextResponse.json({ error: 'new_creator_wallet must be a string' }, { status: 400 })
-      }
-      const nextWallet = normalizeSolanaWalletAddress(body.new_creator_wallet)
-      if (!nextWallet) {
-        return NextResponse.json({ error: 'new_creator_wallet must be a valid Solana address' }, { status: 400 })
-      }
-      try {
-        const renamed = await renamePartnerCommunityCreatorWallet(creator_wallet, nextWallet)
-        workingWallet = renamed.creator_wallet
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : 'Could not change wallet'
-        const status =
-          msg.includes('already on the partner allowlist') || msg.includes('not found') ? 409 : 400
-        return NextResponse.json({ error: msg }, { status })
-      }
-    }
-
     const patch: {
       display_label?: string | null
       partner_tier?: '$0_partner' | 'partner_pro' | 'white_label'
@@ -134,18 +108,11 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ w
       patch.partner_pro_monthly_quote_usdc = parsed.value as number | null
     }
 
-    if (Object.keys(patch).length === 0 && !('new_creator_wallet' in body)) {
+    if (Object.keys(patch).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
     }
 
-    let row =
-      Object.keys(patch).length > 0
-        ? await updatePartnerCommunityCreator(workingWallet, patch)
-        : await getPartnerCommunityCreatorByWallet(workingWallet)
-    if (!row) {
-      return NextResponse.json({ error: 'Partner wallet not found' }, { status: 404 })
-    }
-
+    const row = await updatePartnerCommunityCreator(creator_wallet, patch)
     clearPartnerCommunityWalletCache()
     return NextResponse.json({ creator: row })
   } catch (error) {

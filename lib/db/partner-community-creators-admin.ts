@@ -209,62 +209,6 @@ export async function updatePartnerCommunityCreator(
 }
 
 /**
- * Move an allowlist row to a new wallet (primary key). Copies all fields, then deletes the old row.
- * Rejects if the destination wallet is already allowlisted.
- */
-export async function renamePartnerCommunityCreatorWallet(
-  fromWallet: string,
-  toWallet: string
-): Promise<PartnerCommunityCreatorRow> {
-  const from = typeof fromWallet === 'string' ? fromWallet.trim() : ''
-  const to = typeof toWallet === 'string' ? toWallet.trim() : ''
-  if (!from || !to) throw new Error('Both wallets are required')
-  if (from === to) {
-    const same = await getPartnerCommunityCreatorByWallet(from)
-    if (!same) throw new Error('Partner wallet not found')
-    return same
-  }
-
-  const existing = await getPartnerCommunityCreatorByWallet(from)
-  if (!existing) throw new Error('Partner wallet not found')
-
-  const conflict = await getPartnerCommunityCreatorByWallet(to)
-  if (conflict) throw new Error('That wallet is already on the partner allowlist')
-
-  const sb = getSupabaseAdmin()
-  const { data: inserted, error: insertError } = await sb
-    .from('partner_community_creators')
-    .insert({
-      creator_wallet: to,
-      display_label: existing.display_label,
-      partner_tier: existing.partner_tier,
-      sort_order: existing.sort_order,
-      is_active: existing.is_active,
-      logo_url: existing.logo_url,
-      discord_partner_tenant_id: existing.discord_partner_tenant_id,
-      partner_pro_monthly_quote_usdc: existing.partner_pro_monthly_quote_usdc,
-      updated_at: new Date().toISOString(),
-    })
-    .select()
-    .single()
-
-  if (insertError) throw new Error(insertError.message)
-
-  const { error: deleteError } = await sb
-    .from('partner_community_creators')
-    .delete()
-    .eq('creator_wallet', from)
-
-  if (deleteError) {
-    // Best-effort rollback so we do not leave two rows if delete fails.
-    await sb.from('partner_community_creators').delete().eq('creator_wallet', to)
-    throw new Error(deleteError.message)
-  }
-
-  return inserted as PartnerCommunityCreatorRow
-}
-
-/**
  * If this wallet is an active partner program creator with a linked Discord partner tenant,
  * return that tenant id (for stamping `raffles.discord_partner_tenant_id` at create time).
  */
