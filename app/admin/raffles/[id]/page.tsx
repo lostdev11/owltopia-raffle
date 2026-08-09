@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers'
 import { redirect, notFound } from 'next/navigation'
 import { getRaffleById, getEntriesByRaffleId } from '@/lib/db/raffles'
+import { getMilestonesByRaffleId } from '@/lib/db/raffle-milestones'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { EditRaffleForm } from '@/components/EditRaffleForm'
 import { AdminRaffleActions } from '@/components/AdminRaffleActions'
@@ -27,6 +28,7 @@ export default async function EditRafflePage({
 
   const status = (raffle.status ?? '').trim().toLowerCase()
   const entries = await getEntriesByRaffleId(raffle.id)
+  const milestones = await getMilestonesByRaffleId(raffle.id)
   const hasConfirmedEntries = entries.some((entry) => entry.status === 'confirmed')
 
   // Draft: show edit form
@@ -50,5 +52,12 @@ export default async function EditRafflePage({
   }
 
   // Non-draft: show admin actions (return NFT, cancel, refund list, delete)
-  return <AdminRaffleActions raffle={raffle} entries={entries} adminRole={role} />
+  return (
+    <AdminRaffleActions
+      raffle={raffle}
+      entries={entries}
+      milestones={milestones}
+      adminRole={role}
+    />
+  )
 }

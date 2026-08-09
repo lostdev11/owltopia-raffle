@@ -21,7 +21,7 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Trash2, ArrowLeftCircle, XCircle, Ban, CheckCircle, Send, Download, Upload, Dices } from 'lucide-react'
-import type { Raffle, Entry } from '@/lib/types'
+import type { Raffle, Entry, RaffleMilestone, RaffleMilestoneWinnerMode } from '@/lib/types'
 import type { AdminRole } from '@/lib/db/admins'
 import Link from 'next/link'
 import { getRaffleMinimum, canSelectWinner, calculateTicketsSold } from '@/lib/db/raffles'
@@ -30,6 +30,12 @@ import { AdminManualRefundRecorder } from '@/components/AdminManualRefundRecorde
 import { raffleRequiresCancellationFee } from '@/lib/raffles/cancellation-fee-policy'
 import { getCancellationFeeSol } from '@/lib/config/raffles'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import {
+  formatMilestonePrize,
+  formatMilestoneTrigger,
+  milestoneWinnerModeLabel,
+} from '@/lib/raffles/milestones/copy'
+import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
 
 const PRIZE_RETURN_REASONS = [
   { value: 'cancelled', label: 'Raffle cancelled' },
@@ -51,6 +57,7 @@ function listingArtworkPayloadFromUrl(url: string): {
 interface AdminRaffleActionsProps {
   raffle: Raffle
   entries?: Entry[]
+  milestones?: RaffleMilestone[]
   /** Defaults to full for backward compatibility; pass `mod` for junior admins. */
   adminRole?: AdminRole
 }
@@ -58,6 +65,7 @@ interface AdminRaffleActionsProps {
 export function AdminRaffleActions({
   raffle,
   entries = [],
+  milestones: milestonesProp = [],
   adminRole = 'full',
 }: AdminRaffleActionsProps) {
   const isFullAdmin = adminRole === 'full'
@@ -77,6 +85,12 @@ export function AdminRaffleActions({
   const [acceptCancelDialogOpen, setAcceptCancelDialogOpen] = useState(false)
   const [acceptingCancel, setAcceptingCancel] = useState(false)
   const [blockingPurchases, setBlockingPurchases] = useState(false)
+  const [milestones, setMilestones] = useState<RaffleMilestone[]>(milestonesProp)
+  const [milestoneModeBusyId, setMilestoneModeBusyId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setMilestones(milestonesProp)
+  }, [milestonesProp])
   const [fixMintDialogOpen, setFixMintDialogOpen] = useState(false)
   const [fixMintInput, setFixMintInput] = useState('')
   const [fixingMint, setFixingMint] = useState(false)
@@ -113,6 +127,56 @@ export function AdminRaffleActions({
   useEffect(() => {
     setListOnPlatform(raffle.list_on_platform !== false)
   }, [raffle.id, raffle.list_on_platform])
+
+  const drawThresholdTickets = useMemo(
+    () => getEffectiveDrawThresholdTickets(raffle),
+    [raffle]
+  )
+
+  const changeMilestoneWinnerMode = async (
+    milestone: RaffleMilestone,
+    winnerMode: RaffleMilestoneWinnerMode
+  ) => {
+    if (winnerMode === milestone.winner_mode) return
+    setMilestoneModeBusyId(milestone.id)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/milestones/${milestone.id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ winner_mode: winnerMode }),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string
+        milestone?: RaffleMilestone
+      }
+      if (!res.ok) {
+        setMessage({
+          type: 'error',
+          text: typeof data.error === 'string' ? data.error : 'Could not update winner mode',
+        })
+        return
+      }
+      if (data.milestone) {
+        setMilestones((prev) =>
+          prev.map((row) => (row.id === milestone.id ? data.milestone! : row))
+        )
+      }
+      setMessage({
+        type: 'success',
+        text: `Milestone winner mode set to ${milestoneWinnerModeLabel(winnerMode)}. Prize unchanged.`,
+      })
+      router.refresh()
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Could not update winner mode',
+      })
+    } finally {
+      setMilestoneModeBusyId(null)
+    }
+  }
 
   const persistListOnPlatform = async (next: boolean) => {
     setListPlatformSaving(true)
@@ -1093,6 +1157,75 @@ export function AdminRaffleActions({
             {listPlatformSaving && <p className="text-xs text-muted-foreground mt-2">Saving…</p>}
           </CardContent>
         </Card>
+
+        {milestones.length > 0 ? (
+          <Card className="border-amber-500/30 bg-amber-500/[0.04]">
+            <CardHeader className="pb-2">
+              <CardTitle>Bonus milestones</CardTitle>
+              <CardDescription>
+                Change who wins each bonus (random / top buyer / creator draw). Prize amount stays the
+                same. Available until a winner is selected.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-0">
+              {milestones.map((m) => {
+                const canEdit =
+                  !m.winner_wallet && (m.status === 'pending' || m.status === 'unlocked')
+                const trigger = formatMilestoneTrigger(
+                  m,
+                  raffle.max_tickets,
+                  drawThresholdTickets
+                )
+                return (
+                  <div
+                    key={m.id}
+                    className="rounded-md border border-border/60 bg-background/50 p-3 space-y-2"
+                  >
+                    <p className="text-sm font-medium">
+                      {formatMilestonePrize(m)} · when {trigger}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Status: {m.status}
+                      {m.deposit_verified_at ? ' · funded' : ' · not funded'}
+                      {m.winner_wallet
+                        ? ` · winner ${m.winner_wallet.slice(0, 4)}…${m.winner_wallet.slice(-4)}`
+                        : ''}
+                    </p>
+                    {canEdit ? (
+                      <div className="space-y-1">
+                        <Label htmlFor={`admin-milestone-winner-${m.id}`} className="text-xs">
+                          Winner selection
+                        </Label>
+                        <select
+                          id={`admin-milestone-winner-${m.id}`}
+                          value={m.winner_mode}
+                          disabled={milestoneModeBusyId === m.id}
+                          onChange={(e) =>
+                            void changeMilestoneWinnerMode(
+                              m,
+                              e.target.value as RaffleMilestoneWinnerMode
+                            )
+                          }
+                          className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
+                        >
+                          <option value="random">Random (ticket-weighted)</option>
+                          <option value="top_buyer">Top buyer (ties broken randomly)</option>
+                          <option value="creator_initiated_pull">
+                            Creator starts random draw when unlocked
+                          </option>
+                        </select>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Winner mode locked: {milestoneWinnerModeLabel(m.winner_mode)}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </CardContent>
+          </Card>
+        ) : null}
 
         {isNftRaffle && (
           <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-3">

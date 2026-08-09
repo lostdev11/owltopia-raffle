@@ -2955,7 +2955,7 @@ export function RaffleDetailClient({
             milestones={initialMilestones}
             entries={entries}
             sessionWallet={sessionWallet}
-            isAdmin={isAdmin === true}
+            isAdmin={adminCapable}
             onRefresh={() => router.refresh()}
           />
         )}
