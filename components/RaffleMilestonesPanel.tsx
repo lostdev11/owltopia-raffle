@@ -17,7 +17,7 @@ import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWa
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import type { Entry, Raffle, RaffleMilestone } from '@/lib/types'
+import type { Entry, Raffle, RaffleMilestone, RaffleMilestoneWinnerMode } from '@/lib/types'
 import {
   buildMilestoneBonusRulesCopy,
   buildSingleMilestoneRuleLine,
@@ -53,14 +53,17 @@ type Props = {
   milestones: RaffleMilestone[]
   entries: Entry[]
   sessionWallet: string | null
+  /** Platform admin — can change winner mode like the creator. */
+  isAdmin?: boolean
   onRefresh?: () => void
 }
 
 export function RaffleMilestonesPanel({
   raffle,
-  milestones,
+  milestones: milestonesProp,
   entries,
   sessionWallet,
+  isAdmin = false,
   onRefresh,
 }: Props) {
   const { publicKey, connected } = useWallet()
@@ -79,6 +82,11 @@ export function RaffleMilestonesPanel({
     tx: string
     label: string
   } | null>(null)
+  const [milestones, setMilestones] = useState(milestonesProp)
+
+  useEffect(() => {
+    setMilestones(milestonesProp)
+  }, [milestonesProp])
 
   const sold = useMemo(() => ticketsSoldFromEntries(entries), [entries])
   const drawThresholdTickets = useMemo(
@@ -88,6 +96,7 @@ export function RaffleMilestonesPanel({
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const isCreator =
     !!sessionWallet && !!creatorWallet && walletsEqualSolana(sessionWallet, creatorWallet)
+  const canManage = isCreator || isAdmin
 
   const leaderboard = useMemo(() => {
     const rows = aggregateWalletTickets(entries)
@@ -98,9 +107,9 @@ export function RaffleMilestonesPanel({
 
   const needsMilestoneDeposit = useMemo(
     () =>
-      isCreator &&
+      canManage &&
       milestones.some((m) => m.prize_type === 'crypto' && !m.deposit_verified_at),
-    [isCreator, milestones]
+    [canManage, milestones]
   )
 
   useEffect(() => {
@@ -336,6 +345,37 @@ export function RaffleMilestonesPanel({
     [raffle.id, onRefresh]
   )
 
+  const changeWinnerMode = useCallback(
+    async (m: RaffleMilestone, winnerMode: RaffleMilestoneWinnerMode) => {
+      if (winnerMode === m.winner_mode) return
+      setActionError(null)
+      setLoadingId(`mode-${m.id}`)
+      try {
+        const res = await fetch(`/api/raffles/${raffle.id}/milestones/${m.id}`, {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ winner_mode: winnerMode }),
+        })
+        const json = (await res.json().catch(() => ({}))) as {
+          error?: string
+          milestone?: RaffleMilestone
+        }
+        if (!res.ok) {
+          setActionError(typeof json.error === 'string' ? json.error : 'Update failed')
+          return
+        }
+        if (json.milestone) {
+          setMilestones((prev) => prev.map((row) => (row.id === m.id ? json.milestone! : row)))
+        }
+        onRefresh?.()
+      } finally {
+        setLoadingId(null)
+      }
+    },
+    [raffle.id, onRefresh]
+  )
+
   if (milestones.length === 0) return null
 
   const showLeaderboard = milestones.some((m) => m.winner_mode === 'top_buyer')
@@ -439,6 +479,10 @@ export function RaffleMilestonesPanel({
 
       {milestoneProgressBlocks.map(({ m, unlocked }) => {
         const ruleLine = buildSingleMilestoneRuleLine(m, raffle.max_tickets, drawThresholdTickets)
+        const canEditWinnerMode =
+          canManage &&
+          !m.winner_wallet &&
+          (m.status === 'pending' || m.status === 'unlocked')
 
         return (
           <div key={m.id} className="rounded-md border border-border/60 bg-background/40 p-3 space-y-3">
@@ -446,6 +490,33 @@ export function RaffleMilestonesPanel({
             <p className="text-xs text-muted-foreground">
               {formatMilestonePrize(m)} · {milestoneWinnerModeLabel(m.winner_mode)}
             </p>
+
+            {canEditWinnerMode ? (
+              <div className="space-y-1">
+                <Label htmlFor={`milestone-winner-${m.id}`} className="text-xs">
+                  Winner selection
+                </Label>
+                <select
+                  id={`milestone-winner-${m.id}`}
+                  value={m.winner_mode}
+                  disabled={loadingId === `mode-${m.id}`}
+                  onChange={(e) =>
+                    void changeWinnerMode(m, e.target.value as RaffleMilestoneWinnerMode)
+                  }
+                  className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
+                >
+                  <option value="random">Random (ticket-weighted) — recommended</option>
+                  <option value="top_buyer">Top buyer (ties broken randomly)</option>
+                  <option value="creator_initiated_pull">
+                    Creator starts random draw when unlocked
+                  </option>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Prize stays the same. Change who wins this bonus anytime before a winner is
+                  selected.
+                </p>
+              </div>
+            ) : null}
 
             {!unlocked && (
               <p className="text-xs text-muted-foreground">
