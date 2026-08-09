@@ -1,0 +1,281 @@
+/**
+ * Packs vault: funded wallet that receives pack payments and pays prizes.
+ * Env: PACKS_VAULT_SECRET_KEY (JSON 64-byte array or base58).
+ */
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  LAMPORTS_PER_SOL,
+} from '@solana/web3.js'
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  createAssociatedTokenAccountInstruction,
+  createTransferInstruction,
+  getAccount,
+  getAssociatedTokenAddress,
+  getMint,
+} from '@solana/spl-token'
+import { getSolanaConnection, getSolanaReadConnection } from '@/lib/solana/connection'
+import { getTokenInfo } from '@/lib/tokens'
+
+function parseSolanaSecretKeyFromEnv(raw: string | undefined): Keypair | null {
+  const trimmed = raw?.trim()
+  if (!trimmed) return null
+  try {
+    const parsed = JSON.parse(trimmed) as number[]
+    if (Array.isArray(parsed) && parsed.length >= 64) {
+      return Keypair.fromSecretKey(Uint8Array.from(parsed))
+    }
+  } catch {
+    // not JSON
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const bs58 = require('bs58') as { decode: (s: string) => Uint8Array }
+    return Keypair.fromSecretKey(bs58.decode(trimmed))
+  } catch {
+    return null
+  }
+}
+
+let vaultKeypairCache: Keypair | null | undefined
+
+export function getPacksVaultKeypair(): Keypair | null {
+  if (vaultKeypairCache !== undefined) return vaultKeypairCache
+  vaultKeypairCache = parseSolanaSecretKeyFromEnv(process.env.PACKS_VAULT_SECRET_KEY)
+  return vaultKeypairCache
+}
+
+export function getPacksVaultPublicKey(): string | null {
+  const fromEnv = process.env.NEXT_PUBLIC_PACKS_VAULT_WALLET?.trim()
+  if (fromEnv) return fromEnv
+  const kp = getPacksVaultKeypair()
+  return kp ? kp.publicKey.toBase58() : null
+}
+
+async function resolveTokenProgramForMint(
+  connection: Connection,
+  mint: PublicKey,
+  owner: PublicKey
+): Promise<typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID | null> {
+  for (const program of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
+    try {
+      const ata = await getAssociatedTokenAddress(mint, owner, false, program, ASSOCIATED_TOKEN_PROGRAM_ID)
+      await getAccount(connection, ata, 'confirmed', program)
+      return program
+    } catch {
+      // try next
+    }
+  }
+  // Mint exists? Prefer classic SPL if mint account owned by Token program
+  try {
+    const info = await connection.getAccountInfo(mint, 'confirmed')
+    if (info?.owner.equals(TOKEN_2022_PROGRAM_ID)) return TOKEN_2022_PROGRAM_ID
+    if (info?.owner.equals(TOKEN_PROGRAM_ID)) return TOKEN_PROGRAM_ID
+  } catch {
+    // ignore
+  }
+  return TOKEN_PROGRAM_ID
+}
+
+export async function payoutSolFromPacksVault(
+  recipientWallet: string,
+  lamports: bigint
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  if (lamports <= 0n) return { ok: false, error: 'Payout amount must be positive.' }
+  const keypair = getPacksVaultKeypair()
+  if (!keypair) return { ok: false, error: 'Packs vault not configured (PACKS_VAULT_SECRET_KEY)' }
+
+  const connection = getSolanaConnection()
+  const recipient = new PublicKey(recipientWallet)
+  if (lamports > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return { ok: false, error: 'Amount too large for SOL transfer encoding.' }
+  }
+  const balance = await connection.getBalance(keypair.publicKey, 'confirmed')
+  const needed = lamports + 5000n
+  if (BigInt(balance) < needed) {
+    return { ok: false, error: 'Packs vault SOL balance too low for payout (+ fee).' }
+  }
+
+  const tx = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: keypair.publicKey,
+      toPubkey: recipient,
+      lamports: Number(lamports),
+    })
+  )
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
+  tx.recentBlockhash = blockhash
+  tx.feePayer = keypair.publicKey
+  tx.sign(keypair)
+  try {
+    const signature = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed',
+    })
+    await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
+    return { ok: true, signature }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export async function payoutOwlFromPacksVault(
+  recipientWallet: string,
+  owlAmount: number
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  if (!(owlAmount > 0)) return { ok: false, error: 'OWL amount must be positive.' }
+  const keypair = getPacksVaultKeypair()
+  if (!keypair) return { ok: false, error: 'Packs vault not configured (PACKS_VAULT_SECRET_KEY)' }
+
+  const owl = getTokenInfo('OWL')
+  if (!owl.mintAddress) return { ok: false, error: 'OWL mint not configured (NEXT_PUBLIC_OWL_MINT_ADDRESS)' }
+
+  const connection = getSolanaConnection()
+  const readConn = getSolanaReadConnection()
+  const mint = new PublicKey(owl.mintAddress)
+  const recipient = new PublicKey(recipientWallet)
+  const tokenProgram = await resolveTokenProgramForMint(readConn, mint, keypair.publicKey)
+  if (!tokenProgram) return { ok: false, error: 'Could not resolve OWL token program' }
+
+  const mintInfo = await getMint(readConn, mint, 'confirmed', tokenProgram)
+  const raw = BigInt(Math.round(owlAmount * 10 ** mintInfo.decimals))
+  if (raw <= 0n) return { ok: false, error: 'OWL raw amount is zero' }
+
+  const sourceAta = await getAssociatedTokenAddress(
+    mint,
+    keypair.publicKey,
+    false,
+    tokenProgram,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )
+  const destAta = await getAssociatedTokenAddress(
+    mint,
+    recipient,
+    false,
+    tokenProgram,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )
+
+  const tx = new Transaction()
+  try {
+    await getAccount(readConn, destAta, 'confirmed', tokenProgram)
+  } catch {
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        keypair.publicKey,
+        destAta,
+        recipient,
+        mint,
+        tokenProgram,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+    )
+  }
+  tx.add(
+    createTransferInstruction(sourceAta, destAta, keypair.publicKey, raw, [], tokenProgram)
+  )
+
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
+  tx.recentBlockhash = blockhash
+  tx.feePayer = keypair.publicKey
+  tx.sign(keypair)
+  try {
+    const signature = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed',
+    })
+    await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
+    return { ok: true, signature }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** Transfer 1 SPL NFT (amount=1) from packs vault to recipient. */
+export async function payoutNftFromPacksVault(
+  mintAddress: string,
+  recipientWallet: string
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  const keypair = getPacksVaultKeypair()
+  if (!keypair) return { ok: false, error: 'Packs vault not configured (PACKS_VAULT_SECRET_KEY)' }
+
+  const connection = getSolanaConnection()
+  const readConn = getSolanaReadConnection()
+  const mint = new PublicKey(mintAddress)
+  const recipient = new PublicKey(recipientWallet)
+  const tokenProgram = await resolveTokenProgramForMint(readConn, mint, keypair.publicKey)
+  if (!tokenProgram) return { ok: false, error: 'Vault does not hold this NFT mint' }
+
+  const sourceAta = await getAssociatedTokenAddress(
+    mint,
+    keypair.publicKey,
+    false,
+    tokenProgram,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )
+  const destAta = await getAssociatedTokenAddress(
+    mint,
+    recipient,
+    false,
+    tokenProgram,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )
+
+  try {
+    const acct = await getAccount(readConn, sourceAta, 'confirmed', tokenProgram)
+    if (acct.amount < 1n) return { ok: false, error: 'Vault NFT balance is zero' }
+  } catch {
+    return { ok: false, error: 'Vault does not hold this NFT' }
+  }
+
+  const tx = new Transaction()
+  try {
+    await getAccount(readConn, destAta, 'confirmed', tokenProgram)
+  } catch {
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        keypair.publicKey,
+        destAta,
+        recipient,
+        mint,
+        tokenProgram,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+    )
+  }
+  tx.add(
+    createTransferInstruction(sourceAta, destAta, keypair.publicKey, 1n, [], tokenProgram)
+  )
+
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
+  tx.recentBlockhash = blockhash
+  tx.feePayer = keypair.publicKey
+  tx.sign(keypair)
+  try {
+    const signature = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed',
+    })
+    await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
+    return { ok: true, signature }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export async function getPacksVaultSolBalance(): Promise<number | null> {
+  const pubkey = getPacksVaultPublicKey()
+  if (!pubkey) return null
+  try {
+    const bal = await getSolanaReadConnection().getBalance(new PublicKey(pubkey), 'confirmed')
+    return bal / LAMPORTS_PER_SOL
+  } catch {
+    return null
+  }
+}

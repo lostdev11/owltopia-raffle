@@ -50,6 +50,9 @@ export default function AdminPartnerCreatorsPage() {
   const [deleteConfirmWallet, setDeleteConfirmWallet] = useState<string | null>(null)
   const [labelEditWallet, setLabelEditWallet] = useState<string | null>(null)
   const [labelEditValue, setLabelEditValue] = useState('')
+  const [walletEditFrom, setWalletEditFrom] = useState<string | null>(null)
+  const [walletEditValue, setWalletEditValue] = useState('')
+  const [walletEditError, setWalletEditError] = useState<string | null>(null)
   const [savingWallet, setSavingWallet] = useState<string | null>(null)
   const [savedWallet, setSavedWallet] = useState<string | null>(null)
   const [tenantEdits, setTenantEdits] = useState<Record<string, string>>({})
@@ -164,12 +167,16 @@ export default function AdminPartnerCreatorsPage() {
     }
   }
 
-  const patchRow = async (creator_wallet: string, body: Record<string, unknown>) => {
+  const patchRow = async (
+    creator_wallet: string,
+    body: Record<string, unknown>
+  ): Promise<{ ok: true; creator_wallet: string } | { ok: false; error: string }> => {
     setSavingWallet(creator_wallet)
     setSavedWallet(null)
     setListError(null)
     const previousRows = rows
-    if (Object.keys(body).length > 0) {
+    const isRename = typeof body.new_creator_wallet === 'string'
+    if (!isRename && Object.keys(body).length > 0) {
       setRows((prev) =>
         prev.map((r) => (r.creator_wallet === creator_wallet ? { ...r, ...body } : r))
       )
@@ -185,17 +192,26 @@ export default function AdminPartnerCreatorsPage() {
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setRows(previousRows)
-        setListError(typeof data.error === 'string' ? data.error : 'Could not save partner update')
-        return
+        const error =
+          typeof data.error === 'string' ? data.error : 'Could not save partner update'
+        setListError(error)
+        return { ok: false, error }
       }
-      setSavedWallet(creator_wallet)
+      const nextWallet =
+        typeof data?.creator?.creator_wallet === 'string'
+          ? data.creator.creator_wallet
+          : creator_wallet
+      setSavedWallet(nextWallet)
       setTimeout(() => {
-        setSavedWallet((current) => (current === creator_wallet ? null : current))
+        setSavedWallet((current) => (current === nextWallet ? null : current))
       }, 1800)
       await fetchList()
+      return { ok: true, creator_wallet: nextWallet }
     } catch {
       setRows(previousRows)
-      setListError('Could not save partner update')
+      const error = 'Could not save partner update'
+      setListError(error)
+      return { ok: false, error }
     } finally {
       setSavingWallet(null)
     }
@@ -378,7 +394,8 @@ export default function AdminPartnerCreatorsPage() {
         <CardHeader>
           <CardTitle className="text-lg">Allowlisted wallets</CardTitle>
           <CardDescription>
-            Toggle active or edit sort order inline. Delete removes the row (fee tier reverts to holder/standard rules).
+            Toggle active, change wallet, or edit sort order inline. Delete removes the row (fee tier reverts to
+            holder/standard rules).
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -393,7 +410,23 @@ export default function AdminPartnerCreatorsPage() {
             <ul className="space-y-6 divide-y divide-border/60">
               {rows.map((r) => (
                 <li key={r.creator_wallet} className="pt-6 first:pt-0 space-y-3">
-                  <p className="font-mono text-xs sm:text-sm break-all">{r.creator_wallet}</p>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                    <p className="font-mono text-xs sm:text-sm break-all min-w-0">{r.creator_wallet}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-[44px] shrink-0 touch-manipulation w-full sm:w-auto"
+                      disabled={savingWallet === r.creator_wallet}
+                      onClick={() => {
+                        setWalletEditError(null)
+                        setWalletEditFrom(r.creator_wallet)
+                        setWalletEditValue(r.creator_wallet)
+                      }}
+                    >
+                      Change wallet
+                    </Button>
+                  </div>
                   <p className="text-sm text-muted-foreground">
                     Dashboard display name:{' '}
                     <span className="font-medium text-foreground">
@@ -618,11 +651,94 @@ export default function AdminPartnerCreatorsPage() {
                 if (!labelEditWallet) return
                 void patchRow(labelEditWallet, {
                   display_label: labelEditValue.trim() === '' ? null : labelEditValue.trim(),
-                }).then(() => setLabelEditWallet(null))
+                }).then((result) => {
+                  if (result.ok) setLabelEditWallet(null)
+                })
               }}
             >
               {savingWallet === labelEditWallet ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!walletEditFrom}
+        onOpenChange={(open) => {
+          if (!open && savingWallet !== walletEditFrom) {
+            setWalletEditFrom(null)
+            setWalletEditError(null)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change partner wallet</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2 pt-1">
+                <p>
+                  Moves this allowlist entry to a new Solana address (tier, label, Discord link, and
+                  logo stay the same). The old wallet loses partner fee / spotlight access.
+                </p>
+                {walletEditFrom ? (
+                  <p className="break-all font-mono text-xs text-foreground">Current: {walletEditFrom}</p>
+                ) : null}
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="partner-wallet-edit">New creator wallet</Label>
+            <Input
+              id="partner-wallet-edit"
+              value={walletEditValue}
+              onChange={(e) => {
+                setWalletEditValue(e.target.value)
+                setWalletEditError(null)
+              }}
+              placeholder="Solana public key"
+              className="min-h-[44px] font-mono text-sm touch-manipulation"
+              autoComplete="off"
+            />
+            {walletEditError ? <p className="text-sm text-destructive">{walletEditError}</p> : null}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={savingWallet === walletEditFrom}
+              onClick={() => {
+                setWalletEditFrom(null)
+                setWalletEditError(null)
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={
+                !walletEditFrom ||
+                savingWallet === walletEditFrom ||
+                walletEditValue.trim() === '' ||
+                walletEditValue.trim() === walletEditFrom
+              }
+              onClick={() => {
+                if (!walletEditFrom) return
+                const next = walletEditValue.trim()
+                void patchRow(walletEditFrom, { new_creator_wallet: next }).then((result) => {
+                  if (result.ok) {
+                    setWalletEditFrom(null)
+                    setWalletEditError(null)
+                    return
+                  }
+                  setWalletEditError(result.error)
+                })
+              }}
+            >
+              {savingWallet === walletEditFrom ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Save wallet
             </Button>
           </DialogFooter>
         </DialogContent>
