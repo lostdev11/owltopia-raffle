@@ -26,7 +26,7 @@ export type PackOpenClientResult = {
   revealMessage: string
 }
 
-export async function executePackPurchase(opts: {
+export type ExecutePackPurchaseOptions = {
   publicKey: PublicKey
   connection: Connection
   sendTransaction: (
@@ -34,7 +34,37 @@ export async function executePackPurchase(opts: {
     c: Connection,
     opts?: SendTransactionOptions
   ) => Promise<string>
+  /** Fires after on-chain payment confirms — start pack-open video here. */
+  onPaymentConfirmed?: (info: {
+    openId: string
+    paymentSignature: string
+  }) => void
+}
+
+async function confirmPackOpen(input: {
+  openId: string
+  wallet: string
+  paymentSignature: string
 }): Promise<{ ok: true; result: PackOpenClientResult } | { ok: false; error: string }> {
+  const openRes = await fetch('/api/packs/open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      openId: input.openId,
+      wallet: input.wallet,
+      paymentSignature: input.paymentSignature,
+    }),
+  })
+  const openData = await openRes.json().catch(() => ({}))
+  if (!openRes.ok) {
+    return { ok: false, error: openData.error || 'Pack open failed after payment' }
+  }
+  return { ok: true, result: openData.result as PackOpenClientResult }
+}
+
+export async function executePackPurchase(
+  opts: ExecutePackPurchaseOptions
+): Promise<{ ok: true; result: PackOpenClientResult } | { ok: false; error: string }> {
   const wallet = opts.publicKey.toBase58()
 
   const createRes = await fetch('/api/packs/create', {
@@ -85,19 +115,11 @@ export async function executePackPurchase(opts: {
     }
   }
 
-  const openRes = await fetch('/api/packs/open', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      openId,
-      wallet,
-      paymentSignature: signature,
-    }),
-  })
-  const openData = await openRes.json().catch(() => ({}))
-  if (!openRes.ok) {
-    return { ok: false, error: openData.error || 'Pack open failed after payment' }
-  }
+  opts.onPaymentConfirmed?.({ openId, paymentSignature: signature })
 
-  return { ok: true, result: openData.result as PackOpenClientResult }
+  return confirmPackOpen({
+    openId,
+    wallet,
+    paymentSignature: signature,
+  })
 }

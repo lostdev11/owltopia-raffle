@@ -1,14 +1,17 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Button } from '@/components/ui/button'
+import { PackOpenVideo } from '@/components/packs/PackOpenVideo'
 import { executePackPurchase, type PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
 import { fireGreenConfetti } from '@/lib/confetti'
 import { Gift, Loader2, Package, Sparkles, Ticket } from 'lucide-react'
+
+type RipPhase = 'idle' | 'paying' | 'video' | 'reveal'
 
 type PacksConfig = {
   product: {
@@ -112,7 +115,11 @@ export function PacksClient() {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PackOpenClientResult | null>(null)
   const [credits, setCredits] = useState<number | null>(null)
-  const [phase, setPhase] = useState<'idle' | 'paying' | 'opening' | 'reveal'>('idle')
+  const [phase, setPhase] = useState<RipPhase>('idle')
+  const pendingResultRef = useRef<PackOpenClientResult | null>(null)
+  const videoDoneRef = useRef(false)
+  const videoStartedRef = useRef(false)
+  const openErrorRef = useRef<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -148,34 +155,76 @@ export function PacksClient() {
     void loadCredits()
   }, [loadCredits])
 
+  const tryReveal = useCallback(() => {
+    if (openErrorRef.current) {
+      setError(openErrorRef.current)
+      setPhase('idle')
+      setRipping(false)
+      pendingResultRef.current = null
+      videoDoneRef.current = false
+      openErrorRef.current = null
+      return
+    }
+    if (!videoDoneRef.current || !pendingResultRef.current) return
+    const won = pendingResultRef.current
+    pendingResultRef.current = null
+    videoDoneRef.current = false
+    setResult(won)
+    setPhase('reveal')
+    setRipping(false)
+    fireGreenConfetti()
+    void load()
+    void loadCredits()
+  }, [load, loadCredits])
+
+  function onVideoFinished() {
+    videoDoneRef.current = true
+    tryReveal()
+  }
+
   async function onRip() {
     if (!publicKey || !sendTransaction) return
     setError(null)
     setResult(null)
+    pendingResultRef.current = null
+    videoDoneRef.current = false
+    openErrorRef.current = null
     setRipping(true)
     setPhase('paying')
     try {
-      setPhase('opening')
       const out = await executePackPurchase({
         publicKey,
         connection,
         sendTransaction,
+        onPaymentConfirmed: () => {
+          // Payment landed — play opening video while prize resolves server-side
+          setPhase('video')
+        },
       })
       if (!out.ok) {
-        setError(out.error)
-        setPhase('idle')
+        openErrorRef.current = out.error
+        // If video already started, wait for it (or skip) before surfacing error
+        if (videoDoneRef.current || phase === 'paying') {
+          setError(out.error)
+          setPhase('idle')
+          setRipping(false)
+        } else {
+          tryReveal()
+        }
         return
       }
-      setResult(out.result)
-      setPhase('reveal')
-      fireGreenConfetti()
-      void load()
-      void loadCredits()
+      pendingResultRef.current = out.result
+      tryReveal()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Rip failed')
-      setPhase('idle')
-    } finally {
-      setRipping(false)
+      const msg = e instanceof Error ? e.message : 'Rip failed'
+      openErrorRef.current = msg
+      if (videoDoneRef.current) {
+        setError(msg)
+        setPhase('idle')
+        setRipping(false)
+      } else {
+        tryReveal()
+      }
     }
   }
 
@@ -184,6 +233,7 @@ export function PacksClient() {
 
   return (
     <div className="relative min-h-[70vh] overflow-hidden">
+      <PackOpenVideo active={phase === 'video'} onFinished={onVideoFinished} />
       <div
         className="pointer-events-none absolute inset-0 -z-10"
         style={{
@@ -206,7 +256,7 @@ export function PacksClient() {
           <div className="relative flex-1 overflow-hidden rounded-2xl border border-emerald-500/20 bg-emerald-950/40 p-6 shadow-[0_0_60px_-20px_rgba(16,185,129,0.45)]">
             <div
               className={`mx-auto flex h-40 w-40 items-center justify-center rounded-xl border border-amber-500/30 bg-gradient-to-br from-emerald-900/80 to-stone-900 transition-transform duration-700 ${
-                phase === 'opening' || phase === 'paying' ? 'animate-pulse scale-105' : ''
+                phase === 'paying' || phase === 'video' ? 'animate-pulse scale-105' : ''
               } ${phase === 'reveal' ? 'scale-100' : ''}`}
             >
               {phase === 'reveal' && result ? (
@@ -250,7 +300,11 @@ export function PacksClient() {
                   {ripping ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      {phase === 'paying' ? 'Confirm payment…' : 'Ripping…'}
+                      {phase === 'paying'
+                        ? 'Confirm payment…'
+                        : phase === 'video'
+                          ? 'Opening pack…'
+                          : 'Ripping…'}
                     </>
                   ) : (
                     <>Rip pack · {price} SOL</>

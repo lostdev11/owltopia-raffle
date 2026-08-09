@@ -2,6 +2,17 @@
 
 Product utility: buy a pack with SOL, instantly rip it, always win a prize from a pre-funded vault.
 
+## Pack opening video
+
+After payment confirms on-chain, the client plays the pack-open clip **before** showing the prize:
+
+1. User pays pack price → tx confirms
+2. Full-screen video at `/videos/owl-pack-open.mp4` (override with `NEXT_PUBLIC_PACK_OPEN_VIDEO_URL`)
+3. `/api/packs/open` runs in parallel (roll + payout)
+4. When the video ends (or user skips) **and** the open result is ready → prize reveal
+
+Drop the mp4 into `public/videos/owl-pack-open.mp4` (or point the env URL at a CDN).
+
 ## Locked MVP decisions
 
 | Item | Value |
