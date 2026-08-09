@@ -16,6 +16,32 @@ type ManagePayload = {
   milestones: ManageGen2Milestone[]
 }
 
+type MilestoneFormState = {
+  triggerType: 'absolute_mints' | 'percent_supply'
+  triggerValue: string
+  prizeAmount: string
+  prizeCurrency: 'SOL' | 'USDC'
+  winnerMode: 'random' | 'top_buyer'
+}
+
+const emptyForm = (): MilestoneFormState => ({
+  triggerType: 'absolute_mints',
+  triggerValue: '',
+  prizeAmount: '',
+  prizeCurrency: 'SOL',
+  winnerMode: 'random',
+})
+
+function formFromMilestone(m: ManageGen2Milestone): MilestoneFormState {
+  return {
+    triggerType: m.trigger_type,
+    triggerValue: String(m.trigger_value),
+    prizeAmount: m.prize_amount != null ? String(m.prize_amount) : '',
+    prizeCurrency: m.prize_currency === 'USDC' ? 'USDC' : 'SOL',
+    winnerMode: m.winner_mode === 'top_buyer' ? 'top_buyer' : 'random',
+  }
+}
+
 const shortWallet = (w: string) => (w.length > 8 ? `${w.slice(0, 4)}…${w.slice(-4)}` : w)
 
 function statusBadge(m: ManageGen2Milestone): { label: string; cls: string } {
@@ -28,6 +54,87 @@ function statusBadge(m: ManageGen2Milestone): { label: string; cls: string } {
   return { label: 'NEEDS FUNDING', cls: 'text-[#FF9C9C] border-[#FF9C9C]/40' }
 }
 
+function MilestoneFields({
+  form,
+  onChange,
+}: {
+  form: MilestoneFormState
+  onChange: (next: MilestoneFormState) => void
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <label className="flex flex-col gap-1 text-xs text-[#9BA8B4]">
+        Trigger type
+        <select
+          value={form.triggerType}
+          onChange={(e) =>
+            onChange({
+              ...form,
+              triggerType: e.target.value as 'absolute_mints' | 'percent_supply',
+            })
+          }
+          className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
+        >
+          <option value="absolute_mints">At mint count</option>
+          <option value="percent_supply">At % of supply</option>
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-[#9BA8B4]">
+        {form.triggerType === 'absolute_mints' ? 'Mint count (e.g. 500)' : 'Percent of supply (1–100)'}
+        <input
+          inputMode="numeric"
+          value={form.triggerValue}
+          onChange={(e) => onChange({ ...form, triggerValue: e.target.value })}
+          placeholder={form.triggerType === 'absolute_mints' ? '500' : '50'}
+          className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-[#9BA8B4]">
+        Prize amount
+        <input
+          inputMode="decimal"
+          value={form.prizeAmount}
+          onChange={(e) => onChange({ ...form, prizeAmount: e.target.value })}
+          placeholder="1"
+          className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-[#9BA8B4]">
+        Currency
+        <select
+          value={form.prizeCurrency}
+          onChange={(e) => onChange({ ...form, prizeCurrency: e.target.value as 'SOL' | 'USDC' })}
+          className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
+        >
+          <option value="SOL">SOL</option>
+          <option value="USDC">USDC</option>
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-[#9BA8B4] sm:col-span-2">
+        Winner
+        <select
+          value={form.winnerMode}
+          onChange={(e) => onChange({ ...form, winnerMode: e.target.value as 'random' | 'top_buyer' })}
+          className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
+        >
+          <option value="random">Random minter (weighted by mints)</option>
+          <option value="top_buyer">Top minter</option>
+        </select>
+      </label>
+    </div>
+  )
+}
+
+function formToBody(form: MilestoneFormState) {
+  return {
+    trigger_type: form.triggerType,
+    trigger_value: Number(form.triggerValue),
+    prize_amount: Number(form.prizeAmount),
+    prize_currency: form.prizeCurrency,
+    winner_mode: form.winnerMode,
+  }
+}
+
 export function AdminGen2MintMilestones() {
   const { connection } = useConnection()
   const { publicKey } = useWallet()
@@ -38,12 +145,12 @@ export function AdminGen2MintMilestones() {
   const [msg, setMsg] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
-  const [triggerType, setTriggerType] = useState<'absolute_mints' | 'percent_supply'>('absolute_mints')
-  const [triggerValue, setTriggerValue] = useState('')
-  const [prizeAmount, setPrizeAmount] = useState('')
-  const [prizeCurrency, setPrizeCurrency] = useState<'SOL' | 'USDC'>('SOL')
-  const [winnerMode, setWinnerMode] = useState<'random' | 'top_buyer'>('random')
+  const [addForm, setAddForm] = useState<MilestoneFormState>(emptyForm)
   const [adding, setAdding] = useState(false)
+
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<MilestoneFormState>(emptyForm)
+  const [saving, setSaving] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -74,24 +181,53 @@ export function AdminGen2MintMilestones() {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          trigger_type: triggerType,
-          trigger_value: Number(triggerValue),
-          prize_amount: Number(prizeAmount),
-          prize_currency: prizeCurrency,
-          winner_mode: winnerMode,
-        }),
+        body: JSON.stringify(formToBody(addForm)),
       })
       const j = (await res.json()) as { error?: string }
       if (!res.ok) throw new Error(j.error || 'add_failed')
       setMsg('Milestone added — fund the escrow to arm it.')
-      setTriggerValue('')
-      setPrizeAmount('')
+      setAddForm(emptyForm())
       await load()
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'add_failed')
     } finally {
       setAdding(false)
+    }
+  }
+
+  function startEdit(m: ManageGen2Milestone) {
+    setMsg(null)
+    setEditingId(m.id)
+    setEditForm(formFromMilestone(m))
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditForm(emptyForm())
+  }
+
+  async function saveEdit(milestoneId: string) {
+    setMsg(null)
+    setSaving(true)
+    setBusyId(milestoneId)
+    try {
+      const res = await fetch(`/api/owl-center/gen2/milestones/${milestoneId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formToBody(editForm)),
+      })
+      const j = (await res.json()) as { error?: string }
+      if (!res.ok) throw new Error(j.error || 'update_failed')
+      setMsg('Milestone updated.')
+      setEditingId(null)
+      setEditForm(emptyForm())
+      await load()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'update_failed')
+    } finally {
+      setSaving(false)
+      setBusyId(null)
     }
   }
 
@@ -143,6 +279,7 @@ export function AdminGen2MintMilestones() {
       })
       const j = (await res.json()) as { error?: string }
       if (!res.ok) throw new Error(j.error || 'delete_failed')
+      if (editingId === m.id) cancelEdit()
       await load()
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'delete_failed')
@@ -178,65 +315,12 @@ export function AdminGen2MintMilestones() {
         Surprise prizes that fire as the mint hits a count. When a milestone&apos;s mint target is crossed, a random
         minter (weighted by how many they minted) is auto-selected and can claim the escrowed SOL/USDC. Add milestones
         any time during the mint — fund the escrow before the count reaches the target, or the milestone voids.
+        Unfunded milestones can be edited before funding.
       </p>
 
       <div className="border border-[#1A222B] bg-[#0B0F14] p-4">
         <h3 className="mb-3 font-mono text-xs uppercase tracking-widest text-[#00C97A]">Add milestone</h3>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="flex flex-col gap-1 text-xs text-[#9BA8B4]">
-            Trigger type
-            <select
-              value={triggerType}
-              onChange={(e) => setTriggerType(e.target.value as 'absolute_mints' | 'percent_supply')}
-              className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
-            >
-              <option value="absolute_mints">At mint count</option>
-              <option value="percent_supply">At % of supply</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-[#9BA8B4]">
-            {triggerType === 'absolute_mints' ? 'Mint count (e.g. 500)' : 'Percent of supply (1–100)'}
-            <input
-              inputMode="numeric"
-              value={triggerValue}
-              onChange={(e) => setTriggerValue(e.target.value)}
-              placeholder={triggerType === 'absolute_mints' ? '500' : '50'}
-              className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-[#9BA8B4]">
-            Prize amount
-            <input
-              inputMode="decimal"
-              value={prizeAmount}
-              onChange={(e) => setPrizeAmount(e.target.value)}
-              placeholder="1"
-              className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-[#9BA8B4]">
-            Currency
-            <select
-              value={prizeCurrency}
-              onChange={(e) => setPrizeCurrency(e.target.value as 'SOL' | 'USDC')}
-              className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
-            >
-              <option value="SOL">SOL</option>
-              <option value="USDC">USDC</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-[#9BA8B4] sm:col-span-2">
-            Winner
-            <select
-              value={winnerMode}
-              onChange={(e) => setWinnerMode(e.target.value as 'random' | 'top_buyer')}
-              className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
-            >
-              <option value="random">Random minter (weighted by mints)</option>
-              <option value="top_buyer">Top minter</option>
-            </select>
-          </label>
-        </div>
+        <MilestoneFields form={addForm} onChange={setAddForm} />
         <div className="mt-3">
           <DeployButton type="button" onClick={() => void addMilestone()} disabled={adding}>
             {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -264,7 +348,9 @@ export function AdminGen2MintMilestones() {
           {milestones.map((m) => {
             const badge = statusBadge(m)
             const isBusy = busyId === m.id
+            const isEditing = editingId === m.id
             const canFund = !m.funded && m.status === 'pending'
+            const canEdit = !m.funded && (m.status === 'pending' || m.status === 'void')
             const canRemove = !m.funded && (m.status === 'pending' || m.status === 'void')
             const canReturn = m.funded && (m.status === 'void' || m.status === 'unlocked') && !m.returned_at
             return (
@@ -283,35 +369,73 @@ export function AdminGen2MintMilestones() {
                 {m.winner_wallet ? (
                   <p className="mt-2 font-mono text-xs text-[#00C97A]">winner={shortWallet(m.winner_wallet)}</p>
                 ) : null}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {canFund ? (
-                    <DeployButton type="button" onClick={() => void fundMilestone(m)} disabled={isBusy}>
-                      {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                      Fund escrow ({m.prize_amount} {m.prize_currency})
-                    </DeployButton>
-                  ) : null}
-                  {canReturn ? (
-                    <button
-                      type="button"
-                      onClick={() => void returnDeposit(m)}
-                      disabled={isBusy}
-                      className="inline-flex min-h-[44px] items-center gap-2 border border-[#FFD769]/40 px-4 text-sm text-[#FFD769] hover:bg-[#FFD769]/10 disabled:opacity-50"
-                    >
-                      {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                      Return deposit
-                    </button>
-                  ) : null}
-                  {canRemove ? (
-                    <button
-                      type="button"
-                      onClick={() => void removeMilestone(m)}
-                      disabled={isBusy}
-                      className="inline-flex min-h-[44px] items-center gap-2 border border-[#FF9C9C]/40 px-4 text-sm text-[#FF9C9C] hover:bg-[#FF9C9C]/10 disabled:opacity-50"
-                    >
-                      Remove
-                    </button>
-                  ) : null}
-                </div>
+
+                {isEditing ? (
+                  <div className="mt-4 border border-[#1A222B] bg-[#0F1419] p-3">
+                    <h4 className="mb-3 font-mono text-xs uppercase tracking-widest text-[#FFD769]">
+                      Edit milestone
+                    </h4>
+                    <MilestoneFields form={editForm} onChange={setEditForm} />
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <DeployButton
+                        type="button"
+                        onClick={() => void saveEdit(m.id)}
+                        disabled={saving || isBusy}
+                      >
+                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        Save changes
+                      </DeployButton>
+                      <button
+                        type="button"
+                        onClick={cancelEdit}
+                        disabled={saving}
+                        className="inline-flex min-h-[44px] items-center gap-2 border border-[#1A222B] px-4 text-sm text-[#9BA8B4] hover:bg-[#1A222B]/40 disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {canFund ? (
+                      <DeployButton type="button" onClick={() => void fundMilestone(m)} disabled={isBusy}>
+                        {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        Fund escrow ({m.prize_amount} {m.prize_currency})
+                      </DeployButton>
+                    ) : null}
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        onClick={() => startEdit(m)}
+                        disabled={isBusy}
+                        className="inline-flex min-h-[44px] items-center gap-2 border border-[#FFD769]/40 px-4 text-sm text-[#FFD769] hover:bg-[#FFD769]/10 disabled:opacity-50"
+                      >
+                        Edit
+                      </button>
+                    ) : null}
+                    {canReturn ? (
+                      <button
+                        type="button"
+                        onClick={() => void returnDeposit(m)}
+                        disabled={isBusy}
+                        className="inline-flex min-h-[44px] items-center gap-2 border border-[#FFD769]/40 px-4 text-sm text-[#FFD769] hover:bg-[#FFD769]/10 disabled:opacity-50"
+                      >
+                        {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        Return deposit
+                      </button>
+                    ) : null}
+                    {canRemove ? (
+                      <button
+                        type="button"
+                        onClick={() => void removeMilestone(m)}
+                        disabled={isBusy}
+                        className="inline-flex min-h-[44px] items-center gap-2 border border-[#FF9C9C]/40 px-4 text-sm text-[#FF9C9C] hover:bg-[#FF9C9C]/10 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+                )}
               </li>
             )
           })}

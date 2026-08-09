@@ -115,6 +115,12 @@ export async function updateGen2Milestone(
   patch: Partial<
     Pick<
       Gen2MintMilestone,
+      | 'trigger_type'
+      | 'trigger_value'
+      | 'prize_amount'
+      | 'prize_currency'
+      | 'winner_mode'
+      | 'trigger_mint_target'
       | 'status'
       | 'unlocked_at'
       | 'unlocked_at_minted_count'
@@ -138,6 +144,43 @@ export async function updateGen2Milestone(
   if (error) {
     throw new Error(`Failed to update mint milestone: ${error.message}`)
   }
+}
+
+/**
+ * Rewrite an unfunded milestone's config (trigger / prize / winner mode).
+ * Returns the updated row, or null if the id is missing.
+ */
+export async function updateGen2MilestoneConfig(
+  milestoneId: string,
+  params: {
+    input: Gen2MintMilestoneCreateInput
+    triggerMintTarget: number
+    /** When editing a voided milestone into a future target, reset to pending. */
+    status?: Gen2MintMilestone['status']
+  }
+): Promise<Gen2MintMilestone | null> {
+  const patch: Record<string, unknown> = {
+    trigger_type: params.input.trigger_type,
+    trigger_value: params.input.trigger_value,
+    prize_amount: params.input.prize_amount,
+    prize_currency: params.input.prize_currency,
+    winner_mode: params.input.winner_mode,
+    trigger_mint_target: params.triggerMintTarget,
+    updated_at: new Date().toISOString(),
+  }
+  if (params.status) patch.status = params.status
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('gen2_mint_milestones')
+    .update(patch)
+    .eq('id', milestoneId)
+    .select('*')
+    .maybeSingle()
+  if (error) {
+    throw new Error(`Failed to update mint milestone config: ${error.message}`)
+  }
+  if (!data) return null
+  return mapRow(data as Record<string, unknown>)
 }
 
 /**
