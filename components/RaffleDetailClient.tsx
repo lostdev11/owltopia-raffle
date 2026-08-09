@@ -121,16 +121,21 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
 import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
-import { getFungibleHolderInWallet, getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
+import {
+  getFungibleHolderInWallet,
+  getNftHolderInWalletWithRpcFallback,
+} from '@/lib/solana/wallet-tokens'
 import { isNftHolderTransferLocked } from '@/lib/solana/nft-transfer-lock'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import {
   isMplCoreNoApprovalsError,
   mplCoreNoApprovalsEscrowMessage,
+  sanitizeEscrowTransferFallbackError,
 } from '@/lib/solana/mpl-core-transfer-errors'
 import { formatPhantomBlockedEscrowMessage } from '@/lib/solana/phantom-safe-umi-send'
 import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
+import { tryEscrowDepositFallbacks } from '@/lib/solana/escrow-deposit-fallbacks'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 import {
   logEscrowDepositAbort,
@@ -1904,82 +1909,69 @@ export function RaffleDetailClient({
       }
 
       // SPL / Token‑2022 path (existing behavior)
-      let holder = await getNftHolderInWallet(connection, mint, publicKey)
+      let holder = await getNftHolderInWalletWithRpcFallback(connection, mint, publicKey)
       for (
         let attempt = 0;
         attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1 && !holder;
         attempt++
       ) {
         await new Promise((r) => setTimeout(r, 800))
-        holder = await getNftHolderInWallet(connection, mint, publicKey)
+        holder = await getNftHolderInWalletWithRpcFallback(connection, mint, publicKey)
       }
       if (!holder) {
-        let transferFallbackDetails: string | null = null
-        // Auto-fallbacks: try compressed NFT transfer first, then Mpl Core transfer.
-        // This keeps "transfer to escrow" wallet-sign flow working across common NFT standards.
-        if (raffle.prize_standard !== 'mpl_core' && walletAdapter) {
-          try {
-            logEscrowDepositPath(depositLogCtx, 'fallback_compressed', {
-              note: 'No SPL token account found; trying compressed transfer',
-            })
-            const sig = await transferCompressedNftToEscrow({
-              connection,
-              wallet: walletAdapter,
-              assetId: transferAssetId,
-              escrowAddress,
-              sendTransaction,
-            })
-            await afterWalletSignature(sig, 'fallback_compressed')
+        // Auto-fallbacks: Token Metadata first (classic/pNFT), then compressed, then Core.
+        // Previously we skipped Token Metadata here, so wallet-RPC misses produced Core
+        // AssetAccountData / EnumDiscriminatorOutOfRangeError noise on normal SPL mints.
+        if (walletAdapter) {
+          const fallback = await tryEscrowDepositFallbacks({
+            connection,
+            wallet: walletAdapter,
+            assetId: transferAssetId,
+            escrowAddress,
+            sendTransaction,
+            logCtx: depositLogCtx,
+            // Prefer DB standard when set; otherwise default TM-first ordering.
+            dasInterface:
+              raffle.prize_standard === 'mpl_core'
+                ? 'MplCoreAsset'
+                : raffle.prize_standard === 'compressed'
+                  ? 'V1_NFT_COMPRESSED'
+                  : raffle.prize_standard === 'spl' || raffle.prize_standard === 'token2022'
+                    ? 'V1_NFT'
+                    : null,
+            compressedHint: raffle.prize_standard === 'compressed' ? true : null,
+            skipTokenMetadata: false,
+          })
+          if (fallback.ok) {
+            await afterWalletSignature(fallback.signature, fallback.path)
             return
-          } catch (e) {
-            // Not a compressed NFT (or proof/build failed); continue to Core fallback.
-            transferFallbackDetails = e instanceof Error ? e.message : String(e)
-            logEscrowDepositAbort(depositLogCtx, 'fallback_compressed_failed', {
-              detail: transferFallbackDetails,
-            })
           }
-          try {
-            logEscrowDepositPath(depositLogCtx, 'fallback_mpl_core', {
-              note: 'Trying Metaplex Core transfer after compressed failed or N/A',
-            })
-            const sig = await transferMplCoreToEscrow({
-              connection,
-              wallet: walletAdapter,
-              assetId: transferAssetId,
-              escrowAddress,
-              sendTransaction,
-            })
-            await afterWalletSignature(sig, 'fallback_mpl_core')
-            return
-          } catch (e) {
-            // Fall through to the detailed not-found guidance below.
-            transferFallbackDetails = e instanceof Error ? e.message : String(e)
-            logEscrowDepositAbort(depositLogCtx, 'fallback_mpl_core_failed', {
-              detail: transferFallbackDetails,
-            })
+          const transferFallbackDetails = fallback.displayError || fallback.lastError
+          const detailsSuffix = transferFallbackDetails
+            ? ` Details: ${sanitizeEscrowTransferFallbackError(transferFallbackDetails)}`
+            : ''
+          logEscrowDepositAbort(depositLogCtx, 'no_auto_transfer_path', {
+            mintShort,
+            details: detailsSuffix || undefined,
+          })
+          if (fallback.mplCoreNoApprovals) {
+            setDepositEscrowError(
+              mplCoreNoApprovalsEscrowMessage(mintShort, { fullAssetId: transferAssetId })
+            )
+            setShowManualEscrowFallback(false)
+          } else {
+            setDepositEscrowError(
+              `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then paste the transfer signature below and tap Submit signature. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.${detailsSuffix}`
+            )
+            setShowManualEscrowFallback(true)
           }
+          return
         }
-        const detailsSuffix = transferFallbackDetails
-          ? ` Details: ${transferFallbackDetails}`
-          : ''
-        logEscrowDepositAbort(depositLogCtx, 'no_auto_transfer_path', {
-          mintShort,
-          details: detailsSuffix || undefined,
-        })
-        if (
-          transferFallbackDetails &&
-          isMplCoreNoApprovalsError(transferFallbackDetails)
-        ) {
-          setDepositEscrowError(
-            mplCoreNoApprovalsEscrowMessage(mintShort, { fullAssetId: transferAssetId })
-          )
-          setShowManualEscrowFallback(false)
-        } else {
-          setDepositEscrowError(
-            `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then paste the transfer signature below and tap Submit signature. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.${detailsSuffix}`
-          )
-          setShowManualEscrowFallback(true)
-        }
+        logEscrowDepositAbort(depositLogCtx, 'no_auto_transfer_path', { mintShort })
+        setDepositEscrowError(
+          `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then paste the transfer signature below and tap Submit signature. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.`
+        )
+        setShowManualEscrowFallback(true)
         return
       }
       if (!('tokenProgram' in holder) || !('tokenAccount' in holder)) {
