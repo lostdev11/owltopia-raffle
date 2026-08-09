@@ -16,20 +16,23 @@ import {
   TOKEN_2022_PROGRAM_ID,
 } from '@solana/spl-token'
 import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
-import { getFungibleHolderInWallet, getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
+import {
+  getFungibleHolderInWallet,
+  getNftHolderInWalletWithRpcFallback,
+} from '@/lib/solana/wallet-tokens'
 import {
   isNftHolderTransferLocked,
   isProgrammableNftInterface,
   NFT_TRANSFER_LOCKED_RAFFLE_MESSAGE,
 } from '@/lib/solana/nft-transfer-lock'
-import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import {
   isMplCoreNoApprovalsError,
   mplCoreNoApprovalsEscrowMessage,
 } from '@/lib/solana/mpl-core-transfer-errors'
 import { formatPhantomBlockedEscrowMessage } from '@/lib/solana/phantom-safe-umi-send'
-import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
+import { tryEscrowDepositFallbacks } from '@/lib/solana/escrow-deposit-fallbacks'
+import { prizeStandardFromWalletNft } from '@/lib/solana/prize-nft-standard'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 import {
   logEscrowDepositAbort,
@@ -888,7 +891,12 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     if (!isPartner && prizeNft) {
       try {
         const mintPk = new PublicKey(prizeNft.mint)
-        const stakedCheck = await getNftHolderInWallet(connection, mintPk, publicKey, 'confirmed')
+        const stakedCheck = await getNftHolderInWalletWithRpcFallback(
+          connection,
+          mintPk,
+          publicKey,
+          'confirmed'
+        )
         if (
           stakedCheck &&
           'tokenProgram' in stakedCheck &&
@@ -1035,6 +1043,8 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       data.nft_token_id = prizeNft!.mint
       data.nft_metadata_uri = prizeNft!.metadataUri ?? undefined
       data.nft_collection_name = prizeNft!.collectionName ?? undefined
+      const inferredStandard = prizeStandardFromWalletNft(prizeNft!)
+      if (inferredStandard) data.prize_standard = inferredStandard
     }
     if (hideFromPublicBrowse) {
       data.list_on_platform = false
@@ -1226,7 +1236,12 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             }
             for (let attempt = 0; attempt < HOLDER_LOOKUP_MAX_ATTEMPTS; attempt++) {
               if (resolvedHolder) break
-              const h = await getNftHolderInWallet(connection, mintPk, publicKey, 'processed')
+              const h = await getNftHolderInWalletWithRpcFallback(
+                connection,
+                mintPk,
+                publicKey,
+                'processed'
+              )
               if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
                 if (
                   await isNftHolderTransferLocked({
@@ -1391,62 +1406,30 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 router.push(`/raffles/${raffle.slug}?deposit=1`)
                 return
               }
-              try {
-                logEscrowDepositPath(depositLogCtx, 'fallback_compressed', {
-                  note: 'No SPL holder resolved; trying compressed',
-                  bundledSolMilestone:
-                    solMilestoneLamports && fundsEscrowForNftBundle ? nftMilestoneSol : undefined,
-                })
-                depositSig = await transferCompressedNftToEscrow({
-                  connection,
-                  wallet: walletAdapter,
-                  assetId: prizeNft.mint,
-                  escrowAddress,
-                  ...umiSolBundleArgs,
-                })
+              const fallback = await tryEscrowDepositFallbacks({
+                connection,
+                wallet: walletAdapter,
+                assetId: prizeNft.mint,
+                escrowAddress,
+                ...umiSolBundleArgs,
+                logCtx: depositLogCtx,
+                dasInterface: prizeNft.interface,
+                compressedHint: prizeNft.compressed,
+                skipTokenMetadata: false,
+              })
+              if (fallback.ok) {
+                depositSig = fallback.signature
                 markBundledSolIfConfigured()
-                logEscrowDepositSigned(depositLogCtx, 'fallback_compressed', depositSig)
-              } catch (cErr) {
-                logEscrowDepositAbort(depositLogCtx, 'fallback_compressed_failed', {
-                  detail: cErr instanceof Error ? cErr.message : String(cErr),
-                })
-                depositSig = null
-                bundledSolWithNft = 0
-              }
-              if (!depositSig) {
-                try {
-                  logEscrowDepositPath(depositLogCtx, 'fallback_mpl_core', {
-                    bundledSolMilestone:
-                      solMilestoneLamports && fundsEscrowForNftBundle ? nftMilestoneSol : undefined,
-                  })
-                  depositSig = await transferMplCoreToEscrow({
-                    connection,
-                    wallet: walletAdapter,
-                    assetId: prizeNft.mint,
-                    escrowAddress,
-                    ...umiSolBundleArgs,
-                  })
-                  markBundledSolIfConfigured()
-                  logEscrowDepositSigned(depositLogCtx, 'fallback_mpl_core', depositSig)
-                } catch (coreErr) {
-                  const coreMsg = coreErr instanceof Error ? coreErr.message : String(coreErr)
-                  lastMplCoreEscrowError = coreMsg
-                  logEscrowDepositAbort(depositLogCtx, 'fallback_mpl_core_failed', {
-                    detail: coreMsg,
-                  })
-                  depositSig = null
-                  bundledSolWithNft = 0
-                }
-              }
-              if (!depositSig) {
+              } else {
+                lastMplCoreEscrowError = fallback.lastError
                 logEscrowDepositAbort(depositLogCtx, 'no_path_create_form')
                 const mintShort =
                   prizeNft.mint.length > 16
                     ? `${prizeNft.mint.slice(0, 4)}…${prizeNft.mint.slice(-4)}`
                     : prizeNft.mint
                 if (
-                  lastMplCoreEscrowError &&
-                  isMplCoreNoApprovalsError(lastMplCoreEscrowError)
+                  fallback.mplCoreNoApprovals ||
+                  (lastMplCoreEscrowError && isMplCoreNoApprovalsError(lastMplCoreEscrowError))
                 ) {
                   alert(
                     mplCoreNoApprovalsEscrowMessage(mintShort, {
@@ -1455,7 +1438,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   )
                 } else {
                   alert(
-                    'We could not send this NFT to escrow from here (tried compressed, Metaplex Core, and SPL). ' +
+                    'We could not send this NFT to escrow from here (tried Token Metadata, compressed, Metaplex Core, and SPL). ' +
                       'Your raffle is saved — open it to deposit or verify, or try Wi‑Fi / another network.'
                   )
                 }

@@ -18,7 +18,7 @@ import {
   NFT_TRANSFER_LOCKED_RAFFLE_MESSAGE,
 } from '@/lib/solana/nft-transfer-lock'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
-import type { Raffle, RaffleCurrency, ThemeAccent } from '@/lib/types'
+import type { Raffle, RaffleCurrency, ThemeAccent, PrizeStandard } from '@/lib/types'
 import { THEME_ACCENT_VALUES } from '@/lib/types'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { rateLimit, getClientIp } from '@/lib/rate-limit'
@@ -841,6 +841,13 @@ export async function handleCreateRafflePost(
         list_on_platform,
         sol_domains_hub: snsDomainHubOnly,
         promo_x_handle: promoXHandle,
+      }
+
+      const rawPrizeStandard =
+        typeof body.prize_standard === 'string' ? body.prize_standard.trim() : ''
+      const allowedNftStandards: PrizeStandard[] = ['spl', 'token2022', 'mpl_core', 'compressed']
+      if (rawPrizeStandard && allowedNftStandards.includes(rawPrizeStandard as PrizeStandard)) {
+        ;(raffleData as Raffle).prize_standard = rawPrizeStandard as PrizeStandard
       }
     }
 

@@ -53,6 +53,7 @@
     "test:owl-send-batch": "npx --yes tsx scripts/test-owl-send-batch.ts",
     "test:owl-send-csv": "npx --yes tsx scripts/test-owl-send-csv-import.ts",
     "test:nft-transfer-lock": "npx --yes tsx scripts/test-nft-transfer-lock.ts",
+    "test:escrow-deposit-fallbacks": "npx --yes tsx scripts/test-escrow-deposit-fallbacks.ts",
     "test:owl-send-holder-discount": "npx --yes tsx scripts/test-owl-send-holder-discount.ts",
     "test:partner-nest-pool": "npx --yes tsx scripts/test-partner-nest-pool.ts",
     "test:if-chain-rarity": "npx --yes tsx scripts/verify-if-chain-rarity.ts",

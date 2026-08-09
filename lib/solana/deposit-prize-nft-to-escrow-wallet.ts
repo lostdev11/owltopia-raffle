@@ -22,15 +22,18 @@ import {
   type EscrowDepositLogBase,
 } from '@/lib/solana/escrow-deposit-log'
 import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
-import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
-import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
+import { tryEscrowDepositFallbacks } from '@/lib/solana/escrow-deposit-fallbacks'
 import {
   isMplCoreNoApprovalsError,
   mplCoreNoApprovalsEscrowMessage,
 } from '@/lib/solana/mpl-core-transfer-errors'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
-import { getNftHolderInWallet, type NftHolderInWallet, type WalletNft } from '@/lib/solana/wallet-tokens'
+import {
+  getNftHolderInWalletWithRpcFallback,
+  type NftHolderInWallet,
+  type WalletNft,
+} from '@/lib/solana/wallet-tokens'
 import {
   isNftHolderTransferLocked,
   isProgrammableNftInterface,
@@ -132,7 +135,7 @@ export async function depositPrizeNftToEscrowFromWallet(
 
   for (let attempt = 0; attempt < HOLDER_LOOKUP_MAX_ATTEMPTS; attempt++) {
     if (resolvedHolder) break
-    const h = await getNftHolderInWallet(connection, mintPk, publicKey, 'processed')
+    const h = await getNftHolderInWalletWithRpcFallback(connection, mintPk, publicKey, 'processed')
     if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
       if (
         await isNftHolderTransferLocked({
@@ -158,7 +161,6 @@ export async function depositPrizeNftToEscrowFromWallet(
   }
 
   let depositSig: string | null = null
-  let lastMplCoreEscrowError: string | null = null
 
   if (resolvedHolder) {
     const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
@@ -228,47 +230,28 @@ export async function depositPrizeNftToEscrowFromWallet(
       logEscrowDepositSigned(logCtx, 'spl_transfer', depositSig)
     }
   } else if (walletAdapter) {
-    try {
-      logEscrowDepositPath(logCtx, 'fallback_compressed', { note: 'No SPL holder resolved; trying compressed' })
-      depositSig = await transferCompressedNftToEscrow({
-        connection,
-        wallet: walletAdapter,
-        assetId: selectedNft.mint,
-        escrowAddress,
-        sendTransaction,
-      })
-      logEscrowDepositSigned(logCtx, 'fallback_compressed', depositSig)
-    } catch (cErr) {
-      logEscrowDepositAbort(logCtx, 'fallback_compressed_failed', {
-        detail: cErr instanceof Error ? cErr.message : String(cErr),
-      })
-      depositSig = null
-    }
-    if (!depositSig) {
-      try {
-        logEscrowDepositPath(logCtx, 'fallback_mpl_core')
-        depositSig = await transferMplCoreToEscrow({
-          connection,
-          wallet: walletAdapter,
-          assetId: selectedNft.mint,
-          escrowAddress,
-          sendTransaction,
-        })
-        logEscrowDepositSigned(logCtx, 'fallback_mpl_core', depositSig)
-      } catch (coreErr) {
-        const coreMsg = coreErr instanceof Error ? coreErr.message : String(coreErr)
-        lastMplCoreEscrowError = coreMsg
-        logEscrowDepositAbort(logCtx, 'fallback_mpl_core_failed', { detail: coreMsg })
-        depositSig = null
-      }
-    }
-    if (!depositSig) {
-      logEscrowDepositAbort(logCtx, 'no_path_deposit_prize_nft')
+    const fallback = await tryEscrowDepositFallbacks({
+      connection,
+      wallet: walletAdapter,
+      assetId: selectedNft.mint,
+      escrowAddress,
+      sendTransaction,
+      logCtx,
+      dasInterface: selectedNft.interface,
+      compressedHint: selectedNft.compressed,
+      skipTokenMetadata: false,
+    })
+    if (fallback.ok) {
+      depositSig = fallback.signature
+    } else {
       const mintShort =
         selectedNft.mint.length > 16
           ? `${selectedNft.mint.slice(0, 4)}…${selectedNft.mint.slice(-4)}`
           : selectedNft.mint
-      if (lastMplCoreEscrowError && isMplCoreNoApprovalsError(lastMplCoreEscrowError)) {
+      if (
+        fallback.mplCoreNoApprovals ||
+        (fallback.lastError && isMplCoreNoApprovalsError(fallback.lastError))
+      ) {
         return {
           ok: false,
           error: mplCoreNoApprovalsEscrowMessage(mintShort, { fullAssetId: selectedNft.mint }),
@@ -276,9 +259,11 @@ export async function depositPrizeNftToEscrowFromWallet(
           fullAssetId: selectedNft.mint,
         }
       }
+      logEscrowDepositAbort(logCtx, 'no_path_deposit_prize_nft')
       return {
         ok: false,
         error:
+          fallback.displayError ||
           'Could not send this NFT to escrow (tried Metaplex token metadata, SPL, compressed, and Core). Check Wi‑Fi / RPC or deposit manually.',
       }
     }

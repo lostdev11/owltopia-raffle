@@ -147,6 +147,36 @@ export async function getNftHolderInWallet(
 }
 
 /**
+ * Same as {@link getNftHolderInWallet}, then retry on the primary/Metaplex RPC when the wallet
+ * Connection (often `NEXT_PUBLIC_WALLET_READ_RPC_URL`) misses the account.
+ */
+export async function getNftHolderInWalletWithRpcFallback(
+  connection: Connection,
+  mint: PublicKey,
+  owner: PublicKey,
+  commitment: 'processed' | 'confirmed' | 'finalized' = 'confirmed'
+): Promise<NftHolderInWallet | NftHolderDelegated | null> {
+  const first = await getNftHolderInWallet(connection, mint, owner, commitment)
+  if (first) return first
+
+  const { resolveMetaplexClientRpcUrl } = await import('@/lib/solana-rpc-url')
+  const altUrl = resolveMetaplexClientRpcUrl(connection).replace(/\/+$/, '')
+  const connRaw =
+    ((connection as { rpcEndpoint?: string }).rpcEndpoint ??
+      (connection as { _rpcEndpoint?: string })._rpcEndpoint ??
+      '') as string
+  const connUrl = connRaw.trim().replace(/\/+$/, '')
+  if (!altUrl || (connUrl && altUrl === connUrl)) return null
+
+  try {
+    const alt = new Connection(altUrl, { commitment })
+    return await getNftHolderInWallet(alt, mint, owner, commitment)
+  } catch {
+    return null
+  }
+}
+
+/**
  * SPL / Token-2022 token account that holds at least `minAmount` raw units of `mint` (not delegated).
  */
 export async function getFungibleHolderInWallet(

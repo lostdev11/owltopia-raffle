@@ -8,6 +8,7 @@ export type EscrowDepositPath =
   | 'compressed'
   | 'token_metadata'
   | 'spl_transfer'
+  | 'fallback_token_metadata'
   | 'fallback_compressed'
   | 'fallback_mpl_core'
 
