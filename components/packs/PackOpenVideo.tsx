@@ -78,10 +78,10 @@ export function PackOpenVideo({ active, onFinished }: Props) {
         <video
           ref={videoRef}
           className="mx-auto max-h-[80vh] w-full rounded-lg object-contain shadow-[0_0_80px_-20px_rgba(16,185,129,0.5)]"
-          src={PACK_OPEN_VIDEO_SRC}
           poster={PACK_OPEN_VIDEO_POSTER}
           playsInline
-          muted={false}
+          // Muted required for reliable autoplay on mobile wallets after async payment confirm
+          muted
           controls={false}
           preload="auto"
           onEnded={finish}
@@ -89,7 +89,10 @@ export function PackOpenVideo({ active, onFinished }: Props) {
             setFailed(true)
             finish()
           }}
-        />
+        >
+          <source src={PACK_OPEN_VIDEO_SRC} type="video/quicktime" />
+          <source src={PACK_OPEN_VIDEO_SRC} type="video/mp4" />
+        </video>
         <div className="mt-4 flex flex-col items-center gap-2">
           {failed ? (
             <p className="flex items-center gap-2 text-sm text-emerald-100/70">

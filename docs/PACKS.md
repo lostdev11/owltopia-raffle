@@ -7,11 +7,11 @@ Product utility: buy a pack with SOL, instantly rip it, always win a prize from 
 After payment confirms on-chain, the client plays the pack-open clip **before** showing the prize:
 
 1. User pays pack price → tx confirms
-2. Full-screen video at `/videos/owl-pack-open.mp4` (override with `NEXT_PUBLIC_PACK_OPEN_VIDEO_URL`)
+2. Full-screen video at `/videos/owl-pack-open.mov` (override with `NEXT_PUBLIC_PACK_OPEN_VIDEO_URL`)
 3. `/api/packs/open` runs in parallel (roll + payout)
 4. When the video ends (or user skips) **and** the open result is ready → prize reveal
 
-Drop the mp4 into `public/videos/owl-pack-open.mp4` (or point the env URL at a CDN).
+Clip is committed at `public/videos/owl-pack-open.mov`. Prefer an H.264 mp4 later for max browser coverage.
 
 ## Locked MVP decisions
 
