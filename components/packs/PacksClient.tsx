@@ -157,11 +157,14 @@ export function PacksClient() {
 
   const tryReveal = useCallback(() => {
     if (openErrorRef.current) {
+      // Wait for the opening clip if it already started (skip/end will clear)
+      if (videoStartedRef.current && !videoDoneRef.current) return
       setError(openErrorRef.current)
       setPhase('idle')
       setRipping(false)
       pendingResultRef.current = null
       videoDoneRef.current = false
+      videoStartedRef.current = false
       openErrorRef.current = null
       return
     }
@@ -169,6 +172,7 @@ export function PacksClient() {
     const won = pendingResultRef.current
     pendingResultRef.current = null
     videoDoneRef.current = false
+    videoStartedRef.current = false
     setResult(won)
     setPhase('reveal')
     setRipping(false)
@@ -188,6 +192,7 @@ export function PacksClient() {
     setResult(null)
     pendingResultRef.current = null
     videoDoneRef.current = false
+    videoStartedRef.current = false
     openErrorRef.current = null
     setRipping(true)
     setPhase('paying')
@@ -198,33 +203,20 @@ export function PacksClient() {
         sendTransaction,
         onPaymentConfirmed: () => {
           // Payment landed — play opening video while prize resolves server-side
+          videoStartedRef.current = true
           setPhase('video')
         },
       })
       if (!out.ok) {
         openErrorRef.current = out.error
-        // If video already started, wait for it (or skip) before surfacing error
-        if (videoDoneRef.current || phase === 'paying') {
-          setError(out.error)
-          setPhase('idle')
-          setRipping(false)
-        } else {
-          tryReveal()
-        }
+        tryReveal()
         return
       }
       pendingResultRef.current = out.result
       tryReveal()
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Rip failed'
-      openErrorRef.current = msg
-      if (videoDoneRef.current) {
-        setError(msg)
-        setPhase('idle')
-        setRipping(false)
-      } else {
-        tryReveal()
-      }
+      openErrorRef.current = e instanceof Error ? e.message : 'Rip failed'
+      tryReveal()
     }
   }
 
