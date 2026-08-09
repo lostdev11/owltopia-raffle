@@ -19,6 +19,7 @@ import type { RaffleReferralPromoterRow } from '@/lib/referrals/types'
 import { CreatorModerationBuyerWarning } from '@/components/CreatorModerationBuyerWarning'
 import { CreatorEditRaffleDescription } from '@/components/CreatorEditRaffleDescription'
 import { NftFloorCheckLinks } from '@/components/NftFloorCheckLinks'
+import { RaffleMarketFloorPanel } from '@/components/RaffleMarketFloorPanel'
 import { ParticipantsModal } from '@/components/ParticipantsModal'
 import { RaffleBuyoutPanel } from '@/components/RaffleBuyoutPanel'
 import { WinnerModal } from '@/components/WinnerModal'
@@ -4133,19 +4134,34 @@ export function RaffleDetailClient({
                   )}
                   {raffle.floor_price && (
                     <div>
-                      <p className={classes.labelText + ' text-muted-foreground'}>Floor Price</p>
+                      <p className={classes.labelText + ' text-muted-foreground'}>Listed floor price</p>
                       <p className={classes.contentText + ' font-semibold'}>{raffle.floor_price}</p>
                     </div>
                   )}
                 </div>
                 {raffle.prize_type === 'nft' && raffle.nft_mint_address?.trim() && (
-                  <div className="mt-4 pt-4 border-t border-border/60">
-                    <p className={classes.labelText + ' text-muted-foreground mb-2'}>Check collection floor</p>
-                    <NftFloorCheckLinks
-                      mintAddress={raffle.nft_mint_address}
-                      orbisHref={orbisHref}
-                      className="min-w-0"
+                  <div className="mt-4 space-y-4">
+                    <RaffleMarketFloorPanel
+                      raffleId={raffle.id}
+                      prizeType={raffle.prize_type}
+                      status={raffle.status}
+                      initial={{
+                        market_floor_sol: raffle.market_floor_sol ?? null,
+                        market_floor_fetched_at: raffle.market_floor_fetched_at ?? null,
+                        market_floor_source: raffle.market_floor_source ?? null,
+                        market_floor_collection_symbol: raffle.market_floor_collection_symbol ?? null,
+                      }}
+                      labelClassName={classes.labelText}
+                      valueClassName={classes.contentText}
                     />
+                    <div className="pt-4 border-t border-border/60">
+                      <p className={classes.labelText + ' text-muted-foreground mb-2'}>Check collection floor</p>
+                      <NftFloorCheckLinks
+                        mintAddress={raffle.nft_mint_address}
+                        orbisHref={orbisHref}
+                        className="min-w-0"
+                      />
+                    </div>
                   </div>
                 )}
               </div>

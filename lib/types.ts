@@ -298,6 +298,17 @@ export interface Raffle {
   settled_at: string | null
   rank: string | null
   floor_price: string | null
+  /**
+   * Latest marketplace collection floor in SOL (display only).
+   * Never drives ticket_price, floor_price, or draw goal — those stay creator-listed snapshots.
+   */
+  market_floor_sol: number | null
+  /** When {@link market_floor_sol} was last refreshed from a marketplace API. */
+  market_floor_fetched_at: string | null
+  /** Oracle for market floor: tensor | orbis | magic_eden | none. */
+  market_floor_source: 'tensor' | 'orbis' | 'magic_eden' | 'none' | null
+  /** Marketplace collection slug used for the floor lookup (e.g. Magic Eden symbol). */
+  market_floor_collection_symbol: string | null
   /** Set when NFT prize was verified in platform escrow (prize escrow flow). */
   prize_deposited_at: string | null
   /** Tx signature when creator deposited NFT to escrow. Used to identify mint when escrow holds multiple NFTs. */
@@ -376,7 +387,8 @@ export interface Raffle {
   discord_community_alert_posted_at?: string | null
   /**
    * When true, raffle is shown only under the ".sol domains" hub tab (`?tab=sol-domains`), not Main or Partner.
-   * NFT raffles only; use `floor_price` for the listed reference value (no automated SNS/market calls).
+   * NFT raffles only; use `floor_price` for the listed reference value (draw economics).
+   * Live marketplace floor is stored separately in `market_floor_*` when available.
    */
   sol_domains_hub: boolean
   /** When creator requested cancellation (pending admin approval). */

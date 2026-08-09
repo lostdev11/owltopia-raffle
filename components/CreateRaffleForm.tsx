@@ -2323,9 +2323,18 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 />
               </div>
             </div>
+            {prizeMode === 'nft' && (
+              <CreateRaffleMarketFloorHint
+                mintAddress={prizeNft?.mint}
+                onApplyFloorSol={(_sol, display) => {
+                  setFloorPrice(display)
+                  applyFloorToTicketAutofill(display)
+                }}
+              />
+            )}
             <p className="text-xs text-muted-foreground leading-relaxed">
               {prizeMode === 'nft'
-                ? 'Draw goal updates automatically when you change ticket price or prize value.'
+                ? 'Draw goal updates automatically when you change ticket price or prize value. Live market floor is a suggestion only — listed floor stays what you enter.'
                 : 'Changing ticket price updates the sales goal below; minimum tickets stays what you set for the draw.'}
             </p>
             <div

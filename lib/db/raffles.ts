@@ -195,6 +195,14 @@ let drawVrfColumnCache: { applied: boolean; checked: boolean } = {
   checked: false,
 }
 
+let marketFloorColumnCache: { applied: boolean; checked: boolean } = {
+  applied: false,
+  checked: false,
+}
+
+const RAFFLE_MARKET_FLOOR_SUFFIX =
+  ',market_floor_sol,market_floor_fetched_at,market_floor_source,market_floor_collection_symbol'
+
 /**
  * Whether migration 044 (`image_fallback_url`) exists — avoids 42703 when the column was never applied.
  */
@@ -317,6 +325,26 @@ async function checkDrawVrfColumnsApplied(): Promise<boolean> {
   }
 }
 
+/** Whether migration 212 market_floor_* columns exist. */
+async function checkMarketFloorColumnsApplied(): Promise<boolean> {
+  if (marketFloorColumnCache.checked) {
+    return marketFloorColumnCache.applied
+  }
+  try {
+    const { error } = await getSupabaseForRead()
+      .from('raffles')
+      .select('id,market_floor_sol,market_floor_fetched_at,market_floor_source,market_floor_collection_symbol')
+      .limit(1)
+    const applied = !error
+    marketFloorColumnCache = { applied, checked: true }
+    return applied
+  } catch (err) {
+    console.warn('Could not check market floor columns:', err)
+    marketFloorColumnCache = { applied: false, checked: true }
+    return false
+  }
+}
+
 const FULL_RAFFLE_COLUMNS = getBaseRaffleColumnsCore(true) + NFT_COLUMN_SUFFIX
 
 /**
@@ -334,13 +362,15 @@ async function getRaffleColumns(): Promise<string> {
   const hasDrawReveal = await checkDrawRevealColumnsApplied()
   const hasDrawCommit = await checkDrawCommitColumnsApplied()
   const hasDrawVrf = await checkDrawVrfColumnsApplied()
+  const hasMarketFloor = await checkMarketFloorColumnsApplied()
   const base =
     getBaseRaffleColumnsCore(hasImageFallback) +
     (hasDiscordTenant ? ',discord_partner_tenant_id' : '') +
     (hasPromoXHandle ? ',promo_x_handle' : '') +
     (hasDrawReveal ? RAFFLE_DRAW_REVEAL_SUFFIX : '') +
     (hasDrawCommit ? RAFFLE_DRAW_COMMIT_SUFFIX : '') +
-    (hasDrawVrf ? RAFFLE_DRAW_VRF_SUFFIX : '')
+    (hasDrawVrf ? RAFFLE_DRAW_VRF_SUFFIX : '') +
+    (hasMarketFloor ? RAFFLE_MARKET_FLOOR_SUFFIX : '')
   raffleColumnsCache = hasNftSupport ? base + NFT_COLUMN_SUFFIX : base
   return raffleColumnsCache
 }
@@ -1014,6 +1044,23 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     draw_ledger_hash: (row.draw_ledger_hash as string | null | undefined) ?? null,
     draw_reveal_tx: (row.draw_reveal_tx as string | null | undefined) ?? null,
     draw_revealed_at: (row.draw_revealed_at as string | null | undefined) ?? null,
+    market_floor_sol: (() => {
+      const raw = (row as { market_floor_sol?: unknown }).market_floor_sol
+      if (raw == null || raw === '') return null
+      const n = Number(raw)
+      return Number.isFinite(n) && n > 0 ? n : null
+    })(),
+    market_floor_fetched_at:
+      ((row as { market_floor_fetched_at?: string | null }).market_floor_fetched_at as string | null) ?? null,
+    market_floor_source: (() => {
+      const raw = (row as { market_floor_source?: unknown }).market_floor_source
+      if (raw === 'tensor' || raw === 'orbis' || raw === 'magic_eden' || raw === 'none') return raw
+      return null
+    })(),
+    market_floor_collection_symbol:
+      ((row as { market_floor_collection_symbol?: string | null }).market_floor_collection_symbol as
+        | string
+        | null) ?? null,
   } as Raffle
 }
 
@@ -1832,6 +1879,12 @@ export async function updateRaffle(
   }
   if (!(await checkPromoXHandleColumnApplied()) && 'promo_x_handle' in payload) {
     delete payload.promo_x_handle
+  }
+  if (!(await checkMarketFloorColumnsApplied())) {
+    delete payload.market_floor_sol
+    delete payload.market_floor_fetched_at
+    delete payload.market_floor_source
+    delete payload.market_floor_collection_symbol
   }
 
   const { data, error } = await getSupabaseAdmin()
