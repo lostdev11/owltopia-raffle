@@ -17,8 +17,10 @@ export const dynamic = 'force-dynamic'
 
 /**
  * PATCH /api/owl-center/gen2/milestones/[milestoneId]
- * Edit trigger / prize / winner mode on an unfunded pending or void milestone.
- * Editing a void milestone into a future target resets it to pending.
+ *
+ * - Unfunded pending/void: edit trigger, prize, and winner mode.
+ * - Funded pending (armed): edit trigger + winner mode only; prize stays locked to the escrowed amount.
+ * Editing a void (unfunded) milestone into a future target resets it to pending.
  */
 export async function PATCH(
   request: NextRequest,
@@ -48,20 +50,36 @@ export async function PATCH(
     return NextResponse.json({ error: 'Milestone not found' }, { status: 404 })
   }
 
-  if (milestone.deposit_verified_at) {
-    return NextResponse.json(
-      { error: 'This milestone is funded — return the deposit before editing it.' },
-      { status: 400 }
-    )
-  }
-  if (milestone.status !== 'pending' && milestone.status !== 'void') {
+  const funded = !!milestone.deposit_verified_at
+
+  if (funded) {
+    // Armed milestones can still retarget / change winner selection before they fire.
+    if (milestone.status !== 'pending') {
+      return NextResponse.json(
+        { error: 'Funded milestones can only be edited while still pending (before unlock).' },
+        { status: 400 }
+      )
+    }
+  } else if (milestone.status !== 'pending' && milestone.status !== 'void') {
     return NextResponse.json(
       { error: 'Only pending or void milestones can be edited.' },
       { status: 400 }
     )
   }
 
-  const body = await request.json().catch(() => ({}))
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+
+  if (funded) {
+    // Prize is already in escrow — ignore client prize fields and keep the stored amount/currency.
+    if (
+      milestone.prize_amount == null ||
+      (milestone.prize_currency !== 'SOL' && milestone.prize_currency !== 'USDC')
+    ) {
+      return NextResponse.json({ error: 'Funded milestone is missing prize details.' }, { status: 500 })
+    }
+    body.prize_amount = milestone.prize_amount
+    body.prize_currency = milestone.prize_currency
+  }
 
   const existing = await getGen2MilestonesByLaunchId(launch.id)
   const existingTargets = existing
@@ -82,12 +100,13 @@ export async function PATCH(
   }
 
   // Void milestones edited into a still-future target become pending again so they can be funded.
-  const nextStatus = milestone.status === 'void' ? 'pending' : undefined
+  const nextStatus = !funded && milestone.status === 'void' ? 'pending' : undefined
 
   const updated = await updateGen2MilestoneConfig(milestoneId, {
     input: result.milestone,
     triggerMintTarget: result.target,
     status: nextStatus,
+    lockPrize: funded,
   })
   if (!updated) {
     return NextResponse.json({ error: 'Update failed' }, { status: 500 })

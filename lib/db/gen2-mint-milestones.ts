@@ -147,7 +147,7 @@ export async function updateGen2Milestone(
 }
 
 /**
- * Rewrite an unfunded milestone's config (trigger / prize / winner mode).
+ * Rewrite a milestone's editable config (trigger / winner mode, and prize when not locked).
  * Returns the updated row, or null if the id is missing.
  */
 export async function updateGen2MilestoneConfig(
@@ -157,16 +157,20 @@ export async function updateGen2MilestoneConfig(
     triggerMintTarget: number
     /** When editing a voided milestone into a future target, reset to pending. */
     status?: Gen2MintMilestone['status']
+    /** When true (funded/armed), leave prize_amount + prize_currency unchanged. */
+    lockPrize?: boolean
   }
 ): Promise<Gen2MintMilestone | null> {
   const patch: Record<string, unknown> = {
     trigger_type: params.input.trigger_type,
     trigger_value: params.input.trigger_value,
-    prize_amount: params.input.prize_amount,
-    prize_currency: params.input.prize_currency,
     winner_mode: params.input.winner_mode,
     trigger_mint_target: params.triggerMintTarget,
     updated_at: new Date().toISOString(),
+  }
+  if (!params.lockPrize) {
+    patch.prize_amount = params.input.prize_amount
+    patch.prize_currency = params.input.prize_currency
   }
   if (params.status) patch.status = params.status
 

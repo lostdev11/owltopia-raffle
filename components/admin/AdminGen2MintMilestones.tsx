@@ -57,10 +57,15 @@ function statusBadge(m: ManageGen2Milestone): { label: string; cls: string } {
 function MilestoneFields({
   form,
   onChange,
+  prizeLocked = false,
 }: {
   form: MilestoneFormState
   onChange: (next: MilestoneFormState) => void
+  /** Funded/armed milestones keep the escrowed prize fixed. */
+  prizeLocked?: boolean
 }) {
+  const fieldCls =
+    'min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2] disabled:cursor-not-allowed disabled:opacity-60'
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <label className="flex flex-col gap-1 text-xs text-[#9BA8B4]">
@@ -73,7 +78,7 @@ function MilestoneFields({
               triggerType: e.target.value as 'absolute_mints' | 'percent_supply',
             })
           }
-          className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
+          className={fieldCls}
         >
           <option value="absolute_mints">At mint count</option>
           <option value="percent_supply">At % of supply</option>
@@ -86,7 +91,7 @@ function MilestoneFields({
           value={form.triggerValue}
           onChange={(e) => onChange({ ...form, triggerValue: e.target.value })}
           placeholder={form.triggerType === 'absolute_mints' ? '500' : '50'}
-          className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
+          className={fieldCls}
         />
       </label>
       <label className="flex flex-col gap-1 text-xs text-[#9BA8B4]">
@@ -96,7 +101,8 @@ function MilestoneFields({
           value={form.prizeAmount}
           onChange={(e) => onChange({ ...form, prizeAmount: e.target.value })}
           placeholder="1"
-          className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
+          disabled={prizeLocked}
+          className={fieldCls}
         />
       </label>
       <label className="flex flex-col gap-1 text-xs text-[#9BA8B4]">
@@ -104,7 +110,8 @@ function MilestoneFields({
         <select
           value={form.prizeCurrency}
           onChange={(e) => onChange({ ...form, prizeCurrency: e.target.value as 'SOL' | 'USDC' })}
-          className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
+          disabled={prizeLocked}
+          className={fieldCls}
         >
           <option value="SOL">SOL</option>
           <option value="USDC">USDC</option>
@@ -115,12 +122,18 @@ function MilestoneFields({
         <select
           value={form.winnerMode}
           onChange={(e) => onChange({ ...form, winnerMode: e.target.value as 'random' | 'top_buyer' })}
-          className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-sm text-[#E8EEF2]"
+          className={fieldCls}
         >
           <option value="random">Random minter (weighted by mints)</option>
           <option value="top_buyer">Top minter</option>
         </select>
       </label>
+      {prizeLocked ? (
+        <p className="sm:col-span-2 text-xs text-[#5C6773]">
+          Prize is locked while funded — return the deposit to change amount/currency. Trigger and winner
+          option can still be updated before unlock.
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -315,7 +328,7 @@ export function AdminGen2MintMilestones() {
         Surprise prizes that fire as the mint hits a count. When a milestone&apos;s mint target is crossed, a random
         minter (weighted by how many they minted) is auto-selected and can claim the escrowed SOL/USDC. Add milestones
         any time during the mint — fund the escrow before the count reaches the target, or the milestone voids.
-        Unfunded milestones can be edited before funding.
+        You can edit trigger and winner option anytime before unlock; prize amount stays locked once funded.
       </p>
 
       <div className="border border-[#1A222B] bg-[#0B0F14] p-4">
@@ -350,7 +363,9 @@ export function AdminGen2MintMilestones() {
             const isBusy = busyId === m.id
             const isEditing = editingId === m.id
             const canFund = !m.funded && m.status === 'pending'
-            const canEdit = !m.funded && (m.status === 'pending' || m.status === 'void')
+            // Unfunded pending/void: full edit. Funded pending (armed): trigger + winner only.
+            const canEdit =
+              m.status === 'pending' || (!m.funded && m.status === 'void')
             const canRemove = !m.funded && (m.status === 'pending' || m.status === 'void')
             const canReturn = m.funded && (m.status === 'void' || m.status === 'unlocked') && !m.returned_at
             return (
@@ -375,7 +390,7 @@ export function AdminGen2MintMilestones() {
                     <h4 className="mb-3 font-mono text-xs uppercase tracking-widest text-[#FFD769]">
                       Edit milestone
                     </h4>
-                    <MilestoneFields form={editForm} onChange={setEditForm} />
+                    <MilestoneFields form={editForm} onChange={setEditForm} prizeLocked={m.funded} />
                     <div className="mt-3 flex flex-wrap gap-2">
                       <DeployButton
                         type="button"
