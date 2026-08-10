@@ -35,7 +35,10 @@ import {
   attributeOwlSendFrozenFailures,
   findFrozenOwlSendMints,
 } from '@/lib/owl-send/attribute-batch-failure'
-import { resolveOwlSendSplHolder } from '@/lib/owl-send/resolve-spl-holder'
+import {
+  resolveMintTokenProgram,
+  resolveOwlSendSplHolder,
+} from '@/lib/owl-send/resolve-spl-holder'
 import {
   isOwlSendFrozenTransferError,
   isOwlSendWalletExtensionError,
@@ -132,11 +135,18 @@ async function buildOwlSendSplNftTransaction(params: {
             error: `Could not find a transferable SPL token account for ${line.name ?? line.mint.slice(0, 8)}. Compressed / Core / pNFTs may need a single-NFT send.`,
           }
         }
+        // Mint owner is authoritative — never create a dest ATA with the wrong program
+        // (classic Token CPI against a Token-2022 mint → IncorrectProgramId).
+        const mintProgram = await resolveMintTokenProgram(connection, mintPk)
+        const tokenProgram =
+          mintProgram && !mintProgram.equals(holder.tokenProgram)
+            ? mintProgram
+            : holder.tokenProgram
         const destAta = await getAssociatedTokenAddress(
           mintPk,
           recipientPk,
           false,
-          holder.tokenProgram,
+          tokenProgram,
           ASSOCIATED_TOKEN_PROGRAM_ID
         )
         return {
@@ -145,7 +155,7 @@ async function buildOwlSendSplNftTransaction(params: {
             mintPk,
             recipientPk,
             line,
-            tokenProgram: holder.tokenProgram,
+            tokenProgram,
             tokenAccount: holder.tokenAccount,
             destAta,
           },
@@ -326,6 +336,16 @@ function humanizeOwlSendSendError(msg: string): string {
     m.includes('exceeded the compute')
   ) {
     return 'This approval needs more compute than Solana\'s default budget. Hard-refresh OwlSend and retry — batches now request a higher compute limit.'
+  }
+  // ATA Create with classic Token program against a Token-2022 mint (or vice versa).
+  if (
+    m.includes('incorrectprogramid') ||
+    m.includes('incorrect program id')
+  ) {
+    return (
+      'This NFT uses Token-2022 (or classic SPL) and OwlSend built the wrong token-account create. ' +
+      'Hard-refresh and retry — sends now pick the token program from the mint on-chain.'
+    )
   }
   return msg
 }

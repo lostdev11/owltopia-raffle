@@ -24,6 +24,7 @@ import {
 import { prependOwlSendComputeBudget } from '@/lib/owl-send/compute-budget'
 import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
 import { OWL_SEND_MAX_PER_TX } from '@/lib/owl-send/constants'
+import { resolveMintTokenProgram } from '@/lib/owl-send/resolve-spl-holder'
 import type { OwlSendBatchResult } from '@/lib/owl-send/send-spl-nft-batch'
 
 export type OwlSendTokenLine = {
@@ -83,15 +84,17 @@ export async function sendOwlSendTokenLines(params: {
 
     const mintPk = new PublicKey(line.mint)
     const source = new PublicKey(line.tokenAccount)
+    const tokenProgram =
+      (await resolveMintTokenProgram(connection, mintPk, 'confirmed')) ?? TOKEN_PROGRAM_ID
     const destAta = await getAssociatedTokenAddress(
       mintPk,
       recipientPk,
       false,
-      TOKEN_PROGRAM_ID,
+      tokenProgram,
       ASSOCIATED_TOKEN_PROGRAM_ID
     )
     try {
-      await getAccount(connection, destAta, 'confirmed', TOKEN_PROGRAM_ID)
+      await getAccount(connection, destAta, 'confirmed', tokenProgram)
     } catch {
       tx.add(
         createAssociatedTokenAccountInstruction(
@@ -99,14 +102,14 @@ export async function sendOwlSendTokenLines(params: {
           destAta,
           recipientPk,
           mintPk,
-          TOKEN_PROGRAM_ID,
+          tokenProgram,
           ASSOCIATED_TOKEN_PROGRAM_ID
         )
       )
       newAtaCount += 1
     }
     tx.add(
-      createTransferInstruction(source, destAta, owner, line.amountRaw, [], TOKEN_PROGRAM_ID)
+      createTransferInstruction(source, destAta, owner, line.amountRaw, [], tokenProgram)
     )
   }
 
