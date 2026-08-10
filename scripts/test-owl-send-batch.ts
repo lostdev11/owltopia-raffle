@@ -9,6 +9,7 @@ import {
   buildTokenScatterLines,
   capOwlSendSelection,
   chunkOwlSendBatches,
+  chunkOwlSendNftLines,
   collapseRecipientsToNftScatterPaste,
   expandNftScatterEntries,
   pairScatterLines,
@@ -30,7 +31,10 @@ import {
 import {
   gateOwlSendCnftSelection,
   gateOwlSendPnftSelection,
+  owlSendCanAddToSelection,
+  owlSendFilterCompatibleSelection,
   owlSendNftLockLabel,
+  owlSendSelectionApprovalSize,
   owlSendSkippedFrozenNotice,
   partitionOwlSendByFrozen,
 } from '@/lib/owl-send/picker-eligibility'
@@ -46,7 +50,7 @@ import {
   isOwlSendWalletExtensionError,
   owlSendWalletExtensionHint,
 } from '@/lib/owl-send/wallet-send-errors'
-import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
+import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT, OWL_SEND_MAX_SPECIAL_PER_TX } from '@/lib/owl-send/constants'
 import {
   OWL_SEND_COMPUTE_UNIT_LIMIT,
   owlSendTxHasComputeBudget,
@@ -641,33 +645,75 @@ assert.equal(
   'cNFT'
 )
 {
-  const gate = gateOwlSendCnftSelection([
-    {
-      mint: 'g2',
-      tokenAccount: 'ata',
-      amount: '1',
-      decimals: 0,
-      metadataUri: null,
-      name: 'Gen2',
-      image: null,
-      collectionName: null,
-      compressed: false,
-    },
-    {
-      mint: 'c1',
-      tokenAccount: 'c1',
-      amount: '1',
-      decimals: 0,
-      metadataUri: null,
-      name: 'cNFT',
-      image: null,
-      collectionName: null,
-      compressed: true,
-    },
+  const classic = {
+    mint: 'g2',
+    tokenAccount: 'ata',
+    amount: '1',
+    decimals: 0,
+    metadataUri: null,
+    name: 'Gen2',
+    image: null,
+    collectionName: null,
+    compressed: false,
+  }
+  const cnft = {
+    mint: 'c1',
+    tokenAccount: 'c1',
+    amount: '1',
+    decimals: 0,
+    metadataUri: null,
+    name: 'cNFT',
+    image: null,
+    collectionName: null,
+    compressed: true,
+  }
+  const cnft2 = { ...cnft, mint: 'c2', name: 'cNFT2' }
+
+  const mixGate = gateOwlSendCnftSelection([classic, cnft])
+  assert.equal(mixGate.ok, false)
+  if (!mixGate.ok) assert.match(mixGate.title, /separate/i)
+
+  // Multi-cNFT is allowed (sequential 1-per-approval).
+  const multiCnft = gateOwlSendCnftSelection([cnft, cnft2])
+  assert.equal(multiCnft.ok, true)
+
+  const addOk = owlSendCanAddToSelection({ selected: [cnft], candidate: cnft2 })
+  assert.equal(addOk.ok, true)
+  const addMix = owlSendCanAddToSelection({ selected: [classic], candidate: cnft })
+  assert.equal(addMix.ok, false)
+  if (!addMix.ok) assert.match(addMix.detail, /can’t mix|can't mix/i)
+
+  const filtered = owlSendFilterCompatibleSelection({
+    currentSelected: [cnft],
+    candidates: [cnft, cnft2, classic],
+  })
+  assert.deepEqual(filtered.mints.sort(), ['c1', 'c2'])
+  assert.equal(filtered.rejected.length, 1)
+  assert.ok(filtered.gate && !filtered.gate.ok)
+
+  assert.equal(owlSendSelectionApprovalSize([cnft, cnft2]), OWL_SEND_MAX_SPECIAL_PER_TX)
+  assert.equal(owlSendSelectionApprovalSize([classic]), OWL_SEND_MAX_PER_TX)
+
+  const cnftChunks = chunkOwlSendNftLines([
+    { mint: 'c1', recipient: 'r1', compressed: true },
+    { mint: 'c2', recipient: 'r1', compressed: true },
+    { mint: 'c3', recipient: 'r1', compressed: true },
   ])
-  assert.equal(gate.ok, false)
-  if (!gate.ok) assert.match(gate.title, /separately/i)
+  assert.equal(cnftChunks.length, 3)
+  assert.equal(cnftChunks[0]!.length, 1)
+
+  const classicChunks = chunkOwlSendNftLines([
+    { mint: 'g1', recipient: 'r1' },
+    { mint: 'g2', recipient: 'r1' },
+    { mint: 'g3', recipient: 'r1' },
+    { mint: 'g4', recipient: 'r1' },
+    { mint: 'g5', recipient: 'r1' },
+    { mint: 'g6', recipient: 'r1' },
+  ])
+  assert.equal(classicChunks.length, 2)
+  assert.equal(classicChunks[0]!.length, 5)
 }
+
 assert.match(owlSendRetryHint('User rejected the request'), /Wallet rejected/)
 
 {

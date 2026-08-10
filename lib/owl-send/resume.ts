@@ -1,5 +1,5 @@
 import type { OwlSendLine } from '@/lib/owl-send/batch'
-import { chunkOwlSendBatches } from '@/lib/owl-send/batch'
+import { chunkOwlSendNftLines } from '@/lib/owl-send/batch'
 
 export type OwlSendBatchProgressSnapshot = {
   index: number
@@ -96,7 +96,7 @@ export function buildResumeRemainingPlan(params: {
     }
   }
 
-  const batches = chunkOwlSendBatches(remaining)
+  const batches = chunkOwlSendNftLines(remaining)
   const batchProgress: OwlSendBatchProgressSnapshot[] = batches.map((_, i) => ({
     index: i,
     total: batches.length,
@@ -169,7 +169,7 @@ export function buildResumeSkippingFrozenPlan(params: {
     }
   }
 
-  const batches = chunkOwlSendBatches(remaining)
+  const batches = chunkOwlSendNftLines(remaining)
   const batchProgress: OwlSendBatchProgressSnapshot[] = batches.map((_, i) => ({
     index: i,
     total: batches.length,
