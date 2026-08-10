@@ -37,21 +37,24 @@ export function isCryptoPrizeRaffle(raffle: Raffle): boolean {
 
 function searchableFields(raffle: Raffle): string[] {
   return [
+    raffle.id,
     raffle.title,
     raffle.slug,
     raffle.description,
     raffle.nft_collection_name,
     raffle.nft_token_id,
+    raffle.nft_mint_address,
     raffle.prize_currency,
     raffle.promo_x_handle,
     raffle.creator_wallet,
     raffle.created_by,
+    raffle.winner_wallet,
   ]
     .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
     .map((v) => v.trim().toLowerCase())
 }
 
-/** Case-insensitive match on title, slug, collection, prize ticker, promo handle, etc. */
+/** Case-insensitive match on title, slug, id, mint, collection, prize ticker, wallets, etc. */
 export function raffleMatchesBrowseSearch(raffle: Raffle, rawQuery: string): boolean {
   const q = rawQuery.trim().toLowerCase()
   if (!q) return true
