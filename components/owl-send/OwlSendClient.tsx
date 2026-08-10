@@ -39,7 +39,10 @@ import { findFrozenOwlSendMints } from '@/lib/owl-send/attribute-batch-failure'
 import {
   gateOwlSendSpecialAssetSelection,
   isOwlSendCompressedNft,
+  owlSendCanAddToSelection,
+  owlSendFilterCompatibleSelection,
   owlSendNftProblemLabel,
+  owlSendSelectionApprovalSize,
   owlSendSkippedFrozenNotice,
   partitionLiveFrozenForOwlSend,
   partitionOwlSendByFrozen,
@@ -64,6 +67,7 @@ import { isJupiterBrowser } from '@/lib/utils'
 import {
   buildTokenScatterLines,
   chunkOwlSendBatches,
+  chunkOwlSendNftLines,
   collapseRecipientsToNftScatterPaste,
   expandNftScatterEntries,
   pairScatterLines,
@@ -87,6 +91,7 @@ import {
 import {
   OWL_SEND_MAX_PER_TX,
   OWL_SEND_MAX_SELECT,
+  OWL_SEND_MAX_SPECIAL_PER_TX,
   type OwlSendAssetTab,
   type OwlSendMode,
 } from '@/lib/owl-send/constants'
@@ -457,12 +462,18 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     }
     const count = selectedNfts.length
     if (count < 1) return null
+    const perApproval = owlSendSelectionApprovalSize(selectedNfts)
     return buildOwlSendCostEstimate({
       nftCount: count,
-      batchCount: Math.ceil(count / OWL_SEND_MAX_PER_TX),
+      batchCount: Math.ceil(count / perApproval),
       discountBps,
     })
-  }, [preparedLines, batches.length, selectedNfts.length, discountBps])
+  }, [preparedLines, batches.length, selectedNfts, discountBps])
+
+  const nftApprovalSize = useMemo(
+    () => owlSendSelectionApprovalSize(selectedNfts),
+    [selectedNfts]
+  )
 
   const cancelInFlightSend = () => {
     sendCancelledRef.current = true
@@ -501,10 +512,28 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setBatches([])
     setBatchProgress([])
     setSessionError(null)
+
     setSelectedMints((prev) => {
       const next = new Set(prev)
-      if (next.has(nft.mint)) next.delete(nft.mint)
-      else if (next.size < OWL_SEND_MAX_SELECT) next.add(nft.mint)
+      if (next.has(nft.mint)) {
+        next.delete(nft.mint)
+        setCnftGate(null)
+        return next
+      }
+      if (next.size >= OWL_SEND_MAX_SELECT) return prev
+
+      const already = nfts.filter((n) => next.has(n.mint))
+      const mix = owlSendCanAddToSelection({ selected: already, candidate: nft })
+      if (!mix.ok) {
+        setCnftGate({
+          title: mix.title,
+          detail: mix.detail,
+          cnftMints: mix.cnftMints,
+        })
+        return prev
+      }
+      setCnftGate(null)
+      next.add(nft.mint)
       return next
     })
   }
@@ -514,7 +543,24 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setBatches([])
     setBatchProgress([])
     setSessionError(null)
-    setSelectedMints(new Set(mints.slice(0, OWL_SEND_MAX_SELECT)))
+
+    const currentSelected = nfts.filter((n) => selectedMints.has(n.mint))
+    const mintSet = new Set(mints.map((m) => m.trim()).filter(Boolean))
+    const candidates = nfts.filter((n) => mintSet.has(n.mint))
+    const filtered = owlSendFilterCompatibleSelection({
+      currentSelected,
+      candidates,
+    })
+    if (filtered.gate && !filtered.gate.ok) {
+      setCnftGate({
+        title: filtered.gate.title,
+        detail: filtered.gate.detail,
+        cnftMints: filtered.gate.cnftMints,
+      })
+    } else {
+      setCnftGate(null)
+    }
+    setSelectedMints(new Set(filtered.mints.slice(0, OWL_SEND_MAX_SELECT)))
   }
 
   /**
@@ -727,7 +773,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
     setPreparing(true)
     try {
-      const chunked = chunkOwlSendBatches(lines)
+      const chunked = chunkOwlSendNftLines(lines)
       setPreparedLines(lines)
       setBatches(chunked)
       setBatchProgress(
@@ -1041,7 +1087,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     }
 
     const skippedFrozen = draft.preparedLines.length - remainingLines.length
-    const newBatches = chunkOwlSendBatches(remainingLines)
+    const newBatches = chunkOwlSendNftLines(remainingLines)
     const newProgress = newBatches.map((_, index) => ({
       index,
       total: newBatches.length,
@@ -1394,7 +1440,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                 setBatchProgress([])
               }}
             >
-              Deselect those NFTs
+              Deselect conflicting NFTs
             </Button>
             <Button
               type="button"
@@ -1559,9 +1605,12 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     </Button>
                   </div>
                   <CardDescription>
-                    Up to {OWL_SEND_MAX_SELECT} NFTs · {OWL_SEND_MAX_PER_TX} per wallet
-                    approval · only Nested/frozen assets fail on-chain (leftover Gen2 CM
-                    delegates after thaw are fine)
+                    Up to {OWL_SEND_MAX_SELECT} NFTs ·{' '}
+                    {nftApprovalSize === OWL_SEND_MAX_SPECIAL_PER_TX
+                      ? `${OWL_SEND_MAX_SPECIAL_PER_TX} cNFT/pNFT per wallet approval (sequential)`
+                      : `${OWL_SEND_MAX_PER_TX} classic NFTs per wallet approval`}
+                    {' · '}
+                    cNFTs and classic NFTs can’t mix — you’ll get a prompt if you try
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1635,7 +1684,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   </CardTitle>
                   <CardDescription>
                     {mode === 'send_to_one'
-                      ? 'All selected NFTs go to this wallet (batches of 5).'
+                      ? nftApprovalSize === OWL_SEND_MAX_SPECIAL_PER_TX
+                        ? 'All selected NFTs go to this wallet (1 cNFT/pNFT per approval).'
+                        : `All selected NFTs go to this wallet (batches of ${OWL_SEND_MAX_PER_TX}).`
                       : randomizeScatter
                         ? 'Paste wallets (one per line), or wallet,N for exact counts — e.g. walletA,5 then walletB,1. Counts must sum to selected NFTs; otherwise split evenly.'
                         : pairPerNft
@@ -1982,7 +2033,10 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       <p className="pt-1 font-semibold text-white">Total {cost.totalLabel}</p>
                       {cost.batchCount > 1 ? (
                         <p className="text-xs text-muted-foreground">
-                          {cost.batchCount} wallet approvals · {OWL_SEND_MAX_PER_TX} NFTs each
+                          {cost.batchCount} wallet approvals ·{' '}
+                          {nftApprovalSize === OWL_SEND_MAX_SPECIAL_PER_TX
+                            ? `${OWL_SEND_MAX_SPECIAL_PER_TX} cNFT/pNFT each`
+                            : `${OWL_SEND_MAX_PER_TX} NFTs each`}
                         </p>
                       ) : null}
                     </div>

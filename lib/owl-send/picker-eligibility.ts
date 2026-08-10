@@ -3,6 +3,7 @@ import {
   isProgrammableNftInterface,
   isWalletNftTransferLocked,
 } from '@/lib/solana/nft-transfer-lock'
+import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SPECIAL_PER_TX } from '@/lib/owl-send/constants'
 
 /** Compressed NFT from DAS `compression.compressed` (or interface hint). */
 export function isOwlSendCompressedNft(nft: WalletNft): boolean {
@@ -14,6 +15,115 @@ export function isOwlSendCompressedNft(nft: WalletNft): boolean {
 /** Metaplex programmable NFT — needs Token Metadata path, not classic SPL multi-send. */
 export function isOwlSendProgrammableNft(nft: WalletNft): boolean {
   return isProgrammableNftInterface(nft.interface)
+}
+
+/** Picker bucket for mix rules (cNFT / pNFT / classic SPL cannot share a send). */
+export type OwlSendPickerKind = 'cnft' | 'pnft' | 'classic'
+
+export function owlSendPickerKind(nft: Pick<WalletNft, 'compressed' | 'interface'>): OwlSendPickerKind {
+  if (isOwlSendCompressedNft(nft as WalletNft)) return 'cnft'
+  if (isOwlSendProgrammableNft(nft as WalletNft)) return 'pnft'
+  return 'classic'
+}
+
+/** Classic SPL ≤5 per approval; cNFT / pNFT ≤1 (sequential approvals). */
+export function owlSendSelectionApprovalSize(selected: Array<Pick<WalletNft, 'compressed' | 'interface'>>): number {
+  if (selected.some((n) => owlSendPickerKind(n) !== 'classic')) return OWL_SEND_MAX_SPECIAL_PER_TX
+  return OWL_SEND_MAX_PER_TX
+}
+
+function kindLabel(kind: OwlSendPickerKind): string {
+  if (kind === 'cnft') return 'cNFTs'
+  if (kind === 'pnft') return 'pNFTs'
+  return 'classic NFTs'
+}
+
+function mixGate(
+  selectedKind: OwlSendPickerKind,
+  candidateKind: OwlSendPickerKind,
+  conflictMints: string[]
+): OwlSendAssetGate {
+  return {
+    ok: false,
+    title: `Keep ${kindLabel(selectedKind)} separate`,
+    detail: `${kindLabel(candidateKind)} can’t mix with ${kindLabel(selectedKind)} in one send. Deselect the others first, or finish this send and start a new one.`,
+    cnftMints: conflictMints,
+  }
+}
+
+/**
+ * Immediate mix check when toggling one NFT on.
+ * Empty selection always allows the candidate.
+ */
+export function owlSendCanAddToSelection(params: {
+  selected: WalletNft[]
+  candidate: WalletNft
+}): OwlSendAssetGate {
+  const { selected, candidate } = params
+  if (selected.length < 1) return { ok: true }
+  const selectedKind = owlSendPickerKind(selected[0]!)
+  // Defend against a corrupted mixed selection.
+  for (const n of selected) {
+    if (owlSendPickerKind(n) !== selectedKind) {
+      return mixGate(selectedKind, owlSendPickerKind(n), selected.map((s) => s.mint))
+    }
+  }
+  const candidateKind = owlSendPickerKind(candidate)
+  if (candidateKind === selectedKind) return { ok: true }
+  return mixGate(selectedKind, candidateKind, [candidate.mint])
+}
+
+/**
+ * Filter a bulk select (e.g. select-all filtered) to one compatible kind.
+ * Prefers the current selection’s kind; otherwise the first candidate’s kind.
+ */
+export function owlSendFilterCompatibleSelection(params: {
+  currentSelected: WalletNft[]
+  candidates: WalletNft[]
+}): {
+  mints: string[]
+  keptKind: OwlSendPickerKind | null
+  rejected: WalletNft[]
+  gate: OwlSendAssetGate | null
+} {
+  const { currentSelected, candidates } = params
+  if (candidates.length < 1) {
+    return { mints: [], keptKind: null, rejected: [], gate: null }
+  }
+
+  const keptKind: OwlSendPickerKind =
+    currentSelected.length > 0
+      ? owlSendPickerKind(currentSelected[0]!)
+      : owlSendPickerKind(candidates[0]!)
+
+  const kept: WalletNft[] = []
+  const rejected: WalletNft[] = []
+  // Preserve already-selected of the kept kind, then add compatible candidates.
+  const byMint = new Map<string, WalletNft>()
+  for (const n of currentSelected) {
+    if (owlSendPickerKind(n) === keptKind) byMint.set(n.mint, n)
+  }
+  for (const n of candidates) {
+    if (owlSendPickerKind(n) === keptKind) byMint.set(n.mint, n)
+    else rejected.push(n)
+  }
+  for (const n of byMint.values()) kept.push(n)
+
+  const gate =
+    rejected.length > 0
+      ? mixGate(
+          keptKind,
+          owlSendPickerKind(rejected[0]!),
+          rejected.map((r) => r.mint)
+        )
+      : null
+
+  return {
+    mints: kept.map((n) => n.mint),
+    keptKind,
+    rejected,
+    gate,
+  }
 }
 
 /**
@@ -109,31 +219,21 @@ export type OwlSendAssetGate =
 export type OwlSendCnftGate = OwlSendAssetGate
 
 /**
- * cNFTs cannot share a classic SPL multi-send with Gen2/SPL NFTs, and multi-cNFT
- * needs one-at-a-time special path. Gate at Review — popup, not wall of helper text.
+ * cNFTs cannot share a send with classic SPL / pNFTs.
+ * Multiple cNFTs are allowed — each gets its own wallet approval (sequential).
  */
 export function gateOwlSendCnftSelection(selected: WalletNft[]): OwlSendAssetGate {
   const cnfts = selected.filter(isOwlSendCompressedNft)
   if (cnfts.length === 0) return { ok: true }
 
-  const classic = selected.filter((n) => !isOwlSendCompressedNft(n))
-  const cnftMints = cnfts.map((n) => n.mint)
-
-  if (classic.length > 0) {
+  const others = selected.filter((n) => !isOwlSendCompressedNft(n))
+  if (others.length > 0) {
     return {
       ok: false,
-      title: 'Send cNFTs separately',
-      detail: `${cnfts.length} cNFT${cnfts.length === 1 ? '' : 's'} selected with other NFTs. Deselect cNFTs to continue this batch, or send only cNFTs (one at a time).`,
-      cnftMints,
-    }
-  }
-
-  if (cnfts.length > 1) {
-    return {
-      ok: false,
-      title: 'cNFTs: one at a time',
-      detail: 'Compressed NFTs need their own send — keep one selected, then Review again.',
-      cnftMints,
+      title: 'Keep cNFTs separate',
+      detail:
+        'Compressed NFTs can’t mix with other NFTs in one send. Deselect the others, or deselect cNFTs.',
+      cnftMints: cnfts.map((n) => n.mint),
     }
   }
 
@@ -141,32 +241,21 @@ export function gateOwlSendCnftSelection(selected: WalletNft[]): OwlSendAssetGat
 }
 
 /**
- * pNFTs use Token Metadata (not classic SPL multi-transfer). Gate mixes + multi-select
- * at Review so we never call a frozen SPL ATA a “nest lock” mid-send.
+ * pNFTs cannot share a send with classic SPL / cNFTs.
+ * Multiple pNFTs are allowed — each gets its own Token Metadata approval (sequential).
  */
 export function gateOwlSendPnftSelection(selected: WalletNft[]): OwlSendAssetGate {
   const pnfts = selected.filter(isOwlSendProgrammableNft)
   if (pnfts.length === 0) return { ok: true }
 
   const others = selected.filter((n) => !isOwlSendProgrammableNft(n))
-  const pnftMints = pnfts.map((n) => n.mint)
-
   if (others.length > 0) {
     return {
       ok: false,
-      title: 'Send pNFTs separately',
-      detail: `${pnfts.length} pNFT${pnfts.length === 1 ? '' : 's'} selected with other NFTs. Deselect pNFTs for this batch, or send only pNFTs (one at a time).`,
-      cnftMints: pnftMints,
-    }
-  }
-
-  if (pnfts.length > 1) {
-    return {
-      ok: false,
-      title: 'pNFTs: one at a time',
+      title: 'Keep pNFTs separate',
       detail:
-        'Programmable NFTs need their own send (Token Metadata). Keep one selected, then Review again.',
-      cnftMints: pnftMints,
+        'Programmable NFTs can’t mix with other NFTs in one send. Deselect the others, or deselect pNFTs.',
+      cnftMints: pnfts.map((n) => n.mint),
     }
   }
 

@@ -9,6 +9,12 @@ export const OWL_SEND_MAX_SELECT = 20
 /** Max NFTs (and Scatter wallets) per wallet approval / transaction. */
 export const OWL_SEND_MAX_PER_TX = 5
 
+/**
+ * Max cNFT / pNFT / Core assets per wallet approval.
+ * Bubblegum proofs are large — one leaf transfer per tx is the reliable default.
+ */
+export const OWL_SEND_MAX_SPECIAL_PER_TX = 1
+
 /** Approximate ATA rent when recipient needs a new token account. */
 export const OWL_SEND_ATA_RENT_SOL = 0.00203928
 

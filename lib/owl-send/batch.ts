@@ -1,4 +1,9 @@
-import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
+import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT, OWL_SEND_MAX_SPECIAL_PER_TX } from '@/lib/owl-send/constants'
+import {
+  isDasCompressedNft,
+  isDasMplCoreInterface,
+} from '@/lib/solana/prize-nft-standard'
+import { isProgrammableNftInterface } from '@/lib/solana/nft-transfer-lock'
 
 export type OwlSendLine = {
   mint: string
@@ -29,6 +34,24 @@ export function chunkOwlSendBatches<T>(
     chunks.push(items.slice(i, i + size))
   }
   return chunks
+}
+
+function lineNeedsSpecialPath(line: Pick<OwlSendLine, 'compressed' | 'interface'>): boolean {
+  if (isDasCompressedNft({ compressed: line.compressed, interface: line.interface })) return true
+  if (isDasMplCoreInterface(line.interface)) return true
+  if (isProgrammableNftInterface(line.interface)) return true
+  return false
+}
+
+/** Per-approval size: classic SPL ≤5; cNFT / pNFT / Core ≤1 (proof size). */
+export function owlSendNftApprovalSize(lines: Array<Pick<OwlSendLine, 'compressed' | 'interface'>>): number {
+  if (lines.some(lineNeedsSpecialPath)) return OWL_SEND_MAX_SPECIAL_PER_TX
+  return OWL_SEND_MAX_PER_TX
+}
+
+/** Chunk NFT send lines with the correct per-approval size for the asset type. */
+export function chunkOwlSendNftLines(lines: OwlSendLine[]): OwlSendLine[][] {
+  return chunkOwlSendBatches(lines, owlSendNftApprovalSize(lines))
 }
 
 export type NftScatterEntry = {
