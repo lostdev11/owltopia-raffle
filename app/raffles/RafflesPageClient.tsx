@@ -7,7 +7,7 @@
  * - When server returns empty, fallback: fetch from GET /api/raffles and bucket client-side so cards show.
  * - When API also fails: try direct Supabase from browser (different connection path, often works when server times out).
  * - Logging: console.log("raffles fetch", ...) only when ?debug=1.
- * - Tab "Raffles entered": when wallet connected, users see only their own entries with date and blockchain validation.
+ * - Tab "Raffles entered": SIWS session required (same as /api/entries/my); wallet connect alone shows a sign-in prompt.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
@@ -1527,7 +1527,10 @@ export function RafflesPageClient({
               ) : (
                 <div className="rounded-lg border border-border bg-card/50 p-8 text-center text-muted-foreground">
                   <p className="text-lg">Connect your wallet to see raffles you’ve entered.</p>
-                  <p className="mt-2 text-sm">Only you can see your own entries.</p>
+                  <p className="mt-2 text-sm">
+                    After connecting, you’ll sign in once (message signature, no fee). Only you can see your own
+                    entries.
+                  </p>
                 </div>
               )}
             </div>
