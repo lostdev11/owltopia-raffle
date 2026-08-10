@@ -43,6 +43,7 @@ import {
   owlSendSplErrorNeedsSpecialFallback,
   shouldSkipOwlSendSpecialFallback,
 } from '@/lib/owl-send/send-batch'
+import { owlSendNftSendButtonLabel } from '@/lib/owl-send/send-button-label'
 import { owlSendTokenAccountHint } from '@/lib/owl-send/resolve-spl-holder'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
 import {
@@ -822,6 +823,43 @@ assert.match(owlSendRetryHint('User rejected the request'), /Wallet rejected/)
   assert.notEqual(classic.toBase58(), t22.toBase58())
   assert.ok(TOKEN_2022_PROGRAM_ID.toBase58().startsWith('Tokenz'))
   assert.ok(TOKEN_PROGRAM_ID.toBase58().startsWith('Tokenk'))
+}
+
+{
+  assert.equal(
+    owlSendNftSendButtonLabel({
+      batchesTotal: 3,
+      activeIndex: 0,
+      status: 'ready',
+    }),
+    'Send all 3 approvals'
+  )
+  assert.equal(
+    owlSendNftSendButtonLabel({
+      batchesTotal: 3,
+      activeIndex: 1,
+      status: 'ready',
+      remainingFromActive: 2,
+    }),
+    'Send remaining 2 approvals'
+  )
+  assert.equal(
+    owlSendNftSendButtonLabel({
+      batchesTotal: 3,
+      activeIndex: 1,
+      status: 'sending',
+      sendPhase: 'approving',
+    }),
+    'Approve in wallet (2 of 3)…'
+  )
+  assert.equal(
+    owlSendNftSendButtonLabel({
+      batchesTotal: 1,
+      activeIndex: 0,
+      status: 'ready',
+    }),
+    'Are you sure? Send'
+  )
 }
 
 console.log('test-owl-send-batch: ok')

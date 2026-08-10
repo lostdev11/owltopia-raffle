@@ -15,6 +15,9 @@ export const OWL_SEND_MAX_PER_TX = 5
  */
 export const OWL_SEND_MAX_SPECIAL_PER_TX = 1
 
+/** Pause between chained wallet approvals so mobile wallets can close/reopen cleanly. */
+export const OWL_SEND_CHAIN_APPROVAL_GAP_MS = 450
+
 /** Approximate ATA rent when recipient needs a new token account. */
 export const OWL_SEND_ATA_RENT_SOL = 0.00203928
 
