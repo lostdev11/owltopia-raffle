@@ -20,6 +20,10 @@ import {
 import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
 import type { OwlSendLine } from '@/lib/owl-send/batch'
 import type { OwlSendBatchResult, OwlSendSendPhase } from '@/lib/owl-send/send-spl-nft-batch'
+import {
+  orderedEscrowFallbacks,
+  type EscrowFallbackKind,
+} from '@/lib/solana/prize-nft-standard'
 
 async function sendFeeOnlyTx(params: {
   connection: Connection
@@ -58,9 +62,66 @@ async function sendFeeOnlyTx(params: {
   }
 }
 
+async function tryFallbackKind(params: {
+  kind: EscrowFallbackKind
+  connection: Connection
+  walletAdapter: WalletAdapter
+  sendTransaction: WalletSendTransactionFn
+  mint: string
+  recipient: string
+  feeLamports: number
+  treasury: string | null
+}): Promise<string> {
+  const {
+    kind,
+    connection,
+    walletAdapter,
+    sendTransaction,
+    mint,
+    recipient,
+    feeLamports,
+    treasury,
+  } = params
+  const feeOpts =
+    feeLamports > 0 && treasury
+      ? {
+          solMilestoneLamports: feeLamports,
+          fundsEscrowAddress: treasury,
+        }
+      : {}
+
+  if (kind === 'compressed') {
+    return transferCompressedNftToEscrow({
+      connection,
+      wallet: walletAdapter,
+      assetId: mint,
+      escrowAddress: recipient,
+      sendTransaction,
+      ...feeOpts,
+    })
+  }
+  if (kind === 'mpl_core') {
+    return transferMplCoreToEscrow({
+      connection,
+      wallet: walletAdapter,
+      assetId: mint,
+      escrowAddress: recipient,
+      sendTransaction,
+      ...feeOpts,
+    })
+  }
+  return transferTokenMetadataNftToEscrow({
+    connection,
+    wallet: walletAdapter,
+    mintAddress: mint,
+    escrowAddress: recipient,
+    sendTransaction,
+    ...feeOpts,
+  })
+}
+
 /**
- * Try TM (with fee via sol milestone to treasury) → Core (fee in-tx) → cNFT (fee in-tx).
- * Fee uses the same `transferSol` append pattern as escrow deposits when the UMI path supports it.
+ * Try DAS-ordered fallbacks (cNFT → … or TM → …) with Owl fee in the same approval when possible.
  */
 export async function sendOwlSendSpecialNft(params: {
   connection: Connection
@@ -87,60 +148,41 @@ export async function sendOwlSendSpecialNft(params: {
 
   onPhase?.('approving')
 
-  // Token Metadata / pNFT — append fee as SOL transfer to treasury in the same UMI builder.
-  try {
-    const signature = await transferTokenMetadataNftToEscrow({
-      connection,
-      wallet: walletAdapter,
-      mintAddress: mint,
-      escrowAddress: recipient,
-      solMilestoneLamports: feeLamports > 0 ? feeLamports : undefined,
-      fundsEscrowAddress: feeLamports > 0 ? treasury ?? undefined : undefined,
-      sendTransaction,
-    })
-    onPhase?.('confirming')
-    return { ok: true, signature, newAtaCount: 0 }
-  } catch {
-    /* try Core */
-  }
+  const order = orderedEscrowFallbacks({
+    compressed: line.compressed,
+    interface: line.interface,
+  })
 
-  try {
-    const signature = await transferMplCoreToEscrow({
-      connection,
-      wallet: walletAdapter,
-      assetId: mint,
-      escrowAddress: recipient,
-      solMilestoneLamports: feeLamports > 0 ? feeLamports : undefined,
-      fundsEscrowAddress: feeLamports > 0 ? treasury ?? undefined : undefined,
-      sendTransaction,
-    })
-    onPhase?.('confirming')
-    return { ok: true, signature, newAtaCount: 0 }
-  } catch {
-    /* try compressed */
-  }
-
-  try {
-    const signature = await transferCompressedNftToEscrow({
-      connection,
-      wallet: walletAdapter,
-      assetId: mint,
-      escrowAddress: recipient,
-      solMilestoneLamports: feeLamports > 0 ? feeLamports : undefined,
-      fundsEscrowAddress: feeLamports > 0 ? treasury ?? undefined : undefined,
-      sendTransaction,
-    })
-    onPhase?.('confirming')
-    return { ok: true, signature, newAtaCount: 0 }
-  } catch (e) {
-    // Last resort: if asset already moved somehow, don't charge; otherwise surface error.
-    void owner
-    void sendFeeOnlyTx
-    const msg = e instanceof Error ? e.message : String(e)
-    return {
-      ok: false,
-      error: msg || 'Could not send this NFT (tried Token Metadata, Core, and compressed).',
-      failedMints: [mint],
+  const errors: string[] = []
+  for (const kind of order) {
+    try {
+      const signature = await tryFallbackKind({
+        kind,
+        connection,
+        walletAdapter,
+        sendTransaction,
+        mint,
+        recipient,
+        feeLamports,
+        treasury,
+      })
+      onPhase?.('confirming')
+      return { ok: true, signature, newAtaCount: 0 }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (msg.trim()) errors.push(`${kind}: ${msg}`)
     }
+  }
+
+  // Last resort: if asset already moved somehow, don't charge; otherwise surface error.
+  void owner
+  void sendFeeOnlyTx
+  const detail = errors.length > 0 ? ` (${errors[errors.length - 1]})` : ''
+  return {
+    ok: false,
+    error:
+      `Could not send this NFT (tried ${order.join(', ')}).${detail}`.trim() ||
+      'Could not send this NFT (tried Token Metadata, Core, and compressed).',
+    failedMints: [mint],
   }
 }

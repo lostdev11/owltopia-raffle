@@ -183,13 +183,14 @@ export async function resolveOwlSendSplHolder(params: {
     /* fall through */
   }
 
-  // 4) Last resort: derive ATA for the mint's real program (never invent classic for T22).
+  // 4) Last resort: only invent an ATA when the mint is a real SPL / Token-2022 mint.
+  // cNFT asset ids are not token mints — inventing classic ATA caused IncorrectProgramId
+  // and blocked the Bubblegum special path.
   if (mintProgram) {
     return {
       tokenProgram: mintProgram,
       tokenAccount: ataForProgram(mint, owner, mintProgram),
     }
   }
-  // Mint account unreadable — Gen2s are overwhelmingly classic SPL; transfer fails if empty.
-  return { tokenProgram: TOKEN_PROGRAM_ID, tokenAccount: classicAta }
+  return null
 }

@@ -203,6 +203,20 @@ async function main() {
     assert.equal(holder!.tokenAccount.equals(t22Ata), true)
   }
 
+  {
+    // cNFT asset id: no SPL/Token-2022 mint account → null (special path), not invented classic ATA.
+    const mint = Keypair.generate().publicKey
+    const owner = Keypair.generate().publicKey
+    const connection = mockConnection(new Map())
+    const holder = await resolveOwlSendSplHolder({
+      connection,
+      mint,
+      owner,
+      hintTokenAccount: mint.toBase58(),
+    })
+    assert.equal(holder, null)
+  }
+
   console.log('test-owl-send-resolve-spl-holder: ok')
 }
 
