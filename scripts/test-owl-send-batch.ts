@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict'
 import { Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from '@solana/web3.js'
-import { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token'
+import { getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import {
   buildTokenScatterLines,
   capOwlSendSelection,
@@ -686,15 +686,35 @@ assert.match(owlSendRetryHint('User rejected the request'), /Wallet rejected/)
 {
   const owner = Keypair.generate().publicKey
   const mint = Keypair.generate().publicKey
-  const ata = getAssociatedTokenAddressSync(mint, owner, false, TOKEN_PROGRAM_ID).toBase58()
+  // When DAS leaves tokenAccount=mint, do NOT invent a classic SPL ATA —
+  // that address is wrong for Token-2022 and caused IncorrectProgramId on ATA create.
   assert.equal(
     owlSendTokenAccountHint({ mint: mint.toBase58(), owner, tokenAccount: mint.toBase58() }),
-    ata
+    mint.toBase58()
   )
+  const classicAta = getAssociatedTokenAddressSync(mint, owner, false, TOKEN_PROGRAM_ID).toBase58()
   assert.equal(
-    owlSendTokenAccountHint({ mint: mint.toBase58(), owner, tokenAccount: ata }),
-    ata
+    owlSendTokenAccountHint({ mint: mint.toBase58(), owner, tokenAccount: classicAta }),
+    classicAta
   )
+  const t22Ata = getAssociatedTokenAddressSync(mint, owner, false, TOKEN_2022_PROGRAM_ID).toBase58()
+  assert.equal(
+    owlSendTokenAccountHint({ mint: mint.toBase58(), owner, tokenAccount: t22Ata }),
+    t22Ata
+  )
+  assert.notEqual(classicAta, t22Ata)
+}
+
+{
+  // Regression: classic vs Token-2022 ATAs differ — using classic for a T22 mint
+  // is exactly the Viking IncorrectProgramId failure mode.
+  const owner = Keypair.generate().publicKey
+  const mint = Keypair.generate().publicKey
+  const classic = getAssociatedTokenAddressSync(mint, owner, false, TOKEN_PROGRAM_ID)
+  const t22 = getAssociatedTokenAddressSync(mint, owner, false, TOKEN_2022_PROGRAM_ID)
+  assert.notEqual(classic.toBase58(), t22.toBase58())
+  assert.ok(TOKEN_2022_PROGRAM_ID.toBase58().startsWith('Tokenz'))
+  assert.ok(TOKEN_PROGRAM_ID.toBase58().startsWith('Tokenk'))
 }
 
 console.log('test-owl-send-batch: ok')

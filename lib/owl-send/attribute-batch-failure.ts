@@ -59,13 +59,17 @@ function decodeFrozen(data: Buffer | Uint8Array | undefined): boolean {
   }
 }
 
-function classicAtaForMint(mint: string, owner: PublicKey): PublicKey | null {
+function ataForMint(
+  mint: string,
+  owner: PublicKey,
+  programId: PublicKey
+): PublicKey | null {
   try {
     return getAssociatedTokenAddressSync(
       new PublicKey(mint),
       owner,
       false,
-      TOKEN_PROGRAM_ID,
+      programId,
       ASSOCIATED_TOKEN_PROGRAM_ID
     )
   } catch {
@@ -75,12 +79,12 @@ function classicAtaForMint(mint: string, owner: PublicKey): PublicKey | null {
 
 /**
  * Read freeze state for OwlSend batch source token accounts (one RPC).
- * Prefers real ATA hints; when DAS left tokenAccount=mint, derives the classic Gen2 ATA.
+ * Prefers real ATA hints; when DAS left tokenAccount=mint, probes classic + Token-2022 ATAs.
  */
 export async function findFrozenOwlSendMints(params: {
   connection: Connection
   lines: OwlSendLine[]
-  /** Required to derive classic ATAs when DAS left tokenAccount=mint. */
+  /** Required to derive ATAs when DAS left tokenAccount=mint. */
   owner?: PublicKey
   /** Optional pre-resolved source token accounts (mint → ATA). */
   resolvedTokenAccounts?: Map<string, PublicKey>
@@ -112,11 +116,11 @@ export async function findFrozenOwlSendMints(params: {
     }
 
     if (owner) {
-      const ata = classicAtaForMint(mint, owner)
-      if (ata) {
-        lookups.push({ mint, tokenAccount: ata })
-        seen.add(mint)
-      }
+      const classic = ataForMint(mint, owner, TOKEN_PROGRAM_ID)
+      const t22 = ataForMint(mint, owner, TOKEN_2022_PROGRAM_ID)
+      if (classic) lookups.push({ mint, tokenAccount: classic })
+      if (t22) lookups.push({ mint, tokenAccount: t22 })
+      seen.add(mint)
     }
   }
 
@@ -127,16 +131,16 @@ export async function findFrozenOwlSendMints(params: {
       lookups.map((l) => l.tokenAccount),
       'processed'
     )
-    const frozen: string[] = []
+    const frozen = new Set<string>()
     for (let i = 0; i < lookups.length; i++) {
       const info = infos[i]
       if (!info) continue
       const isTokenProg =
         info.owner.equals(TOKEN_PROGRAM_ID) || info.owner.equals(TOKEN_2022_PROGRAM_ID)
       if (!isTokenProg) continue
-      if (decodeFrozen(info.data)) frozen.push(lookups[i]!.mint)
+      if (decodeFrozen(info.data)) frozen.add(lookups[i]!.mint)
     }
-    return frozen
+    return [...frozen]
   } catch {
     return []
   }
