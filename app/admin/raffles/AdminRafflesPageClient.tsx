@@ -3,10 +3,11 @@
 import { useState, useCallback, useEffect, useMemo, type ReactNode } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { RafflesList } from '@/components/RafflesList'
 import { RafflesBrowseToolbar } from '@/components/RafflesBrowseToolbar'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { ArrowLeft, ChevronDown, ExternalLink } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import type { Raffle, Entry } from '@/lib/types'
 import type { RaffleProfitInfo } from '@/lib/raffle-profit'
 import {
@@ -20,6 +21,16 @@ import {
 
 export type RaffleWithEntriesAndProfit = { raffle: Raffle; entries: Entry[]; profitInfo: RaffleProfitInfo }
 
+type AdminListBucket =
+  | 'pending-cancellation'
+  | 'active'
+  | 'paused'
+  | 'future'
+  | 'escrow-recovery'
+  | 'past'
+
+type AdminListItem = RaffleWithEntriesAndProfit & { bucket: AdminListBucket }
+
 interface AdminRafflesPageClientProps {
   activeRafflesWithEntries: RaffleWithEntriesAndProfit[]
   futureRafflesWithEntries: RaffleWithEntriesAndProfit[]
@@ -29,46 +40,167 @@ interface AdminRafflesPageClientProps {
   pendingCancellationRafflesWithEntries: RaffleWithEntriesAndProfit[]
 }
 
-function AdminRaffleSection({
+const BUCKET_LABEL: Record<AdminListBucket, string> = {
+  'pending-cancellation': 'Cancel request',
+  active: 'Live',
+  paused: 'Paused / escrow',
+  future: 'Scheduled',
+  'escrow-recovery': 'NFT in escrow',
+  past: 'Ended',
+}
+
+const PAGE_SIZE = 40
+
+function withBucket(items: RaffleWithEntriesAndProfit[], bucket: AdminListBucket): AdminListItem[] {
+  return items.map((item) => ({ ...item, bucket }))
+}
+
+function statusLabel(raffle: Raffle): string {
+  const status = (raffle.status ?? '').trim()
+  return status || (raffle.is_active ? 'active' : 'ended')
+}
+
+function formatShortDate(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function CollapsiblePanel({
   id,
   title,
+  count,
   description,
-  items,
-  section,
-  emptyUnfiltered,
-  filtersActive,
-  onRaffleDeleted,
+  defaultOpen,
+  open,
+  onOpenChange,
+  children,
 }: {
   id?: string
   title: string
+  count: number
   description?: ReactNode
-  items: RaffleWithEntriesAndProfit[]
-  section: 'active' | 'future' | 'past'
-  emptyUnfiltered: string
-  filtersActive: boolean
-  onRaffleDeleted: (raffleId: string) => void
+  defaultOpen?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  children: ReactNode
 }) {
-  // While searching, skip empty buckets so results stay scannable.
-  if (filtersActive && items.length === 0) return null
+  const controlled = typeof open === 'boolean'
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(Boolean(defaultOpen))
+  const isOpen = controlled ? open : uncontrolledOpen
 
   return (
-    <div id={id} className={`mb-8 sm:mb-12${id ? ' scroll-mt-24' : ''}`}>
-      <h2 className="text-xl sm:text-2xl font-bold mb-2 sm:mb-3">
-        {title}
-      </h2>
-      {description ? <div className="text-sm text-muted-foreground mb-4 sm:mb-6">{description}</div> : null}
-      {items.length > 0 ? (
-        <RafflesList
-          rafflesWithEntries={items}
-          title={undefined}
-          section={section}
-          onRaffleDeleted={onRaffleDeleted}
-        />
-      ) : (
-        <div className="text-center py-8">
-          <p className="text-muted-foreground">{emptyUnfiltered}</p>
-        </div>
+    <details
+      id={id}
+      open={isOpen}
+      onToggle={(e) => {
+        const next = e.currentTarget.open
+        if (!controlled) setUncontrolledOpen(next)
+        onOpenChange?.(next)
+      }}
+      className={cn(
+        'mb-4 rounded-xl border border-border/80 bg-muted/20 scroll-mt-24',
+        'dark:border-border/50 dark:bg-muted/10'
       )}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-3 touch-manipulation min-h-[52px] sm:px-4 [&::-webkit-details-marker]:hidden">
+        <span className="min-w-0 flex-1 text-left">
+          <span className="block text-base font-semibold sm:text-lg">
+            {title}{' '}
+            <span className="font-medium text-muted-foreground">({count})</span>
+          </span>
+          {description ? (
+            <span className="mt-0.5 block text-xs text-muted-foreground sm:text-sm">{description}</span>
+          ) : null}
+        </span>
+        <ChevronDown
+          className={cn(
+            'h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-200',
+            isOpen && 'rotate-180'
+          )}
+          aria-hidden
+        />
+      </summary>
+      {/* Only mount children when open — avoids rendering huge card/list trees while collapsed. */}
+      {isOpen ? <div className="border-t border-border/60 px-3 pb-3 pt-3 sm:px-4 sm:pb-4">{children}</div> : null}
+    </details>
+  )
+}
+
+function AdminRaffleCompactList({
+  items,
+  emptyMessage,
+}: {
+  items: AdminListItem[]
+  emptyMessage: string
+}) {
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [items])
+
+  if (items.length === 0) {
+    return <p className="py-6 text-center text-sm text-muted-foreground">{emptyMessage}</p>
+  }
+
+  const visible = items.slice(0, visibleCount)
+  const remaining = items.length - visible.length
+
+  return (
+    <div className="space-y-2">
+      <ul className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/70 bg-background/60">
+        {visible.map(({ raffle, bucket }) => (
+          <li key={raffle.id} className="flex items-center gap-3 px-3 py-3 sm:px-4">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <p className="truncate font-medium leading-tight">{raffle.title}</p>
+                <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
+                  {BUCKET_LABEL[bucket]}
+                </Badge>
+                <Badge variant="outline" className="shrink-0 text-[10px] uppercase tracking-wide">
+                  {statusLabel(raffle)}
+                </Badge>
+              </div>
+              <p className="mt-1 truncate text-xs text-muted-foreground sm:text-sm">
+                /{raffle.slug}
+                <span className="mx-1.5 text-border">·</span>
+                ends {formatShortDate(raffle.end_time)}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Button asChild variant="outline" size="sm" className="min-h-[40px] touch-manipulation">
+                <Link href={`/admin/raffles/${raffle.id}`}>Manage</Link>
+              </Button>
+              <Button asChild variant="ghost" size="icon" className="min-h-[40px] min-w-[40px] touch-manipulation">
+                <Link href={`/raffles/${raffle.slug}`} aria-label={`View ${raffle.title}`}>
+                  <ExternalLink className="h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {remaining > 0 ? (
+        <div className="flex justify-center pt-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-h-[44px] touch-manipulation"
+            onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+          >
+            Show more ({remaining} remaining)
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -149,20 +281,75 @@ export function AdminRafflesPageClient({
     [browseQuery, browseTicketCurrency, replaceBrowseFiltersInUrl]
   )
 
+  const filtered = useMemo(
+    () => ({
+      pendingCancellation: filterRafflesBrowseList(pendingCancellationRafflesWithEntries, browseFilters),
+      active: filterRafflesBrowseList(activeRafflesWithEntries, browseFilters),
+      pausedPending: filterRafflesBrowseList(pausedPendingRafflesWithEntries, browseFilters),
+      cancelledRecovery: filterRafflesBrowseList(cancelledRecoveryRafflesWithEntries, browseFilters),
+      future: filterRafflesBrowseList(futureRafflesWithEntries, browseFilters),
+      past: filterRafflesBrowseList(pastRafflesWithEntries, browseFilters),
+    }),
+    [
+      pendingCancellationRafflesWithEntries,
+      activeRafflesWithEntries,
+      pausedPendingRafflesWithEntries,
+      cancelledRecoveryRafflesWithEntries,
+      futureRafflesWithEntries,
+      pastRafflesWithEntries,
+      browseFilters,
+    ]
+  )
+
+  const activeItems = useMemo(
+    () => [
+      ...withBucket(filtered.pendingCancellation, 'pending-cancellation'),
+      ...withBucket(filtered.active, 'active'),
+      ...withBucket(filtered.pausedPending, 'paused'),
+      ...withBucket(filtered.future, 'future'),
+    ],
+    [filtered]
+  )
+
+  const endedItems = useMemo(
+    () => [
+      ...withBucket(filtered.cancelledRecovery, 'escrow-recovery'),
+      ...withBucket(filtered.past, 'past'),
+    ],
+    [filtered]
+  )
+
+  const totalCount =
+    activeRafflesWithEntries.length +
+    futureRafflesWithEntries.length +
+    pastRafflesWithEntries.length +
+    pausedPendingRafflesWithEntries.length +
+    cancelledRecoveryRafflesWithEntries.length +
+    pendingCancellationRafflesWithEntries.length
+
+  const resultCount = activeItems.length + endedItems.length
+  const nothingToShow = resultCount === 0
+
+  const pendingCancelCount = filtered.pendingCancellation.length
+  const [activeOpen, setActiveOpen] = useState(pendingCancelCount > 0)
+  const [endedOpen, setEndedOpen] = useState(false)
+
+  // Deep-link / queue scroll opens the Active panel (pending cancellation lives there).
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
     const queue = params.get('queue')
-    const shouldScroll =
+    const shouldOpenActive =
       window.location.hash === '#pending-cancellation' ||
       queue === 'pending-cancellation' ||
       queue === 'cancellation'
-    if (!shouldScroll) return
+    if (!shouldOpenActive) return
 
+    setActiveOpen(true)
     let cancelled = false
     const scrollToQueue = () => {
       if (cancelled) return
-      document.getElementById('pending-cancellation')?.scrollIntoView({
+      document.getElementById('active-raffles')?.scrollIntoView({
         behavior: 'smooth',
         block: 'start',
       })
@@ -175,59 +362,12 @@ export function AdminRafflesPageClient({
     }
   }, [])
 
-  const [rafflesState, setRafflesState] = useState({
-    active: activeRafflesWithEntries,
-    future: futureRafflesWithEntries,
-    past: pastRafflesWithEntries,
-    pausedPending: pausedPendingRafflesWithEntries,
-    cancelledRecovery: cancelledRecoveryRafflesWithEntries,
-    pendingCancellation: pendingCancellationRafflesWithEntries,
-  })
-
-  const handleRaffleDeleted = useCallback((raffleId: string) => {
-    setRafflesState(prev => ({
-      active: prev.active.filter(({ raffle }) => raffle.id !== raffleId),
-      future: prev.future.filter(({ raffle }) => raffle.id !== raffleId),
-      past: prev.past.filter(({ raffle }) => raffle.id !== raffleId),
-      pausedPending: prev.pausedPending.filter(({ raffle }) => raffle.id !== raffleId),
-      cancelledRecovery: prev.cancelledRecovery.filter(({ raffle }) => raffle.id !== raffleId),
-      pendingCancellation: prev.pendingCancellation.filter(({ raffle }) => raffle.id !== raffleId),
-    }))
-
-    setTimeout(() => {
-      router.refresh()
-    }, 500)
-  }, [router])
-
-  const filtered = useMemo(
-    () => ({
-      pendingCancellation: filterRafflesBrowseList(rafflesState.pendingCancellation, browseFilters),
-      active: filterRafflesBrowseList(rafflesState.active, browseFilters),
-      pausedPending: filterRafflesBrowseList(rafflesState.pausedPending, browseFilters),
-      cancelledRecovery: filterRafflesBrowseList(rafflesState.cancelledRecovery, browseFilters),
-      future: filterRafflesBrowseList(rafflesState.future, browseFilters),
-      past: filterRafflesBrowseList(rafflesState.past, browseFilters),
-    }),
-    [rafflesState, browseFilters]
-  )
-
-  const totalCount =
-    rafflesState.active.length +
-    rafflesState.future.length +
-    rafflesState.past.length +
-    rafflesState.pausedPending.length +
-    rafflesState.cancelledRecovery.length +
-    rafflesState.pendingCancellation.length
-
-  const resultCount =
-    filtered.active.length +
-    filtered.future.length +
-    filtered.past.length +
-    filtered.pausedPending.length +
-    filtered.cancelledRecovery.length +
-    filtered.pendingCancellation.length
-
-  const nothingToShow = resultCount === 0
+  // While searching, open groups that have hits so results are visible without extra taps.
+  useEffect(() => {
+    if (!filtersActive) return
+    if (activeItems.length > 0) setActiveOpen(true)
+    if (endedItems.length > 0) setEndedOpen(true)
+  }, [filtersActive, activeItems.length, endedItems.length])
 
   return (
     <div className="container mx-auto py-4 sm:py-6 md:py-8 px-3 sm:px-4">
@@ -244,7 +384,7 @@ export function AdminRafflesPageClient({
           Admin - Manage Raffles
         </h1>
         <p className="text-base sm:text-lg text-muted-foreground">
-          View and manage all raffles, including past raffles. Search by title, slug, ID, mint, creator, or winner.
+          Search, then expand Active or Ended. Lists stay collapsed so the page stays light on mobile.
         </p>
       </div>
 
@@ -266,85 +406,43 @@ export function AdminRafflesPageClient({
         <div className="text-center py-16">
           <p className="text-xl text-muted-foreground mb-4">No raffles match your search.</p>
         </div>
+      ) : nothingToShow ? (
+        <div className="text-center py-16">
+          <p className="text-xl text-muted-foreground mb-4">No raffles available</p>
+        </div>
       ) : (
         <>
-          <AdminRaffleSection
-            id="pending-cancellation"
-            title="Pending cancellation"
+          <CollapsiblePanel
+            id="active-raffles"
+            title="Active raffles"
+            count={activeItems.length}
             description={
-              <>
-                Creators who requested cancellation — open each raffle in Owl Vision to accept or review. Post-start
-                raffles need the on-chain cancellation fee paid before you can complete cancellation.
-              </>
+              pendingCancelCount > 0
+                ? `${pendingCancelCount} pending cancellation · live, paused, and scheduled`
+                : 'Live, paused / escrow, and scheduled'
             }
-            items={filtered.pendingCancellation}
-            section="active"
-            emptyUnfiltered="No pending cancellation requests."
-            filtersActive={filtersActive}
-            onRaffleDeleted={handleRaffleDeleted}
-          />
+            open={activeOpen}
+            onOpenChange={setActiveOpen}
+          >
+            <AdminRaffleCompactList
+              items={activeItems}
+              emptyMessage="No active raffles."
+            />
+          </CollapsiblePanel>
 
-          <AdminRaffleSection
-            title="Active Raffles"
-            items={filtered.active}
-            section="active"
-            emptyUnfiltered="No active raffles at the moment."
-            filtersActive={filtersActive}
-            onRaffleDeleted={handleRaffleDeleted}
-          />
-
-          <AdminRaffleSection
-            title="Paused / Pending Escrow Verification"
-            items={filtered.pausedPending}
-            section="future"
-            emptyUnfiltered="No paused or pending escrow raffles."
-            filtersActive={filtersActive}
-            onRaffleDeleted={handleRaffleDeleted}
-          />
-
-          <AdminRaffleSection
-            title="NFT prize still in escrow (ended or cancelled)"
-            description={
-              <>
-                Ended or cancelled NFT raffles where the prize is still held in escrow (no on-chain transfer to a winner
-                yet). Use this to return NFTs to creators, including legacy raffles that only have a verified deposit
-                timestamp.
-              </>
-            }
-            items={filtered.cancelledRecovery}
-            section="past"
-            emptyUnfiltered="No cancelled NFT raffles need prize return."
-            filtersActive={filtersActive}
-            onRaffleDeleted={handleRaffleDeleted}
-          />
-
-          <AdminRaffleSection
-            title="Future Raffles"
-            items={filtered.future}
-            section="future"
-            emptyUnfiltered="No upcoming raffles scheduled at this time"
-            filtersActive={filtersActive}
-            onRaffleDeleted={handleRaffleDeleted}
-          />
-
-          <AdminRaffleSection
-            title={
-              filtersActive && rafflesState.past.length !== filtered.past.length
-                ? `Past Raffles (${filtered.past.length} of ${rafflesState.past.length})`
-                : `Past Raffles (${filtered.past.length})`
-            }
-            items={filtered.past}
-            section="past"
-            emptyUnfiltered="No past raffles found."
-            filtersActive={filtersActive}
-            onRaffleDeleted={handleRaffleDeleted}
-          />
-
-          {!filtersActive && nothingToShow && (
-            <div className="text-center py-16">
-              <p className="text-xl text-muted-foreground mb-4">No raffles available</p>
-            </div>
-          )}
+          <CollapsiblePanel
+            id="ended-raffles"
+            title="Ended raffles"
+            count={endedItems.length}
+            description="Completed, cancelled, and NFT escrow recovery"
+            open={endedOpen}
+            onOpenChange={setEndedOpen}
+          >
+            <AdminRaffleCompactList
+              items={endedItems}
+              emptyMessage="No ended raffles."
+            />
+          </CollapsiblePanel>
         </>
       )}
     </div>
