@@ -7,6 +7,10 @@ export type OwlSendLine = {
   name?: string | null
   tokenAccount?: string | null
   image?: string | null
+  /** DAS `compression.compressed` — Bubblegum leaf, not classic SPL. */
+  compressed?: boolean | null
+  /** DAS asset interface (e.g. ProgrammableNFT, MplCoreAsset, V1_NFT). */
+  interface?: string | null
 }
 
 /** Cap selection to product max (20). */
@@ -122,8 +126,32 @@ function shuffleInPlace<T>(items: T[]): void {
  * - `randomize: true` with `wallet,N` counts — shuffle NFTs, assign exactly N to each wallet
  *   (sum of counts must equal selected NFT count; bare wallets count as 1 when mixed).
  */
+export type OwlSendScatterMint = {
+  mint: string
+  name?: string | null
+  tokenAccount?: string | null
+  image?: string | null
+  compressed?: boolean | null
+  interface?: string | null
+}
+
+function scatterMintToLine(
+  m: OwlSendScatterMint,
+  recipient: string
+): OwlSendLine {
+  return {
+    mint: m.mint,
+    name: m.name,
+    tokenAccount: m.tokenAccount,
+    image: m.image,
+    compressed: m.compressed,
+    interface: m.interface,
+    recipient,
+  }
+}
+
 export function pairScatterLines(params: {
-  mints: Array<{ mint: string; name?: string | null; tokenAccount?: string | null; image?: string | null }>
+  mints: Array<OwlSendScatterMint>
   recipients?: string[]
   entries?: NftScatterEntry[]
   randomize?: boolean
@@ -167,13 +195,9 @@ export function pairScatterLines(params: {
         error: `Scatter needs the same number of NFTs and wallets (${mints.length} NFT${mints.length === 1 ? '' : 's'}, ${recipientsRaw.length} wallet${recipientsRaw.length === 1 ? '' : 's'}). Turn on randomize to split NFTs across fewer wallets.`,
       }
     }
-    const lines: OwlSendLine[] = mints.map((m, i) => ({
-      mint: m.mint,
-      name: m.name,
-      tokenAccount: m.tokenAccount,
-      image: m.image,
-      recipient: recipientsRaw[i]!,
-    }))
+    const lines: OwlSendLine[] = mints.map((m, i) =>
+      scatterMintToLine(m, recipientsRaw[i]!)
+    )
     return { ok: true, lines }
   }
 
@@ -203,13 +227,7 @@ export function pairScatterLines(params: {
     for (const a of allotments) {
       for (let i = 0; i < a.count; i++) slots.push(a.recipient)
     }
-    const lines: OwlSendLine[] = mints.map((m, i) => ({
-      mint: m.mint,
-      name: m.name,
-      tokenAccount: m.tokenAccount,
-      image: m.image,
-      recipient: slots[i]!,
-    }))
+    const lines: OwlSendLine[] = mints.map((m, i) => scatterMintToLine(m, slots[i]!))
     return { ok: true, lines }
   }
 
@@ -230,13 +248,9 @@ export function pairScatterLines(params: {
   }
 
   shuffleInPlace(mints)
-  const lines: OwlSendLine[] = mints.map((m, i) => ({
-    mint: m.mint,
-    name: m.name,
-    tokenAccount: m.tokenAccount,
-    image: m.image,
-    recipient: uniqueRecipients[i % uniqueRecipients.length]!,
-  }))
+  const lines: OwlSendLine[] = mints.map((m, i) =>
+    scatterMintToLine(m, uniqueRecipients[i % uniqueRecipients.length]!)
+  )
   return { ok: true, lines }
 }
 

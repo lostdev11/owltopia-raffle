@@ -337,14 +337,15 @@ function humanizeOwlSendSendError(msg: string): string {
   ) {
     return 'This approval needs more compute than Solana\'s default budget. Hard-refresh OwlSend and retry — batches now request a higher compute limit.'
   }
-  // ATA Create with classic Token program against a Token-2022 mint (or vice versa).
+  // ATA Create against a non-SPL mint (cNFT asset id) or Token vs Token-2022 mismatch.
+  // Keep wording broad so single-NFT send can fall through to Bubblegum / Core / TM.
   if (
     m.includes('incorrectprogramid') ||
     m.includes('incorrect program id')
   ) {
     return (
-      'This NFT uses Token-2022 (or classic SPL) and OwlSend built the wrong token-account create. ' +
-      'Hard-refresh and retry — sends now pick the token program from the mint on-chain.'
+      'This NFT is not a classic SPL hold (cNFT / Core / Token-2022 mismatch). ' +
+      'OwlSend will retry the compressed / Core / Token Metadata path — or send it alone.'
     )
   }
   return msg

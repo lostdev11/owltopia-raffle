@@ -34,6 +34,11 @@ import {
   owlSendSkippedFrozenNotice,
   partitionOwlSendByFrozen,
 } from '@/lib/owl-send/picker-eligibility'
+import {
+  owlSendLineNeedsSpecialPath,
+  owlSendSplErrorNeedsSpecialFallback,
+  shouldSkipOwlSendSpecialFallback,
+} from '@/lib/owl-send/send-batch'
 import { owlSendTokenAccountHint } from '@/lib/owl-send/resolve-spl-holder'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
 import {
@@ -681,6 +686,62 @@ assert.match(owlSendRetryHint('User rejected the request'), /Wallet rejected/)
   // idempotent
   prependOwlSendComputeBudget(tx)
   assert.equal(tx.instructions.length, 3)
+}
+
+{
+  // Regression: cNFT IncorrectProgramId must fall through to special path
+  // (Viking/JupMonkes — previous Token-2022 humanize blocked the fallback).
+  assert.equal(
+    owlSendSplErrorNeedsSpecialFallback(
+      'This NFT uses Token-2022 (or classic SPL) and OwlSend built the wrong token-account create.'
+    ),
+    true
+  )
+  assert.equal(
+    owlSendSplErrorNeedsSpecialFallback(
+      'This send would fail on-chain before wallet approval. Incorrect program id for instruction'
+    ),
+    true
+  )
+  assert.equal(
+    owlSendSplErrorNeedsSpecialFallback(
+      'This NFT is not a classic SPL hold (cNFT / Core / Token-2022 mismatch).'
+    ),
+    true
+  )
+  assert.equal(owlSendSplErrorNeedsSpecialFallback('Could not establish connection'), false)
+  assert.equal(shouldSkipOwlSendSpecialFallback('Could not establish connection'), true)
+  assert.equal(shouldSkipOwlSendSpecialFallback('Request timed out'), true)
+  assert.equal(
+    shouldSkipOwlSendSpecialFallback('Incorrect program id for instruction'),
+    false
+  )
+
+  assert.equal(
+    owlSendLineNeedsSpecialPath({
+      mint: 'm1',
+      recipient: 'r1',
+      compressed: true,
+    }),
+    true
+  )
+  assert.equal(
+    owlSendLineNeedsSpecialPath({
+      mint: 'm1',
+      recipient: 'r1',
+      interface: 'ProgrammableNFT',
+    }),
+    true
+  )
+  assert.equal(
+    owlSendLineNeedsSpecialPath({
+      mint: 'm1',
+      recipient: 'r1',
+      compressed: false,
+      interface: 'V1_NFT',
+    }),
+    false
+  )
 }
 
 {

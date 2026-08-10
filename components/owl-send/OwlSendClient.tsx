@@ -676,6 +676,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
           tokenAccount: n.tokenAccount,
         }),
         image: n.image,
+        compressed: n.compressed,
+        interface: n.interface,
         recipient: dest,
       }))
     } else {
@@ -704,6 +706,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
             tokenAccount: n.tokenAccount,
           }),
           image: n.image,
+          compressed: n.compressed,
+          interface: n.interface,
         })),
         entries,
         randomize: randomizeScatter,
