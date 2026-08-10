@@ -100,6 +100,8 @@ interface RafflesBrowseToolbarProps {
   resultCount: number
   totalCount: number
   className?: string
+  /** Override search input placeholder (defaults to public browse copy). */
+  searchPlaceholder?: string
 }
 
 export function RafflesBrowseToolbar({
@@ -112,6 +114,7 @@ export function RafflesBrowseToolbar({
   resultCount,
   totalCount,
   className,
+  searchPlaceholder = 'Search raffles (e.g. Pandarianz)',
 }: RafflesBrowseToolbarProps) {
   const searchId = useId()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -205,7 +208,7 @@ export function RafflesBrowseToolbar({
       >
         <div className="relative">
           <label htmlFor={searchId} className="sr-only">
-            Search raffles by name
+            Search raffles
           </label>
           <Search
             className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -219,7 +222,7 @@ export function RafflesBrowseToolbar({
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}
-            placeholder="Search raffles (e.g. Pandarianz)"
+            placeholder={searchPlaceholder}
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             className="min-h-[44px] touch-manipulation pl-9 pr-10 text-base sm:text-sm"
