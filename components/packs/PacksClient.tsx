@@ -337,7 +337,7 @@ export function PacksClient() {
           className="mt-8 text-[11px] uppercase tracking-[0.28em] text-[#A9CBB9]/55 animate-hero-rise"
           style={{ animationDelay: '340ms' }}
         >
-          60% $OWL · 20% SOL · 20% NFT · ~{((config?.product.rtpBps ?? 8000) / 100).toFixed(0)}% RTP
+          60% $OWL · 20% SOL · 20% NFT · ≈{((config?.product.rtpBps ?? 8000) / 100).toFixed(0)}% RTP
         </p>
       </section>
 
