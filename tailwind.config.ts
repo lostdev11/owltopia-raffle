@@ -233,6 +233,33 @@ const config: Config = {
           '0%, 100%': { opacity: '0.35', filter: 'drop-shadow(0 0 4px rgba(0,255,156,0.5))' },
           '50%': { opacity: '1', filter: 'drop-shadow(0 0 10px rgba(0,255,156,1))' },
         },
+        /* Owl Packs: idle float + purchase / reveal */
+        'pack-float': {
+          '0%, 100%': { transform: 'translateY(0) rotate(-1.5deg)' },
+          '50%': { transform: 'translateY(-10px) rotate(1.5deg)' },
+        },
+        'pack-pay-pulse': {
+          '0%, 100%': { transform: 'scale(1)', filter: 'brightness(1)' },
+          '50%': { transform: 'scale(1.04)', filter: 'brightness(1.25)' },
+        },
+        'pack-seal-spin': {
+          '0%': { transform: 'rotate(0deg) scale(1)' },
+          '40%': { transform: 'rotate(12deg) scale(1.08)' },
+          '100%': { transform: 'rotate(0deg) scale(1)' },
+        },
+        'pack-reveal-burst': {
+          '0%': { opacity: '0', transform: 'scale(0.55)' },
+          '55%': { opacity: '1', transform: 'scale(1.08)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        'pack-shine': {
+          '0%': { transform: 'translateX(-120%) rotate(18deg)' },
+          '100%': { transform: 'translateX(160%) rotate(18deg)' },
+        },
+        'pack-ring-expand': {
+          '0%': { opacity: '0.7', transform: 'scale(0.6)' },
+          '100%': { opacity: '0', transform: 'scale(1.55)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -260,6 +287,12 @@ const config: Config = {
         'gen2-border-flow': 'gen2-border-flow 5.5s ease-in-out infinite',
         'gen2-border-glow-ring': 'gen2-border-glow-ring 2.8s ease-in-out infinite',
         'gen2-corner-led': 'gen2-corner-led 1.9s ease-in-out infinite',
+        'pack-float': 'pack-float 5.5s ease-in-out infinite',
+        'pack-pay-pulse': 'pack-pay-pulse 1.1s ease-in-out infinite',
+        'pack-seal-spin': 'pack-seal-spin 1.4s ease-in-out infinite',
+        'pack-reveal-burst': 'pack-reveal-burst 0.7s cubic-bezier(0.22, 1, 0.36, 1) both',
+        'pack-shine': 'pack-shine 1.8s ease-in-out infinite',
+        'pack-ring-expand': 'pack-ring-expand 1.2s ease-out infinite',
       },
     },
   },
