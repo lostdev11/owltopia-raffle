@@ -843,6 +843,9 @@ export interface RaffleInfoForEntry {
   prize_deposited_at?: string | null
   prize_returned_at?: string | null
   prize_standard?: string | null
+  /** Prize art for list thumbs (already selected in getEntriesByWallet). */
+  image_url?: string | null
+  image_fallback_url?: string | null
 }
 
 export interface EntryWithRaffle {

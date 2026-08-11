@@ -341,6 +341,11 @@ export interface Raffle {
   /** Enriched at list time: creator wallet is in partner_community_creators (2% fee, spotlight). */
   creator_is_partner?: boolean
   /**
+   * Client/list enrichment: `wallet_profiles.display_name` for any creator (not partners only).
+   * Used for host filter / browse search. Prefer this over guessing names from titles.
+   */
+  creator_display_name?: string | null
+  /**
    * Enriched at list time for partner creators: `wallet_profiles.display_name` when set, else optional
    * `partner_community_creators.display_label`. Used for partner badge copy / accessibility.
    */

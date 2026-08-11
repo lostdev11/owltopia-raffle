@@ -85,6 +85,11 @@ Today `q` matches titles/wallets/mints — **not** `wallet_profiles.display_name
 
 ## Risks and mitigations
 
+> **Status:** Mitigations below are implemented in code (Phase 1 thumbs + Phase 2 host filter).
+> See `lib/raffles/resolve-host-filter.ts`, `lib/raffles/filter-browse-raffles.ts`,
+> `components/RafflesBrowseToolbar.tsx`, `components/MyEntriesList.tsx`, `app/raffles/RafflesPageClient.tsx`.
+> Verify with `npm run test:filter-browse-host`.
+
 ### Display names are not unique
 
 Treat the display name as a **lookup key**, not the filter itself.
@@ -97,6 +102,8 @@ Treat the display name as a **lookup key**, not the filter itself.
 
 Shareable links always use the wallet (`?host=`), so names never become the source of truth in URLs.
 
+**Implemented:** `classifyHostResolve` + Host chip / ambiguous picker in `RafflesBrowseToolbar`; URL sync via `hostWalletFilterFromSearchParam`.
+
 ### Partner-only labels today
 
 Do not rely on `enrichRafflesWithCreatorHolder` alone — that only fills partner/admin display fields.
@@ -104,6 +111,8 @@ Do not rely on `enrichRafflesWithCreatorHolder` alone — that only fills partne
 - For browse filtering, enrich **all** creators on the loaded list with `/api/profiles?wallets=…` (already used on raffle detail “Created By”).
 - Search/typeahead should match: profile `display_name` → partner `display_label` → wallet substring.
 - Keep partner logo/badge as presentation only; filtering stays wallet-based.
+
+**Implemented:** `creator_display_name` enrichment in `RafflesPageClient` + `enrichRafflesWithCreatorDisplayNames`; host candidates collect labels from profile then partner fields.
 
 ### Overloading `q` with host semantics
 
@@ -115,6 +124,8 @@ Keep responsibilities split:
 
 That avoids breaking existing search while giving hosts a first-class control.
 
+**Implemented:** `?host=` is separate from `q`; searchable fields include display names as an optional bonus; host chip is distinct in the toolbar.
+
 ### Image load on long entry histories
 
 Reuse what is already built for list density:
@@ -124,6 +135,8 @@ Reuse what is already built for list density:
 - Fixed thumb size (`sm`/`md`) so layout does not reflow.
 - If a later audit shows many missing images, add **batched** mint-metadata fallback (`/api/nft/metadata-image/batch`), not one request per row.
 
+**Implemented:** `MyEntriesList` uses `RaffleListThumbnail` (`size="md"`, `loading="lazy"`) with DB image fields only.
+
 ### Name-search performance
 
 Stay on the current browse model first:
@@ -131,6 +144,8 @@ Stay on the current browse model first:
 - Browse is already a **client-side filter over the loaded list** (`filter-browse-raffles.ts`). Enrich that payload once with display names, then filter in memory — same cost class as today’s `q` / currency / prize filters.
 - Only add a server `wallet_profiles` ILIKE lookup if lists get large or you need hosts who are not in the current result set (e.g. ended raffles not loaded).
 - Cap typeahead suggestions (e.g. top 8) and debounce input so profile lookups do not fire on every keystroke.
+
+**Implemented:** one `/api/profiles` batch per loaded creator set; `suggestHosts` capped at 8; host resolve is in-memory over candidates.
 
 ### Additional mitigations
 
