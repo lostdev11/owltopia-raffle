@@ -58,13 +58,22 @@ import {
 import { cn } from '@/lib/utils'
 import { RafflesBrowseToolbar } from '@/components/RafflesBrowseToolbar'
 import {
+  enrichRafflesWithCreatorDisplayNames,
   filterRafflesBrowseList,
   hasActiveBrowseFilters,
+  hostWalletFilterFromSearchParam,
   prizeFilterFromSearchParam,
   ticketCurrencyFilterFromSearchParam,
+  type RaffleBrowseHostFilter,
   type RaffleBrowsePrizeFilter,
   type RaffleBrowseTicketCurrencyFilter,
 } from '@/lib/raffles/filter-browse-raffles'
+import {
+  collectHostCandidates,
+  truncateWalletLabel,
+} from '@/lib/raffles/resolve-host-filter'
+import { getRaffleHostWallet } from '@/lib/raffles/host-wallet-copy'
+import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
 type FetchStatus = 'loading' | 'success' | 'empty' | 'error'
 
@@ -345,10 +354,20 @@ export function RafflesPageClient({
   const [browsePrize, setBrowsePrize] = useState<RaffleBrowsePrizeFilter>(() =>
     prizeFilterFromSearchParam(searchParams.get('prize'))
   )
+  const [browseHostWallet, setBrowseHostWallet] = useState<RaffleBrowseHostFilter>(() =>
+    hostWalletFilterFromSearchParam(searchParams.get('host'))
+  )
+  const [browseHostLabel, setBrowseHostLabel] = useState<string | null>(null)
+  const [creatorDisplayNames, setCreatorDisplayNames] = useState<Record<string, string>>({})
 
   const browseFilters = useMemo(
-    () => ({ query: browseQuery, ticketCurrency: browseTicketCurrency, prize: browsePrize }),
-    [browseQuery, browseTicketCurrency, browsePrize]
+    () => ({
+      query: browseQuery,
+      ticketCurrency: browseTicketCurrency,
+      prize: browsePrize,
+      hostWallet: browseHostWallet,
+    }),
+    [browseQuery, browseTicketCurrency, browsePrize, browseHostWallet]
   )
 
   const replaceBrowseFiltersInUrl = useCallback(
@@ -356,6 +375,7 @@ export function RafflesPageClient({
       query: string
       ticketCurrency: RaffleBrowseTicketCurrencyFilter
       prize: RaffleBrowsePrizeFilter
+      hostWallet: RaffleBrowseHostFilter
     }) => {
       const params = new URLSearchParams(searchParams.toString())
       const q = next.query.trim()
@@ -365,6 +385,8 @@ export function RafflesPageClient({
       else params.delete('currency')
       if (next.prize) params.set('prize', next.prize)
       else params.delete('prize')
+      if (next.hostWallet?.trim()) params.set('host', next.hostWallet.trim())
+      else params.delete('host')
       const qs = params.toString()
       router.replace(qs ? `/raffles?${qs}` : '/raffles', { scroll: false })
     },
@@ -375,38 +397,92 @@ export function RafflesPageClient({
     const urlQ = (searchParams.get('q') ?? '').trim()
     const urlCur = ticketCurrencyFilterFromSearchParam(searchParams.get('currency'))
     const urlPrize = prizeFilterFromSearchParam(searchParams.get('prize'))
-    if (browseQuery.trim() === urlQ && browseTicketCurrency === urlCur && browsePrize === urlPrize) return
+    const urlHost = hostWalletFilterFromSearchParam(searchParams.get('host'))
+    if (
+      browseQuery.trim() === urlQ &&
+      browseTicketCurrency === urlCur &&
+      browsePrize === urlPrize &&
+      (browseHostWallet || '') === (urlHost || '')
+    ) {
+      return
+    }
     const t = setTimeout(() => {
       replaceBrowseFiltersInUrl({
         query: browseQuery,
         ticketCurrency: browseTicketCurrency,
         prize: browsePrize,
+        hostWallet: browseHostWallet,
       })
     }, 350)
     return () => clearTimeout(t)
-  }, [browseQuery, browseTicketCurrency, browsePrize, searchParams, replaceBrowseFiltersInUrl])
+  }, [
+    browseQuery,
+    browseTicketCurrency,
+    browsePrize,
+    browseHostWallet,
+    searchParams,
+    replaceBrowseFiltersInUrl,
+  ])
+
+  // Keep host wallet in sync when URL changes (shared links / back-forward).
+  useEffect(() => {
+    const urlHost = hostWalletFilterFromSearchParam(searchParams.get('host'))
+    setBrowseHostWallet((prev) => ((prev || '') === (urlHost || '') ? prev : urlHost))
+  }, [searchParams])
 
   const handleBrowseTicketCurrencyChange = useCallback(
     (value: RaffleBrowseTicketCurrencyFilter) => {
       setBrowseTicketCurrency(value)
-      replaceBrowseFiltersInUrl({ query: browseQuery, ticketCurrency: value, prize: browsePrize })
+      replaceBrowseFiltersInUrl({
+        query: browseQuery,
+        ticketCurrency: value,
+        prize: browsePrize,
+        hostWallet: browseHostWallet,
+      })
     },
-    [browseQuery, browsePrize, replaceBrowseFiltersInUrl]
+    [browseQuery, browsePrize, browseHostWallet, replaceBrowseFiltersInUrl]
   )
 
   const handleBrowsePrizeChange = useCallback(
     (value: RaffleBrowsePrizeFilter) => {
       setBrowsePrize(value)
-      replaceBrowseFiltersInUrl({ query: browseQuery, ticketCurrency: browseTicketCurrency, prize: value })
+      replaceBrowseFiltersInUrl({
+        query: browseQuery,
+        ticketCurrency: browseTicketCurrency,
+        prize: value,
+        hostWallet: browseHostWallet,
+      })
     },
-    [browseQuery, browseTicketCurrency, replaceBrowseFiltersInUrl]
+    [browseQuery, browseTicketCurrency, browseHostWallet, replaceBrowseFiltersInUrl]
+  )
+
+  const handleBrowseHostChange = useCallback(
+    (wallet: string | null, label?: string | null) => {
+      const next = wallet?.trim() ? wallet.trim() : null
+      setBrowseHostWallet(next)
+      setBrowseHostLabel(next ? (label?.trim() || truncateWalletLabel(next)) : null)
+      replaceBrowseFiltersInUrl({
+        query: browseQuery,
+        ticketCurrency: browseTicketCurrency,
+        prize: browsePrize,
+        hostWallet: next,
+      })
+    },
+    [browseQuery, browseTicketCurrency, browsePrize, replaceBrowseFiltersInUrl]
   )
 
   const clearBrowseFilters = useCallback(() => {
     setBrowseQuery('')
     setBrowseTicketCurrency(null)
     setBrowsePrize(null)
-    replaceBrowseFiltersInUrl({ query: '', ticketCurrency: null, prize: null })
+    setBrowseHostWallet(null)
+    setBrowseHostLabel(null)
+    replaceBrowseFiltersInUrl({
+      query: '',
+      ticketCurrency: null,
+      prize: null,
+      hostWallet: null,
+    })
   }, [replaceBrowseFiltersInUrl])
 
   const applyBrowseFilters = useCallback(
@@ -779,6 +855,41 @@ export function RafflesPageClient({
     ...past.map((item) => item.raffle),
   ]
 
+  const creatorWalletsKey = useMemo(() => {
+    const wallets = new Set<string>()
+    for (const r of allRafflesFlat) {
+      const w = getRaffleHostWallet(r)
+      if (w) wallets.add(w)
+    }
+    return [...wallets].sort().join(',')
+  }, [allRafflesFlat])
+
+  // Enrich all creators (not partners only) for host filter + name search in `q`.
+  useEffect(() => {
+    if (!creatorWalletsKey) {
+      setCreatorDisplayNames({})
+      return
+    }
+    const list = creatorWalletsKey.split(',').filter(Boolean).slice(0, 200)
+    if (list.length === 0) {
+      setCreatorDisplayNames({})
+      return
+    }
+    let cancelled = false
+    const q = list.join(',')
+    fetch(`/api/profiles?wallets=${encodeURIComponent(q)}`)
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((map: Record<string, string>) => {
+        if (!cancelled) setCreatorDisplayNames(map && typeof map === 'object' ? map : {})
+      })
+      .catch(() => {
+        if (!cancelled) setCreatorDisplayNames({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [creatorWalletsKey])
+
   const partnerWalletSet = useMemo(
     () => new Set((partnerCreatorWallets ?? []).map((w) => w.trim()).filter(Boolean)),
     [partnerCreatorWallets]
@@ -824,18 +935,66 @@ export function RafflesPageClient({
     [active, isPartnerCommunityRaffle]
   )
 
-  const partnerFeaturedBrowse = useMemo(
-    () => applyBrowseFilters(partnerFeaturedActive),
-    [partnerFeaturedActive, applyBrowseFilters]
+  const activeView = useMemo(
+    () => enrichRafflesWithCreatorDisplayNames(filterRafflesForCurrentTab(active), creatorDisplayNames),
+    [active, filterRafflesForCurrentTab, creatorDisplayNames]
+  )
+  const pausedPendingView = useMemo(
+    () =>
+      enrichRafflesWithCreatorDisplayNames(
+        filterRafflesForCurrentTab(pausedPending),
+        creatorDisplayNames
+      ),
+    [pausedPending, filterRafflesForCurrentTab, creatorDisplayNames]
+  )
+  const futureView = useMemo(
+    () => enrichRafflesWithCreatorDisplayNames(filterRafflesForCurrentTab(future), creatorDisplayNames),
+    [future, filterRafflesForCurrentTab, creatorDisplayNames]
+  )
+  const pastView = useMemo(
+    () => enrichRafflesWithCreatorDisplayNames(filterRafflesForCurrentTab(past), creatorDisplayNames),
+    [past, filterRafflesForCurrentTab, creatorDisplayNames]
   )
 
-  const activeView = useMemo(() => filterRafflesForCurrentTab(active), [active, filterRafflesForCurrentTab])
-  const pausedPendingView = useMemo(
-    () => filterRafflesForCurrentTab(pausedPending),
-    [pausedPending, filterRafflesForCurrentTab]
+  const hostCandidates = useMemo(
+    () =>
+      collectHostCandidates([
+        ...activeView.map((i) => i.raffle),
+        ...pausedPendingView.map((i) => i.raffle),
+        ...futureView.map((i) => i.raffle),
+        ...pastView.map((i) => i.raffle),
+      ]),
+    [activeView, pausedPendingView, futureView, pastView]
   )
-  const futureView = useMemo(() => filterRafflesForCurrentTab(future), [future, filterRafflesForCurrentTab])
-  const pastView = useMemo(() => filterRafflesForCurrentTab(past), [past, filterRafflesForCurrentTab])
+
+  // Resolve chip label for deep-linked `?host=` once candidates / profiles load.
+  useEffect(() => {
+    if (!browseHostWallet) {
+      setBrowseHostLabel(null)
+      return
+    }
+    const fromCandidates = hostCandidates.find((h) =>
+      walletsEqualSolana(h.wallet, browseHostWallet)
+    )
+    if (fromCandidates) {
+      setBrowseHostLabel(fromCandidates.label)
+      return
+    }
+    const fromProfiles = (creatorDisplayNames[browseHostWallet] || '').trim()
+    if (fromProfiles) {
+      setBrowseHostLabel(fromProfiles)
+      return
+    }
+    setBrowseHostLabel((prev) => prev || truncateWalletLabel(browseHostWallet))
+  }, [browseHostWallet, hostCandidates, creatorDisplayNames])
+
+  const partnerFeaturedBrowse = useMemo(
+    () =>
+      applyBrowseFilters(
+        enrichRafflesWithCreatorDisplayNames(partnerFeaturedActive, creatorDisplayNames)
+      ),
+    [partnerFeaturedActive, applyBrowseFilters, creatorDisplayNames]
+  )
 
   const activeBrowse = useMemo(() => applyBrowseFilters(activeView), [activeView, applyBrowseFilters])
   const pausedPendingBrowse = useMemo(
@@ -1151,6 +1310,10 @@ export function RafflesPageClient({
             onTicketCurrencyChange={handleBrowseTicketCurrencyChange}
             prize={browsePrize}
             onPrizeChange={handleBrowsePrizeChange}
+            hostWallet={browseHostWallet}
+            hostLabel={browseHostLabel}
+            onHostChange={handleBrowseHostChange}
+            hostCandidates={hostCandidates}
             resultCount={browseTabResultCount}
             totalCount={browseTabTotalCount}
           />
