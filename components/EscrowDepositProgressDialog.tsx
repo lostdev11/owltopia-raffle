@@ -41,7 +41,7 @@ function stepTitle(step: EscrowDepositProgressStep | undefined, fallbackTitle: s
     case 'sign_in':
       return 'Sign in to finish'
     case 'verify':
-      return 'Verifying prize in escrow'
+      return 'Finishing raffle creation'
     default:
       return fallbackTitle
   }
@@ -77,8 +77,8 @@ function stepDescription(
     case 'verify':
       return (
         <p>
-          Checking that your prize reached platform escrow so the raffle can go live. We retry
-          automatically
+          Checking that your prize reached platform escrow so we can finish creating your raffle. We
+          retry automatically
           {verifyAttempt && verifyAttempt.max > 0 ? ` (up to ${verifyAttempt.max} tries)` : ''}.
           {verifyAttempt && verifyAttempt.current > 0 ? (
             <span className="block mt-2 font-medium text-foreground">
@@ -108,7 +108,9 @@ export function EscrowDepositProgressDialog({
   onCancel,
 }: EscrowDepositProgressDialogProps) {
   const isLoading = phase === 'loading'
-  const displayTitle = isLoading && step ? stepTitle(step, title) : title
+  // Prefer the caller title (e.g. create flow: "Your raffle is being created") over step labels.
+  const displayTitle =
+    title.trim() || (isLoading && step ? stepTitle(step, 'Working…') : 'Working…')
   const displayDescription = isLoading
     ? stepDescription(step, description, verifyAttempt) ?? description
     : description
