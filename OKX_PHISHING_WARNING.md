@@ -63,7 +63,8 @@ Optional hygiene (may help heuristics over time; will not instantly unblock):
 
 - Keep `NEXT_PUBLIC_SITE_URL` / wallet `appIdentity.uri` on `https://www.owltopia.xyz`
 - Prefer clear branding on raffle pages (already Owltopia-branded)
-- Avoid slug patterns that twin famous phishing campaigns when creating high-visibility raffles, when practical
+- Raffle URLs are sanitized so phishing-shaped segments (`legendary`, `dragon`, `metamask`, …) are stripped from new slugs; existing bad slugs are redirected (see `lib/raffles/slugify.ts` + `lib/raffles/slug-aliases.ts`)
+- After deploy, full admins can rename a live row: `POST /api/admin/raffles/:id/rename-slug` with `{ "useCanonicalAlias": true }` (e.g. `legendary-dumpster-14` → `dumpster-14`)
 
 ---
 

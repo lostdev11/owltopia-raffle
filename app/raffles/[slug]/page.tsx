@@ -20,7 +20,7 @@ import { getReferralSummaryForWallet } from '@/lib/db/referrals'
 import { isReferralProgramEnabled } from '@/lib/referrals/config'
 import { raffleSupportsReferralProgram } from '@/lib/referrals/program'
 import { Suspense } from 'react'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { PLATFORM_NAME, getSiteBaseUrl } from '@/lib/site-config'
 import { resolveRaffleShareOgImage } from '@/lib/resolve-raffle-share-og-image'
 import { lookupOrbisNftUrl } from '@/lib/nft-marketplace-orbis'
@@ -29,6 +29,7 @@ import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
 import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
+import { canonicalRaffleSlug, raffleSlugNeedsRedirect } from '@/lib/raffles/slug-aliases'
 // Force dynamic rendering to prevent caching stale data
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -50,7 +51,8 @@ export async function generateMetadata({
   const description =
     raffle.description?.replace(/\s+/g, ' ').trim().slice(0, 200) ||
     `Enter the raffle for ${raffle.title}. Trusted raffles with full transparency.`
-  const canonicalUrl = `${SITE_URL}/raffles/${raffle.slug}`
+  const publicSlug = canonicalRaffleSlug(raffle.slug)
+  const canonicalUrl = `${SITE_URL}/raffles/${publicSlug}`
   const ogImage = resolveRaffleShareOgImage(raffle)
 
   const linkOnly = raffle.list_on_platform === false
@@ -89,10 +91,21 @@ export default async function RaffleDetailPage({
   params: Promise<{ slug: string }>
 }) {
   const { slug } = await params
+  const redirectTo = raffleSlugNeedsRedirect(slug)
+  if (redirectTo) {
+    redirect(`/raffles/${encodeURIComponent(redirectTo)}`)
+  }
+
   let raffle = await getRaffleBySlug(slug)
   
   if (!raffle) {
     notFound()
+  }
+
+  // If DB still has a deprecated slug, bounce to the canonical public path.
+  const canonical = canonicalRaffleSlug(raffle.slug)
+  if (canonical !== slug) {
+    redirect(`/raffles/${encodeURIComponent(canonical)}`)
   }
 
   // Pending NFT raffles should only be visible to admins and the raffle creator.

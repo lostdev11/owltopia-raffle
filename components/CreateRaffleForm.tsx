@@ -48,6 +48,7 @@ import { assertWalletReadyForSigning } from '@/lib/solana/assert-wallet-ready-fo
 import { sendTransactionWithTimeout } from '@/lib/solana/send-transaction-with-timeout'
 import { walletNftLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
 import { nftPrizeRaffleTitleFromWalletSelection } from '@/lib/raffles/nft-prize-raffle-title'
+import { slugifyRaffleTitle } from '@/lib/raffles/slugify'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -1027,10 +1028,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       end_time: localDateTimeToUtc(endTime),
       theme_accent: themeAccent,
       status: (formData.get('status') as string) || 'draft',
-      slug: titleTrimmed
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, ''),
+      slug: slugifyRaffleTitle(titleTrimmed),
       wallet_address: publicKey.toBase58(),
       prize_type: isPartner ? 'crypto' : 'nft',
     }

@@ -9,6 +9,7 @@ import {
 import { postDiscordChannelEmbed } from '@/lib/discord-channel-messages'
 import { formatRaffleTicketPriceSummary } from '@/lib/raffles/dual-ticket-payment'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
+import { canonicalRaffleSlug } from '@/lib/raffles/slug-aliases'
 
 const FANOUT_CONCURRENCY = 4
 
@@ -27,7 +28,7 @@ function prizeSummary(raffle: Raffle): string {
 
 function rafflePageUrl(raffle: Raffle): string {
   const base = getSiteBaseUrl()
-  return `${base}/raffles/${encodeURIComponent(raffle.slug)}`
+  return `${base}/raffles/${encodeURIComponent(canonicalRaffleSlug(raffle.slug))}`
 }
 
 function discordTimestampUnix(iso: string): number | null {

@@ -6,6 +6,7 @@ import {
 } from '@/lib/raffles/owltopia-share-text'
 import { openAdminTweetMirrorRequest } from '@/lib/client/admin-tweet-mirror-host'
 import { openRaffleShareCopyRequest } from '@/lib/client/raffle-share-copy-host'
+import { canonicalRaffleSlug } from '@/lib/raffles/slug-aliases'
 
 function isMobileNativeSharePreferred(): boolean {
   return (
@@ -75,7 +76,7 @@ export async function shareRaffleFromBrowser(params: {
   const { raffle, isFullAdmin, onCopied } = params
   if (typeof window === 'undefined') return
 
-  const pageUrl = `${window.location.origin}/raffles/${raffle.slug}`
+  const pageUrl = `${window.location.origin}/raffles/${canonicalRaffleSlug(raffle.slug)}`
 
   if (isFullAdmin) {
     const text = buildOwltopiaRaffleShareText(raffle)

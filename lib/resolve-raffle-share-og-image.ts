@@ -1,5 +1,6 @@
 import type { Raffle } from '@/lib/types'
 import { getSiteBaseUrl, OG_IMAGE_CACHE_VERSION } from '@/lib/site-config'
+import { canonicalRaffleSlug } from '@/lib/raffles/slug-aliases'
 export type RaffleShareOgImage = {
   url: string
   width: number
@@ -14,7 +15,7 @@ export type RaffleShareOgImage = {
  */
 export function resolveRaffleShareOgImage(raffle: Raffle): RaffleShareOgImage {
   const site = getSiteBaseUrl().replace(/\/$/, '')
-  const slug = encodeURIComponent(raffle.slug)
+  const slug = encodeURIComponent(canonicalRaffleSlug(raffle.slug))
   return {
     url: `${site}/raffles/${slug}/opengraph-image?v=${OG_IMAGE_CACHE_VERSION}`,
     width: 1200,

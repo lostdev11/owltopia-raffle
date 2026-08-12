@@ -3,6 +3,7 @@ import { buildRaffleHostWalletShareLine } from '@/lib/raffles/host-wallet-copy'
 import { formatRaffleTicketPriceSummary } from '@/lib/raffles/dual-ticket-payment'
 import { formatPromoXHandleForShare } from '@/lib/raffles/promo-x-handle'
 import { getSiteBaseUrl } from '@/lib/site-config'
+import { canonicalRaffleSlug } from '@/lib/raffles/slug-aliases'
 
 /** Remaining time until end — best for raid / last-call posts (not total raffle length). */
 export function formatRaffleRemainingDuration(endTimeIso: string, nowMs: number = Date.now()): string {
@@ -55,7 +56,7 @@ function formatPromoLine(raffle: Raffle): string {
 export function buildOwltopiaRaffleShareShortUrl(raffle: Pick<Raffle, 'slug'>): string {
   const base = getSiteBaseUrl().replace(/^https?:\/\//, '').replace(/^www\./, '')
   const host = base.includes('owltopia') ? 'owltopia.xyz' : base
-  return `${host}/raffles/${raffle.slug}`
+  return `${host}/raffles/${canonicalRaffleSlug(raffle.slug)}`
 }
 
 function buildOwltopiaRaffleShareBody(
