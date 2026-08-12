@@ -101,7 +101,15 @@ export function isEscrowSplPrizeFrozenVerifyError(message: string): boolean {
 }
 
 /**
- * Retries on transient outcomes (network, 5xx, and 429).
+ * Stops immediately on non-retryable 4xx responses.
+ * Retries on 503 (RPC/indexing lag after deposit) and 429.
+ */
+function isRetryableVerifyStatus(status: number): boolean {
+  return status === 429 || status === 503 || status >= 500
+}
+
+/**
+ * Retries on transient outcomes (network, 5xx, 503 lag, and 429).
  * Stops immediately on non-retryable 4xx responses.
  */
 export async function verifyPrizeDepositWithRetries(
@@ -178,7 +186,7 @@ export async function verifyPrizeDepositWithRetries(
     }
 
     const isClientError = res.status >= 400 && res.status < 500
-    const isRetryableClientError = res.status === 429
+    const isRetryableClientError = isRetryableVerifyStatus(res.status)
     if (isClientError && !isRetryableClientError) {
       return {
         ok: false,
@@ -275,7 +283,7 @@ export async function verifyCommunityGiveawayDepositWithRetries(
     }
 
     const isClientError = res.status >= 400 && res.status < 500
-    const isRetryableClientError = res.status === 429
+    const isRetryableClientError = isRetryableVerifyStatus(res.status)
     if (isClientError && !isRetryableClientError) {
       return {
         ok: false,
