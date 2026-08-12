@@ -26,6 +26,7 @@ import { getAdminRole } from '@/lib/db/admins'
 import { getPrizeEscrowPublicKey } from '@/lib/raffles/prize-escrow'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { notifyRaffleCreated } from '@/lib/discord-raffle-webhooks'
+import { sanitizeRaffleSlug, slugifyRaffleTitle } from '@/lib/raffles/slugify'
 import {
   parseNftFloorPrice,
   parseNftTicketPrice,
@@ -255,15 +256,9 @@ export async function handleCreateRafflePost(
       )
     }
 
-    // Generate slug from title if not provided, or use provided slug
-    let slug = body.slug
-    if (!slug) {
-      // Generate base slug from title
-      slug = body.title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, '')
-    }
+    // Generate slug from title if not provided, or use provided slug.
+    // Always sanitize so client-supplied slugs cannot keep phishing-shaped tokens.
+    let slug = body.slug ? sanitizeRaffleSlug(String(body.slug)) : slugifyRaffleTitle(body.title)
 
     // Ensure slug is unique
     slug = await withTimeout(generateUniqueSlug(slug), SUPABASE_TIMEOUT_MS, 'supabase error')
@@ -763,12 +758,13 @@ export async function handleCreateRafflePost(
 
       if (!body.slug) {
         slug = await withTimeout(
-          generateUniqueSlug(
-            canonicalNftTitle
-              .toLowerCase()
-              .replace(/[^a-z0-9]+/g, '-')
-              .replace(/(^-|-$)/g, '')
-          ),
+          generateUniqueSlug(slugifyRaffleTitle(canonicalNftTitle)),
+          SUPABASE_TIMEOUT_MS,
+          'supabase error'
+        )
+      } else {
+        slug = await withTimeout(
+          generateUniqueSlug(sanitizeRaffleSlug(String(body.slug))),
           SUPABASE_TIMEOUT_MS,
           'supabase error'
         )

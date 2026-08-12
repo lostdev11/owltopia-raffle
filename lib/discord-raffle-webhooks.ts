@@ -15,6 +15,7 @@ import type { CommunityGiveaway, Raffle } from '@/lib/types'
 import { resolveNftPrizeImageForDiscordEmbed } from '@/lib/discord-nft-embed-image'
 import { notifyCommunityDiscordRaffleAlerts } from '@/lib/discord-raffle-alert-fanout'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
+import { canonicalRaffleSlug } from '@/lib/raffles/slug-aliases'
 import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 import { parseDiscordUserSnowflake } from '@/lib/discord-webhook-user-mentions'
 import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
@@ -110,7 +111,7 @@ function prizeSummary(raffle: Raffle): string {
 
 function rafflePageUrl(raffle: Raffle): string {
   const base = getSiteBaseUrl()
-  return `${base}/raffles/${encodeURIComponent(raffle.slug)}`
+  return `${base}/raffles/${encodeURIComponent(canonicalRaffleSlug(raffle.slug))}`
 }
 
 function communityGiveawayPageUrl(g: Pick<CommunityGiveaway, 'id'>): string {

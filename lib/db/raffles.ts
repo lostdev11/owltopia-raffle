@@ -28,6 +28,8 @@ import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
 import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
 import { getSupabasePublishableKey, getSupabaseSecretKey } from '@/lib/supabase-env'
+import { raffleSlugStorageCandidates } from '@/lib/raffles/slug-aliases'
+import { sanitizeRaffleSlug } from '@/lib/raffles/slugify'
 import {
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
@@ -787,6 +789,16 @@ export async function getAdminPendingCancellationRaffles(): Promise<GetRafflesRe
 }
 
 export async function getRaffleBySlug(slug: string) {
+  const candidates = raffleSlugStorageCandidates(slug)
+  for (const candidate of candidates) {
+    const found = await getRaffleBySlugExact(candidate)
+    if (found) return found
+  }
+  return null
+}
+
+/** Exact slug match only (no alias resolution). */
+async function getRaffleBySlugExact(slug: string) {
   return withRetry(async () => {
     const client = getSupabaseForRead()
     const columns = await getRaffleColumns()
@@ -1370,10 +1382,11 @@ export async function getEntriesByRaffleId(raffleId: string) {
  * If the slug already exists, appends a number (e.g., "my-raffle-2")
  */
 export async function generateUniqueSlug(baseSlug: string): Promise<string> {
-  let slug = baseSlug
+  const cleaned = sanitizeRaffleSlug(baseSlug)
+  let slug = cleaned
   let counter = 1
   
-  // Check if slug exists, and if so, append a number
+  // Check if slug exists (including slug-alias targets), and if so, append a number
   while (true) {
     const existing = await getRaffleBySlug(slug)
     
@@ -1384,12 +1397,12 @@ export async function generateUniqueSlug(baseSlug: string): Promise<string> {
     
     // Slug exists, try with a number appended
     counter++
-    slug = `${baseSlug}-${counter}`
+    slug = `${cleaned}-${counter}`
     
     // Safety check to prevent infinite loops
     if (counter > 1000) {
       // Fallback to timestamp-based slug
-      slug = `${baseSlug}-${Date.now()}`
+      slug = `${cleaned}-${Date.now()}`
       break
     }
   }
