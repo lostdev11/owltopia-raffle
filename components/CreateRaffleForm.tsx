@@ -233,7 +233,7 @@ function handleCreateEscrowVerifyOutcome(
         phase: 'result',
         persistUntilDismiss: true,
         primaryAction: {
-          label: 'Open raffle',
+          label: 'Sync raffle',
           onClick: () => {
             setEscrowProgress(CREATE_ESCROW_IDLE)
             router.push(`/raffles/${raffleSlug}?deposit=1`)
