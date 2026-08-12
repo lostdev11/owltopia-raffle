@@ -145,7 +145,7 @@ type CreateEscrowProgressState = {
   open: boolean
   title: string
   description: string
-  phase: 'loading' | 'result'
+  phase: 'loading' | 'result' | 'success'
   step?: EscrowDepositProgressStep
   verifyAttempt?: { current: number; max: number }
   /** When true, `finally` leaves the dialog open until the user taps `primaryAction`. */
@@ -281,11 +281,11 @@ function showCreateRaffleSuccessProgress(
   const startLabel = formatDateTimeWithTimezone(raffle.start_time)
   setEscrowProgress({
     open: true,
-    title: scheduled ? 'Raffle scheduled' : 'Your raffle is live',
+    title: scheduled ? 'Success — raffle scheduled' : 'Success — your raffle is live',
     description: scheduled
       ? `Prize is in escrow. Tickets open ${startLabel ? `at ${startLabel}` : 'at your scheduled start time'}.`
-      : 'Prize is in escrow and your raffle is live.',
-    phase: 'result',
+      : 'Prize is in escrow and your raffle is live. Share it or open the listing to manage tickets.',
+    phase: 'success',
     persistUntilDismiss: true,
     primaryAction: {
       label: 'View raffle',
