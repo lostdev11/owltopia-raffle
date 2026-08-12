@@ -44,6 +44,7 @@ import {
 } from '@/lib/solana/escrow-deposit-log'
 import { isEscrowSplPrizeFrozenVerifyError, VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS } from '@/lib/raffles/verify-prize-deposit-client'
 import { registerDepositTxAndVerifyWithRetries, type RegisterAndVerifyPrizeDepositResult } from '@/lib/raffles/register-and-verify-prize-deposit-client'
+import { publicationStatusForStartTime } from '@/lib/raffles/publication-status'
 import { assertWalletReadyForSigning } from '@/lib/solana/assert-wallet-ready-for-signing'
 import { sendTransactionWithTimeout } from '@/lib/solana/send-transaction-with-timeout'
 import { walletNftLooksLikeSnsDomain } from '@/lib/raffles/sns-domain-metadata'
@@ -144,7 +145,7 @@ type CreateEscrowProgressState = {
   open: boolean
   title: string
   description: string
-  phase: 'loading' | 'result'
+  phase: 'loading' | 'result' | 'success'
   step?: EscrowDepositProgressStep
   verifyAttempt?: { current: number; max: number }
   /** When true, `finally` leaves the dialog open until the user taps `primaryAction`. */
@@ -254,6 +255,46 @@ const CREATE_ESCROW_IDLE: CreateEscrowProgressState = {
   description: '',
   phase: 'loading',
   persistUntilDismiss: false,
+}
+
+/** Waiting dialog shown for the whole create → escrow → verify flow. */
+function creatingRaffleProgress(
+  description: string,
+  extras: Partial<CreateEscrowProgressState> = {}
+): CreateEscrowProgressState {
+  return {
+    open: true,
+    title: 'Your raffle is being created',
+    description,
+    phase: 'loading',
+    persistUntilDismiss: false,
+    ...extras,
+  }
+}
+
+function showCreateRaffleSuccessProgress(
+  raffle: Pick<Raffle, 'slug' | 'start_time'>,
+  setEscrowProgress: Dispatch<SetStateAction<CreateEscrowProgressState>>,
+  router: ReturnType<typeof useRouter>
+): void {
+  const scheduled = publicationStatusForStartTime(raffle.start_time) === 'draft'
+  const startLabel = formatDateTimeWithTimezone(raffle.start_time)
+  setEscrowProgress({
+    open: true,
+    title: scheduled ? 'Success — raffle scheduled' : 'Success — your raffle is live',
+    description: scheduled
+      ? `Prize is in escrow. Tickets open ${startLabel ? `at ${startLabel}` : 'at your scheduled start time'}.`
+      : 'Prize is in escrow and your raffle is live. Share it or open the listing to manage tickets.',
+    phase: 'success',
+    persistUntilDismiss: true,
+    primaryAction: {
+      label: 'View raffle',
+      onClick: () => {
+        setEscrowProgress(CREATE_ESCROW_IDLE)
+        router.push(`/raffles/${raffle.slug}`)
+      },
+    },
+  })
 }
 
 type MilestoneDraftRow = {
@@ -1013,6 +1054,11 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     setSubmissionError(null)
     setCreateStep('saving')
     setLoading(true)
+    setEscrowProgress(
+      creatingRaffleProgress(
+        'Saving your listing. Next you will approve sending the prize to escrow — keep this page open.'
+      )
+    )
     const rankValue = formData.get('rank') as string
     const currency = (formData.get('currency') as string) || 'SOL'
     const data: Record<string, unknown> = {
@@ -1119,15 +1165,12 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
         ) {
           try {
             setCreateStep('signing')
-            setEscrowProgress({
-              open: true,
-              title: 'Finish creating your raffle',
-              description:
-                'Your raffle was saved. Loading escrow settings — your wallet will open next to send the prize NFT.',
-              phase: 'loading',
-              step: 'wallet',
-              persistUntilDismiss: false,
-            })
+            setEscrowProgress(
+              creatingRaffleProgress(
+                'Listing saved. Loading escrow settings — your wallet will open next to send the prize NFT.',
+                { step: 'wallet' }
+              )
+            )
             await assertWalletReadyForSigning({
               connected,
               publicKey,
@@ -1155,6 +1198,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             const escrowPubkey = new PublicKey(escrowAddress)
             setEscrowProgress((p) => ({
               ...p,
+              title: 'Your raffle is being created',
               phase: 'loading',
               step: 'wallet',
               persistUntilDismiss: false,
@@ -1455,6 +1499,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
 
             setEscrowProgress((p) => ({
               ...p,
+              title: 'Your raffle is being created',
               phase: 'loading',
               step: 'verify',
               verifyAttempt: { current: 0, max: VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS },
@@ -1462,12 +1507,13 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               secondaryAction: undefined,
               onCancel: undefined,
               description:
-                'Confirming your deposit with Owltopia. We retry automatically if the network is slow.',
+                'Confirming your deposit so we can finish creating your raffle. We retry automatically if the network is slow.',
             }))
             const regOutcome = await registerDepositTxAndVerifyWithRetries(raffle.id, depositSig, {
               onVerifyAttempt: (current, max) => {
                 setEscrowProgress((p) => ({
                   ...p,
+                  title: 'Your raffle is being created',
                   step: 'verify',
                   verifyAttempt: { current, max },
                 }))
@@ -1524,7 +1570,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               })
               return
             }
-            router.push(`/raffles/${raffle.slug}`)
+            showCreateRaffleSuccessProgress(raffle, setEscrowProgress, router)
           } catch (transferErr) {
             logEscrowDepositError(
               {
@@ -1553,15 +1599,12 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
           } else {
             try {
               setCreateStep('signing')
-              setEscrowProgress({
-                open: true,
-                title: 'Finish creating your raffle',
-                description:
-                  `Your raffle was saved. Loading escrow settings — your wallet will open next to send the ${prizeCur} prize.`,
-                phase: 'loading',
-                step: 'wallet',
-                persistUntilDismiss: false,
-              })
+              setEscrowProgress(
+                creatingRaffleProgress(
+                  `Listing saved. Loading escrow settings — your wallet will open next to send the ${prizeCur} prize.`,
+                  { step: 'wallet' }
+                )
+              )
               await assertWalletReadyForSigning({
                 connected,
                 publicKey,
@@ -1783,6 +1826,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               }
               setEscrowProgress((p) => ({
                 ...p,
+                title: 'Your raffle is being created',
                 phase: 'loading',
                 step: 'verify',
                 verifyAttempt: { current: 0, max: VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS },
@@ -1790,12 +1834,13 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 secondaryAction: undefined,
                 onCancel: undefined,
                 description:
-                  'Confirming your deposit with Owltopia. We retry automatically if the network is slow.',
+                  'Confirming your deposit so we can finish creating your raffle. We retry automatically if the network is slow.',
               }))
               const regOutcome = await registerDepositTxAndVerifyWithRetries(raffle.id, depositSig, {
                 onVerifyAttempt: (current, max) => {
                   setEscrowProgress((p) => ({
                     ...p,
+                    title: 'Your raffle is being created',
                     step: 'verify',
                     verifyAttempt: { current, max },
                   }))
@@ -1836,7 +1881,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 })
                 return
               }
-              router.push(`/raffles/${raffle.slug}`)
+              showCreateRaffleSuccessProgress(raffle, setEscrowProgress, router)
             } catch (transferErr) {
               console.error('SPL prize token transfer to escrow failed:', transferErr)
               alert(
@@ -2783,7 +2828,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 ? createStep === 'signing'
                   ? 'Approve in wallet…'
                   : createStep === 'saving'
-                    ? 'Saving raffle…'
+                    ? 'Creating raffle…'
                     : 'Working…'
                 : 'Create raffle — send prize to escrow'}
             </Button>
