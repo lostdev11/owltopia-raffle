@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
     }
     if (msg.includes('approval_status') || msg.includes('created_by_wallet') || msg.includes('does not exist')) {
       return NextResponse.json(
-        { error: 'Partner presale tables need migration 213_owl_center_partner_presale_ready.sql.' },
+        { error: 'Partner presale tables need migration 215_owl_center_partner_presale_ready.sql.' },
         { status: 503 }
       )
     }
