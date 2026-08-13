@@ -58,6 +58,7 @@
     "test:parse-deposit-tx": "npx --yes tsx scripts/test-parse-deposit-tx.ts",
     "test:publish-after-deposits": "npx --yes tsx scripts/test-publish-after-deposits.ts",
     "test:owl-send-holder-discount": "npx --yes tsx scripts/test-owl-send-holder-discount.ts",
+    "test:owl-send-mpl-core-ledger": "npx --yes tsx scripts/test-owl-send-mpl-core-ledger.ts",
     "test:partner-nest-pool": "npx --yes tsx scripts/test-partner-nest-pool.ts",
     "test:filter-browse-host": "npx --yes tsx scripts/test-filter-browse-host.ts",
     "test:packs-open-rng": "npx --yes tsx scripts/test-packs-open-rng.ts",
