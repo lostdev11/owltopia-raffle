@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { requireFullAdminSession } from '@/lib/auth-server'
+import { requireSession } from '@/lib/auth-server'
 import {
   insertOwlCenterPresaleTenant,
-  listOwlCenterPresaleTenantsAdmin,
+  listOwlCenterPresaleTenantsByCreator,
   sanitizePreviewImagesInput,
 } from '@/lib/db/owl-center-presale-tenants'
-import { sumOwlCenterPresaleSold } from '@/lib/owl-center-presale/db'
+import { requirePartnerOrAdminForPresale } from '@/lib/owl-center-presale/access'
 import { OWL_CENTER_PRESALE_DEFAULT_THEME } from '@/lib/owl-center-presale/constants'
 import {
   normalizeOwlCenterPresaleCaps,
@@ -15,8 +15,10 @@ import {
   parseOwlCenterPresalePriceUsdc,
   parseOwlCenterPresaleSupply,
 } from '@/lib/owl-center-presale/limits'
-import { normalizeOwlCenterPresaleSlug } from '@/lib/owl-center-presale/slug'
+import { normalizeOwlCenterPresaleSlug, owlCenterPresalePublicPath } from '@/lib/owl-center-presale/slug'
+import { sumOwlCenterPresaleSold } from '@/lib/owl-center-presale/db'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -27,12 +29,19 @@ function parseHexColor(raw: unknown, fallback: string): string {
   return /^#[0-9A-Fa-f]{6}$/.test(t) ? t : fallback
 }
 
+/** GET — list partner's own presale campaigns. */
 export async function GET(request: NextRequest) {
   try {
-    const session = await requireFullAdminSession(request)
+    const session = await requireSession(request)
     if (session instanceof NextResponse) return session
 
-    const tenants = await listOwlCenterPresaleTenantsAdmin()
+    const access = await requirePartnerOrAdminForPresale(session.wallet)
+    if (!access.ok) return access.response
+
+    const wallet = normalizeSolanaWalletAddress(session.wallet)
+    if (!wallet) return NextResponse.json({ error: 'Invalid session wallet' }, { status: 401 })
+
+    const tenants = await listOwlCenterPresaleTenantsByCreator(wallet)
     const enriched = await Promise.all(
       tenants.map(async (t) => {
         let sold = 0
@@ -45,26 +54,39 @@ export async function GET(request: NextRequest) {
           ...t,
           sold,
           remaining: Math.max(0, t.presale_supply - sold),
+          presale_url: owlCenterPresalePublicPath(t.slug),
         }
       })
     )
     return NextResponse.json({ tenants: enriched })
   } catch (error) {
-    console.error('[admin/owl-center-presale GET]', error)
+    console.error('[partners/owl-center-presale GET]', error)
     return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 })
   }
 }
 
+/** POST — partner self-serve create (pending admin approval). */
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireFullAdminSession(request)
+    const session = await requireSession(request)
     if (session instanceof NextResponse) return session
 
+    const access = await requirePartnerOrAdminForPresale(session.wallet)
+    if (!access.ok) return access.response
+
+    const ip = getClientIp(request)
+    const rl = rateLimit(`partner-oc-presale-create:${session.wallet}:${ip}`, 10, 60_000)
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Too many requests — wait a minute.' }, { status: 429 })
+    }
+
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
-    const slugRaw = typeof body.slug === 'string' ? body.slug : ''
-    const slug = normalizeOwlCenterPresaleSlug(slugRaw)
+    const slug = normalizeOwlCenterPresaleSlug(typeof body.slug === 'string' ? body.slug : '')
     if (!slug) {
-      return NextResponse.json({ error: 'slug must be lowercase letters, numbers, and hyphens' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'slug must be lowercase letters, numbers, and hyphens' },
+        { status: 400 }
+      )
     }
 
     const displayName = typeof body.display_name === 'string' ? body.display_name.trim() : ''
@@ -72,18 +94,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'display_name is required' }, { status: 400 })
     }
 
-    const treasuryRaw = typeof body.treasury_wallet === 'string' ? body.treasury_wallet : ''
-    const treasury = normalizeSolanaWalletAddress(treasuryRaw)
-    if (!treasury) {
-      return NextResponse.json({ error: 'treasury_wallet must be a valid Solana address' }, { status: 400 })
-    }
-
-    let partnerWallet: string | null = null
-    if (typeof body.partner_wallet === 'string' && body.partner_wallet.trim()) {
-      partnerWallet = normalizeSolanaWalletAddress(body.partner_wallet)
-      if (!partnerWallet) {
-        return NextResponse.json({ error: 'partner_wallet is not a valid Solana address' }, { status: 400 })
-      }
+    const partnerRaw = typeof body.partner_wallet === 'string' ? body.partner_wallet : session.wallet
+    const partnerWallet = normalizeSolanaWalletAddress(partnerRaw)
+    if (!partnerWallet) {
+      return NextResponse.json({ error: 'partner_wallet must be a valid Solana address' }, { status: 400 })
     }
 
     const themeBody = body.theme && typeof body.theme === 'object' ? (body.theme as Record<string, unknown>) : {}
@@ -92,22 +106,23 @@ export async function POST(request: NextRequest) {
       max_credits_per_wallet: parseOwlCenterPresaleMaxCreditsPerWallet(body.max_credits_per_wallet),
     })
 
+    const creator = normalizeSolanaWalletAddress(session.wallet)!
     const tenant = await insertOwlCenterPresaleTenant({
       slug,
       display_name: displayName,
       headline: typeof body.headline === 'string' ? body.headline : null,
       description: typeof body.description === 'string' ? body.description : null,
-      treasury_wallet: treasury,
-      partner_wallet: partnerWallet ?? treasury,
-      is_enabled: body.is_enabled === true,
-      is_live: body.is_live === true,
-      approval_status: 'approved',
-      created_by_wallet: normalizeSolanaWalletAddress(session.wallet),
+      // Legacy column: keep equal to partner receive wallet.
+      treasury_wallet: partnerWallet,
+      partner_wallet: partnerWallet,
+      is_enabled: false,
+      is_live: false,
+      approval_status: 'pending',
+      created_by_wallet: creator,
       unit_price_usdc: parseOwlCenterPresalePriceUsdc(body.unit_price_usdc),
       presale_supply: parseOwlCenterPresaleSupply(body.presale_supply),
       max_spots_per_purchase: caps.max_spots_per_purchase,
       max_credits_per_wallet: caps.max_credits_per_wallet,
-      sort_order: typeof body.sort_order === 'number' ? Math.max(0, Math.floor(body.sort_order)) : 0,
       preview_images: sanitizePreviewImagesInput(body.preview_images),
       theme: {
         primary: parseHexColor(themeBody.primary, OWL_CENTER_PRESALE_DEFAULT_THEME.primary),
@@ -116,15 +131,32 @@ export async function POST(request: NextRequest) {
         surface: parseHexColor(themeBody.surface, OWL_CENTER_PRESALE_DEFAULT_THEME.surface),
         muted: parseHexColor(themeBody.muted, OWL_CENTER_PRESALE_DEFAULT_THEME.muted),
       },
-      updated_by_wallet: session.wallet,
+      updated_by_wallet: creator,
     })
 
-    return NextResponse.json({ tenant }, { status: 201 })
+    return NextResponse.json(
+      {
+        tenant: {
+          ...tenant,
+          sold: 0,
+          remaining: tenant.presale_supply,
+          presale_url: owlCenterPresalePublicPath(tenant.slug),
+        },
+        message: 'Submitted for Owltopia admin approval. You can gift credits after approval.',
+      },
+      { status: 201 }
+    )
   } catch (error) {
-    console.error('[admin/owl-center-presale POST]', error)
+    console.error('[partners/owl-center-presale POST]', error)
     const msg = safeErrorMessage(error)
-    if (msg.includes('owl_center_presale_tenants_slug_unique')) {
+    if (msg.includes('owl_center_presale_tenants_slug_unique') || msg.toLowerCase().includes('duplicate')) {
       return NextResponse.json({ error: 'That slug is already in use' }, { status: 409 })
+    }
+    if (msg.includes('approval_status') || msg.includes('created_by_wallet') || msg.includes('does not exist')) {
+      return NextResponse.json(
+        { error: 'Partner presale tables need migration 213_owl_center_partner_presale_ready.sql.' },
+        { status: 503 }
+      )
     }
     return NextResponse.json({ error: msg }, { status: 500 })
   }

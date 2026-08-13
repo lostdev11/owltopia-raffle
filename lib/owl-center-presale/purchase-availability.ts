@@ -45,6 +45,9 @@ export function buildOwlCenterPresaleStatsPayload(params: {
   unitLamports: string | null
   solUsdPrice: number | null
   soldSyncUnavailable?: boolean
+  unitPartnerLamports?: string | null
+  unitPlatformFeeLamports?: string | null
+  platformFeeUsdcPerSpot?: number
 }): OwlCenterPresaleStats {
   const { tenant, sold, unitLamports, solUsdPrice, soldSyncUnavailable } = params
   const presale_supply = tenant.presale_supply
@@ -52,6 +55,7 @@ export function buildOwlCenterPresaleStatsPayload(params: {
   const percent_sold = presale_supply > 0 ? (sold / presale_supply) * 100 : 0
   const availabilityBase = {
     presale_live: tenant.is_live,
+    // Public purchases require enabled (approval already enforced at list/lookup for partners).
     presale_enabled: tenant.is_enabled,
     remaining,
     sold_sync_unavailable: soldSyncUnavailable,
@@ -72,6 +76,9 @@ export function buildOwlCenterPresaleStatsPayload(params: {
     percent_sold,
     unit_price_usdc: tenant.unit_price_usdc,
     unit_lamports: unitLamports,
+    unit_partner_lamports: params.unitPartnerLamports ?? null,
+    unit_platform_fee_lamports: params.unitPlatformFeeLamports ?? null,
+    platform_fee_usdc_per_spot: params.platformFeeUsdcPerSpot,
     sol_usd_price: solUsdPrice,
     presale_live: tenant.is_live,
     presale_enabled: tenant.is_enabled,

@@ -28,6 +28,7 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { isMobileDevice } from '@/lib/utils'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { PartnerNestingRequestCard } from '@/components/partners/PartnerNestingRequestCard'
+import { PartnerPresaleManagerCard } from '@/components/partners/PartnerPresaleManagerCard'
 
 const MOBILE_401_RETRY_DELAY_MS = 800
 
@@ -607,6 +608,8 @@ export default function PartnerHostDashboardPage() {
       </Card>
 
       <PartnerNestingRequestCard />
+
+      <PartnerPresaleManagerCard cardClassName={CARD_SURFACE} />
 
       {data.creatorRefundRaffles.length > 0 && (
         <Card className={`${CARD_SURFACE} mb-6 border-amber-500/35 bg-amber-500/[0.06]`}>
