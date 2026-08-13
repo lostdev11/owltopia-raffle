@@ -84,7 +84,6 @@ function metaBalances(keys: PublicKey[], deltas: Map<string, number>) {
     fromWallet: payer.toBase58(),
     transaction: transaction as any,
   })
-  assert.equal(result.ok, true)
   if (!result.ok) throw new Error(result.error)
   assert.equal(result.draft.assetKind, 'nft')
   assert.equal(result.draft.mode, 'nft_one')
@@ -203,7 +202,6 @@ function metaBalances(keys: PublicKey[], deltas: Map<string, number>) {
       },
     } as any,
   })
-  assert.equal(result.ok, true)
   if (!result.ok) throw new Error(result.error)
   assert.equal(result.draft.assetKind, 'nft')
   assert.equal(result.draft.lines[0]!.mint, mint.toBase58())
