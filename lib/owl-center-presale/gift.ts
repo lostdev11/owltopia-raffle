@@ -49,7 +49,7 @@ export async function giftOwlCenterPresaleCredits(params: {
       return {
         ok: false,
         status: 503,
-        error: 'Gift RPC missing. Apply Supabase migration 213_owl_center_partner_presale_ready.sql.',
+        error: 'Gift RPC missing. Apply Supabase migration 215_owl_center_partner_presale_ready.sql.',
       }
     }
     console.error('gift_owl_center_presale_mints:', error)
