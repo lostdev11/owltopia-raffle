@@ -12,77 +12,86 @@ import {
   OWLTOPIA_MAGIC_EDEN_COLLECTION_LINKS,
   OWLTOPIA_ORBIS_COLLECTION_LINKS,
 } from '@/lib/owltopia-marketplace-links'
+import { isPacksPublicClient } from '@/lib/packs/access'
 
-const glassCardItems: GlassIconItem[] = [
-  {
-    label: 'How It Works',
-    href: '/how-it-works',
-    icon: <Info className="h-6 w-6" />,
-  },
-  {
-    label: 'Leaderboard',
-    href: '/leaderboard',
-    icon: <Trophy className="h-6 w-6" />,
-  },
-  {
-    label: 'Nesting',
-    href: '/nesting',
-    icon: <Coins className="h-6 w-6" />,
-  },
-  {
-    label: 'Owl Packs',
-    href: '/packs',
-    icon: <Package className="h-6 w-6" />,
-  },
-  {
-    label: 'Partner program',
-    href: '/partner-program',
-    icon: <HeartHandshake className="h-6 w-6" />,
-  },
-  {
-    label: 'Owl Council',
-    href: '/council',
-    icon: <Landmark className="h-6 w-6" />,
-  },
-  {
-    label: 'X',
-    href: 'https://x.com/Owltopia_sol',
-    icon: <Twitter className="h-6 w-6" />,
-    external: true,
-  },
-  {
-    label: 'Whitepaper',
-    href: 'https://tinyurl.com/owltopia',
-    icon: <FileText className="h-6 w-6" />,
-    external: true,
-  },
-  {
-    label: 'ME',
-    href: 'magic-eden-collections',
-    icon: <MagicEdenIcon className="h-6 w-6" />,
-    submenu: OWLTOPIA_MAGIC_EDEN_COLLECTION_LINKS,
-  },
-  {
-    label: 'Orbis',
-    href: 'orbis-collections',
-    icon: <OrbisIcon className="h-6 w-6" />,
-    submenu: OWLTOPIA_ORBIS_COLLECTION_LINKS,
-  },
-  {
-    label: 'Tensor',
-    href: 'https://www.tensor.trade/trade/owltopia',
-    icon: <TensorIcon className="h-6 w-6" />,
-    external: true,
-  },
-  {
-    label: 'Discord',
-    href: COMMUNITY_DISCORD_INVITE_URL,
-    icon: <MessageCircle className="h-6 w-6" />,
-    external: true,
-  },
-]
+function buildGlassCardItems(): GlassIconItem[] {
+  const items: GlassIconItem[] = [
+    {
+      label: 'How It Works',
+      href: '/how-it-works',
+      icon: <Info className="h-6 w-6" />,
+    },
+    {
+      label: 'Leaderboard',
+      href: '/leaderboard',
+      icon: <Trophy className="h-6 w-6" />,
+    },
+    {
+      label: 'Nesting',
+      href: '/nesting',
+      icon: <Coins className="h-6 w-6" />,
+    },
+  ]
+  if (isPacksPublicClient()) {
+    items.push({
+      label: 'Owl Packs',
+      href: '/packs',
+      icon: <Package className="h-6 w-6" />,
+    })
+  }
+  items.push(
+    {
+      label: 'Partner program',
+      href: '/partner-program',
+      icon: <HeartHandshake className="h-6 w-6" />,
+    },
+    {
+      label: 'Owl Council',
+      href: '/council',
+      icon: <Landmark className="h-6 w-6" />,
+    },
+    {
+      label: 'X',
+      href: 'https://x.com/Owltopia_sol',
+      icon: <Twitter className="h-6 w-6" />,
+      external: true,
+    },
+    {
+      label: 'Whitepaper',
+      href: 'https://tinyurl.com/owltopia',
+      icon: <FileText className="h-6 w-6" />,
+      external: true,
+    },
+    {
+      label: 'ME',
+      href: 'magic-eden-collections',
+      icon: <MagicEdenIcon className="h-6 w-6" />,
+      submenu: OWLTOPIA_MAGIC_EDEN_COLLECTION_LINKS,
+    },
+    {
+      label: 'Orbis',
+      href: 'orbis-collections',
+      icon: <OrbisIcon className="h-6 w-6" />,
+      submenu: OWLTOPIA_ORBIS_COLLECTION_LINKS,
+    },
+    {
+      label: 'Tensor',
+      href: 'https://www.tensor.trade/trade/owltopia',
+      icon: <TensorIcon className="h-6 w-6" />,
+      external: true,
+    },
+    {
+      label: 'Discord',
+      href: COMMUNITY_DISCORD_INVITE_URL,
+      icon: <MessageCircle className="h-6 w-6" />,
+      external: true,
+    }
+  )
+  return items
+}
 
 export function Footer() {
+  const glassCardItems = buildGlassCardItems()
   return (
     <footer className="w-full bg-black border-t border-green-500/40 mt-auto">
       <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-6">

@@ -110,9 +110,12 @@ export function PackOpenVideo({ active, onFinished }: Props) {
               Opening your pack…
             </p>
           ) : (
-            <p className="font-display text-2xl tracking-[0.18em] text-[#EAFBF4]/90">
-              Ripping…
-            </p>
+            <div className="text-center">
+              <p className="font-display text-2xl tracking-[0.18em] text-[#EAFBF4]/90">
+                The rip
+              </p>
+              <p className="mt-1 text-sm text-[#00FF9C]/80">The pack tears open…</p>
+            </div>
           )}
           {showSkip && (
             <button

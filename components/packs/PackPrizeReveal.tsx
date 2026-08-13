@@ -1,7 +1,8 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
-import { Coins, ImageIcon, Sparkles, Ticket } from 'lucide-react'
+import { CheckCircle2, Coins, ImageIcon, Sparkles, Ticket } from 'lucide-react'
 import type { PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
 import { cn } from '@/lib/utils'
 
@@ -11,11 +12,32 @@ type Props = {
   className?: string
 }
 
-function PrizeCategoryGlyph({ category }: { category: string }) {
-  const className = 'h-9 w-9 text-[#00FF9C]'
-  if (category === 'sol') return <Coins className={className} aria-hidden />
-  if (category === 'nft') return <ImageIcon className={className} aria-hidden />
-  return <Sparkles className={className} aria-hidden />
+function categoryLabel(category: string) {
+  if (category === 'sol') return 'SOL'
+  if (category === 'nft') return 'NFT'
+  return '$OWL'
+}
+
+function PrizeArt({ result }: { result: PackOpenClientResult }) {
+  if (result.category === 'nft' && result.nftImageUrl) {
+    return (
+      <Image
+        src={result.nftImageUrl}
+        alt={result.nftName || result.prizeLabel}
+        width={280}
+        height={280}
+        className="h-full w-full object-cover"
+        unoptimized
+      />
+    )
+  }
+  if (result.category === 'sol') {
+    return <Coins className="h-16 w-16 text-[#00FF9C]" aria-hidden />
+  }
+  if (result.category === 'owl') {
+    return <Sparkles className="h-16 w-16 text-[#00FF9C]" aria-hidden />
+  }
+  return <ImageIcon className="h-16 w-16 text-[#00FF9C]" aria-hidden />
 }
 
 export function PackPrizeReveal({ result, onRipAgain, className }: Props) {
@@ -28,19 +50,32 @@ export function PackPrizeReveal({ result, onRipAgain, className }: Props) {
       role="status"
       aria-live="polite"
     >
-      <div className="relative mx-auto mb-5 flex h-24 w-24 items-center justify-center">
-        <div className="absolute inset-0 rounded-full bg-[#00FF9C]/15 blur-xl" />
-        <div className="absolute inset-[-10%] rounded-full border border-[#00FF9C]/30 animate-pack-ring-expand" />
-        <div className="relative flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-[#163528] to-[#0a1210] ring-1 ring-[#00E58B]/40">
-          <PrizeCategoryGlyph category={result.category} />
+      <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#00FF9C]/80">
+        Congratulations
+      </p>
+      <h2 className="mt-2 font-display text-3xl tracking-[0.04em] text-white sm:text-4xl">
+        You revealed a{' '}
+        <span className="text-[#00FF9C]">{categoryLabel(result.category)}</span>
+      </h2>
+      <p className="mt-2 text-sm text-white/55">Your reward appears!</p>
+
+      <div className="relative mx-auto mt-6 aspect-[3/4] w-[min(72%,260px)]">
+        <div className="absolute inset-[-12%] rounded-full bg-[radial-gradient(circle,rgba(0,255,156,0.35),transparent_68%)] blur-2xl" />
+        <div className="absolute inset-[-6%] rounded-full border border-[#00FF9C]/25 animate-pack-ring-expand" />
+        <div
+          className={cn(
+            'relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl',
+            'bg-gradient-to-b from-[#121816] to-[#070a08]',
+            'ring-1 ring-[#00FF9C]/40',
+            'shadow-[0_0_60px_-12px_rgba(0,255,156,0.65)]'
+          )}
+        >
+          <PrizeArt result={result} />
         </div>
       </div>
 
-      <p className="font-display text-4xl tracking-[0.08em] text-[#EAFBF4] sm:text-5xl">
-        You won
-      </p>
-      <p className="mt-2 text-xl font-semibold text-amber-200 sm:text-2xl">{result.prizeLabel}</p>
-      <p className="mt-3 text-sm leading-relaxed text-[#A9CBB9]">{result.revealMessage}</p>
+      <p className="mt-5 text-xl font-semibold text-amber-200 sm:text-2xl">{result.prizeLabel}</p>
+      <p className="mt-2 text-sm leading-relaxed text-white/60">{result.revealMessage}</p>
 
       {result.category === 'owl' && result.freeTicketCredits > 0 ? (
         <p className="mt-4 inline-flex items-center gap-2 rounded-full border border-[#00E58B]/25 bg-[#00E58B]/10 px-3 py-1.5 text-sm text-[#00FF9C]">
@@ -50,20 +85,21 @@ export function PackPrizeReveal({ result, onRipAgain, className }: Props) {
         </p>
       ) : null}
 
-      <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+      <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:justify-center">
+        <Link
+          href={`/packs/verify/${result.openId}`}
+          className="inline-flex min-h-[48px] min-w-[180px] items-center justify-center gap-2 rounded-xl bg-[#00FF9C] px-6 text-sm font-bold uppercase tracking-wider text-[#062016] transition hover:bg-[#7DFFB8]"
+        >
+          <CheckCircle2 className="h-4 w-4" aria-hidden />
+          Verify open
+        </Link>
         <button
           type="button"
           onClick={onRipAgain}
-          className="inline-flex min-h-[48px] min-w-[180px] items-center justify-center rounded-xl bg-[#00FF9C] px-6 text-sm font-bold uppercase tracking-wider text-[#062016] transition hover:bg-[#7DFFB8]"
+          className="inline-flex min-h-[48px] min-w-[180px] items-center justify-center rounded-xl border border-[#00FF9C]/45 bg-transparent px-6 text-sm font-bold uppercase tracking-wider text-[#00FF9C] transition hover:bg-[#00FF9C]/10"
         >
-          Rip another
+          Open another
         </button>
-        <Link
-          href={`/packs/verify/${result.openId}`}
-          className="text-sm text-[#00FF9C]/80 underline-offset-4 hover:underline"
-        >
-          Verify this open
-        </Link>
       </div>
     </div>
   )

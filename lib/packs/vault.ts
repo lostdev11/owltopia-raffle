@@ -1,6 +1,9 @@
 /**
- * Packs vault: funded wallet that receives pack payments and pays prizes.
- * Env: PACKS_VAULT_SECRET_KEY (JSON 64-byte array or base58).
+ * Packs vault: funded wallet that receives ALL pack purchase SOL and pays prizes.
+ * Env: PACKS_VAULT_SECRET_KEY (JSON 64-byte array or base58)
+ *      NEXT_PUBLIC_PACKS_VAULT_WALLET (public address; should match the secret key)
+ *
+ * Grind an Owl-branded address: `npm run packs:grind-vault` (prefix owL — base58 has no O/l).
  */
 import {
   Connection,

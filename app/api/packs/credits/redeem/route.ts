@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { PublicKey } from '@solana/web3.js'
 import { requireSession } from '@/lib/auth-server'
+import { assertPacksAccess } from '@/lib/packs/assert-access'
 import { consumePackTicketCredits, getWalletTicketCreditBalance } from '@/lib/packs/db'
 import { getRaffleById } from '@/lib/db/raffles'
 import { createEntry } from '@/lib/db/entries'
@@ -42,6 +43,9 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'Invalid session wallet' }, { status: 400 })
     }
+
+    const access = await assertPacksAccess(wallet)
+    if (access !== true) return access
 
     const balance = await getWalletTicketCreditBalance(wallet)
     if (balance < tickets) {

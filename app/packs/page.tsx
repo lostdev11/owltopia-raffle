@@ -1,5 +1,9 @@
 import type { Metadata } from 'next'
+import { cookies } from 'next/headers'
 import { PacksClient } from '@/components/packs/PacksClient'
+import { getOwlVisionAdminRole } from '@/lib/admin/access'
+import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
+import { isPacksPublic } from '@/lib/packs/access'
 import { PLATFORM_NAME, getSiteBaseUrl } from '@/lib/site-config'
 
 const SITE_URL = getSiteBaseUrl()
@@ -21,6 +25,15 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic'
 
-export default function PacksPage() {
-  return <PacksClient />
+export default async function PacksPage() {
+  const session = parseSessionCookieValue((await cookies()).get(SESSION_COOKIE_NAME)?.value)
+  const role = session ? await getOwlVisionAdminRole(session.wallet) : null
+  const isPublic = isPacksPublic()
+
+  return (
+    <PacksClient
+      initialViewerIsAdmin={Boolean(role)}
+      isPublic={isPublic}
+    />
+  )
 }

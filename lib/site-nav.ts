@@ -130,6 +130,9 @@ export const COMMUNITY_NAV_GROUP: SiteNavGroup = {
 
 const OWL_SEND_NAV_DESCRIPTION_PUBLIC = 'Send NFTs & tokens — 0.001 SOL fee'
 const OWL_SEND_NAV_DESCRIPTION_PREVIEW = 'Send NFTs & tokens — 0.001 SOL fee (admin preview)'
+const OWL_PACKS_NAV_DESCRIPTION_PUBLIC = 'Rip packs — every open wins OWL, SOL, or NFT'
+const OWL_PACKS_NAV_DESCRIPTION_PREVIEW =
+  'Rip packs — every open wins OWL, SOL, or NFT (admin preview)'
 
 export const OWLS_NAV_GROUP: SiteNavGroup = {
   id: 'owls',
@@ -203,7 +206,7 @@ export const ADMIN_NAV_GROUP: SiteNavGroup = {
     {
       href: '/admin/packs',
       label: 'Packs',
-      description: 'Pack vault, inventory, and pause controls',
+      description: 'Pack vault + admin-preview rip testing',
       icon: Package,
     },
   ],
@@ -215,24 +218,41 @@ export function isPathInNavGroup(pathname: string, group: SiteNavGroup): boolean
   )
 }
 
-/** Hide OwlSend from Community nav during admin-only preview; label by public gate. */
+/** Hide OwlSend / Owl Packs from Community nav during admin-only preview; label by public gate. */
 export function filterCommunityNavItems(options: {
   showOwlSend: boolean
   /** When false (admin preview), keep the "(admin preview)" subtitle. */
   owlSendPublic?: boolean
+  showOwlPacks?: boolean
+  /** When false (admin preview), keep the "(admin preview)" subtitle. */
+  owlPacksPublic?: boolean
 }): SiteNavItem[] {
-  const items = options.showOwlSend
+  let items = options.showOwlSend
     ? COMMUNITY_NAV_GROUP.items
     : COMMUNITY_NAV_GROUP.items.filter((item) => item.href !== '/owl-send')
+  if (options.showOwlPacks === false) {
+    items = items.filter((item) => item.href !== '/packs')
+  }
   const owlSendPublic = options.owlSendPublic === true
+  const owlPacksPublic = options.owlPacksPublic === true
   return items.map((item) => {
-    if (item.href !== '/owl-send') return item
-    return {
-      ...item,
-      description: owlSendPublic
-        ? OWL_SEND_NAV_DESCRIPTION_PUBLIC
-        : OWL_SEND_NAV_DESCRIPTION_PREVIEW,
+    if (item.href === '/owl-send') {
+      return {
+        ...item,
+        description: owlSendPublic
+          ? OWL_SEND_NAV_DESCRIPTION_PUBLIC
+          : OWL_SEND_NAV_DESCRIPTION_PREVIEW,
+      }
     }
+    if (item.href === '/packs') {
+      return {
+        ...item,
+        description: owlPacksPublic
+          ? OWL_PACKS_NAV_DESCRIPTION_PUBLIC
+          : OWL_PACKS_NAV_DESCRIPTION_PREVIEW,
+      }
+    }
+    return item
   })
 }
 

@@ -186,7 +186,13 @@ export default function AdminPacksPage() {
       </Link>
       <h1 className="mt-4 text-2xl font-semibold">Packs vault</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Fund the packs wallet with SOL, $OWL, and NFTs. Unpause when inventory is ready.
+        Fund the packs wallet with SOL, $OWL, and NFTs. Unpause when inventory is ready for admin
+        preview testing at{' '}
+        <Link href="/packs" className="text-theme-prime underline-offset-2 hover:underline">
+          /packs
+        </Link>
+        . All pack purchase SOL lands in this vault; prizes pay out from it. Public launch still
+        requires <code className="text-xs">PACKS_PUBLIC=true</code>.
       </p>
 
       {error && <p className="mt-4 text-sm text-destructive">{error}</p>}

@@ -1,19 +1,31 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
-import { PackOpenVideo } from '@/components/packs/PackOpenVideo'
+import { PackAnimationPreload } from '@/components/packs/PackAnimationPreload'
+import { PackHoverVideo } from '@/components/packs/PackHoverVideo'
+import { PackOpeningExperience } from '@/components/packs/PackOpeningExperience'
 import { PackPrizeReveal } from '@/components/packs/PackPrizeReveal'
-import { PackVisual } from '@/components/packs/PackVisual'
 import { executePackPurchase, type PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
-import { fireMintConfetti, preloadConfetti } from '@/lib/confetti'
-import { Gift, Loader2, Ticket } from 'lucide-react'
+import { preloadConfetti } from '@/lib/confetti'
+import { usePacksAdminAccess } from '@/lib/packs/use-packs-admin-access'
+import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
+import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
+import {
+  Check,
+  Gift,
+  Loader2,
+  Package,
+  ShoppingBag,
+  ShieldCheck,
+  Ticket,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-type RipPhase = 'idle' | 'paying' | 'video' | 'reveal'
+type RipPhase = 'idle' | 'paying' | 'experience' | 'reveal'
 
 type PacksConfig = {
   product: {
@@ -47,6 +59,10 @@ type PacksConfig = {
 
 function shortWallet(w: string) {
   return w.length > 10 ? `${w.slice(0, 4)}…${w.slice(-4)}` : w
+}
+
+function bpsToPercent(bps: number) {
+  return `${(bps / 100).toFixed(0)}%`
 }
 
 function RedeemCreditsForm({ onDone }: { onDone: () => void }) {
@@ -116,10 +132,35 @@ function RedeemCreditsForm({ onDone }: { onDone: () => void }) {
   )
 }
 
-export function PacksClient() {
+function RarityRow({
+  label,
+  pct,
+  tone,
+}: {
+  label: string
+  pct: string
+  tone: string
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-white/5 py-2.5 last:border-0">
+      <span className={cn('text-sm font-medium', tone)}>{label}</span>
+      <span className="font-mono text-sm text-white/80">{pct}</span>
+    </div>
+  )
+}
+
+export function PacksClient({
+  initialViewerIsAdmin = false,
+  isPublic = false,
+}: {
+  initialViewerIsAdmin?: boolean
+  isPublic?: boolean
+}) {
   const { publicKey, connected } = useWallet()
   const { connection } = useConnection()
   const sendTransaction = useSendTransactionForWallet()
+  const access = usePacksAdminAccess({ initialViewerIsAdmin, isPublic })
+  const { signIn, signingIn, error: signInError } = useSiwsSignIn()
   const [config, setConfig] = useState<PacksConfig | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [ripping, setRipping] = useState(false)
@@ -127,10 +168,10 @@ export function PacksClient() {
   const [result, setResult] = useState<PackOpenClientResult | null>(null)
   const [credits, setCredits] = useState<number | null>(null)
   const [phase, setPhase] = useState<RipPhase>('idle')
-  const pendingResultRef = useRef<PackOpenClientResult | null>(null)
-  const videoDoneRef = useRef(false)
-  const videoStartedRef = useRef(false)
-  const openErrorRef = useRef<string | null>(null)
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false)
+
+  const allowed = access.allowed
+  const showAdminPreview = access.isAdmin && !isPublic
 
   const load = useCallback(async () => {
     try {
@@ -159,53 +200,21 @@ export function PacksClient() {
   }, [publicKey])
 
   useEffect(() => {
+    if (!allowed) return
     void load()
     preloadConfetti()
-  }, [load])
+  }, [allowed, load])
 
   useEffect(() => {
+    if (!allowed) return
     void loadCredits()
-  }, [loadCredits])
-
-  const tryReveal = useCallback(() => {
-    if (openErrorRef.current) {
-      // Wait for the opening clip if it already started (skip/end will clear)
-      if (videoStartedRef.current && !videoDoneRef.current) return
-      setError(openErrorRef.current)
-      setPhase('idle')
-      setRipping(false)
-      pendingResultRef.current = null
-      videoDoneRef.current = false
-      videoStartedRef.current = false
-      openErrorRef.current = null
-      return
-    }
-    if (!videoDoneRef.current || !pendingResultRef.current) return
-    const won = pendingResultRef.current
-    pendingResultRef.current = null
-    videoDoneRef.current = false
-    videoStartedRef.current = false
-    setResult(won)
-    setPhase('reveal')
-    setRipping(false)
-    fireMintConfetti()
-    void load()
-    void loadCredits()
-  }, [load, loadCredits])
-
-  function onVideoFinished() {
-    videoDoneRef.current = true
-    tryReveal()
-  }
+  }, [allowed, loadCredits])
 
   async function onRip() {
     if (!publicKey || !sendTransaction) return
     setError(null)
     setResult(null)
-    pendingResultRef.current = null
-    videoDoneRef.current = false
-    videoStartedRef.current = false
-    openErrorRef.current = null
+    setPaymentConfirmed(false)
     setRipping(true)
     setPhase('paying')
     try {
@@ -214,40 +223,176 @@ export function PacksClient() {
         connection,
         sendTransaction,
         onPaymentConfirmed: () => {
-          // Payment landed — play opening video while prize resolves server-side
-          videoStartedRef.current = true
-          setPhase('video')
+          setPaymentConfirmed(true)
         },
       })
       if (!out.ok) {
-        openErrorRef.current = out.error
-        tryReveal()
+        setError(out.error)
+        setPhase('idle')
+        setRipping(false)
+        setPaymentConfirmed(false)
         return
       }
-      pendingResultRef.current = out.result
-      tryReveal()
+      // Cinematic only after purchase succeeded and reward is resolved
+      setResult(out.result)
+      setPhase('experience')
+      setRipping(false)
+      void load()
+      void loadCredits()
     } catch (e) {
-      openErrorRef.current = e instanceof Error ? e.message : 'Rip failed'
-      tryReveal()
+      setError(e instanceof Error ? e.message : 'Rip failed')
+      setPhase('idle')
+      setRipping(false)
+      setPaymentConfirmed(false)
     }
   }
 
   const paused = config?.vault.paused ?? true
   const price = config?.product.priceSol ?? 0.1
-  const showReveal = phase === 'reveal' && result
+  const showReveal = phase === 'reveal' && !!result
+  const showExperience = phase === 'experience' && !!result
+  const weights = config?.product.categoryWeightsBps ?? { owl: 6000, sol: 2000, nft: 2000 }
+  const packsOpened = config?.recentOpens?.length ?? 0
+  const phaseCaption =
+    phase === 'paying'
+      ? paymentConfirmed
+        ? 'Payment confirmed — resolving prize…'
+        : 'Confirm in your wallet…'
+      : phase === 'experience'
+        ? 'Tap Open pack when you are ready'
+        : null
+
+  if (access.loading) {
+    return (
+      <div className="mx-auto flex min-h-[40vh] max-w-3xl items-center justify-center gap-2 px-4 py-16 text-sm text-[#A9CBB9]">
+        <Loader2 className="h-4 w-4 animate-spin" /> Checking access…
+      </div>
+    )
+  }
+
+  if (!allowed) {
+    if (!connected || !publicKey) {
+      return (
+        <div className="mx-auto flex min-h-[50vh] max-w-lg flex-col items-center justify-center gap-4 px-4 py-16 text-center text-[#EAFBF4]">
+          <Package className="h-10 w-10 text-[#00FF9C]" aria-hidden />
+          <h1 className="font-display text-3xl tracking-wide">Owl Packs</h1>
+          <p className="text-sm text-[#A9CBB9]">
+            {isPublic
+              ? 'Connect a wallet to rip a pack.'
+              : 'Admin preview — connect your Owl Vision admin wallet, then sign in.'}
+          </p>
+          <WalletConnectButton />
+          {!isPublic ? (
+            <p className="text-xs text-white/40">
+              Or open{' '}
+              <Link href="/admin" className="text-[#00FF9C] underline-offset-2 hover:underline">
+                Admin
+              </Link>{' '}
+              and Sign in first.
+            </p>
+          ) : null}
+        </div>
+      )
+    }
+    if (access.denied) {
+      return (
+        <div className="mx-auto flex min-h-[50vh] max-w-lg flex-col items-center justify-center gap-4 px-4 py-16 text-center text-[#EAFBF4]">
+          <Package className="h-10 w-10 text-[#00FF9C]" aria-hidden />
+          <h1 className="font-display text-3xl tracking-wide">Owl Packs</h1>
+          <p className="text-sm text-[#A9CBB9]">
+            Admin preview only. This connected wallet is not on the Owl Vision admin list.
+          </p>
+          <p className="text-xs text-white/45">
+            Switch to an admin wallet, or sign in below if this wallet is an admin (clears a stale
+            session).
+          </p>
+          <Gen2PresaleSignInPrompt
+            title="Sign in to unlock admin preview"
+            message="Sign a one-time message (no fee). Your wallet must be in the admins table."
+            onSignedIn={() => {
+              access.recheck()
+            }}
+          />
+          {signInError ? <p className="text-sm text-red-300">{signInError}</p> : null}
+          <button
+            type="button"
+            disabled={signingIn}
+            onClick={() => {
+              void signIn({ onSuccess: () => access.recheck() })
+            }}
+            className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[#00FF9C]/40 px-4 text-sm font-semibold text-[#00FF9C] hover:bg-[#00FF9C]/10 disabled:opacity-50"
+          >
+            {signingIn ? 'Signing…' : 'Retry admin check'}
+          </button>
+          <Link
+            href="/admin"
+            className="text-xs text-[#00FF9C]/80 underline-offset-4 hover:underline"
+          >
+            Open Admin →
+          </Link>
+        </div>
+      )
+    }
+    return (
+      <div className="mx-auto flex min-h-[40vh] max-w-3xl items-center justify-center gap-2 px-4 py-16 text-sm text-[#A9CBB9]">
+        <Loader2 className="h-4 w-4 animate-spin" /> Checking access…
+      </div>
+    )
+  }
+
+  const buyButton = !connected ? (
+    <WalletConnectButton />
+  ) : (
+    <button
+      type="button"
+      disabled={ripping || paused || !config?.vault.address || showReveal || showExperience}
+      onClick={() => void onRip()}
+      className={cn(
+        'inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl px-6',
+        'bg-[#00FF9C] text-sm font-bold uppercase tracking-[0.12em] text-[#062016]',
+        'shadow-[0_0_40px_-8px_rgba(0,255,156,0.65)] transition',
+        'hover:bg-[#7DFFB8] disabled:cursor-not-allowed disabled:opacity-45',
+        !ripping && !paused && !showReveal ? 'animate-button-glow-pulse' : ''
+      )}
+    >
+      {ripping ? (
+        <>
+          <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+          {phase === 'paying'
+            ? paymentConfirmed
+              ? 'Resolving prize…'
+              : 'Confirm payment…'
+            : 'Buying…'}
+        </>
+      ) : (
+        <>
+          <ShoppingBag className="h-5 w-5" aria-hidden />
+          Buy pack — {price} SOL
+        </>
+      )}
+    </button>
+  )
 
   return (
     <div className="relative min-h-[100dvh] overflow-x-hidden text-[#EAFBF4]">
-      <PackOpenVideo active={phase === 'video'} onFinished={onVideoFinished} />
+      <PackAnimationPreload />
+      {showExperience && result ? (
+        <PackOpeningExperience
+          reward={result}
+          includeHoverGate
+          onComplete={() => {
+            setPhase('reveal')
+            setPaymentConfirmed(false)
+          }}
+        />
+      ) : null}
 
-      {/* Full-bleed atmosphere */}
       <div className="pointer-events-none absolute inset-0 -z-10" aria-hidden>
-        <div className="absolute inset-0 bg-[#060b09]" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_90%_55%_at_50%_-5%,rgba(0,255,156,0.22),transparent_58%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_50%_40%_at_95%_15%,rgba(251,191,36,0.1),transparent_50%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_45%_35%_at_5%_70%,rgba(0,229,139,0.08),transparent_55%)]" />
+        <div className="absolute inset-0 bg-[#050807]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-5%,rgba(0,255,156,0.18),transparent_58%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_40%_35%_at_85%_40%,rgba(0,229,139,0.08),transparent_55%)]" />
         <div
-          className="absolute inset-0 opacity-[0.04]"
+          className="absolute inset-0 opacity-[0.035]"
           style={{
             backgroundImage:
               'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.85\' numOctaves=\'3\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")',
@@ -255,94 +400,144 @@ export function PacksClient() {
         />
       </div>
 
-      {/* Hero — one composition */}
-      <section className="relative mx-auto flex min-h-[min(100dvh,880px)] max-w-5xl flex-col items-center justify-center px-4 pb-16 pt-10 text-center sm:px-6 sm:pt-14">
-        <p
-          className="font-display text-[clamp(3.4rem,14vw,7rem)] leading-[0.9] tracking-[0.06em] text-[#EAFBF4] animate-hero-rise"
-          style={{ animationDelay: '40ms' }}
-        >
-          OWL PACKS
-        </p>
-        <p
-          className="mt-4 max-w-md text-base text-[#A9CBB9] animate-hero-rise sm:text-lg"
-          style={{ animationDelay: '120ms' }}
-        >
-          Rip a pack for {price} SOL. Every open wins — $OWL, SOL, or an NFT from the vault.
-        </p>
-
-        <div
-          className="mt-8 w-full animate-hero-rise"
-          style={{ animationDelay: '200ms' }}
-        >
-          {showReveal ? (
-            <PackPrizeReveal
-              result={result}
-              onRipAgain={() => {
-                setResult(null)
-                setPhase('idle')
-                setError(null)
-              }}
-            />
-          ) : (
-            <PackVisual phase={phase === 'video' ? 'paying' : phase} />
-          )}
-        </div>
-
-        {!showReveal ? (
-          <div
-            className="mt-8 flex w-full max-w-sm flex-col items-center gap-3 animate-hero-rise"
-            style={{ animationDelay: '280ms' }}
-          >
-            {!connected ? (
-              <WalletConnectButton />
-            ) : (
-              <button
-                type="button"
-                disabled={ripping || paused || !config?.vault.address}
-                onClick={() => void onRip()}
-                className={cn(
-                  'inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl px-6',
-                  'bg-[#00FF9C] text-base font-bold uppercase tracking-[0.14em] text-[#062016]',
-                  'shadow-[0_0_40px_-8px_rgba(0,255,156,0.65)] transition',
-                  'hover:bg-[#7DFFB8] disabled:cursor-not-allowed disabled:opacity-45',
-                  !ripping && !paused ? 'animate-button-glow-pulse' : ''
-                )}
-              >
-                {ripping ? (
-                  <>
-                    <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-                    {phase === 'paying'
-                      ? 'Confirm payment…'
-                      : phase === 'video'
-                        ? 'Opening pack…'
-                        : 'Ripping…'}
-                  </>
-                ) : (
-                  <>Rip pack · {price} SOL</>
-                )}
-              </button>
-            )}
-
-            {paused && (
-              <p className="text-sm text-amber-200/90">
-                Packs paused{config?.vault.pauseReason ? `: ${config.vault.pauseReason}` : ''}
-              </p>
-            )}
-            {error && <p className="text-sm text-red-300">{error}</p>}
-            {loadError && <p className="text-sm text-red-300">{loadError}</p>}
-          </div>
+      {/* Hero — mock composition: copy | pack | rarities (stacked on mobile) */}
+      <section className="relative mx-auto max-w-6xl px-4 pb-10 pt-6 sm:px-6 sm:pt-10 lg:pb-6">
+        {showAdminPreview ? (
+          <p className="mb-5 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-center text-xs font-medium text-amber-100 sm:text-left">
+            Admin preview — public users cannot open packs yet. Unpause in Admin → Packs to rip.
+          </p>
         ) : null}
 
-        <p
-          className="mt-8 text-[11px] uppercase tracking-[0.28em] text-[#A9CBB9]/55 animate-hero-rise"
-          style={{ animationDelay: '340ms' }}
-        >
-          60% $OWL · 20% SOL · 20% NFT · ≈{((config?.product.rtpBps ?? 8000) / 100).toFixed(0)}% RTP
-        </p>
+        <div className="grid items-center gap-8 lg:grid-cols-[1.05fr_1.15fr_0.9fr] lg:gap-6">
+          {/* Left copy + CTA */}
+          <div className="order-2 space-y-5 text-center lg:order-1 lg:text-left">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-[#00FF9C] animate-hero-rise">
+              Premium pack
+            </p>
+            <h1
+              className="font-display text-[clamp(2.2rem,7vw,3.6rem)] leading-[0.95] tracking-[0.02em] text-white animate-hero-rise"
+              style={{ animationDelay: '60ms' }}
+            >
+              Owltopia Pack
+              <span className="mt-1 block text-[#00FF9C]">Open Experience</span>
+            </h1>
+            <p
+              className="text-base text-white/60 animate-hero-rise sm:text-lg"
+              style={{ animationDelay: '120ms' }}
+            >
+              Where luck meets logic.
+            </p>
+            <ul
+              className="mx-auto max-w-sm space-y-2.5 text-left text-sm text-white/70 animate-hero-rise lg:mx-0"
+              style={{ animationDelay: '160ms' }}
+            >
+              <li className="flex items-start gap-2.5">
+                <Check className="mt-0.5 h-4 w-4 shrink-0 text-[#00FF9C]" aria-hidden />
+                Premium digital collectibles from the vault
+              </li>
+              <li className="flex items-start gap-2.5">
+                <Check className="mt-0.5 h-4 w-4 shrink-0 text-[#00FF9C]" aria-hidden />
+                Transparent &amp; verifiable opens
+              </li>
+              <li className="flex items-start gap-2.5">
+                <Check className="mt-0.5 h-4 w-4 shrink-0 text-[#00FF9C]" aria-hidden />
+                Built on Solana — every pack wins
+              </li>
+            </ul>
+
+            <div
+              className="mx-auto flex w-full max-w-sm flex-col gap-2 animate-hero-rise lg:mx-0"
+              style={{ animationDelay: '220ms' }}
+            >
+              {buyButton}
+              <p className="inline-flex items-center justify-center gap-1.5 text-[11px] uppercase tracking-[0.18em] text-white/40 lg:justify-start">
+                <ShieldCheck className="h-3.5 w-3.5 text-[#00FF9C]/70" aria-hidden />
+                Secure checkout with Solana
+              </p>
+              {phaseCaption ? (
+                <p className="text-sm text-[#00FF9C]/90">{phaseCaption}</p>
+              ) : null}
+              {paused && (
+                <p className="text-sm text-amber-200/90">
+                  Packs paused{config?.vault.pauseReason ? `: ${config.vault.pauseReason}` : ''}
+                </p>
+              )}
+              {error && <p className="text-sm text-red-300">{error}</p>}
+              {loadError && <p className="text-sm text-red-300">{loadError}</p>}
+            </div>
+          </div>
+
+          {/* Center pack / reveal */}
+          <div
+            className="order-1 flex min-h-[340px] flex-col items-center justify-center animate-hero-rise lg:order-2 lg:min-h-[460px]"
+            style={{ animationDelay: '80ms' }}
+          >
+            {showReveal && result ? (
+              <PackPrizeReveal
+                result={result}
+                onRipAgain={() => {
+                  setResult(null)
+                  setPhase('idle')
+                  setError(null)
+                  setPaymentConfirmed(false)
+                }}
+              />
+            ) : (
+              <PackHoverVideo phase={phase === 'paying' ? 'paying' : 'idle'} />
+            )}
+          </div>
+
+          {/* Right rarities panel */}
+          <aside
+            className="order-3 w-full max-w-sm justify-self-center animate-hero-rise lg:max-w-none lg:justify-self-stretch"
+            style={{ animationDelay: '140ms' }}
+          >
+            <div className="rounded-2xl border border-[#00FF9C]/20 bg-black/45 p-4 shadow-[0_0_40px_-20px_rgba(0,255,156,0.35)] backdrop-blur-sm sm:p-5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#00FF9C]">
+                Possible prizes
+              </p>
+              <div className="mt-3">
+                <RarityRow label="$OWL" pct={bpsToPercent(weights.owl)} tone="text-emerald-200" />
+                <RarityRow label="SOL" pct={bpsToPercent(weights.sol)} tone="text-sky-200" />
+                <RarityRow label="NFT" pct={bpsToPercent(weights.nft)} tone="text-amber-200" />
+              </div>
+              <p className="mt-3 text-xs leading-relaxed text-white/45">
+                ≈{((config?.product.rtpBps ?? 8000) / 100).toFixed(0)}% RTP · every open wins · vault NFTs:{' '}
+                {config?.vault.availableNfts ?? 0}
+              </p>
+              <a
+                href="#prize-tiers"
+                className="mt-4 inline-flex min-h-[44px] items-center text-xs font-semibold uppercase tracking-[0.2em] text-[#00FF9C] hover:text-[#7DFFB8]"
+              >
+                View odds →
+              </a>
+            </div>
+          </aside>
+        </div>
       </section>
 
-      {/* Below-fold: tickets + recent + tiers — one job each */}
-      <section className="mx-auto max-w-3xl px-4 pb-10 sm:px-6">
+      {/* Stats strip */}
+      <section className="border-y border-[#00FF9C]/15 bg-black/50">
+        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 px-4 py-5 sm:grid-cols-3 sm:px-6 sm:py-6">
+          <div className="text-center sm:text-left">
+            <p className="text-[10px] uppercase tracking-[0.28em] text-white/40">Recent opens shown</p>
+            <p className="mt-1 font-display text-2xl tracking-wide text-[#00FF9C]">{packsOpened}</p>
+          </div>
+          <div className="text-center sm:text-left">
+            <p className="text-[10px] uppercase tracking-[0.28em] text-white/40">Pack price</p>
+            <p className="mt-1 font-display text-2xl tracking-wide text-white">{price} SOL</p>
+          </div>
+          <div className="text-center sm:text-left">
+            <p className="text-[10px] uppercase tracking-[0.28em] text-white/40">Target EV</p>
+            <p className="mt-1 font-display text-2xl tracking-wide text-white">
+              ≈{config?.ev.targetEvSol ?? 0.08} SOL
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Below-fold */}
+      <section className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
         <div className="border-t border-white/10 pt-10">
           <h2 className="font-display text-3xl tracking-[0.12em] text-[#EAFBF4]">Your free tickets</h2>
           <p className="mt-2 max-w-lg text-sm text-[#A9CBB9]">
@@ -391,11 +586,12 @@ export function PacksClient() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
+      <section id="prize-tiers" className="mx-auto max-w-3xl scroll-mt-24 px-4 pb-16 sm:px-6">
         <div className="border-t border-white/10 pt-10">
           <h2 className="font-display text-3xl tracking-[0.12em] text-[#EAFBF4]">Prize tiers</h2>
           <p className="mt-2 text-sm text-[#A9CBB9]">
-            Bottom-heavy weights fund rarer tops. Target EV ≈ {config?.ev.targetEvSol ?? 0.08} SOL per open.
+            Bottom-heavy weights fund rarer tops. Target EV ≈ {config?.ev.targetEvSol ?? 0.08} SOL per
+            open.
             {config ? ` Vault NFTs ready: ${config.vault.availableNfts}.` : null}
           </p>
           <div className="mt-6 grid gap-8 sm:grid-cols-3">
@@ -420,7 +616,9 @@ export function PacksClient() {
               </ul>
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00FF9C]/85">NFT bands</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00FF9C]/85">
+                NFT bands
+              </p>
               <ul className="mt-2 space-y-1 text-sm text-[#A9CBB9]">
                 {(config?.odds.nftBands ?? []).map((b) => (
                   <li key={`${b.min}-${b.max}`}>

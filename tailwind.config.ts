@@ -260,6 +260,24 @@ const config: Config = {
           '0%': { opacity: '0.7', transform: 'scale(0.6)' },
           '100%': { opacity: '0', transform: 'scale(1.55)' },
         },
+        'pack-spark': {
+          '0%, 100%': { opacity: '0.15', transform: 'translateY(0) scale(0.7)' },
+          '50%': { opacity: '1', transform: 'translateY(-14px) scale(1.15)' },
+        },
+        'pack-pedestal-glow': {
+          '0%, 100%': { filter: 'brightness(1)', opacity: '0.85' },
+          '50%': { filter: 'brightness(1.35)', opacity: '1' },
+        },
+        'pack-reward-enter': {
+          '0%': { opacity: '0', transform: 'translateY(24px) scale(0.7)' },
+          '55%': { opacity: '1', transform: 'translateY(0) scale(var(--pack-enter-scale, 1.08))' },
+          '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
+        },
+        'pack-energy-spin': {
+          '0%': { transform: 'translate(-50%, -50%) rotate(0deg) scale(1)' },
+          '50%': { transform: 'translate(-50%, -50%) rotate(180deg) scale(1.04)' },
+          '100%': { transform: 'translate(-50%, -50%) rotate(360deg) scale(1)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -293,6 +311,10 @@ const config: Config = {
         'pack-reveal-burst': 'pack-reveal-burst 0.7s cubic-bezier(0.22, 1, 0.36, 1) both',
         'pack-shine': 'pack-shine 1.8s ease-in-out infinite',
         'pack-ring-expand': 'pack-ring-expand 1.2s ease-out infinite',
+        'pack-spark': 'pack-spark 1.6s ease-in-out infinite',
+        'pack-pedestal-glow': 'pack-pedestal-glow 1.4s ease-in-out infinite',
+        'pack-reward-enter': 'pack-reward-enter 0.8s cubic-bezier(0.22, 1, 0.36, 1) both',
+        'pack-energy-spin': 'pack-energy-spin 24s linear infinite',
       },
     },
   },

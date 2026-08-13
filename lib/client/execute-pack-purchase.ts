@@ -19,6 +19,7 @@ export type PackOpenClientResult = {
   solAmount: number | null
   nftMint: string | null
   nftName: string | null
+  nftImageUrl: string | null
   freeTicketCredits: number
   payoutSignature: string | null
   openSeed: string
@@ -34,7 +35,7 @@ export type ExecutePackPurchaseOptions = {
     c: Connection,
     opts?: SendTransactionOptions
   ) => Promise<string>
-  /** Fires after on-chain payment confirms — start pack-open video here. */
+  /** Fires after on-chain payment confirms — UI may show “resolving prize…” here. */
   onPaymentConfirmed?: (info: {
     openId: string
     paymentSignature: string

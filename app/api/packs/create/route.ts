@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { PublicKey } from '@solana/web3.js'
+import { assertPacksAccess } from '@/lib/packs/assert-access'
 import { startPackOpen } from '@/lib/packs/open-engine'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -21,6 +22,9 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'Invalid wallet' }, { status: 400 })
     }
+
+    const access = await assertPacksAccess(wallet)
+    if (access !== true) return access
 
     const started = await startPackOpen(wallet)
     return NextResponse.json({
