@@ -13,7 +13,7 @@ Send Solana NFTs and tokens with clear costs — built for Owltopia holders.
 **Features**
 • Send NFTs or SPL tokens in one flow
 • Send to one wallet, or Scatter to many
-• Up to 20 NFTs per session · up to 5 per wallet approval
+• Up to 20 NFTs per session · 3–4 classic NFTs per wallet approval (smaller when scattering to new wallets)
 • Live cost estimate before you sign (Owl fee + rent + network)
 • Resume mid-session if a batch fails
 • Transfer ledger for confirmed sends

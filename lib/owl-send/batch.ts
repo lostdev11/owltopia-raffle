@@ -1,4 +1,11 @@
-import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT, OWL_SEND_MAX_SPECIAL_PER_TX } from '@/lib/owl-send/constants'
+import {
+  OWL_SEND_MAX_PER_TX,
+  OWL_SEND_MAX_PER_TX_NFT_ONE,
+  OWL_SEND_MAX_PER_TX_NFT_SCATTER,
+  OWL_SEND_MAX_SELECT,
+  OWL_SEND_MAX_SPECIAL_PER_TX,
+  owlSendClassicApprovalSize,
+} from '@/lib/owl-send/constants'
 import {
   isDasCompressedNft,
   isDasMplCoreInterface,
@@ -43,15 +50,58 @@ function lineNeedsSpecialPath(line: Pick<OwlSendLine, 'compressed' | 'interface'
   return false
 }
 
-/** Per-approval size: classic SPL ≤5; cNFT / pNFT / Core ≤1 (proof size). */
-export function owlSendNftApprovalSize(lines: Array<Pick<OwlSendLine, 'compressed' | 'interface'>>): number {
+/** Per-approval size: classic SPL 3–4 (packet headroom); cNFT / pNFT / Core ≤1. */
+export function owlSendNftApprovalSize(
+  lines: Array<Pick<OwlSendLine, 'compressed' | 'interface' | 'recipient'>>
+): number {
   if (lines.some(lineNeedsSpecialPath)) return OWL_SEND_MAX_SPECIAL_PER_TX
-  return OWL_SEND_MAX_PER_TX
+  const uniqueRecipients = new Set(
+    lines.map((l) => (l.recipient ?? '').trim()).filter(Boolean)
+  ).size
+  return owlSendClassicApprovalSize(uniqueRecipients)
+}
+
+/**
+ * Pack classic NFT lines so wallet,N allotments stay together.
+ *
+ * Same-wallet groups (2+) use the one-wallet limit (4) — 4 Gen2s to one dest
+ * is ~867 bytes and leaves Jupiter/Phantom injection headroom.
+ * Singleton 1:1 lines pack at the scatter limit (3).
+ * Mixing a 4-owl allotment with the next wallet (old 5-wide slice) is what
+ * blew the packet on Jupiter.
+ */
+export function packOwlSendClassicNftLines(lines: OwlSendLine[]): OwlSendLine[][] {
+  const groups = new Map<string, OwlSendLine[]>()
+  const order: string[] = []
+  for (const line of lines) {
+    const key = (line.recipient ?? '').trim() || line.mint
+    if (!groups.has(key)) {
+      order.push(key)
+      groups.set(key, [])
+    }
+    groups.get(key)!.push(line)
+  }
+
+  const chunks: OwlSendLine[][] = []
+  const singles: OwlSendLine[] = []
+  for (const key of order) {
+    const group = groups.get(key) ?? []
+    if (group.length >= 2) {
+      chunks.push(...chunkOwlSendBatches(group, OWL_SEND_MAX_PER_TX_NFT_ONE))
+    } else if (group[0]) {
+      singles.push(group[0])
+    }
+  }
+  chunks.push(...chunkOwlSendBatches(singles, OWL_SEND_MAX_PER_TX_NFT_SCATTER))
+  return chunks
 }
 
 /** Chunk NFT send lines with the correct per-approval size for the asset type. */
 export function chunkOwlSendNftLines(lines: OwlSendLine[]): OwlSendLine[][] {
-  return chunkOwlSendBatches(lines, owlSendNftApprovalSize(lines))
+  if (lines.some(lineNeedsSpecialPath)) {
+    return chunkOwlSendBatches(lines, OWL_SEND_MAX_SPECIAL_PER_TX)
+  }
+  return packOwlSendClassicNftLines(lines)
 }
 
 export type NftScatterEntry = {
