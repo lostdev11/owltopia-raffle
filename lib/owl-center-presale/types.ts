@@ -1,3 +1,5 @@
+import type { OwlCenterPresaleApprovalStatus } from '@/lib/owl-center-presale/constants'
+
 export type OwlCenterPresalePreviewImage = {
   url: string
   alt: string
@@ -28,7 +30,11 @@ export type OwlCenterPresaleStats = OwlCenterPresaleTenantPublic & {
   remaining: number
   percent_sold: number
   unit_price_usdc: number
+  /** Spot + platform fee per unit (buyer total). */
   unit_lamports: string | null
+  unit_partner_lamports?: string | null
+  unit_platform_fee_lamports?: string | null
+  platform_fee_usdc_per_spot?: number
   sol_usd_price: number | null
   presale_live: boolean
   presale_enabled: boolean
@@ -58,6 +64,9 @@ export type OwlCenterPresaleTenantAdmin = {
   partner_wallet: string | null
   is_enabled: boolean
   is_live: boolean
+  approval_status: OwlCenterPresaleApprovalStatus
+  created_by_wallet: string | null
+  rejection_reason: string | null
   unit_price_usdc: number
   presale_supply: number
   max_spots_per_purchase: number

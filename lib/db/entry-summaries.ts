@@ -22,6 +22,7 @@ type RpcRow = {
   revenue_usdc: number | string | null
   revenue_owl: number | string | null
   revenue_bamboo: number | string | null
+  revenue_goats: number | string | null
   viewer_confirmed_tickets: number | string | null
 }
 
@@ -47,7 +48,7 @@ function emptyStats(raffleId: string): RaffleEntryListStats {
     totalEntries: 0,
     confirmedEntries: 0,
     uniqueWallets: 0,
-    revenue: { sol: 0, usdc: 0, owl: 0, bamboo: 0 },
+    revenue: { sol: 0, usdc: 0, owl: 0, bamboo: 0, goats: 0 },
     viewerConfirmedTickets: 0,
   }
 }
@@ -104,6 +105,7 @@ async function summarizeEntriesFallback(
         else if (c === 'USDC') stats.revenue.usdc += amount
         else if (c === 'OWL') stats.revenue.owl += amount
         else if (c === 'BAMBOO') stats.revenue.bamboo += amount
+        else if (c === 'GOATS') stats.revenue.goats += amount
       }
     }
 
@@ -157,6 +159,7 @@ export async function getEntrySummariesByRaffleIds(
         usdc: num(row.revenue_usdc),
         owl: num(row.revenue_owl),
         bamboo: num(row.revenue_bamboo),
+        goats: num(row.revenue_goats),
       },
       viewerConfirmedTickets: num(row.viewer_confirmed_tickets),
     })

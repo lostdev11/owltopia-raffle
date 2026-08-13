@@ -8,6 +8,13 @@ import {
 } from '@/lib/db/owl-center-presale-tenants'
 import { sumOwlCenterPresaleSold } from '@/lib/owl-center-presale/db'
 import { OWL_CENTER_PRESALE_DEFAULT_THEME } from '@/lib/owl-center-presale/constants'
+import {
+  normalizeOwlCenterPresaleCaps,
+  parseOwlCenterPresaleMaxCreditsPerWallet,
+  parseOwlCenterPresaleMaxSpotsPerPurchase,
+  parseOwlCenterPresalePriceUsdc,
+  parseOwlCenterPresaleSupply,
+} from '@/lib/owl-center-presale/limits'
 import { normalizeOwlCenterPresaleSlug } from '@/lib/owl-center-presale/slug'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { safeErrorMessage } from '@/lib/safe-error'
@@ -18,12 +25,6 @@ function parseHexColor(raw: unknown, fallback: string): string {
   if (typeof raw !== 'string') return fallback
   const t = raw.trim()
   return /^#[0-9A-Fa-f]{6}$/.test(t) ? t : fallback
-}
-
-function parsePositiveInt(raw: unknown, fallback: number, max: number): number {
-  const n = typeof raw === 'number' ? raw : parseInt(String(raw ?? ''), 10)
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) return fallback
-  return Math.min(max, n)
 }
 
 export async function GET(request: NextRequest) {
@@ -86,6 +87,10 @@ export async function POST(request: NextRequest) {
     }
 
     const themeBody = body.theme && typeof body.theme === 'object' ? (body.theme as Record<string, unknown>) : {}
+    const caps = normalizeOwlCenterPresaleCaps({
+      max_spots_per_purchase: parseOwlCenterPresaleMaxSpotsPerPurchase(body.max_spots_per_purchase),
+      max_credits_per_wallet: parseOwlCenterPresaleMaxCreditsPerWallet(body.max_credits_per_wallet),
+    })
 
     const tenant = await insertOwlCenterPresaleTenant({
       slug,
@@ -93,14 +98,16 @@ export async function POST(request: NextRequest) {
       headline: typeof body.headline === 'string' ? body.headline : null,
       description: typeof body.description === 'string' ? body.description : null,
       treasury_wallet: treasury,
-      partner_wallet: partnerWallet,
+      partner_wallet: partnerWallet ?? treasury,
       is_enabled: body.is_enabled === true,
       is_live: body.is_live === true,
-      unit_price_usdc: parsePositiveInt(body.unit_price_usdc, 20, 10_000),
-      presale_supply: parsePositiveInt(body.presale_supply, 100, 1_000_000),
-      max_spots_per_purchase: parsePositiveInt(body.max_spots_per_purchase, 5, 100),
-      max_credits_per_wallet: parsePositiveInt(body.max_credits_per_wallet, 20, 500),
-      sort_order: parsePositiveInt(body.sort_order, 0, 10_000),
+      approval_status: 'approved',
+      created_by_wallet: normalizeSolanaWalletAddress(session.wallet),
+      unit_price_usdc: parseOwlCenterPresalePriceUsdc(body.unit_price_usdc),
+      presale_supply: parseOwlCenterPresaleSupply(body.presale_supply),
+      max_spots_per_purchase: caps.max_spots_per_purchase,
+      max_credits_per_wallet: caps.max_credits_per_wallet,
+      sort_order: typeof body.sort_order === 'number' ? Math.max(0, Math.floor(body.sort_order)) : 0,
       preview_images: sanitizePreviewImagesInput(body.preview_images),
       theme: {
         primary: parseHexColor(themeBody.primary, OWL_CENTER_PRESALE_DEFAULT_THEME.primary),

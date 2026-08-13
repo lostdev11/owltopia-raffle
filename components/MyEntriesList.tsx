@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
+import { RaffleListThumbnail } from '@/components/RaffleListThumbnail'
 import { useSiwsSession } from '@/hooks/use-siws-session'
 import type { EntryWithRaffle } from '@/lib/db/entries'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
@@ -166,24 +167,45 @@ export function MyEntriesList({ walletAddress }: MyEntriesListProps) {
       {items.map(({ entry, raffle }) => (
         <Card key={entry.id} className="overflow-hidden border-green-500/20 bg-card/80">
           <CardHeader className="pb-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-start gap-3">
               <Link
                 href={`/raffles/${raffle.slug}`}
-                className="font-semibold text-primary hover:underline"
+                className="shrink-0"
+                aria-label={`View ${raffle.title}`}
               >
-                {raffle.title}
+                <RaffleListThumbnail
+                  raffle={{
+                    id: raffle.id,
+                    image_url: raffle.image_url ?? null,
+                    image_fallback_url: raffle.image_fallback_url ?? null,
+                    prize_type: raffle.prize_type === 'nft' ? 'nft' : 'crypto',
+                    prize_currency: raffle.prize_currency ?? null,
+                  }}
+                  size="md"
+                  className="rounded-md"
+                  fallbackLabel="NFT"
+                  loading="lazy"
+                />
               </Link>
-              <Badge
-                variant={
-                  entry.status === 'confirmed'
-                    ? 'default'
-                    : entry.status === 'rejected'
-                      ? 'destructive'
-                      : 'secondary'
-                }
-              >
-                {entry.status}
-              </Badge>
+              <div className="min-w-0 flex-1 flex flex-wrap items-center justify-between gap-2">
+                <Link
+                  href={`/raffles/${raffle.slug}`}
+                  className="font-semibold text-primary hover:underline break-words"
+                >
+                  {raffle.title}
+                </Link>
+                <Badge
+                  variant={
+                    entry.status === 'confirmed'
+                      ? 'default'
+                      : entry.status === 'rejected'
+                        ? 'destructive'
+                        : 'secondary'
+                  }
+                >
+                  {entry.status}
+                </Badge>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-3 pt-0">

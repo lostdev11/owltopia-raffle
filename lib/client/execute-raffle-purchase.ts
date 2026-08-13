@@ -88,6 +88,9 @@ export function formatSplTokenTransferFailure(errorMessage: string, currency: st
   if (currency === 'BAMBOO') {
     return 'Not enough BAMBOO in your wallet for this payment. Check your token balance and try again.'
   }
+  if (currency === 'GOATS') {
+    return 'Not enough GOATS in your wallet for this payment. Check your token balance and try again.'
+  }
   if (currency === 'OWL') {
     return (
       'Not enough OWL in your wallet for this payment. Staked OWL is separate — add or unwrap OWL so your token balance covers the ticket total, then try again.'
@@ -401,7 +404,7 @@ function resolvePaymentsFromPurchaseDetails(details: PurchasePaymentDetails): {
 function resolveSplPaymentMint(raffleCurrency: string, paymentDetails: PurchasePaymentDetails): string | null {
   if (raffleCurrency === 'USDC') return paymentDetails.usdcMint
   if (raffleCurrency === 'OWL') return paymentDetails.tokenMint ?? paymentDetails.owlMint
-  if (raffleCurrency === 'BAMBOO') return paymentDetails.tokenMint ?? null
+  if (raffleCurrency === 'BAMBOO' || raffleCurrency === 'GOATS') return paymentDetails.tokenMint ?? null
   return null
 }
 
@@ -435,7 +438,12 @@ export async function buildPurchaseTransactionFromPaymentDetails(
         })
       )
     }
-  } else if (raffleCurrency === 'USDC' || raffleCurrency === 'OWL' || raffleCurrency === 'BAMBOO') {
+  } else if (
+    raffleCurrency === 'USDC' ||
+    raffleCurrency === 'OWL' ||
+    raffleCurrency === 'BAMBOO' ||
+    raffleCurrency === 'GOATS'
+  ) {
     const mint = resolveSplPaymentMint(raffleCurrency, paymentDetails)
     if (!mint) throw new Error(`${raffleCurrency} mint address not configured in payment details`)
     const mintPk = new PublicKey(mint)

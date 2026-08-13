@@ -1,5 +1,9 @@
 # Troubleshooting
 
+## “You’re visiting a potential phishing site” (OKX Wallet)
+
+If a user shares a full-page red phishing interstitial when opening an Owltopia raffle link, that overlay is from **OKX Wallet’s domain blocklist**, not from our app (we don’t ship that UI). Confirm they have the OKX extension / in-app browser; public blocklists are typically clean. Owner appeal steps and a Discord reply template: [`OKX_PHISHING_WARNING.md`](../OKX_PHISHING_WARNING.md). For Phantom’s different “dApp could be malicious” sheet, see [`PHANTOM_DOMAIN_REVIEW.md`](../PHANTOM_DOMAIN_REVIEW.md).
+
 ## 403 Forbidden on API routes (/api/raffles, /api/time, /api/proxy-image)
 
 If the **browser** gets `403 (Forbidden)` when calling your own APIs (e.g. `GET https://www.owltopia.xyz/api/raffles`), the response is usually **not** coming from the Next.js route handlers (they don’t return 403 for those endpoints). It’s typically from the hosting layer in front of the app.

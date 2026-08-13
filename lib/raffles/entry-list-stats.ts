@@ -101,6 +101,7 @@ export function stubEntriesFromListStats(
     ['USDC', rev.usdc],
     ['OWL', rev.owl],
     ['BAMBOO', rev.bamboo],
+    ['GOATS', rev.goats],
   ] as const) {
     if (amount > 0) {
       stubs.push({

@@ -3526,8 +3526,9 @@ export default function AdminDashboardPage() {
                   Owl Center
                 </CardTitle>
                 <CardDescription>
-                  Launchpad hub — all launches, Gen2 console, mint schedules, phase auto-advance, presale tenants, and
-                  partner demo collections. Public: /owl-center
+                  Launchpad hub — all launches, Gen2 console, mint schedules, phase auto-advance, partner
+                  presales, and partner demo collections. Public: /owl-center · Approvals:{' '}
+                  /admin/owl-center-presale
                 </CardDescription>
               </CardHeader>
             </Link>

@@ -3,13 +3,22 @@
  * Run: npx tsx scripts/test-owl-send-batch.ts
  */
 import assert from 'node:assert/strict'
-import { Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from '@solana/web3.js'
-import { getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token'
+import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountInstruction,
+  createRevokeInstruction,
+  createTransferInstruction,
+  getAssociatedTokenAddressSync,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+} from '@solana/spl-token'
 import {
   buildTokenScatterLines,
   capOwlSendSelection,
   chunkOwlSendBatches,
   chunkOwlSendNftLines,
+  packOwlSendClassicNftLines,
   collapseRecipientsToNftScatterPaste,
   expandNftScatterEntries,
   pairScatterLines,
@@ -18,10 +27,12 @@ import {
   parseTokenScatterEntries,
 } from '@/lib/owl-send/batch'
 import {
+  applyPartialOwlSendBatchSuccess,
   buildResumeRemainingPlan,
   buildResumeSkippingFrozenPlan,
   collectSentMintsFromBatches,
   collectSentMintsFromLedger,
+  splitOversizedOwlSendBatch,
 } from '@/lib/owl-send/resume'
 import { attributeOwlSendFrozenFailures } from '@/lib/owl-send/attribute-batch-failure'
 import {
@@ -43,6 +54,8 @@ import {
   owlSendSplErrorNeedsSpecialFallback,
   shouldSkipOwlSendSpecialFallback,
 } from '@/lib/owl-send/send-batch'
+import { owlSendNftSendButtonLabel } from '@/lib/owl-send/send-button-label'
+import { owlSendBatchesCanSignAll, walletSupportsOwlSendSignAll } from '@/lib/owl-send/sign-all'
 import { owlSendTokenAccountHint } from '@/lib/owl-send/resolve-spl-holder'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
 import {
@@ -50,7 +63,21 @@ import {
   isOwlSendWalletExtensionError,
   owlSendWalletExtensionHint,
 } from '@/lib/owl-send/wallet-send-errors'
-import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT, OWL_SEND_MAX_SPECIAL_PER_TX } from '@/lib/owl-send/constants'
+import {
+  OWL_SEND_MAX_PER_TX,
+  OWL_SEND_MAX_PER_TX_NFT_ONE,
+  OWL_SEND_MAX_PER_TX_NFT_SCATTER,
+  OWL_SEND_MAX_SELECT,
+  OWL_SEND_MAX_SPECIAL_PER_TX,
+  owlSendClassicApprovalSize,
+} from '@/lib/owl-send/constants'
+import {
+  isOwlSendPacketSizeError,
+  measureOwlSendTxBytes,
+  OWL_SEND_TX_PACKET_LIMIT,
+  OWL_SEND_TX_SAFE_BYTES,
+  owlSendTxFitsSafePacket,
+} from '@/lib/owl-send/tx-size'
 import {
   OWL_SEND_COMPUTE_UNIT_LIMIT,
   owlSendTxHasComputeBudget,
@@ -61,7 +88,13 @@ import { getOwlSendFeeLamportsForCount, getOwlSendFeeSol } from '@/lib/owl-send/
 import { canAccessOwlSend, canAccessOwlSendCsv, isOwlSendCsvPublicClient } from '@/lib/owl-send/access'
 
 assert.equal(OWL_SEND_MAX_PER_TX, 5)
+assert.equal(OWL_SEND_MAX_PER_TX_NFT_SCATTER, 3)
+assert.equal(OWL_SEND_MAX_PER_TX_NFT_ONE, 4)
+assert.equal(owlSendClassicApprovalSize(1), OWL_SEND_MAX_PER_TX_NFT_ONE)
+assert.equal(owlSendClassicApprovalSize(2), OWL_SEND_MAX_PER_TX_NFT_ONE)
+assert.equal(owlSendClassicApprovalSize(5), OWL_SEND_MAX_PER_TX_NFT_SCATTER)
 assert.equal(OWL_SEND_MAX_SELECT, 20)
+assert.ok(OWL_SEND_TX_SAFE_BYTES < OWL_SEND_TX_PACKET_LIMIT)
 assert.equal(getOwlSendFeeSol(), 0.001)
 assert.equal(getOwlSendFeeLamportsForCount(5), Math.round(0.001 * LAMPORTS_PER_SOL) * 5)
 
@@ -301,7 +334,8 @@ if (resume.ok) {
       skipFrozen.remaining.map((l) => l.mint),
       ['m1', 'm2', 'm3', 'm4']
     )
-    assert.equal(skipFrozen.batches.length, 1)
+    assert.equal(skipFrozen.batches.length, 2)
+    assert.equal(skipFrozen.batches[0]!.length, OWL_SEND_MAX_PER_TX_NFT_SCATTER)
   }
 
   const allFrozen = buildResumeSkippingFrozenPlan({
@@ -692,7 +726,11 @@ assert.equal(
   assert.ok(filtered.gate && !filtered.gate.ok)
 
   assert.equal(owlSendSelectionApprovalSize([cnft, cnft2]), OWL_SEND_MAX_SPECIAL_PER_TX)
-  assert.equal(owlSendSelectionApprovalSize([classic]), OWL_SEND_MAX_PER_TX)
+  assert.equal(owlSendSelectionApprovalSize([classic]), OWL_SEND_MAX_PER_TX_NFT_ONE)
+  assert.equal(
+    owlSendSelectionApprovalSize([classic], { uniqueRecipients: 5 }),
+    OWL_SEND_MAX_PER_TX_NFT_SCATTER
+  )
 
   const cnftChunks = chunkOwlSendNftLines([
     { mint: 'c1', recipient: 'r1', compressed: true },
@@ -711,7 +749,54 @@ assert.equal(
     { mint: 'g6', recipient: 'r1' },
   ])
   assert.equal(classicChunks.length, 2)
-  assert.equal(classicChunks[0]!.length, 5)
+  assert.equal(classicChunks[0]!.length, OWL_SEND_MAX_PER_TX_NFT_ONE)
+
+  const scatterChunks = chunkOwlSendNftLines(
+    Array.from({ length: 6 }, (_, i) => ({ mint: `s${i}`, recipient: `w${i}` }))
+  )
+  assert.equal(scatterChunks.length, 2)
+  assert.equal(scatterChunks[0]!.length, OWL_SEND_MAX_PER_TX_NFT_SCATTER)
+}
+
+{
+  // Real Gen2 scatter that failed on Jupiter: 20 owls as wallet,N
+  // 4+3+3+3+3+3+1. Old 5-wide slice mixed the first 4 with the next wallet.
+  const paste = [
+    'F7D8eHhzsgRGgNha4GdZxSERSW6UmAdFP42AfPYf1anS,4',
+    '1BWutmTvYPwDtmw9abTkS4Ssr8no61spGAvW1X6NDix,3',
+    '4896aktjfLHTggf2rztPUpdngVxqgmq4ZXeXunoxReKR,3',
+    '7BU48rrJwxJT5148TUmJ9VuQ1Ls4nSy9b2x1sg9THCKh,3',
+    'Dz7aU2HsM1sZdNz2CF6GWdPc21oPgzdjfEFLzz8t8uUk,3',
+    'rfxaoHUY9aZdwSsj7nUahwrndkHeRapd3Q3ED3AEZ6F,3',
+    'FT6Putm7UtB7L7Yztv3gZr68TYb3kAXZzePL2ZqnaR4K,1',
+  ].join('\n')
+  const entries = parseNftScatterEntries(paste)
+  assert.equal(entries.reduce((sum, e) => sum + (e.count ?? 0), 0), 20)
+  for (const e of entries) {
+    assert.equal(new PublicKey(e.recipient).toBase58(), e.recipient)
+  }
+  const paired = pairScatterLines({
+    mints: Array.from({ length: 20 }, (_, i) => ({ mint: `g2-${i}`, name: `Owltopia G2 #${i}` })),
+    entries,
+    randomize: true,
+  })
+  assert.equal(paired.ok, true)
+  if (paired.ok) {
+    const packed = packOwlSendClassicNftLines(paired.lines)
+    assert.equal(packed.length, 7)
+    assert.equal(packed[0]!.length, 4)
+    assert.equal(new Set(packed[0]!.map((l) => l.recipient)).size, 1)
+    assert.equal(packed[0]![0]!.recipient, 'F7D8eHhzsgRGgNha4GdZxSERSW6UmAdFP42AfPYf1anS')
+    for (let i = 1; i <= 5; i++) {
+      assert.equal(packed[i]!.length, 3)
+      assert.equal(new Set(packed[i]!.map((l) => l.recipient)).size, 1)
+    }
+    assert.equal(packed[6]!.length, 1)
+    // Old 5-wide slice would mix wallet 1 (4) with wallet 2 (1) — the Jupiter fail.
+    const naive = chunkOwlSendBatches(paired.lines, 5)
+    assert.equal(naive[0]!.length, 5)
+    assert.ok(new Set(naive[0]!.map((l) => l.recipient)).size >= 2)
+  }
 }
 
 assert.match(owlSendRetryHint('User rejected the request'), /Wallet rejected/)
@@ -822,6 +907,182 @@ assert.match(owlSendRetryHint('User rejected the request'), /Wallet rejected/)
   assert.notEqual(classic.toBase58(), t22.toBase58())
   assert.ok(TOKEN_2022_PROGRAM_ID.toBase58().startsWith('Tokenz'))
   assert.ok(TOKEN_PROGRAM_ID.toBase58().startsWith('Tokenk'))
+}
+
+assert.match(
+  owlSendRetryHint('This batch does not fit in one Solana transaction (often when sending Gen2s to new wallets).'),
+  /smaller batches|too large/i
+)
+assert.equal(isOwlSendPacketSizeError('VersionedTransaction too large'), true)
+assert.equal(isOwlSendPacketSizeError('Account is frozen'), false)
+
+{
+  const owner = Keypair.generate().publicKey
+  const treasury = Keypair.generate().publicKey
+  const buildScatter = (n: number) => {
+    const tx = new Transaction()
+    tx.add(
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }),
+      ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })
+    )
+    for (let i = 0; i < n; i++) {
+      const mint = Keypair.generate().publicKey
+      const recipient = Keypair.generate().publicKey
+      const source = getAssociatedTokenAddressSync(mint, owner)
+      const dest = getAssociatedTokenAddressSync(mint, recipient)
+      tx.add(
+        createAssociatedTokenAccountInstruction(
+          owner,
+          dest,
+          recipient,
+          mint,
+          TOKEN_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        ),
+        createRevokeInstruction(source, owner, [], TOKEN_PROGRAM_ID),
+        createTransferInstruction(source, dest, owner, 1n, [], TOKEN_PROGRAM_ID)
+      )
+    }
+    tx.add(SystemProgram.transfer({ fromPubkey: owner, toPubkey: treasury, lamports: 2500 }))
+    tx.feePayer = owner
+    tx.recentBlockhash = '11111111111111111111111111111111'
+    return tx
+  }
+
+  const five = buildScatter(5)
+  const three = buildScatter(3)
+  assert.ok(measureOwlSendTxBytes(five) > OWL_SEND_TX_SAFE_BYTES)
+  assert.ok(measureOwlSendTxBytes(five) < OWL_SEND_TX_PACKET_LIMIT)
+  assert.equal(owlSendTxFitsSafePacket(five), false)
+  assert.equal(owlSendTxFitsSafePacket(three), true)
+}
+
+{
+  const lines = Array.from({ length: 5 }, (_, i) => ({
+    mint: `m${i}`,
+    recipient: `r${i}`,
+    name: `G2 #${i}`,
+  }))
+  const split = applyPartialOwlSendBatchSuccess({
+    preparedLines: lines,
+    batches: [lines],
+    batchProgress: [{ index: 0, total: 1, status: 'sending' }],
+    batchIndex: 0,
+    sentLines: lines.slice(0, 3),
+    deferredLines: lines.slice(3),
+    signature: 'sig',
+  })
+  assert.equal(split.batches.length, 2)
+  assert.equal(split.batches[0]!.length, 3)
+  assert.equal(split.batches[1]!.length, 2)
+  assert.equal(split.batchProgress[0]!.status, 'done')
+  assert.equal(split.batchProgress[1]!.status, 'ready')
+  assert.equal(split.deferredCount, 2)
+  assert.equal(split.nextIndex, 1)
+
+  const oversized = splitOversizedOwlSendBatch({
+    batches: [lines],
+    batchProgress: [{ index: 0, total: 1, status: 'sending' }],
+    batchIndex: 0,
+    error: 'transaction too large',
+  })
+  assert.ok(oversized)
+  assert.equal(oversized!.batches.length, 2)
+  assert.equal(oversized!.batches[0]!.length, 3)
+  assert.equal(oversized!.batchProgress[0]!.status, 'failed')
+}
+
+{
+  assert.equal(
+    owlSendNftSendButtonLabel({
+      batchesTotal: 7,
+      activeIndex: 0,
+      status: 'ready',
+    }),
+    'Send all 7 approvals'
+  )
+  assert.equal(
+    owlSendNftSendButtonLabel({
+      batchesTotal: 7,
+      activeIndex: 2,
+      status: 'ready',
+      remainingFromActive: 5,
+    }),
+    'Send remaining 5 approvals'
+  )
+  assert.equal(
+    owlSendNftSendButtonLabel({
+      batchesTotal: 7,
+      activeIndex: 1,
+      status: 'sending',
+      sendPhase: 'approving',
+    }),
+    'Approve in wallet (2 of 7)…'
+  )
+  assert.equal(
+    owlSendNftSendButtonLabel({
+      batchesTotal: 7,
+      activeIndex: 3,
+      status: 'failed',
+      remainingFromActive: 4,
+    }),
+    'Retry remaining 4 approvals'
+  )
+  assert.equal(
+    owlSendNftSendButtonLabel({
+      batchesTotal: 1,
+      activeIndex: 0,
+      status: 'ready',
+    }),
+    'Are you sure? Send'
+  )
+  assert.equal(
+    owlSendNftSendButtonLabel({
+      batchesTotal: 7,
+      activeIndex: 0,
+      status: 'ready',
+      signAll: true,
+    }),
+    'Send all 7 in one approval'
+  )
+  assert.equal(
+    owlSendNftSendButtonLabel({
+      batchesTotal: 7,
+      activeIndex: 0,
+      status: 'sending',
+      sendPhase: 'approving',
+      remainingFromActive: 7,
+      signAll: true,
+    }),
+    'Approve all 7 in wallet…'
+  )
+}
+
+{
+  assert.equal(walletSupportsOwlSendSignAll({ name: 'Phantom' } as never), true)
+  assert.equal(walletSupportsOwlSendSignAll({ name: 'Jupiter' } as never), false)
+  assert.equal(
+    walletSupportsOwlSendSignAll({
+      name: 'Solflare',
+      signAllTransactions: async () => [],
+    } as never),
+    true
+  )
+  assert.equal(
+    owlSendBatchesCanSignAll([
+      [{ mint: 'a', recipient: 'r1' }],
+      [{ mint: 'b', recipient: 'r2' }],
+    ]),
+    true
+  )
+  assert.equal(owlSendBatchesCanSignAll([[{ mint: 'a', recipient: 'r1' }]]), false)
+  assert.equal(
+    owlSendBatchesCanSignAll([
+      [{ mint: 'a', recipient: 'r1', compressed: true }],
+      [{ mint: 'b', recipient: 'r2', compressed: true }],
+    ]),
+    false
+  )
 }
 
 console.log('test-owl-send-batch: ok')
