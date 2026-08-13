@@ -55,6 +55,7 @@ import {
   shouldSkipOwlSendSpecialFallback,
 } from '@/lib/owl-send/send-batch'
 import { owlSendNftSendButtonLabel } from '@/lib/owl-send/send-button-label'
+import { owlSendBatchesCanSignAll, walletSupportsOwlSendSignAll } from '@/lib/owl-send/sign-all'
 import { owlSendTokenAccountHint } from '@/lib/owl-send/resolve-spl-holder'
 import { owlSendRetryHint } from '@/lib/owl-send/retry-hint'
 import {
@@ -1034,6 +1035,53 @@ assert.equal(isOwlSendPacketSizeError('Account is frozen'), false)
       status: 'ready',
     }),
     'Are you sure? Send'
+  )
+  assert.equal(
+    owlSendNftSendButtonLabel({
+      batchesTotal: 7,
+      activeIndex: 0,
+      status: 'ready',
+      signAll: true,
+    }),
+    'Send all 7 in one approval'
+  )
+  assert.equal(
+    owlSendNftSendButtonLabel({
+      batchesTotal: 7,
+      activeIndex: 0,
+      status: 'sending',
+      sendPhase: 'approving',
+      remainingFromActive: 7,
+      signAll: true,
+    }),
+    'Approve all 7 in wallet…'
+  )
+}
+
+{
+  assert.equal(walletSupportsOwlSendSignAll({ name: 'Phantom' } as never), true)
+  assert.equal(walletSupportsOwlSendSignAll({ name: 'Jupiter' } as never), false)
+  assert.equal(
+    walletSupportsOwlSendSignAll({
+      name: 'Solflare',
+      signAllTransactions: async () => [],
+    } as never),
+    true
+  )
+  assert.equal(
+    owlSendBatchesCanSignAll([
+      [{ mint: 'a', recipient: 'r1' }],
+      [{ mint: 'b', recipient: 'r2' }],
+    ]),
+    true
+  )
+  assert.equal(owlSendBatchesCanSignAll([[{ mint: 'a', recipient: 'r1' }]]), false)
+  assert.equal(
+    owlSendBatchesCanSignAll([
+      [{ mint: 'a', recipient: 'r1', compressed: true }],
+      [{ mint: 'b', recipient: 'r2', compressed: true }],
+    ]),
+    false
   )
 }
 
