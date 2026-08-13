@@ -77,10 +77,12 @@ import {
   type OwlSendTokenScatterLine,
 } from '@/lib/owl-send/batch'
 import {
+  applyPartialOwlSendBatchSuccess,
   buildResumeRemainingPlan,
   buildResumeSkippingFrozenPlan,
   collectSentMintsFromBatches,
   collectSentMintsFromLedger,
+  splitOversizedOwlSendBatch,
 } from '@/lib/owl-send/resume'
 import {
   clearOwlSendNftDraft,
@@ -95,6 +97,7 @@ import {
   type OwlSendAssetTab,
   type OwlSendMode,
 } from '@/lib/owl-send/constants'
+import { isOwlSendPacketSizeError } from '@/lib/owl-send/tx-size'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { formatOwlSendFeeSol, getOwlSendFeeSol, getOwlSendFeeSolForDiscount } from '@/lib/owl-send/fee'
 import type { OwlSendHolderRoleName } from '@/lib/owl-send/holder-discount'
@@ -452,6 +455,14 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setRandomizeScatter(next)
   }
 
+  const nftApprovalSize = useMemo(() => {
+    const unique =
+      mode === 'scatter'
+        ? new Set(activeScatterRecipients.filter(Boolean)).size || 3
+        : 1
+    return owlSendSelectionApprovalSize(selectedNfts, { uniqueRecipients: unique })
+  }, [selectedNfts, mode, activeScatterRecipients])
+
   const cost = useMemo(() => {
     if (preparedLines && preparedLines.length > 0) {
       return buildOwlSendCostEstimate({
@@ -462,18 +473,12 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     }
     const count = selectedNfts.length
     if (count < 1) return null
-    const perApproval = owlSendSelectionApprovalSize(selectedNfts)
     return buildOwlSendCostEstimate({
       nftCount: count,
-      batchCount: Math.ceil(count / perApproval),
+      batchCount: Math.ceil(count / nftApprovalSize),
       discountBps,
     })
-  }, [preparedLines, batches.length, selectedNfts, discountBps])
-
-  const nftApprovalSize = useMemo(
-    () => owlSendSelectionApprovalSize(selectedNfts),
-    [selectedNfts]
-  )
+  }, [preparedLines, batches.length, selectedNfts, discountBps, nftApprovalSize])
 
   const cancelInFlightSend = () => {
     sendCancelledRef.current = true
@@ -899,31 +904,55 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setSendPhaseStartedAt(null)
 
     if (result.ok) {
-      const nextProgress = workingProgress.map((b) =>
-        b.index === workingIndex
-          ? { ...b, status: 'done' as const, signature: result.signature }
-          : b.index === workingIndex + 1 && b.status === 'pending'
-            ? { ...b, status: 'ready' as const }
-            : b
-      )
-      setBatchProgress(nextProgress)
-      setBatches(workingBatches)
-      setPreparedLines(workingPrepared)
-      if (workingIndex + 1 < workingBatches.length) setActiveBatch(workingIndex + 1)
-      const sent = new Set(lines.map((l) => l.mint))
+      const sentMintSet = new Set(result.sentMints?.length ? result.sentMints : lines.map((l) => l.mint))
+      const sentLines = lines.filter((l) => sentMintSet.has(l.mint))
+      const deferredLines = lines.filter((l) => !sentMintSet.has(l.mint))
+
+      if (deferredLines.length > 0 && sentLines.length > 0) {
+        const split = applyPartialOwlSendBatchSuccess({
+          preparedLines: workingPrepared,
+          batches: workingBatches,
+          batchProgress: workingProgress,
+          batchIndex: workingIndex,
+          sentLines,
+          deferredLines,
+          signature: result.signature,
+        })
+        setBatches(split.batches)
+        setBatchProgress(split.batchProgress)
+        setPreparedLines(split.preparedLines)
+        setActiveBatch(split.nextIndex)
+        setSessionNotice(
+          `Sent ${sentLines.length} NFT${sentLines.length === 1 ? '' : 's'} in this approval — ${split.deferredCount} moved to the next approval so the transaction fits Solana’s size limit.`
+        )
+      } else {
+        const nextProgress = workingProgress.map((b) =>
+          b.index === workingIndex
+            ? { ...b, status: 'done' as const, signature: result.signature }
+            : b.index === workingIndex + 1 && b.status === 'pending'
+              ? { ...b, status: 'ready' as const }
+              : b
+        )
+        setBatchProgress(nextProgress)
+        setBatches(workingBatches)
+        setPreparedLines(workingPrepared)
+        if (workingIndex + 1 < workingBatches.length) setActiveBatch(workingIndex + 1)
+      }
+
+      const sent = new Set(sentLines.map((l) => l.mint))
       setRetryMints((prev) => prev.filter((m) => !sent.has(m)))
-      const successItems = owlSendSuccessItemsFromNftLines(lines, {
+      const successItems = owlSendSuccessItemsFromNftLines(sentLines, {
         showRecipient: mode === 'scatter',
       })
       setSuccessPopup({
         title:
-          workingBatches.length > 1
-            ? `Batch ${workingIndex + 1} of ${workingBatches.length} sent`
+          (deferredLines.length > 0 ? workingBatches.length + 1 : workingBatches.length) > 1
+            ? `Batch ${workingIndex + 1} sent`
             : 'NFTs sent successfully',
         detail:
           mode === 'scatter'
-            ? `${lines.length} NFT${lines.length === 1 ? '' : 's'} transferred. Fee paid to Owltopia treasury.`
-            : `${lines.length} NFT${lines.length === 1 ? '' : 's'} → ${shorten(lines[0]?.recipient ?? '')}. Fee paid to Owltopia treasury.`,
+            ? `${sentLines.length} NFT${sentLines.length === 1 ? '' : 's'} transferred. Fee paid to Owltopia treasury.`
+            : `${sentLines.length} NFT${sentLines.length === 1 ? '' : 's'} → ${shorten(sentLines[0]?.recipient ?? '')}. Fee paid to Owltopia treasury.`,
         signature: result.signature,
         items: successItems,
       })
@@ -934,7 +963,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         txSignature: result.signature,
         batchIndex: workingIndex,
         feeDiscountBps: discountBps,
-        lines: lines.map((l) => ({
+        lines: sentLines.map((l) => ({
           recipient: l.recipient,
           mint: l.mint,
           name: l.name ?? null,
@@ -943,20 +972,36 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       }).then(() => setLedgerRefreshKey((k) => k + 1))
       void loadAssets()
     } else {
-      setBatches(workingBatches)
-      setPreparedLines(workingPrepared)
-      setBatchProgress(
-        workingProgress.map((b) =>
-          b.index === workingIndex
-            ? {
-                ...b,
-                status: 'failed' as const,
-                error: result.error,
-                failedMints: result.failedMints,
-              }
-            : b
+      const sizeSplit =
+        isOwlSendPacketSizeError(result.error) || /too large/i.test(result.error)
+          ? splitOversizedOwlSendBatch({
+              batches: workingBatches,
+              batchProgress: workingProgress,
+              batchIndex: workingIndex,
+              error: result.error,
+            })
+          : null
+      if (sizeSplit) {
+        setBatches(sizeSplit.batches)
+        setPreparedLines(sizeSplit.batches.flat())
+        setBatchProgress(sizeSplit.batchProgress)
+        setSessionNotice('Split this approval so the next Retry fits in one Solana transaction.')
+      } else {
+        setBatches(workingBatches)
+        setPreparedLines(workingPrepared)
+        setBatchProgress(
+          workingProgress.map((b) =>
+            b.index === workingIndex
+              ? {
+                  ...b,
+                  status: 'failed' as const,
+                  error: result.error,
+                  failedMints: result.failedMints,
+                }
+              : b
+          )
         )
-      )
+      }
       setActiveBatch(workingIndex)
       if (result.failedMints?.length) {
         setRetryMints((prev) => [...new Set([...prev, ...result.failedMints!])])
@@ -1608,7 +1653,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     Up to {OWL_SEND_MAX_SELECT} NFTs ·{' '}
                     {nftApprovalSize === OWL_SEND_MAX_SPECIAL_PER_TX
                       ? `${OWL_SEND_MAX_SPECIAL_PER_TX} cNFT/pNFT per wallet approval (sequential)`
-                      : `${OWL_SEND_MAX_PER_TX} classic NFTs per wallet approval`}
+                      : `${nftApprovalSize} classic NFTs per wallet approval`}
                     {' · '}
                     cNFTs and classic NFTs can’t mix — you’ll get a prompt if you try
                   </CardDescription>
@@ -1686,7 +1731,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     {mode === 'send_to_one'
                       ? nftApprovalSize === OWL_SEND_MAX_SPECIAL_PER_TX
                         ? 'All selected NFTs go to this wallet (1 cNFT/pNFT per approval).'
-                        : `All selected NFTs go to this wallet (batches of ${OWL_SEND_MAX_PER_TX}).`
+                        : `All selected NFTs go to this wallet (batches of ${nftApprovalSize}).`
                       : randomizeScatter
                         ? 'Paste wallets (one per line), or wallet,N for exact counts — e.g. walletA,5 then walletB,1. Counts must sum to selected NFTs; otherwise split evenly.'
                         : pairPerNft
@@ -2036,7 +2081,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                           {cost.batchCount} wallet approvals ·{' '}
                           {nftApprovalSize === OWL_SEND_MAX_SPECIAL_PER_TX
                             ? `${OWL_SEND_MAX_SPECIAL_PER_TX} cNFT/pNFT each`
-                            : `${OWL_SEND_MAX_PER_TX} NFTs each`}
+                            : `${nftApprovalSize} NFTs each`}
                         </p>
                       ) : null}
                     </div>

@@ -1,4 +1,9 @@
-import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT, OWL_SEND_MAX_SPECIAL_PER_TX } from '@/lib/owl-send/constants'
+import {
+  OWL_SEND_MAX_PER_TX,
+  OWL_SEND_MAX_SELECT,
+  OWL_SEND_MAX_SPECIAL_PER_TX,
+  owlSendClassicApprovalSize,
+} from '@/lib/owl-send/constants'
 import {
   isDasCompressedNft,
   isDasMplCoreInterface,
@@ -43,10 +48,15 @@ function lineNeedsSpecialPath(line: Pick<OwlSendLine, 'compressed' | 'interface'
   return false
 }
 
-/** Per-approval size: classic SPL ≤5; cNFT / pNFT / Core ≤1 (proof size). */
-export function owlSendNftApprovalSize(lines: Array<Pick<OwlSendLine, 'compressed' | 'interface'>>): number {
+/** Per-approval size: classic SPL 3–4 (packet headroom); cNFT / pNFT / Core ≤1. */
+export function owlSendNftApprovalSize(
+  lines: Array<Pick<OwlSendLine, 'compressed' | 'interface' | 'recipient'>>
+): number {
   if (lines.some(lineNeedsSpecialPath)) return OWL_SEND_MAX_SPECIAL_PER_TX
-  return OWL_SEND_MAX_PER_TX
+  const uniqueRecipients = new Set(
+    lines.map((l) => (l.recipient ?? '').trim()).filter(Boolean)
+  ).size
+  return owlSendClassicApprovalSize(uniqueRecipients)
 }
 
 /** Chunk NFT send lines with the correct per-approval size for the asset type. */

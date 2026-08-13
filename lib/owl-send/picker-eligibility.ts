@@ -3,7 +3,7 @@ import {
   isProgrammableNftInterface,
   isWalletNftTransferLocked,
 } from '@/lib/solana/nft-transfer-lock'
-import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SPECIAL_PER_TX } from '@/lib/owl-send/constants'
+import { OWL_SEND_MAX_SPECIAL_PER_TX, owlSendClassicApprovalSize } from '@/lib/owl-send/constants'
 
 /** Compressed NFT from DAS `compression.compressed` (or interface hint). */
 export function isOwlSendCompressedNft(nft: WalletNft): boolean {
@@ -26,10 +26,13 @@ export function owlSendPickerKind(nft: Pick<WalletNft, 'compressed' | 'interface
   return 'classic'
 }
 
-/** Classic SPL ≤5 per approval; cNFT / pNFT ≤1 (sequential approvals). */
-export function owlSendSelectionApprovalSize(selected: Array<Pick<WalletNft, 'compressed' | 'interface'>>): number {
+/** Classic SPL 3–4 per approval (packet headroom); cNFT / pNFT ≤1 (sequential). */
+export function owlSendSelectionApprovalSize(
+  selected: Array<Pick<WalletNft, 'compressed' | 'interface'>>,
+  opts?: { uniqueRecipients?: number }
+): number {
   if (selected.some((n) => owlSendPickerKind(n) !== 'classic')) return OWL_SEND_MAX_SPECIAL_PER_TX
-  return OWL_SEND_MAX_PER_TX
+  return owlSendClassicApprovalSize(opts?.uniqueRecipients ?? 1)
 }
 
 function kindLabel(kind: OwlSendPickerKind): string {

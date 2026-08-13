@@ -10,6 +10,7 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { OwlSendClient } from '@/components/owl-send/OwlSendClient'
 import {
   OWL_SEND_MAX_PER_TX,
+  OWL_SEND_MAX_PER_TX_NFT_ONE,
   OWL_SEND_MAX_SELECT,
 } from '@/lib/owl-send/constants'
 import { formatOwlSendFeeSol, getOwlSendFeeSol, isOwlSendFeeEnabledClient } from '@/lib/owl-send/fee'
@@ -119,7 +120,7 @@ export function AdminOwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               Send 1 NFT to your own wallet (Send to one)
             </ChecklistItem>
             <ChecklistItem>
-              Scatter 2 NFTs to 2 wallets — confirm pairing + batch of {OWL_SEND_MAX_PER_TX}
+              Scatter 2 NFTs to 2 wallets — confirm pairing + batch of {OWL_SEND_MAX_PER_TX_NFT_ONE}
             </ChecklistItem>
             <ChecklistItem>
               Tokens → Scatter — paste wallets (or wallet,amount) and confirm Solscan success
@@ -176,7 +177,7 @@ function AdminChrome({
           <Link href="/owl-send" className="text-primary underline-offset-4 hover:underline">
             /owl-send
           </Link>
-          . Max {OWL_SEND_MAX_SELECT} NFTs / session, {OWL_SEND_MAX_PER_TX} per approval.
+          . Max {OWL_SEND_MAX_SELECT} NFTs / session, {OWL_SEND_MAX_PER_TX_NFT_ONE} classic NFTs per approval.
         </p>
         <div className="flex flex-wrap gap-2 text-xs">
           <StatusPill ok={feeConfigured}>
