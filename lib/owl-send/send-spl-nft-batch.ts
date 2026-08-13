@@ -84,7 +84,7 @@ async function resolveHolder(
   })
 }
 
-async function buildOwlSendSplNftTransaction(params: {
+export async function buildOwlSendSplNftTransaction(params: {
   connection: Connection
   owner: PublicKey
   lines: OwlSendLine[]
