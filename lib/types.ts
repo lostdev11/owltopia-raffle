@@ -121,7 +121,7 @@ export type RaffleStatus =
   | null
 
 /** Supported raffle ticket currencies */
-export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'
+export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'
 
 export type RaffleOfferStatus = 'pending' | 'accepted' | 'declined' | 'cancelled' | 'expired'
 

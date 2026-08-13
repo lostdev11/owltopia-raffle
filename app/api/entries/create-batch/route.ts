@@ -244,7 +244,7 @@ export async function POST(request: NextRequest) {
 
     if (!unifiedCurrency) return NextResponse.json(ERROR_BODY, { status: 400 })
 
-    const tokenInfo = getTokenInfo(unifiedCurrency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO')
+    const tokenInfo = getTokenInfo(unifiedCurrency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS')
     if (unifiedCurrency !== 'SOL' && !tokenInfo.mintAddress) {
       return NextResponse.json(ERROR_BODY, { status: 500 })
     }

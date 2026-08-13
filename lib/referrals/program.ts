@@ -1,7 +1,8 @@
 import { BAMBOO_TICKET_CURRENCY } from '@/lib/raffles/bamboo-ticket-currency'
+import { GOATS_TICKET_CURRENCY } from '@/lib/raffles/goats-ticket-currency'
 import { raffleHasEnded, raffleHasStarted } from '@/lib/raffles/purchase-window'
 
-const EXCLUDED_TICKET_CURRENCIES = new Set(['OWL', BAMBOO_TICKET_CURRENCY])
+const EXCLUDED_TICKET_CURRENCIES = new Set(['OWL', BAMBOO_TICKET_CURRENCY, GOATS_TICKET_CURRENCY])
 
 /** Referral links, attribution, and rewards apply only to standard ticket raffles. */
 export function raffleTicketCurrencySupportsReferralProgram(

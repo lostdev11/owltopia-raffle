@@ -636,6 +636,10 @@ function knownFungibleLabels(): Map<string, { name: string; symbol: string }> {
     name: 'Bamboo',
     symbol: 'BAMBOO',
   })
+  map.set('BBLpindmy8n5ACcYyQmwsZbsT651g9u7C8TdKcgFBAGS', {
+    name: 'GOATS OF SOLANA',
+    symbol: 'GOATS',
+  })
   const owl =
     typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_OWL_MINT_ADDRESS?.trim() : undefined
   if (owl) {

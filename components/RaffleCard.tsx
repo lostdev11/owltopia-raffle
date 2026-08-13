@@ -765,7 +765,7 @@ export function RaffleCard({
                     <>
                       {raffle.ticket_price} {raffle.currency}
                       <CurrencyIcon
-                        currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                        currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                         size={12}
                         className="inline-block"
                       />
@@ -997,7 +997,7 @@ export function RaffleCard({
                         <>
                           {raffle.ticket_price} {raffle.currency}
                           <CurrencyIcon
-                            currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                            currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                             size={16}
                             className="inline-block flex-shrink-0"
                           />
@@ -1107,7 +1107,7 @@ export function RaffleCard({
                         <>
                           {raffle.ticket_price} {raffle.currency}
                           <CurrencyIcon
-                            currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                            currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                             size={16}
                             className="inline-block"
                           />

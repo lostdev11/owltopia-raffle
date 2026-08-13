@@ -3769,7 +3769,7 @@ export function RaffleDetailClient({
                             <>
                               {raffle.ticket_price.toFixed(4).replace(/\.?0+$/, '')} {raffle.currency}
                               <CurrencyIcon
-                                currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                                currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                                 size={14}
                                 className="inline-block"
                               />
@@ -4016,7 +4016,7 @@ export function RaffleDetailClient({
                       <>
                         {raffle.ticket_price.toFixed(6).replace(/\.?0+$/, '')} {raffle.currency}
                         <CurrencyIcon
-                          currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                          currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                           size={imageSize === 'small' ? 16 : 20}
                           className="inline-block"
                         />
@@ -4923,7 +4923,7 @@ export function RaffleDetailClient({
                           : 'border-input bg-background text-muted-foreground hover:bg-muted/60'
                       }`}
                     >
-                      {c === 'BAMBOO' ? 'Bamboo (BAMBOO)' : c}
+                      {c === 'BAMBOO' ? 'Bamboo (BAMBOO)' : c === 'GOATS' ? 'GOATS OF SOLANA (GOATS)' : c}
                     </button>
                   ))}
                 </div>
@@ -4951,7 +4951,7 @@ export function RaffleDetailClient({
               <div className="text-xl font-bold flex items-center gap-2">
                 {purchaseAmount.toFixed(6)} {ticketPaymentCurrency}
                 <CurrencyIcon
-                  currency={ticketPaymentCurrency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                  currency={ticketPaymentCurrency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                   size={20}
                   className="inline-block"
                 />
