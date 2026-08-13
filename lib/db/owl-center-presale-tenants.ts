@@ -1,9 +1,12 @@
+import {
+  OWL_CENTER_PRESALE_DEFAULT_THEME,
+  type OwlCenterPresaleApprovalStatus,
+} from '@/lib/owl-center-presale/constants'
 import type {
   OwlCenterPresalePreviewImage,
   OwlCenterPresaleTheme,
   OwlCenterPresaleTenantAdmin,
 } from '@/lib/owl-center-presale/types'
-import { OWL_CENTER_PRESALE_DEFAULT_THEME } from '@/lib/owl-center-presale/constants'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 function parseTheme(row: Record<string, unknown>): OwlCenterPresaleTheme {
@@ -31,6 +34,11 @@ function parsePreviewImages(raw: unknown): OwlCenterPresalePreviewImage[] {
   return out.slice(0, 12)
 }
 
+function parseApprovalStatus(raw: unknown): OwlCenterPresaleApprovalStatus {
+  if (raw === 'pending' || raw === 'rejected' || raw === 'approved') return raw
+  return 'approved'
+}
+
 export function mapOwlCenterPresaleTenantRow(row: Record<string, unknown>): OwlCenterPresaleTenantAdmin {
   return {
     id: String(row.id),
@@ -42,6 +50,9 @@ export function mapOwlCenterPresaleTenantRow(row: Record<string, unknown>): OwlC
     partner_wallet: (row.partner_wallet as string | null) ?? null,
     is_enabled: Boolean(row.is_enabled),
     is_live: Boolean(row.is_live),
+    approval_status: parseApprovalStatus(row.approval_status),
+    created_by_wallet: (row.created_by_wallet as string | null) ?? null,
+    rejection_reason: (row.rejection_reason as string | null) ?? null,
     unit_price_usdc: Number(row.unit_price_usdc ?? 20),
     presale_supply: Number(row.presale_supply ?? 100),
     max_spots_per_purchase: Number(row.max_spots_per_purchase ?? 5),
@@ -56,7 +67,7 @@ export function mapOwlCenterPresaleTenantRow(row: Record<string, unknown>): OwlC
 }
 
 const TENANT_SELECT =
-  'id, slug, display_name, headline, description, treasury_wallet, partner_wallet, is_enabled, is_live, unit_price_usdc, presale_supply, max_spots_per_purchase, max_credits_per_wallet, theme_primary, theme_accent, theme_background, theme_surface, theme_muted, preview_images, sort_order, updated_by_wallet, created_at, updated_at'
+  'id, slug, display_name, headline, description, treasury_wallet, partner_wallet, is_enabled, is_live, approval_status, created_by_wallet, rejection_reason, unit_price_usdc, presale_supply, max_spots_per_purchase, max_credits_per_wallet, theme_primary, theme_accent, theme_background, theme_surface, theme_muted, preview_images, sort_order, updated_by_wallet, created_at, updated_at'
 
 export async function getOwlCenterPresaleTenantBySlug(slug: string): Promise<OwlCenterPresaleTenantAdmin | null> {
   const db = getSupabaseAdmin()
@@ -89,15 +100,44 @@ export async function listOwlCenterPresaleTenantsAdmin(): Promise<OwlCenterPresa
   return (data ?? []).map((r) => mapOwlCenterPresaleTenantRow(r as Record<string, unknown>))
 }
 
+export async function listOwlCenterPresaleTenantsByCreator(
+  createdByWallet: string
+): Promise<OwlCenterPresaleTenantAdmin[]> {
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('owl_center_presale_tenants')
+    .select(TENANT_SELECT)
+    .eq('created_by_wallet', createdByWallet)
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => mapOwlCenterPresaleTenantRow(r as Record<string, unknown>))
+}
+
 export async function listEnabledOwlCenterPresaleTenantsPublic(): Promise<OwlCenterPresaleTenantAdmin[]> {
   const db = getSupabaseAdmin()
   const { data, error } = await db
     .from('owl_center_presale_tenants')
     .select(TENANT_SELECT)
     .eq('is_enabled', true)
+    .eq('approval_status', 'approved')
     .order('sort_order', { ascending: true })
     .order('slug', { ascending: true })
-  if (error) throw new Error(error.message)
+  if (error) {
+    // Pre-migration: approval_status column may not exist yet — fall back to enabled only.
+    if (error.message.includes('approval_status') || error.message.includes('does not exist')) {
+      const fallback = await db
+        .from('owl_center_presale_tenants')
+        .select(
+          'id, slug, display_name, headline, description, treasury_wallet, partner_wallet, is_enabled, is_live, unit_price_usdc, presale_supply, max_spots_per_purchase, max_credits_per_wallet, theme_primary, theme_accent, theme_background, theme_surface, theme_muted, preview_images, sort_order, updated_by_wallet, created_at, updated_at'
+        )
+        .eq('is_enabled', true)
+        .order('sort_order', { ascending: true })
+        .order('slug', { ascending: true })
+      if (fallback.error) throw new Error(fallback.error.message)
+      return (fallback.data ?? []).map((r) => mapOwlCenterPresaleTenantRow(r as Record<string, unknown>))
+    }
+    throw new Error(error.message)
+  }
   return (data ?? []).map((r) => mapOwlCenterPresaleTenantRow(r as Record<string, unknown>))
 }
 
@@ -126,6 +166,9 @@ export async function insertOwlCenterPresaleTenant(input: {
   partner_wallet?: string | null
   is_enabled?: boolean
   is_live?: boolean
+  approval_status?: OwlCenterPresaleApprovalStatus
+  created_by_wallet?: string | null
+  rejection_reason?: string | null
   unit_price_usdc?: number
   presale_supply?: number
   max_spots_per_purchase?: number
@@ -146,6 +189,9 @@ export async function insertOwlCenterPresaleTenant(input: {
     partner_wallet: input.partner_wallet?.trim() || null,
     is_enabled: input.is_enabled === true,
     is_live: input.is_live === true,
+    approval_status: input.approval_status ?? 'approved',
+    created_by_wallet: input.created_by_wallet?.trim() || null,
+    rejection_reason: input.rejection_reason?.trim() || null,
     unit_price_usdc: input.unit_price_usdc ?? 20,
     presale_supply: input.presale_supply ?? 100,
     max_spots_per_purchase: input.max_spots_per_purchase ?? 5,
@@ -176,6 +222,9 @@ export async function updateOwlCenterPresaleTenant(
     partner_wallet: string | null
     is_enabled: boolean
     is_live: boolean
+    approval_status: OwlCenterPresaleApprovalStatus
+    created_by_wallet: string | null
+    rejection_reason: string | null
     unit_price_usdc: number
     presale_supply: number
     max_spots_per_purchase: number
@@ -196,6 +245,9 @@ export async function updateOwlCenterPresaleTenant(
   if (patch.partner_wallet !== undefined) updates.partner_wallet = patch.partner_wallet?.trim() || null
   if (patch.is_enabled !== undefined) updates.is_enabled = patch.is_enabled
   if (patch.is_live !== undefined) updates.is_live = patch.is_live
+  if (patch.approval_status !== undefined) updates.approval_status = patch.approval_status
+  if (patch.created_by_wallet !== undefined) updates.created_by_wallet = patch.created_by_wallet?.trim() || null
+  if (patch.rejection_reason !== undefined) updates.rejection_reason = patch.rejection_reason?.trim() || null
   if (patch.unit_price_usdc !== undefined) updates.unit_price_usdc = patch.unit_price_usdc
   if (patch.presale_supply !== undefined) updates.presale_supply = patch.presale_supply
   if (patch.max_spots_per_purchase !== undefined) updates.max_spots_per_purchase = patch.max_spots_per_purchase
