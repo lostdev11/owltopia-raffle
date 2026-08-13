@@ -2146,6 +2146,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     <ol className="space-y-2">
                       {batchProgress.map((b) => {
                         const lines = batches[b.index] ?? []
+                        const uniqueWallets = new Set(
+                          lines.map((l) => l.recipient.trim()).filter(Boolean)
+                        ).size
                         return (
                           <li
                             key={b.index}
@@ -2171,7 +2174,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                             <p className="mt-1 text-xs text-muted-foreground">
                               {lines.length} NFT{lines.length === 1 ? '' : 's'}
                               {mode === 'scatter'
-                                ? ` → ${lines.length} wallet${lines.length === 1 ? '' : 's'}`
+                                ? ` → ${uniqueWallets} wallet${uniqueWallets === 1 ? '' : 's'}`
                                 : ` → ${shorten(lines[0]?.recipient ?? '')}`}
                               {' · '}
                               {formatOwlSendFeeSol(feeSol * lines.length)} fee

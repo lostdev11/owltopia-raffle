@@ -3,7 +3,7 @@
  * Run: npx tsx scripts/test-owl-send-batch.ts
  */
 import assert from 'node:assert/strict'
-import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from '@solana/web3.js'
+import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountInstruction,
@@ -18,6 +18,7 @@ import {
   capOwlSendSelection,
   chunkOwlSendBatches,
   chunkOwlSendNftLines,
+  packOwlSendClassicNftLines,
   collapseRecipientsToNftScatterPaste,
   expandNftScatterEntries,
   pairScatterLines,
@@ -753,6 +754,47 @@ assert.equal(
   )
   assert.equal(scatterChunks.length, 2)
   assert.equal(scatterChunks[0]!.length, OWL_SEND_MAX_PER_TX_NFT_SCATTER)
+}
+
+{
+  // Real Gen2 scatter that failed on Jupiter: 20 owls as wallet,N
+  // 4+3+3+3+3+3+1. Old 5-wide slice mixed the first 4 with the next wallet.
+  const paste = [
+    'F7D8eHhzsgRGgNha4GdZxSERSW6UmAdFP42AfPYf1anS,4',
+    '1BWutmTvYPwDtmw9abTkS4Ssr8no61spGAvW1X6NDix,3',
+    '4896aktjfLHTggf2rztPUpdngVxqgmq4ZXeXunoxReKR,3',
+    '7BU48rrJwxJT5148TUmJ9VuQ1Ls4nSy9b2x1sg9THCKh,3',
+    'Dz7aU2HsM1sZdNz2CF6GWdPc21oPgzdjfEFLzz8t8uUk,3',
+    'rfxaoHUY9aZdwSsj7nUahwrndkHeRapd3Q3ED3AEZ6F,3',
+    'FT6Putm7UtB7L7Yztv3gZr68TYb3kAXZzePL2ZqnaR4K,1',
+  ].join('\n')
+  const entries = parseNftScatterEntries(paste)
+  assert.equal(entries.reduce((sum, e) => sum + (e.count ?? 0), 0), 20)
+  for (const e of entries) {
+    assert.equal(new PublicKey(e.recipient).toBase58(), e.recipient)
+  }
+  const paired = pairScatterLines({
+    mints: Array.from({ length: 20 }, (_, i) => ({ mint: `g2-${i}`, name: `Owltopia G2 #${i}` })),
+    entries,
+    randomize: true,
+  })
+  assert.equal(paired.ok, true)
+  if (paired.ok) {
+    const packed = packOwlSendClassicNftLines(paired.lines)
+    assert.equal(packed.length, 7)
+    assert.equal(packed[0]!.length, 4)
+    assert.equal(new Set(packed[0]!.map((l) => l.recipient)).size, 1)
+    assert.equal(packed[0]![0]!.recipient, 'F7D8eHhzsgRGgNha4GdZxSERSW6UmAdFP42AfPYf1anS')
+    for (let i = 1; i <= 5; i++) {
+      assert.equal(packed[i]!.length, 3)
+      assert.equal(new Set(packed[i]!.map((l) => l.recipient)).size, 1)
+    }
+    assert.equal(packed[6]!.length, 1)
+    // Old 5-wide slice would mix wallet 1 (4) with wallet 2 (1) — the Jupiter fail.
+    const naive = chunkOwlSendBatches(paired.lines, 5)
+    assert.equal(naive[0]!.length, 5)
+    assert.ok(new Set(naive[0]!.map((l) => l.recipient)).size >= 2)
+  }
 }
 
 assert.match(owlSendRetryHint('User rejected the request'), /Wallet rejected/)
