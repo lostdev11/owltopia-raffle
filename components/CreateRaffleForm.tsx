@@ -15,7 +15,7 @@ import {
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
 } from '@solana/spl-token'
-import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
+import { HOLDER_LOOKUP_MAX_ATTEMPTS, CREATE_FLOW_HOLDER_LOOKUP_MAX_ATTEMPTS, CREATE_FLOW_HOLDER_LOOKUP_RETRY_MS } from '@/lib/solana/holder-lookup-retries'
 import {
   getFungibleHolderInWallet,
   getNftHolderInWalletWithRpcFallback,
@@ -1059,6 +1059,19 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
         'Saving your listing. Next you will approve sending the prize to escrow — keep this page open.'
       )
     )
+    // Prefetch escrow + warm Metaplex module while the create API runs so the wallet
+    // approve prompt opens sooner after save.
+    const prizeEscrowPrefetch = fetch('/api/config/prize-escrow', { credentials: 'include' }).then(
+      async (res) => {
+        const data = await res.json().catch(() => ({}))
+        return { res, data }
+      }
+    )
+    const mplTokenMetadataWarm =
+      !isPartner && prizeNft
+        ? import('@metaplex-foundation/mpl-token-metadata').catch(() => null)
+        : Promise.resolve(null)
+    void mplTokenMetadataWarm
     const rankValue = formData.get('rank') as string
     const currency = (formData.get('currency') as string) || 'SOL'
     const data: Record<string, unknown> = {
@@ -1167,21 +1180,23 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             setCreateStep('signing')
             setEscrowProgress(
               creatingRaffleProgress(
-                'Listing saved. Loading escrow settings — your wallet will open next to send the prize NFT.',
+                'Listing saved. Preparing your wallet approve prompt…',
                 { step: 'wallet' }
               )
             )
-            await assertWalletReadyForSigning({
-              connected,
-              publicKey,
-              walletAdapter: wallet?.adapter ?? null,
-              connection,
-            })
             const mintPk = new PublicKey(raffle.nft_mint_address)
             const walletAdapter = wallet?.adapter ?? null
 
-            const escrowRes = await fetch('/api/config/prize-escrow', { credentials: 'include' })
-            const escrowData = await escrowRes.json().catch(() => ({}))
+            const [{ res: escrowRes, data: escrowData }] = await Promise.all([
+              prizeEscrowPrefetch,
+              assertWalletReadyForSigning({
+                connected,
+                publicKey,
+                walletAdapter,
+                connection,
+                skipRpcProbe: true,
+              }),
+            ])
             const escrowAddress = escrowData?.address
             if (!escrowRes.ok || !escrowAddress) {
               const errMsg =
@@ -1203,7 +1218,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               step: 'wallet',
               persistUntilDismiss: false,
               description:
-                'Checking on-chain that your NFT is in this wallet. On mobile or slow Wi‑Fi this can take up to about a minute — please wait.',
+                'Quickly confirming your NFT is in this wallet, then your wallet will open to approve the escrow transfer.',
             }))
 
             const depositLogCtx = {
@@ -1221,6 +1236,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             })
 
             // Mobile RPC can lag behind the NFT list API — retry like the raffle page deposit flow.
+            // Create flow uses fewer/shorter retries when the picker already selected the NFT.
             let resolvedHolder: NftHolderInWallet | null = null
             // Helius DAS sets tokenAccount === mint (asset id). That is not an SPL token account; skip
             // or we can mis-resolve and never try compressed.
@@ -1276,7 +1292,10 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 // Fall through to holder lookup retries.
               }
             }
-            for (let attempt = 0; attempt < HOLDER_LOOKUP_MAX_ATTEMPTS; attempt++) {
+            const holderAttempts = prizeNft?.tokenAccount
+              ? CREATE_FLOW_HOLDER_LOOKUP_MAX_ATTEMPTS
+              : HOLDER_LOOKUP_MAX_ATTEMPTS
+            for (let attempt = 0; attempt < holderAttempts; attempt++) {
               if (resolvedHolder) break
               const h = await getNftHolderInWalletWithRpcFallback(
                 connection,
@@ -1303,8 +1322,8 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                 resolvedHolder = h
                 break
               }
-              if (attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1) {
-                await new Promise((r) => setTimeout(r, 700))
+              if (attempt < holderAttempts - 1) {
+                await new Promise((r) => setTimeout(r, CREATE_FLOW_HOLDER_LOOKUP_RETRY_MS))
               }
             }
 
@@ -1344,7 +1363,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               phase: 'loading',
               step: 'wallet',
               persistUntilDismiss: false,
-              description: `When your wallet opens, ${nftWalletHint}`,
+              description: `Opening your wallet now — ${nftWalletHint}`,
               secondaryAction: {
                 label: "Wallet didn't open",
                 onClick: () => {
@@ -1354,6 +1373,8 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               },
               onCancel: () => setEscrowProgress(CREATE_ESCROW_IDLE),
             }))
+            // Yield so the “Opening your wallet” UI paints before the heavy transfer builder.
+            await new Promise((r) => requestAnimationFrame(() => r(undefined)))
 
             if (resolvedHolder) {
               const { tokenProgram, tokenAccount: sourceTokenAccount } = resolvedHolder
@@ -1601,24 +1622,26 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               setCreateStep('signing')
               setEscrowProgress(
                 creatingRaffleProgress(
-                  `Listing saved. Loading escrow settings — your wallet will open next to send the ${prizeCur} prize.`,
+                  `Listing saved. Preparing your wallet approve prompt for the ${prizeCur} prize…`,
                   { step: 'wallet' }
                 )
               )
-              await assertWalletReadyForSigning({
-                connected,
-                publicKey,
-                walletAdapter: wallet?.adapter ?? null,
-                connection,
-              })
+              const [{ res: escrowRes, data: escrowData }] = await Promise.all([
+                prizeEscrowPrefetch,
+                assertWalletReadyForSigning({
+                  connected,
+                  publicKey,
+                  walletAdapter: wallet?.adapter ?? null,
+                  connection,
+                  skipRpcProbe: true,
+                }),
+              ])
               const rawNeed = humanPartnerPrizeToRawUnits(prizeCur, raffle.prize_amount)
               if (rawNeed == null) {
                 alert(`Invalid ${prizeCur} prize amount from server. Open your raffle to try deposit again.`)
                 router.push(`/raffles/${raffle.slug}?deposit=1`)
                 return
               }
-              const escrowRes = await fetch('/api/config/prize-escrow', { credentials: 'include' })
-              const escrowData = await escrowRes.json().catch(() => ({}))
               const escrowAddress = escrowData?.address
               if (!escrowRes.ok || !escrowAddress) {
                 const errMsg =
