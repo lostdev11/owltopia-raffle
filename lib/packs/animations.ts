@@ -7,9 +7,14 @@
  */
 
 export const PACK_ANIMATIONS = {
-  /** Looping sealed pack on the packs page (pre-purchase). VP9 + alpha. */
+  /** Looping sealed pack — VP9 + alpha (Chromium / Firefox). */
   hovering: '/Animations/Pack%20hover.webm',
-  /** H.264 fallback composited on the packs page color (Safari). */
+  /**
+   * Animated WebP + alpha. Used on iOS / WebKit where WebM alpha is ignored
+   * and the MP4 fallback would show a solid rectangle.
+   */
+  hoveringAlpha: '/Animations/Pack%20hover.webp',
+  /** H.264 last-resort fallback (opaque, page-colored). */
   hoveringFallback: '/Animations/Pack%20hover.mp4',
   /** Plays once after purchase + reward are confirmed. */
   opening: '/Animations/Pack%20opening.mp4',
@@ -98,14 +103,19 @@ function ensureWarmupVideo(container: HTMLElement, src: string) {
 export function preloadPackAnimationVideos(): void {
   if (typeof document === 'undefined') return
 
-  const urls = [PACK_ANIMATIONS.hovering, PACK_ANIMATIONS.hoveringFallback, PACK_ANIMATIONS.opening]
+  const urls = [
+    PACK_ANIMATIONS.hovering,
+    PACK_ANIMATIONS.hoveringAlpha,
+    PACK_ANIMATIONS.hoveringFallback,
+    PACK_ANIMATIONS.opening,
+  ]
 
   for (const href of urls) {
     const existing = document.querySelector(`link[data-pack-anim="${href}"]`)
     if (existing) continue
     const link = document.createElement('link')
     link.rel = 'preload'
-    link.as = 'video'
+    link.as = href.endsWith('.webp') ? 'image' : 'video'
     link.href = href
     link.setAttribute('data-pack-anim', href)
     document.head.appendChild(link)
@@ -122,6 +132,7 @@ export function preloadPackAnimationVideos(): void {
   }
 
   for (const src of urls) {
+    if (src.endsWith('.webp')) continue
     ensureWarmupVideo(container, src)
   }
 }

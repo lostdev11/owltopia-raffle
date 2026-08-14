@@ -18,8 +18,9 @@ export function PackAnimationPreload() {
     >
       <video preload="auto" muted playsInline tabIndex={-1}>
         <source src={PACK_ANIMATIONS.hovering} type="video/webm" />
-        <source src={PACK_ANIMATIONS.hoveringFallback} type="video/mp4" />
       </video>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={PACK_ANIMATIONS.hoveringAlpha} alt="" />
       <video preload="auto" muted playsInline tabIndex={-1}>
         <source src={PACK_ANIMATIONS.opening} type="video/mp4" />
       </video>

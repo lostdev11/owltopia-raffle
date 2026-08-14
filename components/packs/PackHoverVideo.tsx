@@ -5,6 +5,7 @@ import {
   PACK_ANIMATION_POSTER,
   PACK_ANIMATIONS,
 } from '@/lib/packs/animations'
+import { useWebmHoverAlpha } from '@/lib/packs/hover-alpha'
 import { PackVisual } from '@/components/packs/PackVisual'
 import { cn } from '@/lib/utils'
 
@@ -14,28 +15,68 @@ type Props = {
   className?: string
 }
 
+type ClipProps = {
+  className?: string
+  onHoverFailed?: () => void
+}
+
 /**
- * On-page looping sealed-pack clip (pre-purchase). Falls back to PackVisual
- * if the video cannot play (e.g. unsupported codec).
+ * Transparent looping pack. WebM+alpha on Chromium/Firefox; animated WebP on
+ * iOS/WebKit (MP4 cannot store transparency).
  */
-export function PackHoverVideo({ phase = 'idle', className }: Props) {
+export function PackHoverClip({ className, onHoverFailed }: ClipProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const [failed, setFailed] = useState(false)
+  const useWebm = useWebmHoverAlpha()
+  const [webpOnly, setWebpOnly] = useState(false)
+
+  const showWebm = useWebm && !webpOnly
 
   useEffect(() => {
-    if (failed) return
+    if (!showWebm) return
     const el = videoRef.current
     if (!el) return
     const play = el.play()
     if (play && typeof play.then === 'function') {
-      play.catch(() => {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('[packs] hover video autoplay failed — using PackVisual fallback')
-        }
-        setFailed(true)
-      })
+      play.catch(() => setWebpOnly(true))
     }
-  }, [failed])
+  }, [showWebm])
+
+  if (showWebm) {
+    return (
+      <video
+        ref={videoRef}
+        className={cn('bg-transparent object-contain', className)}
+        poster={PACK_ANIMATION_POSTER}
+        autoPlay
+        loop
+        muted
+        playsInline
+        controls={false}
+        preload="auto"
+        onError={() => setWebpOnly(true)}
+      >
+        <source src={PACK_ANIMATIONS.hovering} type="video/webm" />
+      </video>
+    )
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- animated WebP with alpha; next/image does not loop it
+    <img
+      src={PACK_ANIMATIONS.hoveringAlpha}
+      alt=""
+      draggable={false}
+      className={cn('bg-transparent object-contain', className)}
+      onError={() => onHoverFailed?.()}
+    />
+  )
+}
+
+/**
+ * On-page looping sealed-pack clip (pre-purchase).
+ */
+export function PackHoverVideo({ phase = 'idle', className }: Props) {
+  const [failed, setFailed] = useState(false)
 
   if (failed) {
     return <PackVisual phase={phase} className={className} />
@@ -56,29 +97,13 @@ export function PackHoverVideo({ phase = 'idle', className }: Props) {
         )}
         aria-hidden
       />
-      <video
-        ref={videoRef}
+      <PackHoverClip
         className={cn(
-          'relative z-[1] mx-auto w-full max-h-[min(78dvh,520px)] bg-transparent object-contain',
+          'relative z-[1] mx-auto w-full max-h-[min(78dvh,520px)]',
           phase === 'paying' ? 'animate-pack-pay-pulse' : ''
         )}
-        poster={PACK_ANIMATION_POSTER}
-        autoPlay
-        loop
-        muted
-        playsInline
-        controls={false}
-        preload="auto"
-        onError={() => {
-          if (process.env.NODE_ENV === 'development') {
-            console.warn('[packs] hover video error — using PackVisual fallback')
-          }
-          setFailed(true)
-        }}
-      >
-        <source src={PACK_ANIMATIONS.hovering} type="video/webm" />
-        <source src={PACK_ANIMATIONS.hoveringFallback} type="video/mp4" />
-      </video>
+        onHoverFailed={() => setFailed(true)}
+      />
       {phase === 'paying' ? (
         <p className="mt-3 text-center text-xs uppercase tracking-[0.28em] text-[#00FF9C]/85">
           Confirm payment…

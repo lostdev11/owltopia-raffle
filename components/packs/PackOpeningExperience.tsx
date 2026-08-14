@@ -11,6 +11,7 @@ import {
   PACK_REVEAL_TIMING,
   getPackCategoryReveal,
 } from '@/lib/packs/animations'
+import { PackHoverClip } from '@/components/packs/PackHoverVideo'
 import { fireMintConfetti } from '@/lib/confetti'
 import { cn } from '@/lib/utils'
 
@@ -94,7 +95,6 @@ export function PackOpeningExperience({
   className,
 }: PackOpeningExperienceProps) {
   const openingRef = useRef<HTMLVideoElement | null>(null)
-  const hoveringRef = useRef<HTMLVideoElement | null>(null)
   const revealStartedRef = useRef(false)
   const whiteEnteredRef = useRef(false)
   const whiteReadyRef = useRef(false)
@@ -187,33 +187,12 @@ export function PackOpeningExperience({
     tryStartReveal()
   }, [stage, hoverOnly, tryStartReveal])
 
-  // Autoplay hovering
+  // Hover clip is WebM or animated WebP — mark ready as soon as the stage is shown
   useEffect(() => {
     if (stage !== 'hovering' && stage !== 'ready') return
-    const el = hoveringRef.current
-    if (!el || hoverFailed) {
-      setHoverReady(true)
-      setStage((s) => (s === 'hovering' ? 'ready' : s))
-      return
-    }
-    const p = el.play()
-    if (p && typeof p.then === 'function') {
-      p.then(() => {
-        setHoverReady(true)
-        setStage((s) => (s === 'hovering' ? 'ready' : s))
-      }).catch(() => {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn('[packs] hovering clip failed in experience')
-        }
-        setHoverFailed(true)
-        setHoverReady(true)
-        setStage((s) => (s === 'hovering' ? 'ready' : s))
-      })
-    } else {
-      setHoverReady(true)
-      setStage((s) => (s === 'hovering' ? 'ready' : s))
-    }
-  }, [stage, hoverFailed])
+    setHoverReady(true)
+    setStage((s) => (s === 'hovering' ? 'ready' : s))
+  }, [stage])
 
   // Never leave Open pack disabled if hover decode hangs
   useEffect(() => {
@@ -272,11 +251,9 @@ export function PackOpeningExperience({
   useEffect(() => {
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    const hoverEl = hoveringRef.current
     const openEl = openingRef.current
     return () => {
       document.body.style.overflow = prevOverflow
-      hoverEl?.pause()
       openEl?.pause()
     }
   }, [])
@@ -284,7 +261,6 @@ export function PackOpeningExperience({
   function onOpenPack() {
     if (openClicked || hoverOnly) return
     setOpenClicked(true)
-    hoveringRef.current?.pause()
     setStage('opening')
   }
 
@@ -459,25 +435,18 @@ export function PackOpeningExperience({
                   Pack ready
                 </div>
               ) : (
-                <video
-                  ref={hoveringRef}
-                  className="mx-auto max-h-[78dvh] w-full bg-transparent object-contain transition-opacity ease-out"
+                <div
+                  className="transition-opacity ease-out"
                   style={{
                     transitionDuration: `${PACK_REVEAL_TIMING.videoCrossfadeMs}ms`,
                     opacity: stage === 'opening' ? 0 : 1,
                   }}
-                  poster={PACK_ANIMATION_POSTER}
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  controls={false}
-                  preload="auto"
-                  onError={() => setHoverFailed(true)}
                 >
-                  <source src={PACK_ANIMATIONS.hovering} type="video/webm" />
-                  <source src={PACK_ANIMATIONS.hoveringFallback} type="video/mp4" />
-                </video>
+                  <PackHoverClip
+                    className="mx-auto max-h-[78dvh] w-full"
+                    onHoverFailed={() => setHoverFailed(true)}
+                  />
+                </div>
               )
             ) : null}
 

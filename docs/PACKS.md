@@ -14,7 +14,7 @@ After payment confirms **and** `/api/packs/open` returns the real prize:
 
 Assets (do not rename):
 
-- `/Animations/Pack hover.webm` (transparent) + `.mp4` fallback — looping sealed pack on `/packs`
+- `/Animations/Pack hover.webm` (transparent, desktop) + `/Animations/Pack hover.webp` (transparent, iOS/WebKit)
 - `/Animations/Pack opening.mp4` — one-shot rip → white portal
 
 Config: `lib/packs/animations.ts`. Dev playground (local only): `/dev/pack-opening`.
