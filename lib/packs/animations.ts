@@ -2,15 +2,15 @@
  * Centralized pack cinematic media paths.
  * Assets live under /public/Animations/ (exact filenames preserved).
  *
- * Prefer H.264 mp4 for cross-browser playback. The hover clip ships as .mov
- * with an optional .mp4 sibling when converted for Chrome/Android.
+ * Prefer H.264 mp4 for the opening clip. Hover uses VP9 WebM with alpha
+ * and an H.264 mp4 fallback composited on the packs page color.
  */
 
 export const PACK_ANIMATIONS = {
-  /** Looping sealed pack on the packs page (pre-purchase). */
-  hovering: '/Animations/Pack%20hover.mp4',
-  /** QuickTime fallback when mp4 is unavailable. */
-  hoveringFallback: '/Animations/Pack%20hover.mov',
+  /** Looping sealed pack on the packs page (pre-purchase). VP9 + alpha. */
+  hovering: '/Animations/Pack%20hover.webm',
+  /** H.264 fallback composited on the packs page color (Safari). */
+  hoveringFallback: '/Animations/Pack%20hover.mp4',
   /** Plays once after purchase + reward are confirmed. */
   opening: '/Animations/Pack%20opening.mp4',
 } as const
@@ -98,7 +98,7 @@ function ensureWarmupVideo(container: HTMLElement, src: string) {
 export function preloadPackAnimationVideos(): void {
   if (typeof document === 'undefined') return
 
-  const urls = [PACK_ANIMATIONS.hovering, PACK_ANIMATIONS.opening]
+  const urls = [PACK_ANIMATIONS.hovering, PACK_ANIMATIONS.hoveringFallback, PACK_ANIMATIONS.opening]
 
   for (const href of urls) {
     const existing = document.querySelector(`link[data-pack-anim="${href}"]`)

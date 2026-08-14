@@ -17,7 +17,8 @@ export function PackAnimationPreload() {
       className="pointer-events-none fixed h-px w-px overflow-hidden opacity-0"
     >
       <video preload="auto" muted playsInline tabIndex={-1}>
-        <source src={PACK_ANIMATIONS.hovering} type="video/mp4" />
+        <source src={PACK_ANIMATIONS.hovering} type="video/webm" />
+        <source src={PACK_ANIMATIONS.hoveringFallback} type="video/mp4" />
       </video>
       <video preload="auto" muted playsInline tabIndex={-1}>
         <source src={PACK_ANIMATIONS.opening} type="video/mp4" />

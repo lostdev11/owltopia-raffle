@@ -461,7 +461,7 @@ export function PackOpeningExperience({
               ) : (
                 <video
                   ref={hoveringRef}
-                  className="mx-auto max-h-[78dvh] w-full object-contain transition-opacity ease-out"
+                  className="mx-auto max-h-[78dvh] w-full bg-transparent object-contain transition-opacity ease-out"
                   style={{
                     transitionDuration: `${PACK_REVEAL_TIMING.videoCrossfadeMs}ms`,
                     opacity: stage === 'opening' ? 0 : 1,
@@ -475,8 +475,8 @@ export function PackOpeningExperience({
                   preload="auto"
                   onError={() => setHoverFailed(true)}
                 >
-                  <source src={PACK_ANIMATIONS.hovering} type="video/mp4" />
-                  <source src={PACK_ANIMATIONS.hoveringFallback} type="video/quicktime" />
+                  <source src={PACK_ANIMATIONS.hovering} type="video/webm" />
+                  <source src={PACK_ANIMATIONS.hoveringFallback} type="video/mp4" />
                 </video>
               )
             ) : null}

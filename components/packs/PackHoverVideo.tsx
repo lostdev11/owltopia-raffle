@@ -59,7 +59,7 @@ export function PackHoverVideo({ phase = 'idle', className }: Props) {
       <video
         ref={videoRef}
         className={cn(
-          'relative z-[1] mx-auto w-full max-h-[min(78dvh,520px)] object-contain',
+          'relative z-[1] mx-auto w-full max-h-[min(78dvh,520px)] bg-transparent object-contain',
           phase === 'paying' ? 'animate-pack-pay-pulse' : ''
         )}
         poster={PACK_ANIMATION_POSTER}
@@ -76,8 +76,8 @@ export function PackHoverVideo({ phase = 'idle', className }: Props) {
           setFailed(true)
         }}
       >
-        <source src={PACK_ANIMATIONS.hovering} type="video/mp4" />
-        <source src={PACK_ANIMATIONS.hoveringFallback} type="video/quicktime" />
+        <source src={PACK_ANIMATIONS.hovering} type="video/webm" />
+        <source src={PACK_ANIMATIONS.hoveringFallback} type="video/mp4" />
       </video>
       {phase === 'paying' ? (
         <p className="mt-3 text-center text-xs uppercase tracking-[0.28em] text-[#00FF9C]/85">
