@@ -38,6 +38,30 @@ export type PackVaultConfigRow = {
   updated_at: string
 }
 
+export type PackInventoryPrizeStandard = 'spl' | 'mpl_core' | 'compressed'
+
+export const PACK_INVENTORY_PRIZE_STANDARDS: PackInventoryPrizeStandard[] = [
+  'spl',
+  'mpl_core',
+  'compressed',
+]
+
+export function isPackInventoryPrizeStandard(
+  value: unknown
+): value is PackInventoryPrizeStandard {
+  return (
+    value === 'spl' || value === 'mpl_core' || value === 'compressed'
+  )
+}
+
+export function packInventoryPrizeStandardLabel(
+  standard: PackInventoryPrizeStandard | string | null | undefined
+): string {
+  if (standard === 'mpl_core') return 'Core'
+  if (standard === 'compressed') return 'cNFT'
+  return 'SPL'
+}
+
 export type PackInventoryRow = {
   id: string
   kind: 'nft'
@@ -45,6 +69,7 @@ export type PackInventoryRow = {
   name: string | null
   image_url: string | null
   fair_value_sol: number
+  prize_standard: PackInventoryPrizeStandard
   status: PackInventoryStatus
   reserved_open_id: string | null
   paid_open_id: string | null

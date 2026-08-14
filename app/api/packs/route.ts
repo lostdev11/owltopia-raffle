@@ -14,9 +14,10 @@ import {
   defaultProductFallback,
   getActivePackProduct,
   getPackVaultConfig,
+  listPackInventory,
   listRecentCompletedOpens,
 } from '@/lib/packs/db'
-import { simulatePackEv } from '@/lib/packs/ev-simulator'
+import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
 import { getPacksVaultPublicKey } from '@/lib/packs/vault'
 
 export const dynamic = 'force-dynamic'
@@ -27,12 +28,14 @@ export async function GET() {
     let vaultConfig = null as Awaited<ReturnType<typeof getPackVaultConfig>> | null
     let nftCount = 0
     let recent: Awaited<ReturnType<typeof listRecentCompletedOpens>> = []
+    let inventory: Awaited<ReturnType<typeof listPackInventory>> = []
 
     try {
       product = await getActivePackProduct()
       vaultConfig = await getPackVaultConfig()
       nftCount = await countAvailableNfts()
       recent = await listRecentCompletedOpens(24)
+      inventory = await listPackInventory('available')
     } catch {
       // Migration may not be applied yet — return static config
       vaultConfig = null
@@ -45,7 +48,10 @@ export async function GET() {
     const pauseReason = vaultConfig?.pause_reason ?? 'Packs not configured yet'
     const vault = getPacksVaultPublicKey() || vaultConfig?.vault_pubkey || null
 
-    const ev = simulatePackEv({ owlSolPrice: vaultConfig?.owl_sol_price ?? null })
+    const ev = simulatePackEvFromInventory({
+      owlSolPrice: vaultConfig?.owl_sol_price ?? null,
+      inventory,
+    })
 
     return NextResponse.json({
       product: {

@@ -55,7 +55,7 @@ Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payo
    `npm run packs:grind-vault` → writes `.local/packs-vault-keypair.txt` (gitignored).
 2. Set `PACKS_VAULT_SECRET_KEY` (server) and `NEXT_PUBLIC_PACKS_VAULT_WALLET` from that file (Vercel + `.env.local`).
 3. Fund the vault with SOL, OWL, and NFTs. **All pack purchase SOL goes to this wallet**; prize payouts leave from it (house edge stays as residual balance).
-4. Admin → Packs: list NFT inventory with fair values in 0.05–0.5 SOL.
+4. Admin → Packs: load wallet NFTs, set floors (0.05–0.5 SOL), **Deposit & add**. SPL, Metaplex Core, and compressed NFTs are supported; pNFT and frozen/nested assets are not.
 5. Run `npm run packs:ev-simulator` before going live; adjust tier weights / `owl_sol_price` until EV ≈ 0.08 SOL.
 6. Pause opens when NFT inventory cannot cover the NFT category (solvency guard).
 

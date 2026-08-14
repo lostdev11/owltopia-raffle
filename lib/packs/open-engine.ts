@@ -24,7 +24,7 @@ import {
   pickCategory,
   pickTier,
 } from '@/lib/packs/rng'
-import type { PackOpenResult, PackOpenRow } from '@/lib/packs/types'
+import type { PackInventoryPrizeStandard, PackOpenResult, PackOpenRow } from '@/lib/packs/types'
 import { verifyPackPayment } from '@/lib/packs/verify-payment'
 import {
   getPacksVaultPublicKey,
@@ -181,6 +181,7 @@ export async function confirmAndOpenPack(input: {
   let nftMint: string | null = null
   let nftName: string | null = null
   let nftImageUrl: string | null = null
+  let nftPrizeStandard: PackInventoryPrizeStandard | null = null
   let freeTickets = 0
 
   if (pick.category === 'owl') {
@@ -213,6 +214,7 @@ export async function confirmAndOpenPack(input: {
       nftMint = fallback.mint_address
       nftName = fallback.name
       nftImageUrl = fallback.image_url
+      nftPrizeStandard = fallback.prize_standard ?? 'spl'
       fairValueSol = Number(fallback.fair_value_sol)
       prizeLabel = fallback.name || `NFT ${fallback.mint_address.slice(0, 8)}…`
     } else {
@@ -220,6 +222,7 @@ export async function confirmAndOpenPack(input: {
       nftMint = reserved.mint_address
       nftName = reserved.name
       nftImageUrl = reserved.image_url
+      nftPrizeStandard = reserved.prize_standard ?? 'spl'
       fairValueSol = Number(reserved.fair_value_sol)
       prizeLabel = reserved.name || `NFT ${reserved.mint_address.slice(0, 8)}…`
     }
@@ -259,7 +262,7 @@ export async function confirmAndOpenPack(input: {
       }
       payoutSignature = paid.signature
     } else if (category === 'nft' && nftMint && nftInventoryId) {
-      const paid = await payoutNftFromPacksVault(nftMint, input.buyerWallet)
+      const paid = await payoutNftFromPacksVault(nftMint, input.buyerWallet, nftPrizeStandard)
       if (!paid.ok || !paid.signature) {
         await releaseNftReservation(nftInventoryId)
         throw new Error(paid.error || 'NFT payout failed')

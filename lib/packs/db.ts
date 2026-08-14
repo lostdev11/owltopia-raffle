@@ -5,6 +5,7 @@ import {
   PACK_RTP_BPS,
 } from '@/lib/packs/config'
 import type {
+  PackInventoryPrizeStandard,
   PackInventoryRow,
   PackOpenRow,
   PackProductRow,
@@ -112,6 +113,7 @@ export async function addPackInventoryNft(input: {
   name?: string | null
   image_url?: string | null
   fair_value_sol: number
+  prize_standard?: PackInventoryPrizeStandard
 }): Promise<PackInventoryRow> {
   const { data, error } = await getSupabaseAdmin()
     .from('pack_inventory')
@@ -121,6 +123,7 @@ export async function addPackInventoryNft(input: {
       name: input.name ?? null,
       image_url: input.image_url ?? null,
       fair_value_sol: input.fair_value_sol,
+      prize_standard: input.prize_standard ?? 'spl',
       status: 'available',
     })
     .select('*')

@@ -25,6 +25,11 @@ import {
 } from '@solana/spl-token'
 import { getSolanaConnection, getSolanaReadConnection } from '@/lib/solana/connection'
 import { getTokenInfo } from '@/lib/tokens'
+import {
+  payoutCompressedFromKeypair,
+  payoutMplCoreFromKeypair,
+} from '@/lib/solana/payout-nft-from-keypair'
+import type { PackInventoryPrizeStandard } from '@/lib/packs/types'
 
 function parseSolanaSecretKeyFromEnv(raw: string | undefined): Keypair | null {
   const trimmed = raw?.trim()
@@ -200,14 +205,20 @@ export async function payoutOwlFromPacksVault(
   }
 }
 
-/** Transfer 1 SPL NFT (amount=1) from packs vault to recipient. */
-export async function payoutNftFromPacksVault(
+function isVaultSplMissingNftError(error: string | undefined): boolean {
+  if (!error) return false
+  return (
+    error.includes('Vault does not hold this NFT') ||
+    error.includes('Vault does not hold this NFT mint') ||
+    error.includes('Vault NFT balance is zero')
+  )
+}
+
+async function payoutSplNftFromPacksVault(
+  keypair: Keypair,
   mintAddress: string,
   recipientWallet: string
 ): Promise<{ ok: boolean; signature?: string; error?: string }> {
-  const keypair = getPacksVaultKeypair()
-  if (!keypair) return { ok: false, error: 'Packs vault not configured (PACKS_VAULT_SECRET_KEY)' }
-
   const connection = getSolanaConnection()
   const readConn = getSolanaReadConnection()
   const mint = new PublicKey(mintAddress)
@@ -270,6 +281,33 @@ export async function payoutNftFromPacksVault(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
+}
+
+/** Transfer an NFT prize from the packs vault to the winner (SPL, Core, or compressed). */
+export async function payoutNftFromPacksVault(
+  mintAddress: string,
+  recipientWallet: string,
+  prizeStandard?: PackInventoryPrizeStandard | null
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  const keypair = getPacksVaultKeypair()
+  if (!keypair) return { ok: false, error: 'Packs vault not configured (PACKS_VAULT_SECRET_KEY)' }
+
+  if (prizeStandard === 'mpl_core') {
+    return payoutMplCoreFromKeypair(keypair, mintAddress, recipientWallet)
+  }
+  if (prizeStandard === 'compressed') {
+    return payoutCompressedFromKeypair(keypair, mintAddress, recipientWallet)
+  }
+
+  const spl = await payoutSplNftFromPacksVault(keypair, mintAddress, recipientWallet)
+  if (spl.ok) return spl
+  if (!isVaultSplMissingNftError(spl.error)) return spl
+
+  const core = await payoutMplCoreFromKeypair(keypair, mintAddress, recipientWallet)
+  if (core.ok) return core
+  const compressed = await payoutCompressedFromKeypair(keypair, mintAddress, recipientWallet)
+  if (compressed.ok) return compressed
+  return { ok: false, error: spl.error || core.error || compressed.error || 'NFT payout failed' }
 }
 
 export async function getPacksVaultSolBalance(): Promise<number | null> {

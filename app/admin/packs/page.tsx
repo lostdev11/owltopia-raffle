@@ -7,7 +7,10 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { AdminPacksInventoryForm } from '@/components/admin/AdminPacksInventoryForm'
 import { getCachedAdmin, setCachedAdmin, getCachedAdminRole } from '@/lib/admin-check-cache'
+import { packNftBandLabel } from '@/lib/packs/ev-simulator'
+import { packInventoryPrizeStandardLabel } from '@/lib/packs/types'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 
 type AdminPacksData = {
@@ -30,7 +33,9 @@ type AdminPacksData = {
     id: string
     mint_address: string
     name: string | null
+    image_url?: string | null
     fair_value_sol: number
+    prize_standard?: string | null
     status: string
   }[]
 }
@@ -42,9 +47,6 @@ export default function AdminPacksPage() {
   const [data, setData] = useState<AdminPacksData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [mint, setMint] = useState('')
-  const [fair, setFair] = useState('0.1')
-  const [name, setName] = useState('')
   const [owlPrice, setOwlPrice] = useState('')
 
   useEffect(() => {
@@ -111,32 +113,6 @@ export default function AdminPacksPage() {
     }
   }
 
-  async function addNft() {
-    setBusy(true)
-    setError(null)
-    try {
-      const res = await fetch('/api/admin/packs', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mint_address: mint.trim(),
-          fair_value_sol: Number(fair),
-          name: name.trim() || null,
-        }),
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error || 'Add failed')
-      setMint('')
-      setName('')
-      await load()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Add failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   async function removeNft(id: string) {
     setBusy(true)
     try {
@@ -186,8 +162,8 @@ export default function AdminPacksPage() {
       </Link>
       <h1 className="mt-4 text-2xl font-semibold">Packs vault</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Fund the packs wallet with SOL, $OWL, and NFTs. Unpause when inventory is ready for admin
-        preview testing at{' '}
+        Fund the packs wallet with SOL and $OWL, then deposit prize NFTs below. Unpause when
+        inventory is ready for admin preview testing at{' '}
         <Link href="/packs" className="text-theme-prime underline-offset-2 hover:underline">
           /packs
         </Link>
@@ -219,6 +195,13 @@ export default function AdminPacksPage() {
               EV est. {data.ev.estimatedEvSol.toFixed(4)} SOL (target {data.ev.targetEvSol}) · RTP{' '}
               {data.ev.estimatedRtpBps} bps
             </p>
+            {data.ev.notes.length > 0 && (
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                {data.ev.notes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            )}
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 size="sm"
@@ -242,6 +225,7 @@ export default function AdminPacksPage() {
                 value={owlPrice}
                 onChange={(e) => setOwlPrice(e.target.value)}
                 placeholder="e.g. 0.002"
+                className="min-h-[44px] touch-manipulation"
               />
               <Button
                 disabled={busy}
@@ -257,56 +241,63 @@ export default function AdminPacksPage() {
           </div>
 
           <div className="rounded-lg border p-4">
-            <h2 className="font-medium">Add NFT to inventory</h2>
-            <p className="text-xs text-muted-foreground">
-              Deposit the NFT to the vault wallet on-chain first, then register it here (fair value
-              0.05–0.5 SOL).
-            </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <Label>Mint</Label>
-                <Input value={mint} onChange={(e) => setMint(e.target.value)} />
-              </div>
-              <div>
-                <Label>Fair value (SOL)</Label>
-                <Input value={fair} onChange={(e) => setFair(e.target.value)} />
-              </div>
-              <div>
-                <Label>Name</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} />
-              </div>
-            </div>
-            <Button className="mt-3" disabled={busy} onClick={() => void addNft()}>
-              Add NFT
-            </Button>
+            <AdminPacksInventoryForm
+              vaultAddress={data.vault.configuredAddress}
+              inventory={data.inventory}
+              owlSolPrice={data.vault.owlSolPrice}
+              onRegistered={load}
+            />
           </div>
 
           <div className="rounded-lg border p-4">
             <h2 className="font-medium">Inventory</h2>
+            <p className="text-xs text-muted-foreground">
+              Remove only unlists the row. It does not send the NFT back from the vault.
+            </p>
             <ul className="mt-3 divide-y text-sm">
               {data.inventory.length === 0 && (
                 <li className="py-3 text-muted-foreground">No items</li>
               )}
-              {data.inventory.map((item) => (
-                <li key={item.id} className="flex items-center justify-between gap-2 py-2">
-                  <div>
-                    <p className="font-mono text-xs">{item.mint_address}</p>
-                    <p className="text-muted-foreground">
-                      {item.name || 'NFT'} · {item.fair_value_sol} SOL · {item.status}
-                    </p>
-                  </div>
-                  {item.status === 'available' && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => void removeNft(item.id)}
-                    >
-                      Remove
-                    </Button>
-                  )}
-                </li>
-              ))}
+              {data.inventory.map((item) => {
+                const band = packNftBandLabel(Number(item.fair_value_sol))
+                return (
+                  <li key={item.id} className="flex items-center justify-between gap-2 py-2">
+                    <div className="flex min-w-0 items-center gap-3">
+                      {item.image_url ? (
+                        <img
+                          src={item.image_url}
+                          alt=""
+                          className="h-10 w-10 shrink-0 rounded object-cover"
+                        />
+                      ) : (
+                        <div className="h-10 w-10 shrink-0 rounded bg-muted" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{item.name || 'NFT'}</p>
+                        <p className="font-mono text-xs text-muted-foreground break-all">
+                          {item.mint_address}
+                        </p>
+                        <p className="text-muted-foreground">
+                          {item.fair_value_sol} SOL
+                          {band ? ` · ${band}` : ''} ·{' '}
+                          {packInventoryPrizeStandardLabel(item.prize_standard)} · {item.status}
+                        </p>
+                      </div>
+                    </div>
+                    {item.status === 'available' && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="min-h-[44px] shrink-0 touch-manipulation"
+                        disabled={busy}
+                        onClick={() => void removeNft(item.id)}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           </div>
         </div>

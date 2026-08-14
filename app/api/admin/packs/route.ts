@@ -9,7 +9,8 @@ import {
   removePackInventoryNft,
   updatePackVaultConfig,
 } from '@/lib/packs/db'
-import { simulatePackEv } from '@/lib/packs/ev-simulator'
+import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
+import { isPackInventoryPrizeStandard } from '@/lib/packs/types'
 import { getPacksVaultPublicKey, getPacksVaultSolBalance } from '@/lib/packs/vault'
 
 export const dynamic = 'force-dynamic'
@@ -23,7 +24,10 @@ export async function GET(request: NextRequest) {
     const inventory = await listPackInventory()
     const nftCount = await countAvailableNfts()
     const solBal = await getPacksVaultSolBalance()
-    const ev = simulatePackEv({ owlSolPrice: config.owl_sol_price })
+    const ev = simulatePackEvFromInventory({
+      owlSolPrice: config.owl_sol_price,
+      inventory,
+    })
 
     return NextResponse.json({
       vault: {
@@ -124,19 +128,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid mint address' }, { status: 400 })
     }
 
+    const prizeStandardRaw = body.prize_standard
+    const prize_standard = prizeStandardRaw == null || prizeStandardRaw === ''
+      ? 'spl'
+      : prizeStandardRaw
+    if (!isPackInventoryPrizeStandard(prize_standard)) {
+      return NextResponse.json(
+        { error: 'prize_standard must be spl, mpl_core, or compressed' },
+        { status: 400 }
+      )
+    }
+
     const row = await addPackInventoryNft({
       mint_address: mint,
       name: typeof body.name === 'string' ? body.name : null,
       image_url: typeof body.image_url === 'string' ? body.image_url : null,
       fair_value_sol: fair,
+      prize_standard,
     })
     return NextResponse.json({ ok: true, item: row })
   } catch (e) {
     console.error('[admin packs] POST inventory', e)
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : 'Failed to add NFT' },
-      { status: 400 }
-    )
+    const msg = e instanceof Error ? e.message : 'Failed to add NFT'
+    if (/pack_inventory_mint_available|duplicate key/i.test(msg)) {
+      return NextResponse.json(
+        { error: 'That mint is already available or reserved in inventory' },
+        { status: 400 }
+      )
+    }
+    return NextResponse.json({ error: msg }, { status: 400 })
   }
 }
 

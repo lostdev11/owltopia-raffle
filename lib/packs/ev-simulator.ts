@@ -95,3 +95,71 @@ export function simulatePackEv(options?: {
     notes,
   }
 }
+
+export type PackNftBandLabel = 'common' | 'mid' | 'high'
+
+const BAND_LABELS: PackNftBandLabel[] = ['common', 'mid', 'high']
+
+export function packNftFairValueInRange(value: number): boolean {
+  return Number.isFinite(value) && value >= 0.05 && value <= 0.5
+}
+
+/** First matching band (inclusive). 0.1 lands in common; 0.25 lands in mid. */
+export function packNftBandLabel(fairValueSol: number): PackNftBandLabel | null {
+  if (!packNftFairValueInRange(fairValueSol)) return null
+  const idx = PACK_NFT_VALUE_BANDS.findIndex(
+    (b) => fairValueSol >= b.minFairValueSol && fairValueSol <= b.maxFairValueSol
+  )
+  return idx >= 0 ? (BAND_LABELS[idx] ?? null) : null
+}
+
+export type InventoryFairValueRow = {
+  fair_value_sol: number
+  status?: string
+}
+
+/**
+ * Per-band average fair value from available inventory (plus optional draft floors).
+ * Empty bands keep the config midpoint and emit a note.
+ */
+export function nftBandAveragesFromInventory(
+  rows: InventoryFairValueRow[],
+  draftFloors: number[] = []
+): { averages: number[]; notes: string[] } {
+  const available = rows
+    .filter((r) => (r.status ?? 'available') === 'available')
+    .map((r) => Number(r.fair_value_sol))
+    .filter((v) => packNftFairValueInRange(v))
+  const extras = draftFloors.filter((v) => packNftFairValueInRange(v))
+  const values = [...available, ...extras]
+
+  const notes: string[] = []
+  const averages = PACK_NFT_VALUE_BANDS.map((b, i) => {
+    const inBand = values.filter((v) => v >= b.minFairValueSol && v <= b.maxFairValueSol)
+    if (inBand.length === 0) {
+      notes.push(
+        `Band ${b.minFairValueSol}–${b.maxFairValueSol} (${BAND_LABELS[i] ?? i}) has 0 NFTs — using midpoint`
+      )
+      return (b.minFairValueSol + b.maxFairValueSol) / 2
+    }
+    return inBand.reduce((s, v) => s + v, 0) / inBand.length
+  })
+
+  return { averages, notes }
+}
+
+export function simulatePackEvFromInventory(options: {
+  owlSolPrice?: number | null
+  inventory: InventoryFairValueRow[]
+  draftFloors?: number[]
+}): EvSimulatorResult {
+  const { averages, notes: bandNotes } = nftBandAveragesFromInventory(
+    options.inventory,
+    options.draftFloors
+  )
+  const ev = simulatePackEv({
+    owlSolPrice: options.owlSolPrice,
+    nftBandAvgFairValues: averages,
+  })
+  return { ...ev, notes: [...ev.notes, ...bandNotes] }
+}
