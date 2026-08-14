@@ -8,7 +8,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { AdminPacksInventoryForm } from '@/components/admin/AdminPacksInventoryForm'
+import { PacksAdminExtraDetails } from '@/components/admin/PacksAdminExtraDetails'
 import { getCachedAdmin, setCachedAdmin, getCachedAdminRole } from '@/lib/admin-check-cache'
+import { packPauseReasonLabel, packRtpPercentLabel } from '@/lib/packs/admin-copy'
 import { packNftBandLabel } from '@/lib/packs/ev-simulator'
 import { packInventoryPrizeStandardLabel } from '@/lib/packs/types'
 import { ArrowLeft, Loader2 } from 'lucide-react'
@@ -155,6 +157,8 @@ export default function AdminPacksPage() {
     )
   }
 
+  const pauseLabel = data ? packPauseReasonLabel(data.vault.pauseReason) : null
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
       <Link href="/admin" className="inline-flex items-center gap-1 text-sm text-muted-foreground">
@@ -162,13 +166,12 @@ export default function AdminPacksPage() {
       </Link>
       <h1 className="mt-4 text-2xl font-semibold">Packs vault</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Fund the packs wallet with SOL and $OWL, then deposit prize NFTs below. Unpause when
-        inventory is ready for admin preview testing at{' '}
+        Send SOL and $OWL to the packs wallet, then add prize NFTs below. Turn packs on when
+        you’re ready to test at{' '}
         <Link href="/packs" className="text-theme-prime underline-offset-2 hover:underline">
           /packs
         </Link>
-        . All pack purchase SOL lands in this vault; prizes pay out from it. Public launch still
-        requires <code className="text-xs">PACKS_PUBLIC=true</code>.
+        . Pack purchases go into this vault, and prizes pay out from it.
       </p>
 
       {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
@@ -178,47 +181,58 @@ export default function AdminPacksPage() {
           <div className="rounded-lg border p-4 text-sm">
             <p>
               Vault:{' '}
-              <span className="font-mono text-xs">
-                {data.vault.configuredAddress || 'not configured'}
+              <span className="font-mono text-xs break-all">
+                {data.vault.configuredAddress || 'not set up yet'}
               </span>
             </p>
             <p className="mt-1">
               Status:{' '}
-              <strong>{data.vault.paused ? 'PAUSED' : 'LIVE'}</strong>
-              {data.vault.pauseReason ? ` — ${data.vault.pauseReason}` : ''}
+              <strong>{data.vault.paused ? 'Paused' : 'On'}</strong>
+              {pauseLabel ? ` — ${pauseLabel}` : ''}
             </p>
             <p className="mt-1">
-              SOL balance: {data.vault.solBalance ?? '—'} · NFTs available:{' '}
-              {data.vault.availableNfts} (min {data.vault.minNftCount})
+              SOL in vault: {data.vault.solBalance ?? '—'} · Prize NFTs ready:{' '}
+              {data.vault.availableNfts} (need at least {data.vault.minNftCount})
             </p>
             <p className="mt-1">
-              EV est. {data.ev.estimatedEvSol.toFixed(4)} SOL (target {data.ev.targetEvSol}) · RTP{' '}
-              {data.ev.estimatedRtpBps} bps
+              Typical prize: about {data.ev.estimatedEvSol.toFixed(4)} SOL (aiming for{' '}
+              {data.ev.targetEvSol} SOL). Players get back about{' '}
+              {packRtpPercentLabel(data.ev.estimatedRtpBps)} of the pack price.
             </p>
-            {data.ev.notes.length > 0 && (
-              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-                {data.ev.notes.map((note) => (
-                  <li key={note}>{note}</li>
-                ))}
-              </ul>
-            )}
+            <PacksAdminExtraDetails notes={data.ev.notes}>
+              <p className="text-xs text-muted-foreground">
+                Public launch still needs <code className="text-xs">PACKS_PUBLIC=true</code>.
+                Return-to-player estimate: {(data.ev.estimatedRtpBps / 100).toFixed(2)}% (
+                {data.ev.estimatedRtpBps} bps).
+              </p>
+            </PacksAdminExtraDetails>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 size="sm"
+                className="min-h-[44px] touch-manipulation"
                 disabled={busy}
                 variant={data.vault.paused ? 'default' : 'secondary'}
                 onClick={() => void patchVault({ paused: !data.vault.paused })}
               >
-                {data.vault.paused ? 'Unpause packs' : 'Pause packs'}
+                {data.vault.paused ? 'Turn packs on' : 'Turn packs off'}
               </Button>
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => void load()}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="min-h-[44px] touch-manipulation"
+                disabled={busy}
+                onClick={() => void load()}
+              >
                 Refresh
               </Button>
             </div>
           </div>
 
           <div className="rounded-lg border p-4">
-            <Label htmlFor="owl-price">OWL/SOL price (for EV)</Label>
+            <Label htmlFor="owl-price">OWL price in SOL</Label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Used to estimate how much $OWL prizes are worth.
+            </p>
             <div className="mt-2 flex gap-2">
               <Input
                 id="owl-price"
@@ -228,6 +242,7 @@ export default function AdminPacksPage() {
                 className="min-h-[44px] touch-manipulation"
               />
               <Button
+                className="min-h-[44px] shrink-0 touch-manipulation"
                 disabled={busy}
                 onClick={() =>
                   void patchVault({

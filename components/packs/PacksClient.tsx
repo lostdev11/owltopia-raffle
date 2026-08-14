@@ -11,6 +11,7 @@ import { PackOpeningExperience } from '@/components/packs/PackOpeningExperience'
 import { PackPrizeReveal } from '@/components/packs/PackPrizeReveal'
 import { executePackPurchase, type PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
 import { preloadConfetti } from '@/lib/confetti'
+import { packPauseReasonLabel } from '@/lib/packs/admin-copy'
 import { usePacksAdminAccess } from '@/lib/packs/use-packs-admin-access'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
@@ -248,6 +249,7 @@ export function PacksClient({
   }
 
   const paused = config?.vault.paused ?? true
+  const pauseLabel = packPauseReasonLabel(config?.vault.pauseReason)
   const price = config?.product.priceSol ?? 0.1
   const showReveal = phase === 'reveal' && !!result
   const showExperience = phase === 'experience' && !!result
@@ -459,7 +461,7 @@ export function PacksClient({
               ) : null}
               {paused && (
                 <p className="text-sm text-amber-200/90">
-                  Packs paused{config?.vault.pauseReason ? `: ${config.vault.pauseReason}` : ''}
+                  Packs paused{pauseLabel ? `: ${pauseLabel}` : ''}
                 </p>
               )}
               {error && <p className="text-sm text-red-300">{error}</p>}
@@ -502,8 +504,8 @@ export function PacksClient({
                 <RarityRow label="NFT" pct={bpsToPercent(weights.nft)} tone="text-amber-200" />
               </div>
               <p className="mt-3 text-xs leading-relaxed text-white/45">
-                ≈{((config?.product.rtpBps ?? 8000) / 100).toFixed(0)}% RTP · every open wins · vault NFTs:{' '}
-                {config?.vault.availableNfts ?? 0}
+                Every open wins · prizes are worth about {bpsToPercent(config?.product.rtpBps ?? 8000)}{' '}
+                of the pack price on average · prize NFTs ready: {config?.vault.availableNfts ?? 0}
               </p>
               <a
                 href="#prize-tiers"
@@ -528,7 +530,7 @@ export function PacksClient({
             <p className="mt-1 font-display text-2xl tracking-wide text-white">{price} SOL</p>
           </div>
           <div className="text-center sm:text-left">
-            <p className="text-[10px] uppercase tracking-[0.28em] text-white/40">Target EV</p>
+            <p className="text-[10px] uppercase tracking-[0.28em] text-white/40">Typical prize</p>
             <p className="mt-1 font-display text-2xl tracking-wide text-white">
               ≈{config?.ev.targetEvSol ?? 0.08} SOL
             </p>
@@ -590,9 +592,9 @@ export function PacksClient({
         <div className="border-t border-white/10 pt-10">
           <h2 className="font-display text-3xl tracking-[0.12em] text-[#EAFBF4]">Prize tiers</h2>
           <p className="mt-2 text-sm text-[#A9CBB9]">
-            Bottom-heavy weights fund rarer tops. Target EV ≈ {config?.ev.targetEvSol ?? 0.08} SOL per
-            open.
-            {config ? ` Vault NFTs ready: ${config.vault.availableNfts}.` : null}
+            Common prizes show up more often. Typical prize is about{' '}
+            {config?.ev.targetEvSol ?? 0.08} SOL per open.
+            {config ? ` Prize NFTs ready: ${config.vault.availableNfts}.` : null}
           </p>
           <div className="mt-6 grid gap-8 sm:grid-cols-3">
             <div>

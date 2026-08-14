@@ -4,10 +4,12 @@ import { useCallback, useMemo, useState } from 'react'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { PublicKey } from '@solana/web3.js'
 import { Loader2 } from 'lucide-react'
+import { PacksAdminExtraDetails } from '@/components/admin/PacksAdminExtraDetails'
 import { WalletNftPicker } from '@/components/WalletNftPicker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { packRtpPercentLabel } from '@/lib/packs/admin-copy'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import {
   packNftBandLabel,
@@ -313,28 +315,23 @@ export function AdminPacksInventoryForm({
       <div>
         <h2 className="font-medium">Add NFTs to inventory</h2>
         <p className="text-xs text-muted-foreground">
-          Load this wallet, multi-select SPL, Core, or compressed NFTs, set a floor (0.05–0.5 SOL),
-          then deposit into the packs vault. Floor is the fair value used for prize bands and EV.
-          pNFT and frozen/nested assets cannot be paid out yet.
+          Load this wallet, pick NFTs, set a floor price (0.05–0.5 SOL), then send them to the
+          packs vault. Floor is how we value the NFT for prize odds. Some NFT types (pNFT,
+          frozen, nested) can’t be paid out yet.
         </p>
       </div>
 
       <div className="rounded-md border bg-muted/30 p-3 text-sm">
         <p>
-          EV preview {liveEv.estimatedEvSol.toFixed(4)} SOL (target {liveEv.targetEvSol}) · RTP{' '}
-          {liveEv.estimatedRtpBps} bps
+          Typical prize: about {liveEv.estimatedEvSol.toFixed(4)} SOL (aiming for{' '}
+          {liveEv.targetEvSol} SOL). Players get back about{' '}
+          {packRtpPercentLabel(liveEv.estimatedRtpBps)} of the pack price.
         </p>
-        {liveEv.notes.length > 0 && (
-          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-            {liveEv.notes.map((note) => (
-              <li key={note}>{note}</li>
-            ))}
-          </ul>
-        )}
+        <PacksAdminExtraDetails notes={liveEv.notes} />
       </div>
 
       <div>
-        <Label htmlFor="packs-default-floor">Default floor (SOL)</Label>
+        <Label htmlFor="packs-default-floor">Default floor price (SOL)</Label>
         <Input
           id="packs-default-floor"
           inputMode="decimal"

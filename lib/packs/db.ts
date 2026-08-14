@@ -38,7 +38,7 @@ export async function getPackVaultConfig(): Promise<PackVaultConfigRow> {
     id: 1,
     vault_pubkey: vault,
     paused: true,
-    pause_reason: 'Vault config missing — apply migration 212',
+    pause_reason: 'Vault isn’t set up yet',
     min_owl_balance: 100,
     min_sol_balance: 1,
     min_nft_count: 1,

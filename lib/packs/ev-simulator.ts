@@ -73,15 +73,17 @@ export function simulatePackEv(options?: {
 
   const notes: string[] = []
   if (!owlSolPrice) {
-    notes.push('Using static OWL fairValueSol from config — set owl_sol_price for live EV.')
+    notes.push(
+      'OWL prize value is using a saved estimate. Set the OWL price in SOL on this page for a live calculation.'
+    )
   }
   const drift = Math.abs(estimatedEvSol - PACK_TARGET_EV_SOL)
   if (drift > 0.01) {
     notes.push(
-      `EV ${estimatedEvSol.toFixed(4)} SOL is more than 0.01 from target ${PACK_TARGET_EV_SOL} — retune tier weights.`
+      `Typical prize value (${estimatedEvSol.toFixed(4)} SOL) is more than 0.01 SOL off the ${PACK_TARGET_EV_SOL} SOL target. Adjust prize weights.`
     )
   } else {
-    notes.push('EV is within 0.01 SOL of the 80% RTP target.')
+    notes.push('Typical prize value is close to the 80% target (within 0.01 SOL).')
   }
 
   return {
@@ -138,7 +140,7 @@ export function nftBandAveragesFromInventory(
     const inBand = values.filter((v) => v >= b.minFairValueSol && v <= b.maxFairValueSol)
     if (inBand.length === 0) {
       notes.push(
-        `Band ${b.minFairValueSol}–${b.maxFairValueSol} (${BAND_LABELS[i] ?? i}) has 0 NFTs — using midpoint`
+        `No ${BAND_LABELS[i] ?? i}-tier NFTs (${b.minFairValueSol}–${b.maxFairValueSol} SOL) yet — using the middle of that range for the estimate.`
       )
       return (b.minFairValueSol + b.maxFairValueSol) / 2
     }
