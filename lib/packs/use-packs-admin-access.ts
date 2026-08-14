@@ -7,7 +7,7 @@ import { parseAdminRole } from '@/lib/admin/roles'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 
 type AccessState = {
-  /** True when viewer may use Owl Packs (public flag, SIWS admin session, or connected admin wallet). */
+  /** True when viewer may use Owl Packs (public by default, SIWS admin session, or connected admin wallet). */
   allowed: boolean
   /** Connected wallet (or session) resolved as admin. */
   isAdmin: boolean
@@ -23,7 +23,8 @@ type AccessState = {
 
 /**
  * Owl Packs access gate aligned with Header / OwlSend:
- * - SIWS `?session=1` keeps admin preview after disconnect/reconnect
+ * - public by default; env kill switch hides the page from non-admins
+ * - SIWS `?session=1` keeps admin access after disconnect/reconnect
  * - wallet `?wallet=` check with cache
  * - transient API errors never hard-deny
  */

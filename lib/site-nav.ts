@@ -206,7 +206,7 @@ export const ADMIN_NAV_GROUP: SiteNavGroup = {
     {
       href: '/admin/packs',
       label: 'Packs',
-      description: 'Pack vault + admin-preview rip testing',
+      description: 'Pack vault, inventory, and pause/unpause',
       icon: Package,
     },
   ],

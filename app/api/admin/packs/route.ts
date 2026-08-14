@@ -94,6 +94,8 @@ export async function PATCH(request: NextRequest) {
         )
       }
       patch.pause_reason = null
+    } else if (body.paused === true && patch.pause_reason === undefined) {
+      patch.pause_reason = 'Paused by admin'
     }
 
     const updated = await updatePackVaultConfig(patch)

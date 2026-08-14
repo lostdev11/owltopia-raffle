@@ -11,7 +11,11 @@ import { PackOpeningExperience } from '@/components/packs/PackOpeningExperience'
 import { PackPrizeReveal } from '@/components/packs/PackPrizeReveal'
 import { executePackPurchase, type PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
 import { preloadConfetti } from '@/lib/confetti'
-import { packPauseReasonLabel } from '@/lib/packs/admin-copy'
+import {
+  isPacksLaunchPause,
+  packPauseReasonLabel,
+  packPublicPauseMessage,
+} from '@/lib/packs/admin-copy'
 import { usePacksAdminAccess } from '@/lib/packs/use-packs-admin-access'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
@@ -250,6 +254,8 @@ export function PacksClient({
 
   const paused = config?.vault.paused ?? true
   const pauseLabel = packPauseReasonLabel(config?.vault.pauseReason)
+  const publicPauseMessage = packPublicPauseMessage(config?.vault.pauseReason)
+  const launchPause = config ? isPacksLaunchPause(config.vault.pauseReason) : true
   const price = config?.product.priceSol ?? 0.1
   const showReveal = phase === 'reveal' && !!result
   const showExperience = phase === 'experience' && !!result
@@ -342,19 +348,26 @@ export function PacksClient({
     )
   }
 
-  const buyButton = !connected ? (
+  const buyButtonClass = cn(
+    'inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl px-6',
+    'bg-[#00FF9C] text-sm font-bold uppercase tracking-[0.12em] text-[#062016]',
+    'shadow-[0_0_40px_-8px_rgba(0,255,156,0.65)] transition',
+    'hover:bg-[#7DFFB8] disabled:cursor-not-allowed disabled:opacity-45'
+  )
+  const buyButton = paused ? (
+    <button type="button" disabled className={buyButtonClass}>
+      {launchPause ? 'Coming soon' : 'Temporarily paused'}
+    </button>
+  ) : !connected ? (
     <WalletConnectButton />
   ) : (
     <button
       type="button"
-      disabled={ripping || paused || !config?.vault.address || showReveal || showExperience}
+      disabled={ripping || !config?.vault.address || showReveal || showExperience}
       onClick={() => void onRip()}
       className={cn(
-        'inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl px-6',
-        'bg-[#00FF9C] text-sm font-bold uppercase tracking-[0.12em] text-[#062016]',
-        'shadow-[0_0_40px_-8px_rgba(0,255,156,0.65)] transition',
-        'hover:bg-[#7DFFB8] disabled:cursor-not-allowed disabled:opacity-45',
-        !ripping && !paused && !showReveal ? 'animate-button-glow-pulse' : ''
+        buyButtonClass,
+        !ripping && !showReveal ? 'animate-button-glow-pulse' : ''
       )}
     >
       {ripping ? (
@@ -406,7 +419,15 @@ export function PacksClient({
       <section className="relative mx-auto max-w-6xl px-4 pb-10 pt-6 sm:px-6 sm:pt-10 lg:pb-6">
         {showAdminPreview ? (
           <p className="mb-5 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-center text-xs font-medium text-amber-100 sm:text-left">
-            Admin preview — public users cannot open packs yet. Unpause in Admin → Packs to rip.
+            Admin-only view — public nav is hidden. Set PACKS_PUBLIC to show /packs to everyone.
+          </p>
+        ) : access.isAdmin && paused ? (
+          <p className="mb-5 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-center text-xs font-medium text-amber-100 sm:text-left">
+            Public can see this page, but buying is off.{' '}
+            <Link href="/admin/packs" className="underline underline-offset-2 hover:text-white">
+              Turn packs on in Admin → Packs
+            </Link>
+            {pauseLabel ? ` (${pauseLabel})` : ''}.
           </p>
         ) : null}
 
@@ -460,9 +481,7 @@ export function PacksClient({
                 <p className="text-sm text-[#00FF9C]/90">{phaseCaption}</p>
               ) : null}
               {paused && (
-                <p className="text-sm text-amber-200/90">
-                  Packs paused{pauseLabel ? `: ${pauseLabel}` : ''}
-                </p>
+                <p className="text-sm text-amber-200/90">{publicPauseMessage}</p>
               )}
               {error && <p className="text-sm text-red-300">{error}</p>}
               {loadError && <p className="text-sm text-red-300">{loadError}</p>}

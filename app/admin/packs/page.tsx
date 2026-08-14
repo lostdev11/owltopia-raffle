@@ -166,12 +166,12 @@ export default function AdminPacksPage() {
       </Link>
       <h1 className="mt-4 text-2xl font-semibold">Packs vault</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Send SOL and $OWL to the packs wallet, then add prize NFTs below. Turn packs on when
-        you’re ready to test at{' '}
+        The{' '}
         <Link href="/packs" className="text-theme-prime underline-offset-2 hover:underline">
           /packs
-        </Link>
-        . Pack purchases go into this vault, and prizes pay out from it.
+        </Link>{' '}
+        page is public. Buying stays off until you turn packs on below. Fund the vault with SOL,
+        $OWL, and prize NFTs first — purchases go into this wallet, and prizes pay out from it.
       </p>
 
       {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
@@ -201,8 +201,8 @@ export default function AdminPacksPage() {
             </p>
             <PacksAdminExtraDetails notes={data.ev.notes}>
               <p className="text-xs text-muted-foreground">
-                Public launch still needs <code className="text-xs">PACKS_PUBLIC=true</code>.
-                Return-to-player estimate: {(data.ev.estimatedRtpBps / 100).toFixed(2)}% (
+                Turning packs on makes buying live for everyone on /packs. Return-to-player
+                estimate: {(data.ev.estimatedRtpBps / 100).toFixed(2)}% (
                 {data.ev.estimatedRtpBps} bps).
               </p>
             </PacksAdminExtraDetails>
