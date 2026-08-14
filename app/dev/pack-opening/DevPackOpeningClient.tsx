@@ -71,7 +71,7 @@ export function DevPackOpeningClient() {
   const reward = useMemo(() => mockReward(category), [category])
 
   useEffect(() => {
-    preloadPackAnimationVideos()
+    preloadPackAnimationVideos({ opening: true })
   }, [])
 
   const experienceProps = useMemo(() => {

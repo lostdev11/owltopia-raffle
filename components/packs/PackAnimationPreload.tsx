@@ -1,29 +1,16 @@
 'use client'
 
 import { useEffect } from 'react'
-import { PACK_ANIMATIONS, preloadPackAnimationVideos } from '@/lib/packs/animations'
+import { preloadPackAnimationVideos } from '@/lib/packs/animations'
 
 /**
- * Keeps both pack clips in the document so OPEN PACK does not wait on a cold buffer.
+ * Warms the opening clip once checkout starts so OPEN PACK is not a cold buffer.
+ * Hover is already on-screen — do not decode extra hover copies in the background.
  */
-export function PackAnimationPreload() {
+export function PackAnimationPreload({ opening = false }: { opening?: boolean }) {
   useEffect(() => {
-    preloadPackAnimationVideos()
-  }, [])
+    preloadPackAnimationVideos({ opening })
+  }, [opening])
 
-  return (
-    <div
-      aria-hidden
-      className="pointer-events-none fixed h-px w-px overflow-hidden opacity-0"
-    >
-      <video preload="auto" muted playsInline tabIndex={-1}>
-        <source src={PACK_ANIMATIONS.hovering} type="video/webm" />
-      </video>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={PACK_ANIMATIONS.hoveringAlpha} alt="" />
-      <video preload="auto" muted playsInline tabIndex={-1}>
-        <source src={PACK_ANIMATIONS.opening} type="video/mp4" />
-      </video>
-    </div>
-  )
+  return null
 }

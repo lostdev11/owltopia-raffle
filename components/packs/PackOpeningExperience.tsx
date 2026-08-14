@@ -443,7 +443,7 @@ export function PackOpeningExperience({
                   }}
                 >
                   <PackHoverClip
-                    className="mx-auto max-h-[78dvh] w-full"
+                    className="mx-auto max-h-[min(70dvh,520px)] w-full sm:max-h-[78dvh]"
                     onHoverFailed={() => setHoverFailed(true)}
                   />
                 </div>

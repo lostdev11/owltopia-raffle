@@ -239,8 +239,8 @@ const config: Config = {
           '50%': { transform: 'translateY(-10px) rotate(1.5deg)' },
         },
         'pack-pay-pulse': {
-          '0%, 100%': { transform: 'scale(1)', filter: 'brightness(1)' },
-          '50%': { transform: 'scale(1.04)', filter: 'brightness(1.25)' },
+          '0%, 100%': { transform: 'scale(1)' },
+          '50%': { transform: 'scale(1.04)' },
         },
         'pack-seal-spin': {
           '0%': { transform: 'rotate(0deg) scale(1)' },

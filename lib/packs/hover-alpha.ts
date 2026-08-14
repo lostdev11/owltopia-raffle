@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { isMobileDevice } from '@/lib/utils'
 
 /**
  * VP9 WebM alpha is reliable in Chromium/Firefox, not in iOS / iPadOS /
@@ -19,10 +20,18 @@ export function browserSupportsWebmAlpha(): boolean {
   return probe.canPlayType('video/webm; codecs="vp9"') !== ''
 }
 
-export function useWebmHoverAlpha(): boolean {
-  const [ok, setOk] = useState(false)
+export type PackHoverFormat = 'pending' | 'webm' | 'webp'
+
+export function usePackHoverPlayback(): { format: PackHoverFormat; mobile: boolean } {
+  const [state, setState] = useState<{ format: PackHoverFormat; mobile: boolean }>({
+    format: 'pending',
+    mobile: false,
+  })
   useEffect(() => {
-    setOk(browserSupportsWebmAlpha())
+    setState({
+      format: browserSupportsWebmAlpha() ? 'webm' : 'webp',
+      mobile: isMobileDevice(),
+    })
   }, [])
-  return ok
+  return state
 }

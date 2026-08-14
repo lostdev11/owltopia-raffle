@@ -377,7 +377,7 @@ export function PacksClient({
 
   return (
     <div className="relative min-h-[100dvh] overflow-x-hidden text-[#EAFBF4]">
-      <PackAnimationPreload />
+      <PackAnimationPreload opening={phase === 'paying' || phase === 'experience'} />
       {showExperience && result ? (
         <PackOpeningExperience
           reward={result}

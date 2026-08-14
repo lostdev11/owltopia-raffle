@@ -7,8 +7,10 @@
  */
 
 export const PACK_ANIMATIONS = {
-  /** Looping sealed pack — VP9 + alpha (Chromium / Firefox). */
+  /** Looping sealed pack — VP9 + alpha (Chromium / Firefox desktop). */
   hovering: '/Animations/Pack%20hover.webm',
+  /** Smaller VP9 + alpha for phones (400px / 20fps). */
+  hoveringMobile: '/Animations/Pack%20hover.mobile.webm',
   /**
    * Animated WebP + alpha. Used on iOS / WebKit where WebM alpha is ignored
    * and the MP4 fallback would show a solid rectangle.
@@ -97,25 +99,18 @@ function ensureWarmupVideo(container: HTMLElement, src: string) {
 }
 
 /**
- * Keep hover + opening clips in a hidden DOM node so the browser can keep
- * the decode buffer until the user actually opens a pack.
+ * Warm the opening clip only. Hover is already on-screen — preloading every
+ * hover format (plus a 6MB opening mp4) made mobile decode stutter.
  */
-export function preloadPackAnimationVideos(): void {
+export function preloadPackAnimationVideos(opts?: { opening?: boolean }): void {
   if (typeof document === 'undefined') return
+  if (!opts?.opening) return
 
-  const urls = [
-    PACK_ANIMATIONS.hovering,
-    PACK_ANIMATIONS.hoveringAlpha,
-    PACK_ANIMATIONS.hoveringFallback,
-    PACK_ANIMATIONS.opening,
-  ]
-
-  for (const href of urls) {
-    const existing = document.querySelector(`link[data-pack-anim="${href}"]`)
-    if (existing) continue
+  const href = PACK_ANIMATIONS.opening
+  if (!document.querySelector(`link[data-pack-anim="${href}"]`)) {
     const link = document.createElement('link')
     link.rel = 'preload'
-    link.as = href.endsWith('.webp') ? 'image' : 'video'
+    link.as = 'video'
     link.href = href
     link.setAttribute('data-pack-anim', href)
     document.head.appendChild(link)
@@ -131,8 +126,5 @@ export function preloadPackAnimationVideos(): void {
     document.body.appendChild(container)
   }
 
-  for (const src of urls) {
-    if (src.endsWith('.webp')) continue
-    ensureWarmupVideo(container, src)
-  }
+  ensureWarmupVideo(container, href)
 }
