@@ -32,7 +32,7 @@ export function OwlCenterNav() {
                 return (
                   <span
                     key={item.href}
-                    title={`${item.description} (admin only)`}
+                    title={`${item.description} (partners & admins)`}
                     aria-disabled="true"
                     className={cn(
                       'inline-flex min-h-[44px] shrink-0 cursor-not-allowed touch-manipulation items-center gap-1.5 rounded-md border border-transparent px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-widest text-[#5C6773] opacity-55 sm:px-3.5 sm:text-[11px]'
