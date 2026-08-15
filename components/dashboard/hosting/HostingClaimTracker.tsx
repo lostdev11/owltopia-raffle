@@ -157,7 +157,7 @@ export function HostingClaimTracker({
 
         {pendingClaims.length > 0 && (
           <HostingCallout tone="emerald" title="Claim now — ticket proceeds">
-            <p>One transaction per raffle. You can also claim from each row under My raffles.</p>
+            <p>One transaction per raffle. Claim from this list or from each row under My raffles.</p>
             <ul className="space-y-2 !text-sm">
               {pendingClaims.map((r) => {
                 const payout =
