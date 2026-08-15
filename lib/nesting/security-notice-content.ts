@@ -15,7 +15,7 @@ export const NESTING_SECURITY_BULLETS: readonly string[] = [
   'The connected wallet must match the one you signed with, so nests stay on the right account.',
   'Nest moves go through Owltopia after safety checks — your browser never gets a direct database tap.',
   `For NFT nest perches (Owltopia Coins, Gen 1, Gen 2, and partner collections): ${NESTING_NFT_WALLET_HELD_LOCK_LINE}`,
-  'Some wallets (especially Jupiter) make the nest lock look scarier than it is. Phantom and Solflare usually show clearer wording — same safe freeze, NFT stays in your wallet.',
+  'Some wallets (especially Jupiter) make the nest lock look scarier than it is — Jupiter may say the tx is “malicious” or grants “permission to spend your tokens.” That is its scanner on the freeze Approve step, not a custody transfer. Phantom and Solflare usually show clearer wording — same safe freeze, NFT stays in your wallet.',
   'Every tap re-checks perch rules, IDs, amounts, and that the nest belongs to you before anything changes.',
   'OWL claims pay out on-chain from the reward treasury when it is funded; otherwise only your in-app totals update.',
 ]

@@ -359,7 +359,7 @@ export function NestingLandingClient({
             },
             {
               q: 'What am I approving when I nest?',
-              a: 'A freeze on each selected owl so it stays in your wallet but cannot trade for the nest period. Owls are not transferred. Phantom often still lists this as “Approve to transfer” — that is their label for the freeze step, not sending the NFT away. Jupiter can look scarier for the same step. On My nest, expand “What you are approving” for a short walkthrough. If you are not on owltopia.xyz, cancel.',
+              a: 'A freeze on each selected owl so it stays in your wallet but cannot trade for the nest period. Owls are not transferred. Jupiter often shows a red “flagged as malicious” / “permission to spend your tokens” warning for that Approve step — that is its automatic scanner on the nest freeze delegate, not Owltopia taking your assets. Phantom often lists the same step as “Approve to transfer.” On My nest, expand “What you are approving” and match the nest freeze address to what your wallet shows. If you are not on owltopia.xyz, cancel.',
             },
             {
               q: 'Why do you ask me to sign a message on the dashboard?',
