@@ -7,6 +7,7 @@ import {
   getCreatorTicketSalesGrossByWallet,
   getLiveFundsEscrowSalesBreakdownByWallet,
 } from '@/lib/db/raffles'
+import { getAuctionsByCreator } from '@/lib/db/auctions'
 import { getEntriesByWallet, getRefundCandidatesByRaffleIds } from '@/lib/db/entries'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { defaultDisplayNameFromWallet, getWalletProfileForDashboard } from '@/lib/db/wallet-profiles'
@@ -169,6 +170,7 @@ export async function GET(request: NextRequest) {
 
     const [
       raffles,
+      myAuctions,
       settledRevenue,
       liveEarnings,
       grossSales,
@@ -185,6 +187,10 @@ export async function GET(request: NextRequest) {
       milestoneBonusWins,
     ] = await Promise.all([
       Promise.resolve(rafflesForResponse),
+      getAuctionsByCreator(wallet).catch((err) => {
+        console.error('getAuctionsByCreator:', err)
+        return []
+      }),
       getCreatorRevenueByWallet(wallet),
       getCreatorLiveEarningsByWallet(wallet),
       getCreatorTicketSalesGrossByWallet(wallet),
@@ -346,6 +352,7 @@ export async function GET(request: NextRequest) {
       displayName: walletProfile.displayName,
       discord: walletProfile.discord,
       myRaffles: raffles,
+      myAuctions,
       myEntries: entriesWithRaffles,
       creatorRevenue: creatorRevenueTotal,
       creatorRevenueByCurrency,

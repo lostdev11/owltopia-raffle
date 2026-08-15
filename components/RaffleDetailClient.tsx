@@ -98,7 +98,6 @@ import {
   ExternalLink,
   XCircle,
   Loader2,
-  Coins,
   CheckCircle,
   Ticket,
   RefreshCw,
@@ -315,8 +314,6 @@ export function RaffleDetailClient({
   const [claimPrizePhase, setClaimPrizePhase] = useState<'idle' | 'loading' | 'success'>('idle')
   const [claimPrizeTxSignature, setClaimPrizeTxSignature] = useState<string | null>(null)
   const [claimPrizeAlreadyClaimed, setClaimPrizeAlreadyClaimed] = useState(false)
-  const [claimProceedsLoading, setClaimProceedsLoading] = useState(false)
-  const [claimProceedsError, setClaimProceedsError] = useState<string | null>(null)
   const [claimRefundLoadingEntryId, setClaimRefundLoadingEntryId] = useState<string | null>(null)
   const [isClaimingAllRefunds, setIsClaimingAllRefunds] = useState(false)
   const [claimRefundError, setClaimRefundError] = useState<string | null>(null)
@@ -2450,40 +2447,6 @@ export function RaffleDetailClient({
     sendCancellationFeeAndGetSignature,
   ])
 
-  const handleClaimProceeds = useCallback(async () => {
-    setClaimProceedsError(null)
-    setActionClaimSuccess(null)
-    setClaimProceedsLoading(true)
-    try {
-      const res = await fetch(`/api/raffles/${raffle.id}/claim-proceeds`, {
-        method: 'POST',
-        credentials: 'include',
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setClaimProceedsError(
-          typeof (data as { error?: string }).error === 'string'
-            ? (data as { error: string }).error
-            : 'Could not claim proceeds. Sign in on My Dashboard if you are not signed in yet.'
-        )
-        return
-      }
-      const alreadyClaimed = (data as { alreadyClaimed?: boolean }).alreadyClaimed === true
-      presentActionClaimSuccess({
-        tx: extractTransactionSignature(data),
-        heading: alreadyClaimed ? 'Proceeds already claimed' : 'Proceeds claimed!',
-        message: alreadyClaimed
-          ? 'Creator proceeds were already sent to your wallet.'
-          : 'Net ticket proceeds were sent to your wallet.',
-      })
-      router.refresh()
-    } catch (e) {
-      setClaimProceedsError(e instanceof Error ? e.message : 'Request failed')
-    } finally {
-      setClaimProceedsLoading(false)
-    }
-  }, [presentActionClaimSuccess, raffle.id, router])
-
   const handleCreatorClaimPrizeBackFromEscrow = useCallback(async () => {
     setError(null)
     setActionClaimSuccess(null)
@@ -2924,21 +2887,22 @@ export function RaffleDetailClient({
             raffleUsesFundsEscrow(raffle) &&
             !raffle.creator_claimed_at &&
             !!raffle.settled_at?.trim() && (
-              <Button
-                variant="default"
-                size="default"
-                onClick={handleClaimProceeds}
-                disabled={claimProceedsLoading}
-                className="touch-manipulation min-h-[44px] text-sm sm:text-base"
-                title="Claim your net ticket proceeds from funds escrow (platform fee goes to treasury in the same transaction)."
+              <div
+                className="w-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-3 sm:px-4 sm:py-3.5 space-y-1"
+                role="status"
               >
-                {claimProceedsLoading ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Coins className="mr-2 h-4 w-4" />
-                )}
-                Claim proceeds
-              </Button>
+                <p className="text-sm font-medium text-foreground">Ticket proceeds ready</p>
+                <p className="text-sm text-muted-foreground">
+                  Claim your net funds from{' '}
+                  <Link
+                    href="/dashboard?tab=hosting"
+                    className="text-primary font-medium underline underline-offset-2 hover:no-underline"
+                  >
+                    My Dashboard → Hosting
+                  </Link>
+                  .
+                </p>
+              </div>
             )}
         </div>
         {referralEnabled ? (
@@ -3019,11 +2983,6 @@ export function RaffleDetailClient({
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        {claimProceedsError && (
-          <p className="text-sm text-destructive mb-2" role="alert">
-            {claimProceedsError}
-          </p>
-        )}
         {canViewOfferPanel && (
           <Card className="border-primary/25">
             <CardHeader className="pb-2">
