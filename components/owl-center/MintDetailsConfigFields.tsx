@@ -86,17 +86,17 @@ export function MintDetailsConfigFields({
             className="mt-1 h-4 w-4 shrink-0 touch-manipulation accent-[#00FF9C] disabled:opacity-50"
           />
           <span>
-            Freeze Collection at mint
+            Lock NFTs until trading
             <span className="mt-1 block normal-case tracking-normal text-[#9BA8B4]">
-              Minted NFTs stay non-transferable until you thaw. Checking this freezes them at mint —
-              do not press Thaw to freeze. Thaw = unfreeze for trading when mint is done (or you are
-              ready for secondary). Requires Metaplex Core.
+              Minted NFTs cannot be transferred or listed until you later tap{' '}
+              <span className="text-[#E8EEF2]">Enable trading</span> on Manage collection. Checking this locks at
+              mint — it does not unlock. Requires Metaplex Core.
             </span>
           </span>
         </label>
         {values.freeze_enabled ? (
           <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-            Planned thaw / unfreeze (optional)
+            Planned unlock date (optional)
             <input
               type="datetime-local"
               value={values.unfreeze_date}
@@ -320,8 +320,8 @@ export function MintDetailsConfigFields({
           </p>
           {values.allowlist_phases.map((phase, idx) => (
             <div key={`${phase.key}-${idx}`} className="grid gap-3 border border-[#1A222B] bg-[#0A0E12]/80 p-3 sm:grid-cols-2">
-              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                Label
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
+                Phase name
                 <input
                   value={phase.label}
                   onChange={(e) => {
@@ -330,18 +330,6 @@ export function MintDetailsConfigFields({
                     onChange({ ...values, allowlist_phases: next, wl_enabled: true })
                   }}
                   className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-                />
-              </label>
-              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                Key
-                <input
-                  value={phase.key}
-                  onChange={(e) => {
-                    const next = [...values.allowlist_phases]
-                    next[idx] = { ...phase, key: e.target.value }
-                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
-                  }}
-                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm text-[#F4FBF8]"
                 />
               </label>
               <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">

@@ -3,6 +3,7 @@
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { AdminCoreCollectionThawPanel } from '@/components/admin/AdminCoreCollectionThawPanel'
 import { CreatorDeleteLaunchPanel } from '@/components/owl-center/CreatorDeleteLaunchPanel'
+import { CreatorLaunchSetupChecklist } from '@/components/owl-center/CreatorLaunchSetupChecklist'
 import { CreatorWlWalletsPanel } from '@/components/owl-center/CreatorWlWalletsPanel'
 import { LaunchMintConfigPanel } from '@/components/owl-center/LaunchMintConfigPanel'
 import { LaunchPresaleOveragePanel } from '@/components/owl-center/LaunchPresaleOveragePanel'
@@ -34,6 +35,8 @@ type Props = {
   revealDayApiPath?: string
   /** Creator Core thaw path; omit for admin default thaw API. */
   coreThawApiPath?: string
+  /** Guided launch checklist (Phase A). Default on. */
+  showSetupChecklist?: boolean
   showMintConfig?: boolean
   /** Partner / creator whitelist wallet list (Manage collection). */
   showWlWallets?: boolean
@@ -59,6 +62,7 @@ export function CollectionLaunchOpsCard({
   metadataApiPath,
   revealDayApiPath,
   coreThawApiPath,
+  showSetupChecklist = true,
   showMintConfig = true,
   showWlWallets = true,
   showCoreThaw = true,
@@ -76,10 +80,14 @@ export function CollectionLaunchOpsCard({
 
   return (
     <CommandCard label={cardLabel} id="launch-ops" className={className}>
+      {showSetupChecklist ? (
+        <CreatorLaunchSetupChecklist launchId={launchId} launch={launch} />
+      ) : null}
+
       {launch.slug ? (
         <MintShareLinkPanel
           embedded
-          first
+          first={!showSetupChecklist}
           anchorId="mint-share-link"
           slug={launch.slug}
           collectionName={launch.name}
@@ -165,5 +173,6 @@ export function creatorLaunchOpsCardProps(launchId: string, launch: OwlCenterLau
     hashListApiPath: creatorHashListApiPath(launchId),
     coreThawApiPath: creatorCoreThawApiPath(launchId),
     marketplaceCreatorMode: true,
+    showSetupChecklist: true,
   }
 }

@@ -55,10 +55,15 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
 
   const phases = resolvePartnerAllowlistPhases(launch)
   const phaseParam = request.nextUrl.searchParams.get('phase')
-  const phaseResolved = resolvePhaseKey(launch, phaseParam)
-  if (typeof phaseResolved === 'object') return jsonError(phaseResolved.error, 400)
+  const listAll = !phaseParam?.trim()
+  let phase_key: string | null = null
+  if (!listAll) {
+    const phaseResolved = resolvePhaseKey(launch, phaseParam)
+    if (typeof phaseResolved === 'object') return jsonError(phaseResolved.error, 400)
+    phase_key = phaseResolved
+  }
 
-  const rows = await listLaunchWlWallets(id, phaseResolved)
+  const rows = await listLaunchWlWallets(id, phase_key)
   const total_allowed = rows.reduce((s, r) => s + r.allowed_mints, 0)
   const total_used = rows.reduce((s, r) => s + r.used_mints, 0)
 
@@ -67,7 +72,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     launch_id: id,
     wl_enabled: launchHasWhitelistProgram(launch),
     wl_supply: launch.wl_supply,
-    phase_key: phaseResolved,
+    phase_key,
     phases,
     rows,
     wallet_count: rows.length,

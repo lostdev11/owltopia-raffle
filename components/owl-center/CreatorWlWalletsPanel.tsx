@@ -253,7 +253,7 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
   )
 
   if (embedded) {
-    return <CommandCardSection label="WHITELIST · WALLETS">{body}</CommandCardSection>
+    return <CommandCardSection id="wl-wallets" label="ALLOWLIST · WALLETS">{body}</CommandCardSection>
   }
 
   return body
