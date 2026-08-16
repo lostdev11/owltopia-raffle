@@ -22,7 +22,11 @@ function parseSolanaSecretKey(raw: string | undefined): Keypair | null {
 let cache: Keypair | null | undefined
 
 export function getCoinArtUpdateAuthorityWallet(): string {
-  return process.env.COIN_ART_UPGRADE_AUTHORITY_WALLET?.trim() || ''
+  const configured = process.env.COIN_ART_UPGRADE_AUTHORITY_WALLET?.trim() || ''
+  if (configured) return configured
+  // Fall back to deriving the public key from the secret so status/authorize
+  // pages work when only COIN_ART_UPGRADE_AUTHORITY_SECRET_KEY is set in Vercel.
+  return getCoinArtUpdateAuthorityKeypair()?.publicKey.toBase58() ?? ''
 }
 
 /**

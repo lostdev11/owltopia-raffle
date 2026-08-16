@@ -3636,6 +3636,20 @@ export default function AdminDashboardPage() {
                   </CardHeader>
                 </Link>
               </Card>
+              <Card className="hover:border-primary transition-colors cursor-pointer">
+                <Link href="/admin/coin-upgrade">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Sparkles className="h-5 w-5" />
+                      Coin art upgrade
+                    </CardTitle>
+                    <CardDescription>
+                      Optional paid Owltopia Coin art upgrade: sales stats, and the one-tap Phantom authorize for
+                      Gembird (/coin-upgrade/authorize).
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
               <Card className="hover:border-primary transition-colors cursor-pointer border-primary/40">
                 <Link href="/admin/owl-send">
                   <CardHeader>

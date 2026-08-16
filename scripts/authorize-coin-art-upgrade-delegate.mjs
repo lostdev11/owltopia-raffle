@@ -142,7 +142,7 @@ async function main() {
   }
 
   const result = await updateCollectionPlugin(umi, {
-    collection,
+    collection: collection.publicKey,
     plugin: {
       type: 'UpdateDelegate',
       additionalDelegates: nextDelegates.map((d) => publicKey(d)),
