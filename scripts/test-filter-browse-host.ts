@@ -17,6 +17,7 @@ import {
   resolveHostCandidates,
   suggestHosts,
 } from '../lib/raffles/resolve-host-filter'
+import { buildRafflesHostBrowseHref } from '../lib/raffles/host-wallet-copy'
 
 /** Fixed valid mainnet mint/program addresses (used only as stand-in wallets). */
 const wDevA = 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'
@@ -114,6 +115,20 @@ assert.ok(suggestions.length <= 8)
 assert.equal(hostWalletFilterFromSearchParam(wDevA), wDevA)
 assert.equal(hostWalletFilterFromSearchParam(''), null)
 assert.equal(hostWalletFilterFromSearchParam(null), null)
+
+// Created By → browse deep link (wallet only; never display name)
+assert.equal(buildRafflesHostBrowseHref(wDevA), `/raffles?host=${encodeURIComponent(wDevA)}`)
+assert.equal(buildRafflesHostBrowseHref(''), null)
+assert.equal(buildRafflesHostBrowseHref('  '), null)
+assert.equal(
+  buildRafflesHostBrowseHref({ creator_wallet: wDevA, created_by: null }),
+  `/raffles?host=${encodeURIComponent(wDevA)}`
+)
+assert.equal(
+  buildRafflesHostBrowseHref({ creator_wallet: null, created_by: wDevB }),
+  `/raffles?host=${encodeURIComponent(wDevB)}`
+)
+assert.equal(buildRafflesHostBrowseHref({ creator_wallet: null, created_by: null }), null)
 
 assert.equal(
   hasActiveBrowseFilters({
