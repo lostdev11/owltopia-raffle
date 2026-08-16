@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { consumeLaunchWlMints } from '@/lib/db/owl-center-launch-wl-wallets'
 import { buildSimpleMintEligibility } from '@/lib/owl-center/simple-mint-eligibility'
-import { isLaunchWhitelistWindowOpen } from '@/lib/owl-center/launch-wl-window'
+import { getLaunchActiveAllowlistPhase, isLaunchWhitelistWindowOpen } from '@/lib/owl-center/launch-wl-window'
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
 import { shouldRequireOwlCenterPlatformMintFeeServer } from '@/lib/owl-center/platform-mint-fee'
 import { verifyGen2MintTransaction } from '@/lib/owl-center/verify-gen2-mint-tx'
@@ -163,7 +163,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
 
   // Soft-consume launch WL spots after a successful (non-duplicate) confirm during the WL window.
   if (!row.duplicate_tx && isLaunchWhitelistWindowOpen(launch)) {
-    const consumed = await consumeLaunchWlMints(launch.id, wallet, qty)
+    const activePhase = getLaunchActiveAllowlistPhase(launch)
+    const consumed = await consumeLaunchWlMints(launch.id, wallet, qty, activePhase?.key ?? 'wl')
     if (!consumed.ok) {
       console.error('consumeLaunchWlMints after confirm', slug, wallet, consumed.error)
     }

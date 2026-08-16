@@ -153,6 +153,11 @@ export type OwlCenterLaunchPublic = {
   freeze_authority: string | null
   freeze_thawed_at: string | null
   freeze_progress: OwlCenterFreezeProgress
+  /**
+   * Partner multi-allowlist phases (Team / OG / WL / …) before PUBLIC.
+   * Empty = legacy single WL via creator_wl_enabled + phase_schedule.WHITELIST.
+   */
+  partner_allowlist_phases: import('@/lib/owl-center/partner-allowlist-phases').PartnerAllowlistPhase[]
 }
 
 export type SimpleMintEligibilityResponse = {

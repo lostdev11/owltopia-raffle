@@ -9,6 +9,10 @@ import {
 import { getOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { requireLaunchMintEditorSession } from '@/lib/owl-center/creator-access'
 import { launchHasWhitelistProgram } from '@/lib/owl-center/launch-wl-window'
+import {
+  normalizePhaseKey,
+  resolvePartnerAllowlistPhases,
+} from '@/lib/owl-center/partner-allowlist-phases'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
@@ -17,6 +21,21 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
+}
+
+function resolvePhaseKey(
+  launch: Parameters<typeof resolvePartnerAllowlistPhases>[0],
+  raw: string | null | undefined
+): string | { error: string } {
+  const phases = resolvePartnerAllowlistPhases(launch)
+  const requested = raw?.trim() ? normalizePhaseKey(raw) : ''
+  if (requested) {
+    if (phases.length > 0 && !phases.some((p) => p.key === requested)) {
+      return { error: `Unknown allowlist phase "${requested}". Save mint details phases first.` }
+    }
+    return requested
+  }
+  return phases[0]?.key ?? 'wl'
 }
 
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -34,7 +53,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   const editor = await requireLaunchMintEditorSession(request, launch)
   if (editor instanceof NextResponse) return editor
 
-  const rows = await listLaunchWlWallets(id)
+  const phases = resolvePartnerAllowlistPhases(launch)
+  const phaseParam = request.nextUrl.searchParams.get('phase')
+  const phaseResolved = resolvePhaseKey(launch, phaseParam)
+  if (typeof phaseResolved === 'object') return jsonError(phaseResolved.error, 400)
+
+  const rows = await listLaunchWlWallets(id, phaseResolved)
   const total_allowed = rows.reduce((s, r) => s + r.allowed_mints, 0)
   const total_used = rows.reduce((s, r) => s + r.used_mints, 0)
 
@@ -43,6 +67,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     launch_id: id,
     wl_enabled: launchHasWhitelistProgram(launch),
     wl_supply: launch.wl_supply,
+    phase_key: phaseResolved,
+    phases,
     rows,
     wallet_count: rows.length,
     total_allowed,
@@ -67,7 +93,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
   if (!launchHasWhitelistProgram(launch)) {
     return jsonError(
-      'Enable whitelist phase in Mint details (Show Advanced → Whitelist) before adding wallets.',
+      'Add at least one allowlist phase in Mint details (Show Advanced) before adding wallets.',
       400
     )
   }
@@ -78,6 +104,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   } catch {
     return jsonError('Invalid JSON', 400)
   }
+
+  const phaseResolved = resolvePhaseKey(
+    launch,
+    typeof body.phase_key === 'string' ? body.phase_key : typeof body.phase === 'string' ? body.phase : null
+  )
+  if (typeof phaseResolved === 'object') return jsonError(phaseResolved.error, 400)
 
   const defaultAllowed = Math.max(1, Math.floor(Number(body.allowed_mints ?? 1) || 1))
   const note = typeof body.note === 'string' ? body.note : null
@@ -112,12 +144,14 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
   const result = await bulkUpsertLaunchWlWallets({
     launchId: id,
+    phaseKey: phaseResolved,
     wallets,
     createdByWallet: editor.wallet,
   })
 
   return NextResponse.json({
     ok: true,
+    phase_key: phaseResolved,
     upserted: result.upserted,
     failed: result.failed,
   })
@@ -139,7 +173,10 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   if (editor instanceof NextResponse) return editor
 
   const wallet = request.nextUrl.searchParams.get('wallet')?.trim() ?? ''
-  const result = await removeLaunchWlWallet(id, wallet)
+  const phaseResolved = resolvePhaseKey(launch, request.nextUrl.searchParams.get('phase'))
+  if (typeof phaseResolved === 'object') return jsonError(phaseResolved.error, 400)
+
+  const result = await removeLaunchWlWallet(id, wallet, phaseResolved)
   if (!result.ok) return jsonError(result.error, 400)
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, phase_key: phaseResolved })
 }

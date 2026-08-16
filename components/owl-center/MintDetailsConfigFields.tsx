@@ -3,6 +3,11 @@
 import { useEffect, useState } from 'react'
 
 import type { MintDetailsFormValues } from '@/lib/owl-center/launch-mint-config'
+import {
+  nextPresetForPhases,
+  PARTNER_ALLOWLIST_MAX_PHASES,
+  type PartnerAllowlistPhaseFormRow,
+} from '@/lib/owl-center/partner-allowlist-phases'
 import { formatOwlCenterPlatformMintFeeLabel } from '@/lib/owl-center/platform-mint-fee'
 import { defaultWalletSplitFormRows } from '@/lib/owl-center/wallet-splits'
 import { WalletSplitEditor } from '@/components/owl-center/WalletSplitEditor'
@@ -81,15 +86,17 @@ export function MintDetailsConfigFields({
             className="mt-1 h-4 w-4 shrink-0 touch-manipulation accent-[#00FF9C] disabled:opacity-50"
           />
           <span>
-            Freeze Collection
+            Freeze Collection at mint
             <span className="mt-1 block normal-case tracking-normal text-[#9BA8B4]">
-              Locks transfers until you thaw (Core PermanentFreezeDelegate). Requires Metaplex Core.
+              Minted NFTs stay non-transferable until you thaw. Checking this freezes them at mint —
+              do not press Thaw to freeze. Thaw = unfreeze for trading when mint is done (or you are
+              ready for secondary). Requires Metaplex Core.
             </span>
           </span>
         </label>
         {values.freeze_enabled ? (
           <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-            Planned unfreeze (optional)
+            Planned thaw / unfreeze (optional)
             <input
               type="datetime-local"
               value={values.unfreeze_date}
@@ -280,49 +287,148 @@ export function MintDetailsConfigFields({
       <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
         <input
           type="checkbox"
-          checked={values.wl_enabled}
-          onChange={(e) => set('wl_enabled', e.target.checked)}
+          checked={values.allowlist_phases.length > 0 || values.wl_enabled}
+          onChange={(e) => {
+            if (e.target.checked) {
+              const seed =
+                values.allowlist_phases.length > 0
+                  ? values.allowlist_phases
+                  : [
+                      {
+                        key: 'wl',
+                        label: 'Whitelist',
+                        start: values.wl_start,
+                        supply: values.wl_supply,
+                        price: values.wl_price,
+                      } satisfies PartnerAllowlistPhaseFormRow,
+                    ]
+              onChange({ ...values, wl_enabled: true, allowlist_phases: seed })
+            } else {
+              onChange({ ...values, wl_enabled: false, allowlist_phases: [], wl_supply: '', wl_start: '', wl_price: '' })
+            }
+          }}
           className="h-4 w-4 accent-[#00FF9C]"
         />
-        Whitelist phase
+        Allowlist phases (Team / OG / WL / …)
       </label>
-      {values.wl_enabled ? (
-        <div className="grid gap-4 border border-[#1A222B] bg-[#0F1419]/60 p-4 sm:grid-cols-2">
-          <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-            WL supply
-            <input
-              type="number"
-              min={1}
-              max={supply || undefined}
-              value={values.wl_supply}
-              onChange={(e) => set('wl_supply', e.target.value)}
-              className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-            />
-          </label>
-          <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-            Whitelist price (USDC)
-            <input
-              type="number"
-              step="any"
-              min={0}
-              value={values.wl_price}
-              onChange={(e) => set('wl_price', e.target.value)}
-              placeholder="30"
-              className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-            />
-          </label>
-          <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
-            Whitelist phase starts
-            <input
-              type="datetime-local"
-              value={values.wl_start}
-              onChange={(e) => set('wl_start', e.target.value)}
-              className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-            />
-          </label>
-          <p className="font-mono text-[10px] leading-relaxed text-[#5C6773] sm:col-span-2">
-            After saving, add wallets in the Whitelist · Wallets section below. Set Public start above so the WL window
-            ends when public mint opens.
+      {values.allowlist_phases.length > 0 || values.wl_enabled ? (
+        <div className="grid gap-4 border border-[#1A222B] bg-[#0F1419]/60 p-4">
+          <p className="text-xs leading-relaxed text-[#9BA8B4]">
+            Add up to {PARTNER_ALLOWLIST_MAX_PHASES} sequential lists before public. Each phase needs a start time;
+            the next phase (or Public start) ends the previous window. After saving, paste wallets per phase in
+            Whitelist · Wallets below.
+          </p>
+          {values.allowlist_phases.map((phase, idx) => (
+            <div key={`${phase.key}-${idx}`} className="grid gap-3 border border-[#1A222B] bg-[#0A0E12]/80 p-3 sm:grid-cols-2">
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                Label
+                <input
+                  value={phase.label}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = { ...phase, label: e.target.value }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                />
+              </label>
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                Key
+                <input
+                  value={phase.key}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = { ...phase, key: e.target.value }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm text-[#F4FBF8]"
+                />
+              </label>
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                Supply
+                <input
+                  type="number"
+                  min={0}
+                  max={supply || undefined}
+                  value={phase.supply}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = { ...phase, supply: e.target.value }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                />
+              </label>
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                Price (USDC)
+                <input
+                  type="number"
+                  step="any"
+                  min={0}
+                  value={phase.price}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = { ...phase, price: e.target.value }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  placeholder="30"
+                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                />
+              </label>
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
+                Phase starts
+                <input
+                  type="datetime-local"
+                  value={phase.start}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = { ...phase, start: e.target.value }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                />
+              </label>
+              <div className="sm:col-span-2">
+                <button
+                  type="button"
+                  className="font-mono text-[10px] uppercase tracking-widest text-[#FF9C9C] underline-offset-2 hover:underline"
+                  onClick={() => {
+                    const next = values.allowlist_phases.filter((_, i) => i !== idx)
+                    onChange({
+                      ...values,
+                      allowlist_phases: next,
+                      wl_enabled: next.length > 0,
+                    })
+                  }}
+                >
+                  Remove phase
+                </button>
+              </div>
+            </div>
+          ))}
+          {values.allowlist_phases.length < PARTNER_ALLOWLIST_MAX_PHASES ? (
+            <button
+              type="button"
+              className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-[#00FF9C]"
+              onClick={() => {
+                const preset = nextPresetForPhases(values.allowlist_phases)
+                onChange({
+                  ...values,
+                  wl_enabled: true,
+                  allowlist_phases: [
+                    ...values.allowlist_phases,
+                    { key: preset.key, label: preset.label, start: '', supply: '', price: '' },
+                  ],
+                })
+              }}
+            >
+              + Add phase (Team / OG / WL …)
+            </button>
+          ) : null}
+          <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
+            Set Public start above so the last allowlist window ends when public mint opens. Per-phase prices are
+            shown in UI; on-chain Candy Machine price is still the collection mint price unless redeployed with
+            separate guards.
           </p>
         </div>
       ) : null}

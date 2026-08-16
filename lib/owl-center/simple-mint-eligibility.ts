@@ -4,13 +4,14 @@ import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { getLaunchWlWallet } from '@/lib/db/owl-center-launch-wl-wallets'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import {
+  formatAllowlistOpensReason,
+  getLaunchActiveAllowlistPhase,
   isLaunchWaitingForWhitelist,
   isLaunchWhitelistWindowOpen,
 } from '@/lib/owl-center/launch-wl-window'
 import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/lib/owl-center/mint-policy'
 import { OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS, isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
-import { formatMintDate, getPhaseStartsAt } from '@/lib/owl-center/phase-schedule'
 import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
 import type { SimpleMintEligibilityResponse } from '@/lib/owl-center/types'
 import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
@@ -115,8 +116,7 @@ export async function buildSimpleMintEligibility(
   } else if (launch.active_phase !== 'PUBLIC') {
     reason = `Mint opens during PUBLIC phase (current: ${launch.active_phase})`
   } else if (isLaunchWaitingForWhitelist(launch)) {
-    const wlStart = getPhaseStartsAt(launch, 'WHITELIST')
-    reason = wlStart ? `Whitelist opens ${formatMintDate(wlStart)}` : 'Whitelist has not opened yet'
+    reason = formatAllowlistOpensReason(launch)
   } else if (!wallet) {
     reason = 'Connect wallet to mint'
   } else if (walletRemaining <= 0) {
@@ -125,15 +125,19 @@ export async function buildSimpleMintEligibility(
     max_mintable = Math.min(walletRemaining, remaining)
 
     if (isLaunchWhitelistWindowOpen(launch)) {
-      const wlRow = await getLaunchWlWallet(launch.id, wallet)
+      const activePhase = getLaunchActiveAllowlistPhase(launch)
+      const phaseKey = activePhase?.key ?? 'wl'
+      const wlRow = await getLaunchWlWallet(launch.id, wallet, phaseKey)
       if (!wlRow) {
         max_mintable = 0
-        reason = 'Wallet is not on this collection whitelist'
+        reason = activePhase
+          ? `Wallet is not on the ${activePhase.label} list`
+          : 'Wallet is not on this collection whitelist'
       } else {
         const wlRemaining = Math.max(0, wlRow.allowed_mints - wlRow.used_mints)
         if (wlRemaining <= 0) {
           max_mintable = 0
-          reason = 'Whitelist mint allocation exhausted'
+          reason = `${activePhase?.label ?? 'Whitelist'} mint allocation exhausted`
         } else {
           max_mintable = Math.min(max_mintable, wlRemaining)
         }

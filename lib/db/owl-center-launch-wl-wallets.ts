@@ -1,8 +1,10 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { normalizePhaseKey } from '@/lib/owl-center/partner-allowlist-phases'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 export type LaunchWlWalletRow = {
   launch_id: string
+  phase_key: string
   wallet: string
   allowed_mints: number
   used_mints: number
@@ -15,6 +17,7 @@ export type LaunchWlWalletRow = {
 function mapRow(row: Record<string, unknown>): LaunchWlWalletRow {
   return {
     launch_id: String(row.launch_id),
+    phase_key: normalizePhaseKey(String(row.phase_key ?? 'wl')) || 'wl',
     wallet: String(row.wallet),
     allowed_mints: Number(row.allowed_mints ?? 0),
     used_mints: Number(row.used_mints ?? 0),
@@ -25,15 +28,22 @@ function mapRow(row: Record<string, unknown>): LaunchWlWalletRow {
   }
 }
 
-export async function listLaunchWlWallets(launchId: string): Promise<LaunchWlWalletRow[]> {
+export async function listLaunchWlWallets(
+  launchId: string,
+  phaseKey?: string | null
+): Promise<LaunchWlWalletRow[]> {
   const db = getSupabaseAdmin()
-  const { data, error } = await db
+  let q = db
     .from('owl_center_launch_wl_wallets')
     .select('*')
     .eq('launch_id', launchId)
     .order('created_at', { ascending: false })
     .limit(5000)
 
+  const pk = phaseKey ? normalizePhaseKey(phaseKey) : null
+  if (pk) q = q.eq('phase_key', pk)
+
+  const { data, error } = await q
   if (error) {
     console.error('listLaunchWlWallets:', error.message)
     return []
@@ -43,15 +53,18 @@ export async function listLaunchWlWallets(launchId: string): Promise<LaunchWlWal
 
 export async function getLaunchWlWallet(
   launchId: string,
-  wallet: string
+  wallet: string,
+  phaseKey: string = 'wl'
 ): Promise<LaunchWlWalletRow | null> {
   const w = normalizeSolanaWalletAddress(wallet)
+  const pk = normalizePhaseKey(phaseKey) || 'wl'
   if (!w) return null
   const db = getSupabaseAdmin()
   const { data, error } = await db
     .from('owl_center_launch_wl_wallets')
     .select('*')
     .eq('launch_id', launchId)
+    .eq('phase_key', pk)
     .eq('wallet', w)
     .maybeSingle()
   if (error || !data) return null
@@ -60,6 +73,7 @@ export async function getLaunchWlWallet(
 
 export async function bulkUpsertLaunchWlWallets(input: {
   launchId: string
+  phaseKey?: string
   wallets: Array<{ wallet: string; allowed_mints?: number; note?: string | null }>
   createdByWallet: string
 }): Promise<{ upserted: number; failed: Array<{ wallet: string; error: string }> }> {
@@ -67,6 +81,7 @@ export async function bulkUpsertLaunchWlWallets(input: {
   let upserted = 0
   const failed: Array<{ wallet: string; error: string }> = []
   const now = new Date().toISOString()
+  const phase_key = normalizePhaseKey(input.phaseKey ?? 'wl') || 'wl'
 
   for (const row of input.wallets) {
     const wallet = normalizeSolanaWalletAddress(row.wallet)
@@ -79,6 +94,7 @@ export async function bulkUpsertLaunchWlWallets(input: {
       .from('owl_center_launch_wl_wallets')
       .select('used_mints')
       .eq('launch_id', input.launchId)
+      .eq('phase_key', phase_key)
       .eq('wallet', wallet)
       .maybeSingle()
     const used = Number((existing as { used_mints?: number } | null)?.used_mints ?? 0)
@@ -90,6 +106,7 @@ export async function bulkUpsertLaunchWlWallets(input: {
     const { error } = await db.from('owl_center_launch_wl_wallets').upsert(
       {
         launch_id: input.launchId,
+        phase_key,
         wallet,
         allowed_mints: allowed,
         used_mints: used,
@@ -97,7 +114,7 @@ export async function bulkUpsertLaunchWlWallets(input: {
         created_by_wallet: input.createdByWallet,
         updated_at: now,
       },
-      { onConflict: 'launch_id,wallet' }
+      { onConflict: 'launch_id,phase_key,wallet' }
     )
     if (error) {
       failed.push({ wallet, error: error.message })
@@ -111,15 +128,18 @@ export async function bulkUpsertLaunchWlWallets(input: {
 
 export async function removeLaunchWlWallet(
   launchId: string,
-  wallet: string
+  wallet: string,
+  phaseKey: string = 'wl'
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const w = normalizeSolanaWalletAddress(wallet)
+  const pk = normalizePhaseKey(phaseKey) || 'wl'
   if (!w) return { ok: false, error: 'Invalid wallet address' }
   const db = getSupabaseAdmin()
   const { error } = await db
     .from('owl_center_launch_wl_wallets')
     .delete()
     .eq('launch_id', launchId)
+    .eq('phase_key', pk)
     .eq('wallet', w)
   if (error) return { ok: false, error: error.message }
   return { ok: true }
@@ -129,13 +149,15 @@ export async function removeLaunchWlWallet(
 export async function consumeLaunchWlMints(
   launchId: string,
   wallet: string,
-  quantity: number
+  quantity: number,
+  phaseKey: string = 'wl'
 ): Promise<{ ok: true; used_mints: number } | { ok: false; error: string }> {
   const w = normalizeSolanaWalletAddress(wallet)
+  const pk = normalizePhaseKey(phaseKey) || 'wl'
   const qty = Math.floor(quantity)
   if (!w || qty < 1) return { ok: false, error: 'Invalid wallet or quantity' }
 
-  const row = await getLaunchWlWallet(launchId, w)
+  const row = await getLaunchWlWallet(launchId, w, pk)
   if (!row) return { ok: false, error: 'Wallet is not on this collection whitelist' }
   const nextUsed = row.used_mints + qty
   if (nextUsed > row.allowed_mints) {
@@ -147,6 +169,7 @@ export async function consumeLaunchWlMints(
     .from('owl_center_launch_wl_wallets')
     .update({ used_mints: nextUsed, updated_at: new Date().toISOString() })
     .eq('launch_id', launchId)
+    .eq('phase_key', pk)
     .eq('wallet', w)
     .eq('used_mints', row.used_mints)
 

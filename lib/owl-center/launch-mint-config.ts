@@ -1,5 +1,16 @@
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import { DEFAULT_PRESALE_OVERAGE_SUPPLY } from '@/lib/owl-center/launch-presale'
+import {
+  formRowsFromPartnerAllowlistPhases,
+  parsePartnerAllowlistPhases,
+  partnerAllowlistEarliestStart,
+  partnerAllowlistPhasesFromFormRows,
+  partnerAllowlistPrimaryPriceUsdc,
+  partnerAllowlistTotalSupply,
+  resolvePartnerAllowlistPhases,
+  type PartnerAllowlistPhase,
+  type PartnerAllowlistPhaseFormRow,
+} from '@/lib/owl-center/partner-allowlist-phases'
 import { datetimeLocalToIso } from '@/lib/owl-center/phase-schedule'
 import {
   DEFAULT_SELLER_FEE_BASIS_POINTS,
@@ -21,6 +32,7 @@ import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 export type MintDetailsFormValues = {
   total_supply: string
   public_price: string
+  /** @deprecated prefer allowlist_phases[0].price — kept for back-compat payloads */
   wl_price: string
   currency: 'SOL' | 'USDC'
   wallet_mint_limit: string
@@ -30,9 +42,12 @@ export type MintDetailsFormValues = {
   presale_supply: string
   presale_overage_supply: string
   presale_start: string
+  /** True when allowlist_phases.length > 0 (or legacy single WL). */
   wl_enabled: boolean
   wl_supply: string
   wl_start: string
+  /** Team / OG / WL / WL2 … (max 5). Empty + wl_enabled uses legacy single WL fields. */
+  allowlist_phases: PartnerAllowlistPhaseFormRow[]
   /** Secondary royalty percent (0–100) — locked after Candy Machine deploy. */
   royalty_percent: string
   royalty_splits: WalletSplitFormRow[]
@@ -66,6 +81,7 @@ export type ParsedMintDetailsConfig = {
   royalty_splits: WalletSplit[] | null
   mint_fund_splits: WalletSplit[] | null
   treasury_wallet: string | null
+  partner_allowlist_phases: PartnerAllowlistPhase[]
 }
 
 function pickNum(v: unknown, fallback: number): number {
@@ -101,7 +117,30 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
   const wallet_mint_limit = pickInt(body.wallet_mint_limit, 5, 1, 50)
 
   const presale_enabled = Boolean(body.presale_enabled ?? body.creator_presale_enabled)
-  const wl_enabled = Boolean(body.wl_enabled ?? body.creator_wl_enabled)
+
+  let partner_allowlist_phases: PartnerAllowlistPhase[] = []
+  if (Array.isArray(body.allowlist_phases) || Array.isArray(body.partner_allowlist_phases)) {
+    const rawRows = (body.allowlist_phases ?? body.partner_allowlist_phases) as unknown[]
+    // Form rows use {start,price}; stored rows use {starts_at,price_usdc}
+    const looksLikeForm =
+      rawRows.length > 0 &&
+      rawRows.some((r) => r && typeof r === 'object' && ('start' in (r as object) || 'price' in (r as object)))
+    if (looksLikeForm) {
+      const parsedPhases = partnerAllowlistPhasesFromFormRows(
+        rawRows as PartnerAllowlistPhaseFormRow[],
+        (local) => parseScheduleEntry(local)
+      )
+      if ('error' in parsedPhases) return parsedPhases
+      partner_allowlist_phases = parsedPhases
+    } else {
+      partner_allowlist_phases = parsePartnerAllowlistPhases(rawRows)
+    }
+  }
+
+  const wl_enabled =
+    partner_allowlist_phases.length > 0
+      ? true
+      : Boolean(body.wl_enabled ?? body.creator_wl_enabled)
 
   const presale_supply = presale_enabled
     ? pickInt(body.presale_supply, Math.min(total_supply, Math.max(1, Math.floor(total_supply * 0.9))), 0, total_supply)
@@ -111,9 +150,17 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
     ? pickInt(body.presale_overage_supply, DEFAULT_PRESALE_OVERAGE_SUPPLY, 0, 500)
     : 0
 
-  const wl_supply = wl_enabled
-    ? pickInt(body.wl_supply, Math.min(total_supply - presale_supply, Math.max(0, Math.floor(total_supply * 0.1))), 0, total_supply)
-    : 0
+  let wl_supply = 0
+  if (partner_allowlist_phases.length > 0) {
+    wl_supply = Math.min(total_supply, partnerAllowlistTotalSupply(partner_allowlist_phases))
+  } else if (wl_enabled) {
+    wl_supply = pickInt(
+      body.wl_supply,
+      Math.min(total_supply - presale_supply, Math.max(0, Math.floor(total_supply * 0.1))),
+      0,
+      total_supply
+    )
+  }
 
   // GEN1 airdrop pool is not editable in the mint-details form, so preserve the
   // existing value (passed through from the launch row) instead of zeroing it.
@@ -160,7 +207,14 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
   const public_start = parseScheduleEntry(body.public_start ?? body.public_phase_start)
 
   if (presale_enabled && presale_start) phase_schedule.PRESALE = presale_start
-  if (wl_enabled && wl_start) phase_schedule.WHITELIST = wl_start
+
+  const earliestAllowlist = partnerAllowlistEarliestStart(partner_allowlist_phases)
+  if (partner_allowlist_phases.length > 0 && earliestAllowlist) {
+    phase_schedule.WHITELIST = earliestAllowlist
+  } else if (wl_enabled && wl_start) {
+    phase_schedule.WHITELIST = wl_start
+  }
+
   if (public_start) phase_schedule.PUBLIC = public_start
   // Only auto-default PUBLIC to the kickoff time for simple single-phase launches.
   // When there are earlier phases (presale/WL), defaulting PUBLIC to the kickoff would
@@ -173,7 +227,33 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
   if (launch_deadline_at && !phase_schedule.AIRDROP) phase_schedule.AIRDROP = launch_deadline_at
 
   const public_price_usdc = currency === 'USDC' ? public_price : null
-  const wl_price_usdc = wl_enabled && wl_price != null ? wl_price : null
+  const multiPrice = partnerAllowlistPrimaryPriceUsdc(partner_allowlist_phases)
+  const wl_price_usdc =
+    partner_allowlist_phases.length > 0
+      ? multiPrice
+      : wl_enabled && wl_price != null
+        ? wl_price
+        : null
+
+  // If multi-phase had no prices but legacy wl_price was sent, keep it on first phase.
+  if (partner_allowlist_phases.length > 0 && multiPrice == null && wl_price != null) {
+    partner_allowlist_phases = partner_allowlist_phases.map((p, i) =>
+      i === 0 ? { ...p, price_usdc: wl_price } : p
+    )
+  }
+
+  // Legacy single WL checkbox → persist as one allowlist phase.
+  if (partner_allowlist_phases.length === 0 && wl_enabled) {
+    partner_allowlist_phases = [
+      {
+        key: 'wl',
+        label: 'Whitelist',
+        starts_at: phase_schedule.WHITELIST ?? null,
+        supply: wl_supply,
+        price_usdc: wl_price_usdc,
+      },
+    ]
+  }
 
   let seller_fee_basis_points = DEFAULT_SELLER_FEE_BASIS_POINTS
   if (body.seller_fee_basis_points != null && body.seller_fee_basis_points !== '') {
@@ -229,6 +309,7 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
     royalty_splits: royaltySplits,
     mint_fund_splits: mintFundSplits,
     treasury_wallet,
+    partner_allowlist_phases,
   }
 }
 
@@ -240,6 +321,8 @@ export function mintDetailsFormFromLaunch(launch: OwlCenterLaunchPublic): MintDe
       : String(launch.creator_mint_price ?? 0)
 
   const splitForms = walletSplitFormRowsFromLaunch(launch)
+  const phases = resolvePartnerAllowlistPhases(launch)
+  const allowlist_phases = formRowsFromPartnerAllowlistPhases(phases, isoToDatetimeLocalShort)
 
   return {
     total_supply: String(launch.total_supply),
@@ -253,9 +336,10 @@ export function mintDetailsFormFromLaunch(launch: OwlCenterLaunchPublic): MintDe
     presale_supply: String(launch.presale_supply || ''),
     presale_overage_supply: String(launch.presale_overage_supply || ''),
     presale_start: launch.phase_schedule?.PRESALE ? isoToDatetimeLocalShort(launch.phase_schedule.PRESALE) : '',
-    wl_enabled: launch.creator_wl_enabled || launch.wl_supply > 0,
+    wl_enabled: phases.length > 0 || launch.creator_wl_enabled || launch.wl_supply > 0,
     wl_supply: String(launch.wl_supply || ''),
     wl_start: launch.phase_schedule?.WHITELIST ? isoToDatetimeLocalShort(launch.phase_schedule.WHITELIST) : '',
+    allowlist_phases,
     royalty_percent: String(basisPointsToPercent(launchSellerFeeBasisPoints(launch))),
     royalty_splits: splitForms.royalty_splits,
     mint_fund_splits: splitForms.mint_fund_splits,
@@ -280,8 +364,14 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
   // local→UTC offset uses the admin's timezone, not the server's (UTC).
   const launchIso = datetimeLocalToIso(values.launch_date)
   const presaleIso = datetimeLocalToIso(values.presale_start)
-  const wlIso = datetimeLocalToIso(values.wl_start)
   const publicIso = datetimeLocalToIso(values.public_start)
+
+  const allowlist_phases = values.allowlist_phases
+  const wlEnabled = allowlist_phases.length > 0 || values.wl_enabled
+  const first = allowlist_phases[0]
+  const wlIso = first?.start.trim()
+    ? datetimeLocalToIso(first.start)
+    : datetimeLocalToIso(values.wl_start)
 
   // Leave price keys out when the field is blank so an empty input preserves
   // the existing price instead of silently overwriting it with 0.
@@ -289,22 +379,36 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
     ? { mint_price: Number(values.public_price), public_price: Number(values.public_price) }
     : {}
 
+  const wlPrice =
+    first?.price.trim()
+      ? Number(first.price)
+      : values.wl_price.trim()
+        ? Number(values.wl_price)
+        : null
+
   return {
     total_supply: Number(values.total_supply),
     ...priceFields,
-    wl_price: values.wl_price.trim() ? Number(values.wl_price) : null,
+    wl_price: wlPrice,
     currency: values.currency,
     wallet_mint_limit: Number(values.wallet_mint_limit),
     launch_date: launchIso,
     presale_enabled: values.presale_enabled,
     presale_supply: values.presale_supply.trim() ? Number(values.presale_supply) : undefined,
     presale_overage_supply: values.presale_overage_supply.trim() ? Number(values.presale_overage_supply) : undefined,
-    wl_enabled: values.wl_enabled,
-    wl_supply: values.wl_supply.trim() ? Number(values.wl_supply) : undefined,
+    wl_enabled: wlEnabled,
+    wl_supply:
+      allowlist_phases.length > 0
+        ? allowlist_phases.reduce((s, p) => s + (Math.floor(Number(p.supply) || 0)), 0)
+        : values.wl_supply.trim()
+          ? Number(values.wl_supply)
+          : undefined,
+    allowlist_phases,
+    partner_allowlist_phases: allowlist_phases,
     phase_schedule: {
       ...(launchIso ? { AIRDROP: launchIso } : {}),
       ...(values.presale_enabled && presaleIso ? { PRESALE: presaleIso } : {}),
-      ...(values.wl_enabled && wlIso ? { WHITELIST: wlIso } : {}),
+      ...(wlEnabled && wlIso ? { WHITELIST: wlIso } : {}),
       ...(publicIso ? { PUBLIC: publicIso } : {}),
     },
     presale_start: presaleIso,
@@ -340,6 +444,7 @@ export function defaultMintDetailsFormValues(partial?: Partial<MintDetailsFormVa
     wl_enabled: false,
     wl_supply: '',
     wl_start: '',
+    allowlist_phases: [],
     royalty_percent: '5',
     royalty_splits: defaultWalletSplitFormRows(creator),
     mint_fund_splits: defaultWalletSplitFormRows(treasury),

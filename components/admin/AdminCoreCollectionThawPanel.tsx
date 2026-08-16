@@ -47,8 +47,9 @@ export function AdminCoreCollectionThawPanel({
   return (
     <CommandCard label="core_freeze.sys">
       <p className="mb-3 text-sm text-[#9BA8B4]">
-        Metaplex Core Freeze Collection — one transaction thaws every asset in the collection via
-        PermanentFreezeDelegate.
+        Thaw = unfreeze for trading. Only run this when mint is done (or you are ready for secondary
+        markets). One transaction enables transfers for every asset in the collection via
+        PermanentFreezeDelegate. This does not freeze — Freeze Collection at mint already did that.
       </p>
       <p className="mb-4 font-mono text-xs text-[#C5D0D8]">
         status={launch.freeze_status}
@@ -56,7 +57,7 @@ export function AdminCoreCollectionThawPanel({
       </p>
       <DeployButton type="button" disabled={!canThaw || busy} onClick={() => void thaw()}>
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-        {thawed ? 'Already thawed' : 'Thaw collection'}
+        {thawed ? 'Already thawed (trading enabled)' : 'Thaw collection (enable trading)'}
       </DeployButton>
       {msg ? (
         <p className={`mt-2 font-mono text-xs ${msg.startsWith('Thawed') ? 'text-[#00FF9C]' : 'text-[#FF9C9C]'}`}>
