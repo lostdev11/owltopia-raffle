@@ -21,6 +21,7 @@ import { useOwlCenterView } from '@/components/owl-center/OwlCenterViewProvider'
 import { useSiwsSession } from '@/hooks/use-siws-session'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
+import { launchPublicPhaseBadgeLabel } from '@/lib/owl-center/launch-mint-open'
 import type { CollectionMintStateResponse } from '@/lib/owl-center/types'
 
 export function CollectionMintPageClient({ slug, launchName }: { slug: string; launchName: string }) {
@@ -93,7 +94,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
     >
       <div className="mb-6 flex flex-wrap items-center gap-2">
         <StatusBadge status={launch.status} />
-        <PhaseBadge phase={launch.active_phase} />
+        <PhaseBadge phase={launch.active_phase} overrideLabel={launchPublicPhaseBadgeLabel(launch)} />
         <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">{mint_network}</span>
       </div>
 

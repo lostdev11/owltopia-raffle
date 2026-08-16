@@ -2,7 +2,9 @@ import { Connection, PublicKey } from '@solana/web3.js'
 
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
+import { launchScheduledPublicReason } from '@/lib/owl-center/launch-mint-open'
 import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/lib/owl-center/mint-policy'
+import { isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import { OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS, isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
@@ -108,6 +110,8 @@ export async function buildSimpleMintEligibility(
       : 'Sold out'
   } else if (launch.active_phase !== 'PUBLIC') {
     reason = `Mint opens during PUBLIC phase (current: ${launch.active_phase})`
+  } else if (!isPhaseOpenBySchedule(launch, 'PUBLIC')) {
+    reason = launchScheduledPublicReason(launch) ?? 'Public mint is not open yet'
   } else if (!wallet) {
     reason = 'Connect wallet to mint'
   } else if (walletRemaining <= 0) {
