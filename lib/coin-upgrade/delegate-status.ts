@@ -1,7 +1,7 @@
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { publicKey } from '@metaplex-foundation/umi'
 import { fetchCollection, mplCore } from '@metaplex-foundation/mpl-core'
-import { getCoinArtUpdateAuthorityWallet } from '@/lib/coin-upgrade/update-authority-keypair'
+import { resolveCoinArtUpdateAuthorityWallet } from '@/lib/coin-upgrade/update-authority-keypair'
 import {
   OWLTOPIA_COIN_COLLECTION_UPDATE_AUTHORITY,
   resolveOwltopiaCoinCollectionAddress,
@@ -25,7 +25,7 @@ export type CoinArtUpgradeDelegateStatus = {
  */
 export async function getCoinArtUpgradeDelegateStatus(): Promise<CoinArtUpgradeDelegateStatus> {
   const collection = resolveOwltopiaCoinCollectionAddress()
-  const hotWallet = getCoinArtUpdateAuthorityWallet() || null
+  const hotWallet = (await resolveCoinArtUpdateAuthorityWallet()) || null
   const endpoint = resolveServerSolanaRpcUrl()
   const umi = createUmi(endpoint).use(mplCore())
   const account = await fetchCollection(umi, publicKey(collection))

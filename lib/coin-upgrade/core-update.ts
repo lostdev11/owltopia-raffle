@@ -7,7 +7,7 @@ import {
 } from '@metaplex-foundation/umi'
 import { fetchAsset, fetchCollection, update } from '@metaplex-foundation/mpl-core'
 import { StakingUserError } from '@/lib/nesting/errors'
-import { getCoinArtUpdateAuthorityKeypair } from '@/lib/coin-upgrade/update-authority-keypair'
+import { resolveCoinArtUpdateAuthorityKeypair } from '@/lib/coin-upgrade/update-authority-keypair'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 function signatureToString(result: unknown): string {
@@ -17,11 +17,11 @@ function signatureToString(result: unknown): string {
   return String(sig)
 }
 
-function createCoinUpdateAuthorityUmi() {
-  const authority = getCoinArtUpdateAuthorityKeypair()
+async function createCoinUpdateAuthorityUmi() {
+  const authority = await resolveCoinArtUpdateAuthorityKeypair()
   if (!authority) {
     throw new StakingUserError(
-      'COIN_ART_UPGRADE_AUTHORITY_SECRET_KEY is required for coin art upgrades (collection update authority or UpdateDelegate hot key).',
+      'Coin art upgrade hot key is not configured. Create one in Admin → Coin art upgrade (or set COIN_ART_UPGRADE_AUTHORITY_SECRET_KEY).',
       503
     )
   }
@@ -57,7 +57,7 @@ export async function updateCoinAssetUriOnChain(params: {
     throw new StakingUserError('Asset id and new URI are required for a coin art upgrade.', 400)
   }
 
-  const { umi } = createCoinUpdateAuthorityUmi()
+  const { umi } = await createCoinUpdateAuthorityUmi()
   const asset = await fetchAsset(umi as any, umiPublicKey(assetId))
   const previousUri = String((asset as any)?.uri ?? '')
   const name = String((asset as any)?.name ?? '')
