@@ -10,6 +10,11 @@ import { getFullAccountKeysForTransaction } from '@/lib/verify-transaction'
 import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
 import { getOwlSendFeeLamports } from '@/lib/owl-send/fee'
 import {
+  describeInvalidSolanaTxSignatureInput,
+  isValidSolanaTxSignatureBase58,
+  normalizeDepositTxSignatureInput,
+} from '@/lib/raffles/verify-prize-deposit-client'
+import {
   collectMplCoreTransferV1FromTx,
   type MplCoreLedgerTxShape,
 } from '@/lib/owl-send/mpl-core-ledger-transfers'
@@ -232,32 +237,52 @@ export function buildOwlSendLedgerDraftFromTx(params: {
   }
 }
 
+function rpcTxLookupErrorMessage(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e)
+  if (/WrongSize|invalid param/i.test(msg)) {
+    return 'That is not a valid Solana transaction signature. Copy the full signature from Solscan, or paste the Solscan /tx/ URL.'
+  }
+  return 'Could not load this transaction from RPC. Try again in a moment.'
+}
+
 export async function recoverOwlSendLedgerDraftFromSignature(params: {
   signature: string
   fromWallet: string
 }): Promise<RecoverOwlSendLedgerResult> {
-  const signature = params.signature.trim()
-  if (!signature || signature.length < 32) {
-    return { ok: false, error: 'Invalid transaction signature.' }
+  const signature = normalizeDepositTxSignatureInput(params.signature)
+  if (!isValidSolanaTxSignatureBase58(signature)) {
+    return {
+      ok: false,
+      error: describeInvalidSolanaTxSignatureInput(params.signature) || 'Invalid transaction signature.',
+    }
   }
 
   const rpcUrl = resolveServerSolanaRpcUrl()
   const connection = new Connection(rpcUrl, 'confirmed')
 
-  const transaction = await getTransactionCached(signature, async () => {
-    await new Promise((r) => setTimeout(r, 400))
-    let tx = await connection.getTransaction(signature, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
+  let transaction: Awaited<ReturnType<typeof getTransactionCached>>
+  try {
+    transaction = await getTransactionCached(signature, async () => {
+      await new Promise((r) => setTimeout(r, 400))
+      let tx = await connection.getTransaction(signature, {
+        commitment: 'confirmed',
+        maxSupportedTransactionVersion: 0,
+      })
+      if (!tx) {
+        tx = await connection.getTransaction(signature, { commitment: 'confirmed' })
+      }
+      return tx
     })
-    if (!tx) {
-      tx = await connection.getTransaction(signature, { commitment: 'confirmed' })
-    }
-    return tx
-  })
+  } catch (e) {
+    return { ok: false, error: rpcTxLookupErrorMessage(e) }
+  }
 
   if (!transaction?.meta) {
-    return { ok: false, error: 'Transaction not found on-chain yet. Try again in a moment.' }
+    return {
+      ok: false,
+      error:
+        'Transaction not found on-chain. If you copied from Discord, a character may have been dropped — paste the Solscan /tx/ URL.',
+    }
   }
 
   return buildOwlSendLedgerDraftFromTx({

@@ -29,6 +29,11 @@ export function normalizeDepositTxSignatureInput(raw: string | null | undefined)
   const stripped = noQuery.replace(/^[`"'“”]+|[`"'“”]+$/g, '').trim()
   if (/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(stripped)) return stripped
 
+  // Discord / mobile often wrap a signature across lines. Joining whitespace
+  // reconstructs the full sig; taking the first line alone yields WrongSize on RPC.
+  const compact = stripped.replace(/\s+/g, '')
+  if (/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(compact)) return compact
+
   // UMI bug: String(Uint8Array) → "42,191,137,…" — recover base58 when possible.
   if (/^\d+(,\d+)+$/.test(stripped)) {
     const recovered = umiSignatureToBase58(stripped)
@@ -37,10 +42,10 @@ export function normalizeDepositTxSignatureInput(raw: string | null | undefined)
 
   for (const part of stripped.split(/\s+/)) {
     const p = part.replace(/^[`'"]|[`'"]$/g, '').split('?')[0]?.trim() ?? ''
-    if (/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(p)) return p
+    if (isValidSolanaTxSignatureBase58(p)) return p
   }
 
-  return stripped
+  return compact || stripped
 }
 
 /** True when `sig` is base58 and decodes to a 64-byte Solana transaction signature. */
@@ -75,7 +80,7 @@ export function describeInvalidSolanaTxSignatureInput(raw: string | null | undef
   if (len < 87 || len > 88) {
     return `Signature length is ${len}; Solana signatures are usually 87–88 characters. Discord/mobile often truncates — copy the full sig from Solscan (or paste the Solscan URL).`
   }
-  return 'Signature is not a valid 64-byte Solana transaction signature. Copy the full signature from Solscan.'
+  return 'Signature is not a valid 64-byte Solana transaction signature. A character may have been dropped (common in Discord). Paste the Solscan /tx/ URL instead.'
 }
 
 export const VERIFY_PRIZE_DEPOSIT_MAX_ATTEMPTS = 14

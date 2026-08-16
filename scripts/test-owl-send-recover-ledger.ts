@@ -9,7 +9,11 @@ import {
   MPL_CORE_PROGRAM_ID,
   MPL_CORE_TRANSFER_V1_DISCRIMINATOR,
 } from '@/lib/owl-send/mpl-core-ledger-transfers'
-import { buildOwlSendLedgerDraftFromTx } from '@/lib/owl-send/recover-ledger-tx'
+import { buildOwlSendLedgerDraftFromTx, recoverOwlSendLedgerDraftFromSignature } from '@/lib/owl-send/recover-ledger-tx'
+import {
+  isValidSolanaTxSignatureBase58,
+  normalizeDepositTxSignatureInput,
+} from '@/lib/raffles/verify-prize-deposit-client'
 
 const payer = PublicKey.unique()
 const asset = PublicKey.unique()
@@ -208,4 +212,32 @@ function metaBalances(keys: PublicKey[], deltas: Map<string, number>) {
   assert.equal(result.draft.lines[0]!.recipient, recipient.toBase58())
 }
 
-console.log('test-owl-send-recover-ledger: ok')
+void (async () => {
+  // Truncated / WrongSize signatures must fail closed without throwing (RPC 500).
+  const real =
+    '37aDg2a6WsLN4prp77wamFYTrBhByNpHD785h4nWq4aUhyt9GWXbczyXTGqB2x1JLyTzqxeGsSRNLEY4wZ7DASCX'
+  const wrappedReal = `${real.slice(0, 48)}\n${real.slice(48)}`
+  const tooShort = '37aDg2a6WsLN4prp77wamFYTrBhByNpHD785h4nWq4aUhyt9'
+
+  assert.equal(isValidSolanaTxSignatureBase58(tooShort), false)
+  const recoveredBad = await recoverOwlSendLedgerDraftFromSignature({
+    signature: tooShort,
+    fromWallet: payer.toBase58(),
+  })
+  assert.equal(recoveredBad.ok, false)
+  if (recoveredBad.ok) throw new Error('expected short sig to fail')
+  assert.match(recoveredBad.error, /signature|Solscan|Discord/i)
+
+  const joined = normalizeDepositTxSignatureInput(wrappedReal)
+  assert.equal(joined, real)
+  assert.equal(isValidSolanaTxSignatureBase58(joined), true)
+  assert.equal(
+    normalizeDepositTxSignatureInput(`  ${real.slice(0, 20)}\n${real.slice(20)}  `),
+    real
+  )
+
+  console.log('test-owl-send-recover-ledger: ok')
+})().catch((e) => {
+  console.error(e)
+  process.exit(1)
+})

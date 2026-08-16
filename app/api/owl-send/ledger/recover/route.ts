@@ -8,6 +8,11 @@ import {
 } from '@/lib/db/owl-send-ledger'
 import { recoverOwlSendLedgerDraftFromSignature } from '@/lib/owl-send/recover-ledger-tx'
 import { verifyOwlSendLedgerTx } from '@/lib/owl-send/verify-ledger-tx'
+import {
+  describeInvalidSolanaTxSignatureInput,
+  isValidSolanaTxSignatureBase58,
+  normalizeDepositTxSignatureInput,
+} from '@/lib/raffles/verify-prize-deposit-client'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,9 +58,19 @@ export async function POST(request: NextRequest) {
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null
     if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
 
-    const txSignature = typeof body.txSignature === 'string' ? body.txSignature.trim() : ''
-    if (!txSignature || txSignature.length < 32) {
-      return NextResponse.json({ error: 'txSignature required' }, { status: 400 })
+    const txSignature = normalizeDepositTxSignatureInput(
+      typeof body.txSignature === 'string' ? body.txSignature : ''
+    )
+    if (!isValidSolanaTxSignatureBase58(txSignature)) {
+      return NextResponse.json(
+        {
+          error:
+            describeInvalidSolanaTxSignatureInput(
+              typeof body.txSignature === 'string' ? body.txSignature : ''
+            ) || 'txSignature required',
+        },
+        { status: 400 }
+      )
     }
     try {
       // eslint-disable-next-line no-new

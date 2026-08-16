@@ -131,6 +131,28 @@ function encodeTransferV1Data(): string {
 }
 
 {
+  // Live OwlSend Core Transfer data ("24o") is TransferV1
+  const keys = [payer, asset, collection, MPL_CORE_PROGRAM_ID, newOwner]
+  const tx = {
+    transaction: {
+      message: {
+        compiledInstructions: [
+          {
+            programIdIndex: 3,
+            accounts: [1, 2, 0, 3, 4, 3, 3],
+            data: '24o',
+          },
+        ],
+      },
+    },
+  }
+  const transfers = collectMplCoreTransferV1FromTx(tx, keys)
+  assert.equal(transfers.length, 1)
+  assert.equal(transfers[0]!.asset, asset.toBase58())
+  assert.equal(transfers[0]!.newOwner, newOwner.toBase58())
+}
+
+{
   // Wrong discriminator is ignored
   const keys = [payer, asset, MPL_CORE_PROGRAM_ID, newOwner]
   const tx = {

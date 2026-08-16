@@ -4,22 +4,18 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, ExternalLink, Loader2, RefreshCw, ScrollText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
 import type { OwlSendLedgerRow } from '@/lib/db/owl-send-ledger'
 import { ledgerModeLabel, OwlSendSolscanTxUrl } from '@/lib/owl-send/record-ledger'
 import { formatOwlSendFeeSol } from '@/lib/owl-send/fee'
 import { LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { useSiwsSession } from '@/hooks/use-siws-session'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
+import {
+  describeInvalidSolanaTxSignatureInput,
+  isValidSolanaTxSignatureBase58,
+  normalizeDepositTxSignatureInput,
+} from '@/lib/raffles/verify-prize-deposit-client'
 import { cn } from '@/lib/utils'
-
-function normalizeTxSignatureInput(raw: string): string {
-  const trimmed = raw.trim()
-  // Allow pasting a full Solscan URL
-  const fromUrl = trimmed.match(/\/tx\/([1-9A-HJ-NP-Za-km-z]{32,})/)
-  if (fromUrl?.[1]) return fromUrl[1]
-  return trimmed
-}
 
 /** Collapse control appears once the ledger has this many rows. */
 const LEDGER_COLLAPSE_AT = 5
@@ -114,9 +110,10 @@ export function OwlSendLedgerPanel({ wallet, refreshKey = 0 }: Props) {
 
   const recoverSend = useCallback(async () => {
     if (!wallet || !signedInAsWallet) return
-    const txSignature = normalizeTxSignatureInput(recoverSig)
-    if (txSignature.length < 32) {
-      setRecoverError('Paste a transaction signature (or Solscan tx URL).')
+    const txSignature = normalizeDepositTxSignatureInput(recoverSig)
+    const invalidReason = describeInvalidSolanaTxSignatureInput(recoverSig)
+    if (!isValidSolanaTxSignatureBase58(txSignature)) {
+      setRecoverError(invalidReason || 'Paste a transaction signature (or Solscan tx URL).')
       return
     }
     setRecovering(true)
@@ -376,10 +373,10 @@ export function OwlSendLedgerPanel({ wallet, refreshKey = 0 }: Props) {
                 {recoverOpen ? (
                   <div className="mt-2 space-y-2">
                     <p className="text-xs text-muted-foreground">
-                      Paste the Solscan signature for an OwlSend from this wallet (e.g. MPL Core)
-                      to add it to the ledger.
+                      Paste the Solscan URL or full signature for an OwlSend from this wallet (e.g. MPL
+                      Core). If Discord split the sig, paste the Solscan link.
                     </p>
-                    <Input
+                    <textarea
                       value={recoverSig}
                       onChange={(e) => {
                         setRecoverSig(e.target.value)
@@ -387,10 +384,15 @@ export function OwlSendLedgerPanel({ wallet, refreshKey = 0 }: Props) {
                         setRecoverNotice(null)
                       }}
                       placeholder="Transaction signature or Solscan URL"
-                      className="min-h-[44px] border-white/10 bg-black/40 font-mono text-xs"
+                      aria-label="OwlSend transaction signature"
+                      rows={3}
+                      className="min-h-[88px] w-full resize-y touch-manipulation rounded-shape-md border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs leading-relaxed break-all text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                       autoComplete="off"
+                      autoCapitalize="off"
+                      autoCorrect="off"
                       spellCheck={false}
                       disabled={recovering}
+                      inputMode="text"
                     />
                     {recoverError ? <p className="text-sm text-red-300">{recoverError}</p> : null}
                     {recoverNotice ? (
