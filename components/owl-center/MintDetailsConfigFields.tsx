@@ -320,6 +320,10 @@ export function MintDetailsConfigFields({
               className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
             />
           </label>
+          <p className="font-mono text-[10px] leading-relaxed text-[#5C6773] sm:col-span-2">
+            After saving, add wallets in the Whitelist · Wallets section below. Set Public start above so the WL window
+            ends when public mint opens.
+          </p>
         </div>
       ) : null}
         </>

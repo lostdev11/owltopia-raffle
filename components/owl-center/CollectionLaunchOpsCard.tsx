@@ -2,6 +2,7 @@
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { CreatorDeleteLaunchPanel } from '@/components/owl-center/CreatorDeleteLaunchPanel'
+import { CreatorWlWalletsPanel } from '@/components/owl-center/CreatorWlWalletsPanel'
 import { LaunchMintConfigPanel } from '@/components/owl-center/LaunchMintConfigPanel'
 import { LaunchPresaleOveragePanel } from '@/components/owl-center/LaunchPresaleOveragePanel'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
@@ -30,6 +31,8 @@ type Props = {
   /** Creator reveal day GET/POST path; omit for admin default. */
   revealDayApiPath?: string
   showMintConfig?: boolean
+  /** Partner / creator whitelist wallet list (Manage collection). */
+  showWlWallets?: boolean
   showMarketplace?: boolean
   showPresaleOverage?: boolean
   marketplaceCompact?: boolean
@@ -51,6 +54,7 @@ export function CollectionLaunchOpsCard({
   metadataApiPath,
   revealDayApiPath,
   showMintConfig = true,
+  showWlWallets = true,
   showMarketplace = true,
   showPresaleOverage = false,
   marketplaceCompact = false,
@@ -83,6 +87,10 @@ export function CollectionLaunchOpsCard({
           saveApiPath={saveApiPath}
           onSaved={onSaved}
         />
+      ) : null}
+
+      {showWlWallets ? (
+        <CreatorWlWalletsPanel embedded launchId={launchId} launch={launch} />
       ) : null}
 
       <RevealDayPanel
