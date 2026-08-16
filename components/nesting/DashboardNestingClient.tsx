@@ -70,6 +70,7 @@ type PendingClaimLedgerSync = {
 }
 import { PositionCard } from '@/components/nesting/PositionCard'
 import { NftPerchGroupedNestCard } from '@/components/nesting/NftPerchGroupedNestCard'
+import { CoinArtUpgradePanel } from '@/components/nesting/CoinArtUpgradePanel'
 import { nestingNftAssetLabels } from '@/lib/nesting/gen1-staking-pools'
 import {
   buildNestingPerchDisplayList,
@@ -4603,6 +4604,8 @@ export function DashboardNestingClient() {
           className={cn('mt-6', activeOwlNestCount >= 1 ? 'mb-2 sm:mb-0' : undefined)}
         />
       </section>
+
+      <CoinArtUpgradePanel />
 
       <p className="text-xs text-muted-foreground text-center">
         <Link href="/nesting" className="text-theme-prime underline-offset-4 hover:underline">
