@@ -4,18 +4,25 @@ import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
+import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 /**
- * Admin thaw for Metaplex Core PermanentFreezeDelegate on public_simple launches.
+ * Thaw Metaplex Core PermanentFreezeDelegate — admin or creator Manage collection.
+ * Thaw = unfreeze for trading (does not freeze).
  */
 export function AdminCoreCollectionThawPanel({
   launch,
   onChanged,
+  apiPath,
+  embedded = false,
 }: {
   launch: OwlCenterLaunchPublic
   onChanged?: () => void
+  /** Defaults to admin thaw route; pass creator path for partner Manage collection. */
+  apiPath?: string
+  embedded?: boolean
 }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -24,12 +31,13 @@ export function AdminCoreCollectionThawPanel({
 
   const thawed = launch.freeze_status === 'thawed'
   const canThaw = Boolean(launch.collection_mint?.trim()) && !thawed
+  const path = apiPath ?? `/api/admin/owl-center/collections/${launch.id}/core-thaw`
 
   async function thaw() {
     setBusy(true)
     setMsg(null)
     try {
-      const res = await fetch(`/api/admin/owl-center/collections/${launch.id}/core-thaw`, {
+      const res = await fetch(path, {
         method: 'POST',
         credentials: 'include',
       })
@@ -44,12 +52,12 @@ export function AdminCoreCollectionThawPanel({
     }
   }
 
-  return (
-    <CommandCard label="core_freeze.sys">
-      <p className="mb-3 text-sm text-[#9BA8B4]">
+  const body = (
+    <>
+      <p className={embedded ? 'mb-3 text-sm text-[#9BA8B4]' : 'mb-3 text-sm text-[#9BA8B4]'}>
         Thaw = unfreeze for trading. Only run this when mint is done (or you are ready for secondary
-        markets). One transaction enables transfers for every asset in the collection via
-        PermanentFreezeDelegate. This does not freeze — Freeze Collection at mint already did that.
+        markets). One transaction enables transfers for every asset in the collection. This does not
+        freeze — Freeze Collection at mint already did that.
       </p>
       <p className="mb-4 font-mono text-xs text-[#C5D0D8]">
         status={launch.freeze_status}
@@ -64,6 +72,12 @@ export function AdminCoreCollectionThawPanel({
           {msg}
         </p>
       ) : null}
-    </CommandCard>
+    </>
   )
+
+  if (embedded) {
+    return <CommandCardSection label="FREEZE · THAW">{body}</CommandCardSection>
+  }
+
+  return <CommandCard label="core_freeze.sys">{body}</CommandCard>
 }

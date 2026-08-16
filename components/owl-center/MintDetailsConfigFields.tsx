@@ -345,10 +345,10 @@ export function MintDetailsConfigFields({
                 />
               </label>
               <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                Supply
+                Supply (hard cap)
                 <input
                   type="number"
-                  min={0}
+                  min={1}
                   max={supply || undefined}
                   value={phase.supply}
                   onChange={(e) => {
@@ -426,9 +426,9 @@ export function MintDetailsConfigFields({
             </button>
           ) : null}
           <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
-            Set Public start above so the last allowlist window ends when public mint opens. Per-phase prices are
-            shown in UI; on-chain Candy Machine price is still the collection mint price unless redeployed with
-            separate guards.
+            Set Public start above so the last allowlist window ends when public mint opens. Phase supply is a hard
+            cap (mints stop for that phase when used). Per-phase prices are shown in UI; on-chain Candy Machine price
+            is still the collection mint price unless redeployed with separate guards.
           </p>
         </div>
       ) : null}

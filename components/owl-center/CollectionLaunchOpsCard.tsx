@@ -1,6 +1,7 @@
 'use client'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
+import { AdminCoreCollectionThawPanel } from '@/components/admin/AdminCoreCollectionThawPanel'
 import { CreatorDeleteLaunchPanel } from '@/components/owl-center/CreatorDeleteLaunchPanel'
 import { CreatorWlWalletsPanel } from '@/components/owl-center/CreatorWlWalletsPanel'
 import { LaunchMintConfigPanel } from '@/components/owl-center/LaunchMintConfigPanel'
@@ -10,6 +11,7 @@ import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPan
 import { MintShareLinkPanel } from '@/components/owl-center/MintShareLinkPanel'
 import { RevealDayPanel } from '@/components/owl-center/RevealDayPanel'
 import {
+  creatorCoreThawApiPath,
   creatorHashListApiPath,
   creatorMarketplaceApiPath,
   creatorMetadataRefreshApiPath,
@@ -30,9 +32,12 @@ type Props = {
   metadataApiPath?: string
   /** Creator reveal day GET/POST path; omit for admin default. */
   revealDayApiPath?: string
+  /** Creator Core thaw path; omit for admin default thaw API. */
+  coreThawApiPath?: string
   showMintConfig?: boolean
   /** Partner / creator whitelist wallet list (Manage collection). */
   showWlWallets?: boolean
+  showCoreThaw?: boolean
   showMarketplace?: boolean
   showPresaleOverage?: boolean
   marketplaceCompact?: boolean
@@ -53,8 +58,10 @@ export function CollectionLaunchOpsCard({
   saveApiPath,
   metadataApiPath,
   revealDayApiPath,
+  coreThawApiPath,
   showMintConfig = true,
   showWlWallets = true,
+  showCoreThaw = true,
   showMarketplace = true,
   showPresaleOverage = false,
   marketplaceCompact = false,
@@ -91,6 +98,15 @@ export function CollectionLaunchOpsCard({
 
       {showWlWallets ? (
         <CreatorWlWalletsPanel embedded launchId={launchId} launch={launch} />
+      ) : null}
+
+      {showCoreThaw ? (
+        <AdminCoreCollectionThawPanel
+          embedded
+          launch={launch}
+          apiPath={coreThawApiPath}
+          onChanged={onSaved}
+        />
       ) : null}
 
       <RevealDayPanel
@@ -147,6 +163,7 @@ export function creatorLaunchOpsCardProps(launchId: string, launch: OwlCenterLau
     revealDayApiPath: creatorRevealDayApiPath(launchId),
     marketplaceApiPath: creatorMarketplaceApiPath(launchId),
     hashListApiPath: creatorHashListApiPath(launchId),
+    coreThawApiPath: creatorCoreThawApiPath(launchId),
     marketplaceCreatorMode: true,
   }
 }

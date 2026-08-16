@@ -51,6 +51,15 @@ export async function listLaunchWlWallets(
   return (data ?? []).map((r) => mapRow(r as Record<string, unknown>))
 }
 
+/** Sum of used_mints for a phase — used as hard phase supply progress. */
+export async function sumLaunchWlPhaseUsedMints(
+  launchId: string,
+  phaseKey: string
+): Promise<number> {
+  const rows = await listLaunchWlWallets(launchId, phaseKey)
+  return rows.reduce((s, r) => s + Math.max(0, r.used_mints), 0)
+}
+
 export async function getLaunchWlWallet(
   launchId: string,
   wallet: string,

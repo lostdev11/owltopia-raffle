@@ -27,6 +27,10 @@ export function creatorWlWalletsApiPath(launchId: string): string {
   return `/api/owl-center/launches/${launchId}/wl-wallets`
 }
 
+export function creatorCoreThawApiPath(launchId: string): string {
+  return `/api/owl-center/launches/${launchId}/core-thaw`
+}
+
 export function publicHashListDownloadPath(slug: string): string {
   return `/api/owl-center/collections/${encodeURIComponent(slug)}/hash-list`
 }

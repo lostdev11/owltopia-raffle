@@ -140,4 +140,14 @@ const wallets = parseWlWalletText(
 assert.equal(wallets.length, 1)
 assert.equal(wallets[0], '7YxQg8HkwvH1L6iuY28JNWzJ96GWEx4qD8CK4M6nYkAY')
 
+/** Hard-cap helper: phaseRemaining = supply - used (same math as eligibility). */
+function phaseRemaining(supply: number, used: number): number {
+  const cap = Math.max(0, Math.floor(supply) || 0)
+  if (cap < 1) return 0
+  return Math.max(0, cap - Math.max(0, used))
+}
+assert.equal(phaseRemaining(10, 3), 7)
+assert.equal(phaseRemaining(10, 10), 0)
+assert.equal(phaseRemaining(0, 0), 0, 'unset supply blocks')
+
 console.log('ok — partner launch WL wallets + multi-phase helpers')

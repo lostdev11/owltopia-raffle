@@ -1,7 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js'
 
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
-import { getLaunchWlWallet } from '@/lib/db/owl-center-launch-wl-wallets'
+import { getLaunchWlWallet, sumLaunchWlPhaseUsedMints } from '@/lib/db/owl-center-launch-wl-wallets'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import {
   formatAllowlistOpensReason,
@@ -127,19 +127,33 @@ export async function buildSimpleMintEligibility(
     if (isLaunchWhitelistWindowOpen(launch)) {
       const activePhase = getLaunchActiveAllowlistPhase(launch)
       const phaseKey = activePhase?.key ?? 'wl'
-      const wlRow = await getLaunchWlWallet(launch.id, wallet, phaseKey)
-      if (!wlRow) {
+      const phaseSupply = Math.max(0, Math.floor(Number(activePhase?.supply ?? 0) || 0))
+      const phaseUsed = await sumLaunchWlPhaseUsedMints(launch.id, phaseKey)
+      const phaseRemaining = phaseSupply > 0 ? Math.max(0, phaseSupply - phaseUsed) : 0
+
+      if (phaseSupply < 1) {
         max_mintable = 0
         reason = activePhase
-          ? `Wallet is not on the ${activePhase.label} list`
-          : 'Wallet is not on this collection whitelist'
+          ? `${activePhase.label} supply is not set — creator must set phase supply in Mint details`
+          : 'Allowlist phase supply is not set'
+      } else if (phaseRemaining <= 0) {
+        max_mintable = 0
+        reason = `${activePhase?.label ?? 'Allowlist'} phase is sold out (${phaseUsed}/${phaseSupply})`
       } else {
-        const wlRemaining = Math.max(0, wlRow.allowed_mints - wlRow.used_mints)
-        if (wlRemaining <= 0) {
+        const wlRow = await getLaunchWlWallet(launch.id, wallet, phaseKey)
+        if (!wlRow) {
           max_mintable = 0
-          reason = `${activePhase?.label ?? 'Whitelist'} mint allocation exhausted`
+          reason = activePhase
+            ? `Wallet is not on the ${activePhase.label} list`
+            : 'Wallet is not on this collection whitelist'
         } else {
-          max_mintable = Math.min(max_mintable, wlRemaining)
+          const wlRemaining = Math.max(0, wlRow.allowed_mints - wlRow.used_mints)
+          if (wlRemaining <= 0) {
+            max_mintable = 0
+            reason = `${activePhase?.label ?? 'Whitelist'} mint allocation exhausted`
+          } else {
+            max_mintable = Math.min(max_mintable, wlRemaining, phaseRemaining)
+          }
         }
       }
     }
