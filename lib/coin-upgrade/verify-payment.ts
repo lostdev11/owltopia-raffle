@@ -28,7 +28,7 @@ function treasurySolIncrease(parsed: ParsedTransactionWithMeta, treasuryB58: str
 
 /**
  * Verifies the treasury received `minUnits` × per-coin upgrade fee from the holder wallet
- * (staking platform fee verification pattern, 0.15 SOL units instead of 0.001).
+ * (staking platform fee verification pattern, 0.1 SOL units instead of 0.001).
  */
 export async function verifyCoinArtUpgradeFeeTransaction(params: {
   signature: string

@@ -142,7 +142,7 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/me/coin-upgrade
  * Body: { asset_ids: string[], payment_signature?: string }
- * Verifies the 0.15 SOL × N fee transfer, records it consume-once, then
+ * Verifies the 0.1 SOL × N fee transfer, records it consume-once, then
  * repoints each coin's Core URI to the new art and applies the reward boost.
  * Retries for already-paid coins do not need a new payment signature.
  */

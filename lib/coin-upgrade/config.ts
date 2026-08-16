@@ -7,7 +7,7 @@ import { LAMPORTS_PER_SOL } from '@solana/web3.js'
  * this config from `GET /api/me/coin-upgrade`.
  */
 
-const DEFAULT_FEE_SOL = 0.15
+const DEFAULT_FEE_SOL = 0.1
 const DEFAULT_REWARD_MULTIPLIER = 2
 
 function readBoolean(raw: string | undefined): boolean {

@@ -1,6 +1,6 @@
 -- ============================================================================
 -- 218: Owltopia Coin NFT art upgrade (community vote: optional paid upgrade).
--- Holder pays COIN_ART_UPGRADE_FEE_SOL (default 0.15 SOL) per coin; the server
+-- Holder pays COIN_ART_UPGRADE_FEE_SOL (default 0.1 SOL) per coin; the server
 -- repoints the MPL Core asset URI to the new Arweave art. Works while nested —
 -- the FreezeDelegate nest lock only blocks transfers, not metadata updates.
 -- Upgraded coins earn 2x nested OWL (position snapshot bump / stake-time multiplier).
