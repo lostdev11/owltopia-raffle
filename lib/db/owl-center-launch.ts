@@ -334,6 +334,7 @@ export async function updateOwlCenterLaunchByIdAdmin(
     freeze_progress: OwlCenterFreezeProgress
     freeze_enabled: boolean
     unfreeze_date: string | null
+    mint_standard: 'token_metadata' | 'core'
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()
