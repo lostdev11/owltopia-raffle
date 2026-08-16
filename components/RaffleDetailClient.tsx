@@ -172,6 +172,7 @@ import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { getEscrowPrizeClaimSuccessCopy } from '@/lib/raffles/claim-prize-success-copy'
 import { getRaffleDisplayTitle } from '@/lib/raffles/nft-prize-raffle-title'
+import { buildRafflesHostBrowseHref } from '@/lib/raffles/host-wallet-copy'
 import { ClaimSuccessOverlay } from '@/components/ClaimSuccessOverlay'
 import { extractTransactionSignature } from '@/lib/claims/extract-transaction-signature'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
@@ -343,6 +344,7 @@ export function RaffleDetailClient({
   } | null>(null)
   const walletAddress = publicKey?.toBase58() ?? ''
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
+  const hostBrowseHref = buildRafflesHostBrowseHref(creatorWallet)
   const isCreator =
     connected &&
     !!walletAddress &&
@@ -4065,17 +4067,41 @@ export function RaffleDetailClient({
               </div>
               <div>
                 <p className={classes.labelText + ' text-muted-foreground'}>Created By</p>
-                {creatorDisplayName ? (
-                  <p className={classes.contentText + ' font-semibold'}>{creatorDisplayName}</p>
-                ) : null}
-                <p
-                  className={
-                    (creatorDisplayName ? 'text-sm ' : classes.contentText + ' font-semibold ') +
-                    'font-mono break-all text-foreground/90'
-                  }
-                >
-                  {creatorWallet || 'Unknown'}
-                </p>
+                {creatorDisplayName && hostBrowseHref ? (
+                  <>
+                    <p className={classes.contentText + ' font-semibold'}>
+                      <Link
+                        href={hostBrowseHref}
+                        className="text-primary font-semibold hover:underline underline-offset-2 touch-manipulation"
+                        title="View all raffles by this host"
+                      >
+                        {creatorDisplayName}
+                      </Link>
+                    </p>
+                    <p className="text-sm font-mono break-all text-foreground/90">{creatorWallet}</p>
+                  </>
+                ) : creatorDisplayName ? (
+                  <>
+                    <p className={classes.contentText + ' font-semibold'}>{creatorDisplayName}</p>
+                    <p className="text-sm font-mono break-all text-foreground/90">
+                      {creatorWallet || 'Unknown'}
+                    </p>
+                  </>
+                ) : hostBrowseHref ? (
+                  <p className={classes.contentText + ' font-semibold font-mono break-all'}>
+                    <Link
+                      href={hostBrowseHref}
+                      className="text-primary font-semibold hover:underline underline-offset-2 touch-manipulation font-mono break-all"
+                      title="View all raffles by this host"
+                    >
+                      {creatorWallet}
+                    </Link>
+                  </p>
+                ) : (
+                  <p className={classes.contentText + ' font-semibold font-mono break-all text-foreground/90'}>
+                    Unknown
+                  </p>
+                )}
               </div>
             </div>
 
