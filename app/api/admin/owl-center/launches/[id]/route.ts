@@ -6,6 +6,7 @@ import { bodyHasMintConfigFields, buildMintDetailsPatchFromBody } from '@/lib/ow
 import { datetimeLocalToIso, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
+import { syncPublicSimpleCandyGuards } from '@/lib/owl-center/sync-public-simple-guards'
 
 export const dynamic = 'force-dynamic'
 
@@ -99,7 +100,12 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   const updated = await updateOwlCenterLaunchByIdAdmin(id, patch)
   if (!updated) return jsonError('Update failed', 500)
 
-  return NextResponse.json({ ok: true, launch: updated })
+  let guard_sync: Awaited<ReturnType<typeof syncPublicSimpleCandyGuards>> | null = null
+  if (bodyHasMintConfigFields(body) && updated.mint_mode === 'public_simple') {
+    guard_sync = await syncPublicSimpleCandyGuards(updated)
+  }
+
+  return NextResponse.json({ ok: true, launch: updated, guard_sync })
 }
 
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {

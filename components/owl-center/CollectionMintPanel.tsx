@@ -11,6 +11,7 @@ import { MintSuccessOverlay } from '@/components/owl-center/MintSuccessOverlay'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
+import { isPublicSimpleMintOpen } from '@/lib/owl-center/phase-schedule'
 import { postCollectionConfirmMintWithRetry } from '@/lib/owl-center/confirm-mint-client'
 import { finalizeMintSessionOptimistic } from '@/lib/owl-center/mint-finalize-client'
 import { recordMintSessionConfirms } from '@/lib/owl-center/mint-session'
@@ -119,7 +120,8 @@ export function CollectionMintPanel({
 
   const trading = launch.active_phase === 'TRADING_ACTIVE'
   const soldOut = launch.active_phase === 'SOLD_OUT' || remaining <= 0
-  const mintClosed = trading || soldOut || mintControls.disabled
+  const waitingForSchedule = !isPublicSimpleMintOpen(launch) || elig?.mint_window_open === false
+  const mintClosed = trading || soldOut || mintControls.disabled || waitingForSchedule
 
   const dismissSuccess = useCallback(() => {
     setStep('idle')
@@ -222,6 +224,11 @@ export function CollectionMintPanel({
     }
     if (!elig?.is_eligible) {
       setErr(elig?.reason ?? 'Not eligible')
+      setStep('error')
+      return
+    }
+    if (elig.mint_window_open === false || !isPublicSimpleMintOpen(launch)) {
+      setErr(elig.reason ?? 'Mint is not open yet')
       setStep('error')
       return
     }
@@ -409,6 +416,8 @@ export function CollectionMintPanel({
 
         {soldOut ? (
           <p className="font-mono text-sm text-[#00FF9C]">SOLD OUT</p>
+        ) : waitingForSchedule ? (
+          <p className="text-sm text-[#C5D0D8]">{elig?.reason ?? 'Mint is not open yet'}</p>
         ) : mintClosed ? (
           <p className="text-sm text-[#9BA8B4]">{elig?.reason ?? 'Mint unavailable'}</p>
         ) : (

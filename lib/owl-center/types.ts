@@ -181,6 +181,10 @@ export type SimpleMintEligibilityResponse = {
   platform_treasury_wallet: string | null
   mint_network: 'devnet' | 'mainnet'
   mint_operational: boolean
+  /** False when PUBLIC start / mint-opens is still in the future (or unscheduled behind WL/presale). */
+  mint_window_open: boolean
+  /** ISO time the public mint button becomes live, when scheduled. */
+  phase_starts_at: string | null
 }
 
 export type CollectionMintStateResponse = {

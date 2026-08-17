@@ -60,9 +60,21 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      const j = (await res.json()) as { error?: string; launch?: OwlCenterLaunchPublic }
+      const j = (await res.json()) as {
+        error?: string
+        launch?: OwlCenterLaunchPublic
+        guard_sync?: { ok?: boolean; status?: string; error?: string; reason?: string }
+      }
       if (!res.ok) throw new Error(j.error || 'save_failed')
-      setMsg('Mint details saved — collection cards will reflect on next load.')
+      if (j.guard_sync && j.guard_sync.ok === false) {
+        setMsg(
+          `Mint details saved, but on-chain Candy Guard was not updated (${j.guard_sync.error ?? 'unknown'}). Public mint dates and the per-wallet cap may still be site-only until guards are synced.`
+        )
+      } else if (j.guard_sync?.status === 'updated') {
+        setMsg('Mint details saved — on-chain start date and per-wallet cap updated.')
+      } else {
+        setMsg('Mint details saved — collection cards will reflect on next load.')
+      }
       onSaved?.()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'save_failed')

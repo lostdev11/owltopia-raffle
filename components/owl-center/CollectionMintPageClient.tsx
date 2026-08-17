@@ -10,6 +10,7 @@ import { CollectionMintPanel } from '@/components/owl-center/CollectionMintPanel
 import { CollectionSoldOutPanel } from '@/components/owl-center/CollectionSoldOutPanel'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { LaunchPhaseTimeline } from '@/components/owl-center/LaunchPhaseTimeline'
+import { MintCountdown } from '@/components/owl-center/MintCountdown'
 import { MintAllocationBar } from '@/components/owl-center/MintAllocationBar'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { PhaseBadge } from '@/components/owl-center/PhaseBadge'
@@ -78,7 +79,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
   const { launch, supply, mint_controls, marketplace, terminal, mint_network, presale_pool, minted_mints } = state
   const trading = launch.active_phase === 'TRADING_ACTIVE'
   const soldOut = launch.active_phase === 'SOLD_OUT' || supply.remaining <= 0
-  const userMintPhase = connected && elig?.is_eligible ? launch.active_phase : null
+  const userMintPhase = connected && elig?.is_eligible && elig.mint_window_open !== false ? launch.active_phase : null
   const canEditMintSettings =
     isOwlCenterAdmin ||
     (!!sessionWallet &&
@@ -134,6 +135,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
             </div>
           ) : null}
           <LaunchPhaseTimeline active={launch.active_phase} launch={launch} userMintPhase={userMintPhase} />
+          <MintCountdown launch={launch} />
           <CollectionMintPanel
             slug={slug}
             launch={launch}

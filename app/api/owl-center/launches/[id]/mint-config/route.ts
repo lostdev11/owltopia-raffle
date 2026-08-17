@@ -6,6 +6,7 @@ import { buildMintDetailsPatchFromBody, bodyHasMintConfigFields } from '@/lib/ow
 import { syncLaunchHubCoverImage } from '@/lib/owl-center/launch-cover-image'
 import { getOwlCenterLaunchByIdAdmin, updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
+import { syncPublicSimpleCandyGuards } from '@/lib/owl-center/sync-public-simple-guards'
 
 export const dynamic = 'force-dynamic'
 
@@ -77,6 +78,11 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   if (!updated) return jsonError('Update failed', 500)
   if (!hasMintFields && coverRaw === undefined) return jsonError('No fields to update', 400)
 
+  let guard_sync: Awaited<ReturnType<typeof syncPublicSimpleCandyGuards>> | null = null
+  if (hasMintFields && updated.mint_mode === 'public_simple') {
+    guard_sync = await syncPublicSimpleCandyGuards(updated)
+  }
+
   const db = getSupabaseAdmin()
   await db.from('owl_center_activity_logs').insert({
     launch_id: id,
@@ -89,5 +95,5 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     event_type: 'system',
   })
 
-  return NextResponse.json({ ok: true, launch: updated })
+  return NextResponse.json({ ok: true, launch: updated, guard_sync })
 }

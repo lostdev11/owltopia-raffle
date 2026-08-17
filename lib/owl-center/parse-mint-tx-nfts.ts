@@ -3,6 +3,7 @@ import 'server-only'
 import { Connection, PublicKey } from '@solana/web3.js'
 
 import { fetchParsedTransactionConfirmed } from '@/lib/gen2-presale/verify-payment'
+import { collectCoreAssetsCreatedInTx } from '@/lib/owl-center/parse-candy-machine-mint-tx'
 import { resolveOwlCenterMintVerifyRpcUrl, type OwlMintNetwork } from '@/lib/solana/network'
 
 const TOKEN_METADATA_PROGRAM = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
@@ -16,7 +17,7 @@ export async function extractMintedNftMintsFromTx(
   const parsed = await fetchParsedTransactionConfirmed(connection, txSignature)
   if (!parsed?.meta) return []
 
-  const mints = new Set<string>()
+  const mints = new Set<string>(collectCoreAssetsCreatedInTx(parsed))
 
   for (const bal of parsed.meta.postTokenBalances ?? []) {
     if (bal.uiTokenAmount?.decimals === 0 && bal.uiTokenAmount?.uiAmount === 1 && bal.mint) {

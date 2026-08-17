@@ -7,8 +7,10 @@ import { Connection } from '@solana/web3.js'
 import bs58 from 'bs58'
 import {
   generateSigner,
+  isSome,
   publicKey,
   signAllTransactions,
+  some,
   transactionBuilder,
   type Transaction,
   type TransactionBuilder,
@@ -29,7 +31,7 @@ import {
   withMintSessionBudget,
   type MintSessionDeadline,
 } from '@/lib/owl-center/mint-time-budget'
-import { fetchCandyMachine, mintV1 } from '@/lib/solana/core-candy-machine'
+import { fetchCandyMachine, mintV1, safeFetchCandyGuard } from '@/lib/solana/core-candy-machine'
 import {
   getLaunchCandyMachineId,
   getLaunchCollectionMint,
@@ -166,6 +168,14 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
       }
     }
 
+    const candyGuardAccount = await withSolanaRpcRetry(
+      () => safeFetchCandyGuard(umi, cmAccount.mintAuthority),
+      MINT_SOLANA_RPC_RETRY
+    )
+    const mintLimitGuard = candyGuardAccount?.guards.mintLimit
+    const mintArgs =
+      mintLimitGuard && isSome(mintLimitGuard) ? { mintLimit: some({ id: mintLimitGuard.value.id }) } : undefined
+
     let platformFeeLamports = 0n
     if (collectPlatformMintFee) {
       if (!feeQuote.ok) return { ok: false, error: feeQuote.error }
@@ -216,6 +226,7 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
           candyMachine,
           asset,
           collection,
+          ...(mintArgs ? { mintArgs } : {}),
         })
       )
       return { ok: true, builder }

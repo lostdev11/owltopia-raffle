@@ -163,8 +163,9 @@ export function MintDetailsConfigFields({
           />
         </label>
         <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
-          Each wallet can mint up to this many NFTs during PUBLIC (and presale / WL when those phases are enabled).
-          Enforced on-chain at confirm time.
+          Each wallet can mint up to this many NFTs during PUBLIC (and presale / WL when those phases are
+          enabled). Enforced on-chain via Candy Guard mintLimit — changing this after deploy updates the
+          on-chain cap when you save.
         </p>
       </div>
 
@@ -209,7 +210,8 @@ export function MintDetailsConfigFields({
             className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
           <span className="font-mono text-[10px] normal-case tracking-normal text-[#5C6773]">
-            Only needed when presale or whitelist phases run first — leave empty to open straight into public mint.
+            Required when whitelist or presale is enabled — public stays closed until this time. Leave empty
+            only for a straight public mint (opens at “Mint opens”, or immediately if that is also empty).
           </span>
         </label>
       </div>

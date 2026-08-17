@@ -3,6 +3,7 @@ import { Connection, PublicKey } from '@solana/web3.js'
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/lib/owl-center/mint-policy'
+import { publicSimpleMintClosedInfo } from '@/lib/owl-center/phase-schedule'
 import { OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS, isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
@@ -19,7 +20,11 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { invalidLaunchMintIdReason } from '@/lib/solana/validate-pubkey'
 
-async function walletPublicMintCount(launchId: string, wallet: string): Promise<number> {
+async function walletPublicMintCount(
+  launchId: string,
+  wallet: string,
+  network: 'mainnet' | 'devnet'
+): Promise<number> {
   const db = getSupabaseAdmin()
   const { data } = await db
     .from('owl_center_mint_events')
@@ -27,6 +32,7 @@ async function walletPublicMintCount(launchId: string, wallet: string): Promise<
     .eq('launch_id', launchId)
     .eq('wallet_address', wallet)
     .eq('phase', 'PUBLIC')
+    .eq('network', network)
   return (data ?? []).reduce((sum, row) => sum + Number((row as { quantity: number }).quantity ?? 0), 0)
 }
 
@@ -59,8 +65,10 @@ export async function buildSimpleMintEligibility(
     onChainRemaining != null ? Math.min(dbRemaining, onChainRemaining) : dbRemaining
   const onChainSoldOut = onChainRemaining === 0 && dbRemaining > 0
   const wallet = walletRaw?.trim() ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
-  const wallet_minted = wallet ? await walletPublicMintCount(launch.id, wallet) : 0
+  const wallet_minted = wallet ? await walletPublicMintCount(launch.id, wallet, mint_network) : 0
   const walletRemaining = Math.max(0, launch.wallet_mint_limit - wallet_minted)
+  const scheduleClosed = publicSimpleMintClosedInfo(launch)
+  const mint_window_open = scheduleClosed == null
 
   const prices_lamports = await getLaunchPriceLamportsQuotes(launch)
   const unit_lamports_estimate = prices_lamports.public
@@ -108,6 +116,8 @@ export async function buildSimpleMintEligibility(
       : 'Sold out'
   } else if (launch.active_phase !== 'PUBLIC') {
     reason = `Mint opens during PUBLIC phase (current: ${launch.active_phase})`
+  } else if (scheduleClosed) {
+    reason = scheduleClosed.reason
   } else if (!wallet) {
     reason = 'Connect wallet to mint'
   } else if (walletRemaining <= 0) {
@@ -155,5 +165,7 @@ export async function buildSimpleMintEligibility(
     platform_treasury_wallet,
     mint_network,
     mint_operational,
+    mint_window_open,
+    phase_starts_at: scheduleClosed?.opensAt ?? null,
   }
 }

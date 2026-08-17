@@ -6,7 +6,6 @@ import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/sync-launch-
 import type { OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 import { verifyGen2MintTransaction } from '@/lib/owl-center/verify-gen2-mint-tx'
 import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
-import { shouldRequireOwlCenterPlatformMintFeeServer } from '@/lib/owl-center/platform-mint-fee'
 import { fetchParsedTransactionConfirmed } from '@/lib/gen2-presale/verify-payment'
 import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
 import { getLaunchCandyMachineId, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
@@ -27,6 +26,75 @@ export type ReconcileLaunchMintsResult = {
   recorded: number
   sold_out_synced: boolean
   sellout_prep: boolean
+}
+
+const DIRECT_INSERT_RPC_ERRORS = new Set([
+  'wallet_mint_limit',
+  'mint_paused',
+  'mint_closed',
+  'phase_mismatch',
+])
+
+/** Record an on-chain public_simple mint. Wallet-limit / pause gates still apply to live confirms; orphans skip them. */
+async function recordPublicSimpleOrphanMint(
+  launch: OwlCenterLaunchPublic,
+  cmId: string,
+  network: 'mainnet' | 'devnet',
+  txSignature: string,
+  mint: { wallet: string; mintedNftMints: string[]; quantity: number }
+): Promise<boolean> {
+  const db = getSupabaseAdmin()
+  const { data, error } = await db.rpc('confirm_owl_center_gen2_mint', {
+    p_launch_slug: launch.slug,
+    p_wallet: mint.wallet,
+    p_tx_signature: txSignature,
+    p_quantity: mint.quantity,
+    p_phase: 'PUBLIC',
+    p_minted_nft_mints: mint.mintedNftMints,
+    p_network: network,
+    p_event_candy_machine_id: cmId,
+  })
+  const row = data as { ok?: boolean; error?: string } | null
+  if (!error && row?.ok === true) return true
+
+  const rpcErr = typeof row?.error === 'string' ? row.error : ''
+  if (rpcErr === 'duplicate_tx') return false
+  if (!DIRECT_INSERT_RPC_ERRORS.has(rpcErr)) {
+    if (error) console.error('[reconcile-public-simple] confirm RPC', error.message)
+    else if (rpcErr) console.error('[reconcile-public-simple] confirm rejected', rpcErr)
+    return false
+  }
+
+  const { error: insertErr } = await db.from('owl_center_mint_events').insert({
+    launch_id: launch.id,
+    wallet_address: mint.wallet,
+    quantity: mint.quantity,
+    phase: 'PUBLIC',
+    tx_signature: txSignature,
+    minted_nft_mints: mint.mintedNftMints,
+    network,
+    candy_machine_id: cmId,
+  })
+  if (insertErr) {
+    if (/duplicate|unique/i.test(insertErr.message)) return false
+    console.error('[reconcile-public-simple] direct insert failed', insertErr.message)
+    return false
+  }
+
+  const { data: launchRow } = await db
+    .from('owl_center_launches')
+    .select('minted_count, total_supply')
+    .eq('id', launch.id)
+    .maybeSingle()
+  const current = Number((launchRow as { minted_count?: number } | null)?.minted_count ?? 0)
+  const total = Number((launchRow as { total_supply?: number } | null)?.total_supply ?? 0)
+  const next = Math.min(total || Number.MAX_SAFE_INTEGER, current + mint.quantity)
+  await db
+    .from('owl_center_launches')
+    .update({ minted_count: next, updated_at: new Date().toISOString() })
+    .eq('id', launch.id)
+
+  return true
 }
 
 /**
@@ -77,8 +145,7 @@ export async function reconcileOrphanCandyMachineMints(
       limit: Math.min(500, Math.max(50, opts?.maxSignatures ?? 200)),
     })
 
-    const requirePlatformFee = shouldRequireOwlCenterPlatformMintFeeServer()
-    const phase = launch.active_phase
+    const mintStandard = launch.mint_standard === 'core' ? 'core' : 'token_metadata'
 
     for (const entry of [...sigs].reverse()) {
       if (supply.itemsRedeemed <= launch.minted_count + recorded) break
@@ -95,23 +162,17 @@ export async function reconcileOrphanCandyMachineMints(
         wallet: mint.wallet,
         candyMachineId: cmId,
         network,
-        requirePlatformMintFee: requirePlatformFee,
+        // Orphans already exist on-chain; record them even if they skipped the site fee path.
+        requirePlatformMintFee: false,
+        mintQuantity: mint.quantity,
+        minMintedNfts: mint.quantity,
+        mintStandard,
+        coreAssetAddresses: mintStandard === 'core' ? mint.mintedNftMints : undefined,
       })
       if (!verified.ok) continue
 
-      const { data, error } = await db.rpc('confirm_owl_center_gen2_mint', {
-        p_launch_slug: launch.slug,
-        p_wallet: mint.wallet,
-        p_tx_signature: entry.signature,
-        p_quantity: mint.quantity,
-        p_phase: phase,
-        p_minted_nft_mints: mint.mintedNftMints,
-        p_network: network,
-        p_event_candy_machine_id: cmId,
-      })
-
-      const row = data as { ok?: boolean; error?: string; duplicate_tx?: boolean } | null
-      if (error || !row?.ok) continue
+      const wrote = await recordPublicSimpleOrphanMint(launch, cmId, network, entry.signature, mint)
+      if (!wrote) continue
 
       recorded++
       knownSigs.add(entry.signature)

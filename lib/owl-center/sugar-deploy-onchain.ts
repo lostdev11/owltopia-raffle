@@ -17,14 +17,13 @@ import {
   percentAmount,
   publicKey,
   signerIdentity,
-  sol,
   some,
   type Umi,
 } from '@metaplex-foundation/umi'
 import { mplCandyMachine } from '@metaplex-foundation/mpl-candy-machine'
 import { mplTokenMetadata } from '@metaplex-foundation/mpl-token-metadata'
 
-import { publicSimpleCandyGuardGuards } from '@/lib/owl-center/sugar-public-simple-guards'
+import { publicSimpleCandyGuardUmiGuards, publicSimpleGuardOptsFromLaunch } from '@/lib/owl-center/sugar-public-simple-guards'
 import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import { walletSplitsToMetaplexCreators } from '@/lib/owl-center/wallet-splits'
 import {
@@ -54,6 +53,13 @@ export type OnchainSugarDeployInput = {
     | 'seller_fee_basis_points'
     | 'mint_standard'
     | 'freeze_enabled'
+    | 'wallet_mint_limit'
+    | 'launch_deadline_at'
+    | 'phase_schedule'
+    | 'creator_wl_enabled'
+    | 'creator_presale_enabled'
+    | 'wl_supply'
+    | 'presale_supply'
   >
   configLines: SugarDeployConfigLine[]
   collectionMetadataUri: string
@@ -214,12 +220,9 @@ export async function deployPublicSimpleCandyMachineOnchain(
       }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
     }
 
-    const botTax = publicSimpleCandyGuardGuards().botTax
     await createCandyGuard(umi, {
       base: guardBase,
-      guards: {
-        botTax: some({ lamports: sol(0.001), lastInstruction: botTax.lastInstruction }),
-      },
+      guards: publicSimpleCandyGuardUmiGuards(publicSimpleGuardOptsFromLaunch(launch)),
     }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
 
     const candyGuard = findCandyGuardPda(umi, { base: guardBase.publicKey })
