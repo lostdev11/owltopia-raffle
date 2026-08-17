@@ -7,14 +7,14 @@ import {
   getOwlCenterLaunchBySlugAdmin,
   insertOwlCenterLaunchAdmin,
 } from '@/lib/db/owl-center-launch'
+import { generateUniqueOwlCenterLaunchSlug } from '@/lib/db/owl-center-launch-slug'
+import { isValidOwlCenterLaunchSlug } from '@/lib/owl-center/launch-slug'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { parseStandardFreezeConfig } from '@/lib/owl-center/freeze-config'
 
 export const dynamic = 'force-dynamic'
-
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
@@ -47,15 +47,17 @@ export async function POST(request: NextRequest) {
     return jsonError('Invalid JSON', 400)
   }
 
-  const slug = typeof body.slug === 'string' ? body.slug.trim().toLowerCase() : ''
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   const symbol = typeof body.symbol === 'string' ? body.symbol.trim() : ''
   const supply = Number(body.total_supply)
 
-  if (!SLUG_RE.test(slug) || slug === 'gen2') return jsonError('Invalid slug (lowercase a-z0-9, no gen2)', 400)
   if (!name || name.length > 120) return jsonError('Invalid name', 400)
   if (!symbol || symbol.length > 16) return jsonError('Invalid symbol', 400)
   if (!Number.isInteger(supply) || supply < 1 || supply > 50_000) return jsonError('Invalid total supply', 400)
+
+  const requestedSlug = typeof body.slug === 'string' ? body.slug.trim().toLowerCase() : ''
+  const slug = requestedSlug || (await generateUniqueOwlCenterLaunchSlug(name))
+  if (!isValidOwlCenterLaunchSlug(slug)) return jsonError('Invalid slug (lowercase a-z0-9, no reserved names)', 400)
 
   const existing = await getOwlCenterLaunchBySlugAdmin(slug)
   if (existing) return jsonError('Slug already exists', 409)

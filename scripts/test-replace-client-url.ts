@@ -8,10 +8,13 @@ import { replaceClientUrl } from '../lib/client/replace-url'
 
 type HistoryCall = { data: unknown; url: string }
 
+// Omit required DOM `window` so `delete` is valid under strict TS
+type GlobalWithOptionalWindow = Omit<typeof globalThis, 'window'> & {
+  window?: Window & typeof globalThis
+}
+
 function withMockHistory(run: (calls: HistoryCall[]) => void) {
-  const g = globalThis as typeof globalThis & {
-    window?: Window & typeof globalThis
-  }
+  const g = globalThis as GlobalWithOptionalWindow
   const prevWindow = g.window
   const calls: HistoryCall[] = []
   const state = { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: ['mock'] }
@@ -50,7 +53,7 @@ withMockHistory((calls) => {
 })
 
 // No window → no throw
-const g = globalThis as typeof globalThis & { window?: Window & typeof globalThis }
+const g = globalThis as GlobalWithOptionalWindow
 const prev = g.window
 delete g.window
 assert.doesNotThrow(() => replaceClientUrl('/dashboard'))

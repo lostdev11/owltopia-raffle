@@ -15,11 +15,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     return { title: `Owltopia Gen2 | Owl Center | ${PLATFORM_NAME}` }
   }
   const launch = await getOwlCenterLaunchBySlug(slug)
+  const canonicalSlug = launch?.slug || slug
   const title = launch ? `${launch.name} | Owl Center | ${PLATFORM_NAME}` : `Collection | ${PLATFORM_NAME}`
   const description = launch?.description ?? `Mint ${launch?.name ?? 'collection'} on Owl Center`
 
   const site = getSiteBaseUrl().replace(/\/$/, '')
-  const canonicalUrl = `${site}/owl-center/collection/${encodeURIComponent(slug)}`
+  const canonicalUrl = `${site}/owl-center/collection/${encodeURIComponent(canonicalSlug)}`
   // Per-collection OG art (the collection PFP) — overrides the platform raffle fallback.
   const ogImageUrl = `${canonicalUrl}/opengraph-image?v=${OG_IMAGE_CACHE_VERSION}`
   const ogAlt = launch ? `${launch.name} on Owl Center` : PLATFORM_NAME
@@ -54,8 +55,12 @@ export default async function OwlCenterCollectionSlugPage({ params }: Props) {
   const launch = await getOwlCenterLaunchBySlug(slug)
   if (!launch) notFound()
 
+  if (slug !== 'gen2' && launch.slug !== slug) {
+    redirect(`/owl-center/collection/${encodeURIComponent(launch.slug)}`)
+  }
+
   if (launch.mint_mode === 'public_simple') {
-    return <CollectionMintPageClient slug={slug} launchName={launch.name} />
+    return <CollectionMintPageClient slug={launch.slug} launchName={launch.name} />
   }
 
   return (
