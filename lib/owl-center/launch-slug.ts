@@ -3,6 +3,8 @@
  * Opaque `sub-<uuid>` slugs are a legacy submission format.
  */
 
+import { stripPhishingShapedSlug } from '@/lib/slugs/phishing-shaped'
+
 export const OWL_CENTER_LAUNCH_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 
 /** Matches creator-submission slugs: `sub-` + 32 hex chars (UUID without dashes). */
@@ -51,9 +53,9 @@ function collapseHyphens(slug: string): string {
   return slug.replace(/-+/g, '-').replace(/^-+|-+$/g, '')
 }
 
-/** Collection name → kebab slug (no uniqueness). Empty / reserved names become `collection`. */
+/** Collection name → kebab slug with phishing-shaped tokens removed. */
 export function slugifyOwlCenterLaunchName(name: string): string {
-  const core = collapseHyphens(
+  const core = stripPhishingShapedSlug(
     name
       .trim()
       .toLowerCase()
@@ -85,7 +87,7 @@ export function allocateUniqueLaunchSlug(base: string, taken: ReadonlySet<string
     if (!taken.has(candidate) && isValidOwlCenterLaunchSlug(candidate)) return candidate
   }
 
-  const fallback = withNumericSuffix(cleaned, Date.now() % 1_000_000)
+  const fallback = withNumericSuffix(cleaned, 1001)
   if (isValidOwlCenterLaunchSlug(fallback) && !taken.has(fallback)) return fallback
-  return withNumericSuffix('collection', Date.now() % 1_000_000)
+  return withNumericSuffix('collection', 1001)
 }

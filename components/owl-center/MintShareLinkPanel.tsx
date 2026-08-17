@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Check, Copy, Share2 } from 'lucide-react'
 
 import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
-import { mintShortUrl } from '@/lib/owl-center/mint-share'
+import { mintCanonicalUrl } from '@/lib/owl-center/mint-share'
 
 type Props = {
   slug: string
@@ -18,22 +18,22 @@ type Props = {
 const PANEL_LABEL = 'share.sys · MINT LINK'
 
 export function MintShareLinkPanel({ slug, collectionName, embedded, anchorId, first }: Props) {
-  const [shortUrl, setShortUrl] = useState('')
+  const [shareUrl, setShareUrl] = useState('')
   const [copied, setCopied] = useState(false)
   const [shareMsg, setShareMsg] = useState<string | null>(null)
   const [canNativeShare, setCanNativeShare] = useState(false)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    setShortUrl(mintShortUrl(window.location.origin, slug))
+    setShareUrl(mintCanonicalUrl(window.location.origin, slug))
     setCanNativeShare(typeof navigator !== 'undefined' && typeof navigator.share === 'function')
   }, [slug])
 
   const onCopy = async () => {
-    if (!shortUrl) return
+    if (!shareUrl) return
     try {
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(shortUrl)
+        await navigator.clipboard.writeText(shareUrl)
         setCopied(true)
         window.setTimeout(() => setCopied(false), 2000)
       }
@@ -44,11 +44,11 @@ export function MintShareLinkPanel({ slug, collectionName, embedded, anchorId, f
   }
 
   const onShare = async () => {
-    if (!shortUrl) return
+    if (!shareUrl) return
     const text = `Mint ${collectionName} on Owl Center:`
     try {
       if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-        await navigator.share({ title: collectionName, text, url: shortUrl })
+        await navigator.share({ title: collectionName, text, url: shareUrl })
         setShareMsg('Shared')
       } else {
         await onCopy()
@@ -64,12 +64,12 @@ export function MintShareLinkPanel({ slug, collectionName, embedded, anchorId, f
     <div className="space-y-3">
       <div className="flex items-center gap-2 rounded-md border border-[#1A222B] bg-[#0F1419] px-3 py-2.5">
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-[#9BA8B4]">
-          {shortUrl || '…'}
+          {shareUrl || '…'}
         </span>
         <button
           type="button"
           onClick={() => void onCopy()}
-          disabled={!shortUrl}
+          disabled={!shareUrl}
           className="inline-flex h-9 shrink-0 touch-manipulation items-center gap-1.5 rounded border border-[#00FF9C]/35 px-3 font-mono text-[11px] font-bold uppercase tracking-widest text-[#00FF9C] hover:bg-[#00FF9C]/10 disabled:opacity-50"
           aria-label="Copy mint link"
         >
@@ -92,7 +92,7 @@ export function MintShareLinkPanel({ slug, collectionName, embedded, anchorId, f
 
       {shareMsg ? <p className="text-center font-mono text-[10px] text-[#9BA8B4]">{shareMsg}</p> : null}
       <p className="font-mono text-[10px] leading-snug text-[#5C6773]">
-        Short link uses the collection name — X, Discord, and iMessage show the art preview.
+        Official Owl Center mint page — X, Discord, and iMessage show the collection art.
       </p>
     </div>
   )
