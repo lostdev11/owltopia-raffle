@@ -1377,11 +1377,17 @@ input[type="submit"] {
 
 /** Compact Owl Center launch tiles — ~300px covers, centered on mobile and desktop. */
 .owl-center-collection-card-grid {
-  display: grid;
+  display: flex;
   width: 100%;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 300px));
+  flex-wrap: wrap;
   justify-content: center;
-  justify-items: center;
+  align-items: stretch;
   gap: 1rem;
+}
+
+.owl-center-collection-card-grid > * {
+  flex: 0 1 300px;
+  width: min(100%, 300px);
+  max-width: 300px;
 }
 
