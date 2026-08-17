@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+import { consumeLaunchWlMints } from '@/lib/db/owl-center-launch-wl-wallets'
 import { buildSimpleMintEligibility } from '@/lib/owl-center/simple-mint-eligibility'
+import { getLaunchActiveAllowlistPhase, isLaunchWhitelistWindowOpen } from '@/lib/owl-center/launch-wl-window'
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
 import { shouldRequireOwlCenterPlatformMintFeeServer } from '@/lib/owl-center/platform-mint-fee'
 import { verifyGen2MintTransaction } from '@/lib/owl-center/verify-gen2-mint-tx'
 import { getOwlCenterLaunchBySlug, getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
+import { parseOwlCenterCollectionSlugParam } from '@/lib/owl-center/launch-slug'
 import { getLaunchCandyMachineId, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { owlCenterSolanaExplorerTxUrl, owlMintNetworkFromParam, type OwlMintNetwork } from '@/lib/solana/network'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -13,7 +16,6 @@ import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
 
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 const SIG_REGEX = /^[1-9A-HJ-NP-Za-km-z]{64,128}$/
 
 export async function POST(request: NextRequest, context: { params: Promise<{ slug: string }> }) {
@@ -24,8 +26,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   }
 
   const { slug: raw } = await context.params
-  const slug = raw?.trim().toLowerCase() ?? ''
-  if (!SLUG_RE.test(slug) || slug === 'gen2') {
+  const slug = parseOwlCenterCollectionSlugParam(raw)
+  if (!slug) {
     return NextResponse.json({ error: 'Invalid collection slug' }, { status: 400 })
   }
 
@@ -109,7 +111,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     ? body.mintedNftMints.filter((x): x is string => typeof x === 'string' && x.length > 0)
     : []
 
-  const eligibilityPre = await buildSimpleMintEligibility(slug, wallet, { skipChainReconcile: true })
+  const eligibilityPre = await buildSimpleMintEligibility(launch.slug, wallet, { skipChainReconcile: true })
   if (!eligibilityPre) return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
   if (eligibilityPre.active_phase !== phase) {
     return NextResponse.json({ error: 'Phase mismatch — refresh and try again' }, { status: 400 })
@@ -123,7 +125,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
 
   const db = getSupabaseAdmin()
   const { data, error } = await db.rpc('confirm_owl_center_gen2_mint', {
-    p_launch_slug: slug,
+    p_launch_slug: launch.slug,
     p_wallet: wallet,
     p_tx_signature: txSig,
     p_quantity: qty,
@@ -134,7 +136,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   })
 
   if (error) {
-    console.error('confirm_owl_center_gen2_mint', slug, error)
+    console.error('confirm_owl_center_gen2_mint', launch.slug, error)
     return NextResponse.json(
       { error: 'Transaction succeeded but database record failed — contact support with your signature.' },
       { status: 500 }
@@ -159,9 +161,18 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     return NextResponse.json({ error: human[err] ?? err }, { status })
   }
 
+  // Soft-consume launch WL spots after a successful (non-duplicate) confirm during the WL window.
+  if (!row.duplicate_tx && isLaunchWhitelistWindowOpen(launch)) {
+    const activePhase = getLaunchActiveAllowlistPhase(launch)
+    const consumed = await consumeLaunchWlMints(launch.id, wallet, qty, activePhase?.key ?? 'wl')
+    if (!consumed.ok) {
+      console.error('consumeLaunchWlMints after confirm', slug, wallet, consumed.error)
+    }
+  }
+
   const [eligibility, launchPublic] = await Promise.all([
-    buildSimpleMintEligibility(slug, wallet, { skipChainReconcile: true }),
-    getOwlCenterLaunchBySlug(slug),
+    buildSimpleMintEligibility(launch.slug, wallet, { skipChainReconcile: true }),
+    getOwlCenterLaunchBySlug(launch.slug),
   ])
 
   let sellout_prep: Awaited<ReturnType<typeof import('@/lib/owl-center/sellout-marketplace-prep').runSelloutMarketplacePrep>> | null =
@@ -176,7 +187,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   }
 
   const launchAfter = sellout_prep?.ok
-    ? await getOwlCenterLaunchBySlug(slug)
+    ? await getOwlCenterLaunchBySlug(launch.slug)
     : launchPublic
 
   return NextResponse.json({

@@ -27,7 +27,7 @@ export function HubCardCoverImage({
       alt={alt}
       className={[
         'absolute inset-0 h-full w-full',
-        fit === 'cover' ? 'object-cover' : 'object-contain p-6',
+        fit === 'cover' ? 'object-cover object-center' : 'object-contain object-center',
         className,
       ]
         .filter(Boolean)

@@ -102,10 +102,11 @@ async function main() {
         magic_eden_url: meUrl,
         tensor_url: tensorUrl,
         metadata_status: 'READY_FOR_INDEXING',
+        orbis_status: 'READY_FOR_INDEXING',
         magic_eden_status: 'READY_FOR_INDEXING',
         tensor_status: 'READY_FOR_INDEXING',
         sellout_prepared_at: now,
-        notes: `Sell-out prep ${now} · ${mints.length} mint(s) in hash list.`,
+        notes: `Sell-out prep ${now} · ${mints.length} mint(s) in hash list. List on Orbis (#list) first.`,
         updated_at: now,
       },
       { onConflict: 'launch_id' }
@@ -127,7 +128,7 @@ async function main() {
 
   await db.from('owl_center_activity_logs').insert({
     launch_id: launch.id,
-    message: `SELL_OUT marketplace prep · ${mints.length} mint(s) · hash list ready · ME=${meUrl ?? '—'}`,
+    message: `SELL_OUT marketplace prep · ${mints.length} mint(s) · hash list ready · Orbis+ME+Tensor ready for indexing`,
     event_type: 'system',
   })
 

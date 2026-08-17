@@ -33,6 +33,7 @@ export function freezeStatusPayload(launch: OwlCenterLaunchPublic) {
     status: launch.status,
     magic_eden_url: launch.magic_eden_url,
     tensor_url: launch.tensor_url,
+    orbis_url: launch.orbis_url,
     minted_count: launch.minted_count,
     total_supply: launch.total_supply,
   }
@@ -294,7 +295,9 @@ export async function processGen2ThawBatch(): Promise<{
       }
     }
 
-    const hasMarketplace = Boolean(launch.magic_eden_url?.trim() || launch.tensor_url?.trim())
+    const hasMarketplace = Boolean(
+      launch.orbis_url?.trim() || launch.magic_eden_url?.trim() || launch.tensor_url?.trim()
+    )
     const trading_activated = hasMarketplace
     const patch: Parameters<typeof updateOwlCenterLaunchAdmin>[1] = {
       freeze_status: 'thawed',
@@ -362,7 +365,7 @@ export async function unlockGen2FreezeEscrowAdmin(): Promise<
       frozen_count: 0,
       error: undefined,
     })
-    const hasMarketplace = Boolean(cur.magic_eden_url?.trim() || cur.tensor_url?.trim())
+    const hasMarketplace = Boolean(cur.orbis_url?.trim() || cur.magic_eden_url?.trim() || cur.tensor_url?.trim())
     const patch: Parameters<typeof updateOwlCenterLaunchAdmin>[1] = {
       freeze_status: 'thawed',
       freeze_thawed_at: cur.freeze_thawed_at ?? now,

@@ -9,6 +9,8 @@ import { LaunchCoverImageFields } from '@/components/owl-center/LaunchCoverImage
 import {
   MintDetailsConfigFields,
 } from '@/components/owl-center/MintDetailsConfigFields'
+import { isLaunchSupplyConfigLocked } from '@/lib/owl-center/launch-edit-locks'
+import { OWL_CENTER_MAX_LAUNCH_SUPPLY } from '@/lib/owl-center/launch-limits'
 import {
   mintDetailsFormFromLaunch,
   mintDetailsPayloadFromForm,
@@ -35,6 +37,9 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
+  const supplyLocked = isLaunchSupplyConfigLocked(launch)
+  const royaltiesLocked = isLaunchRoyaltyLocked(launch)
+
   useEffect(() => {
     setValues(mintDetailsFormFromLaunch(launch))
   }, [launch])
@@ -46,14 +51,17 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
       return
     }
 
+    const supply = Number(values.total_supply)
+    if (!Number.isInteger(supply) || supply < 1 || supply > OWL_CENTER_MAX_LAUNCH_SUPPLY) {
+      setErr(`Total supply must be a whole number between 1 and ${OWL_CENTER_MAX_LAUNCH_SUPPLY.toLocaleString('en-US')}.`)
+      return
+    }
+
     setSaving(true)
     setMsg(null)
     setErr(null)
     try {
-      const payload = mintDetailsPayloadFromForm({
-        ...values,
-        total_supply: String(launch.total_supply),
-      })
+      const payload = mintDetailsPayloadFromForm(values)
       const res = await fetch(saveApiPath ?? `/api/admin/owl-center/launches/${launchId}`, {
         method: 'PATCH',
         credentials: 'include',
@@ -85,11 +93,19 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
 
   const mintDetailsSection = (
     <>
+      <p className="mb-4 text-sm leading-relaxed text-[#9BA8B4]">
+        Edit supply, Metaplex Core vs legacy, mint price, schedule, per-wallet limit, and fund wallets.
+        {supplyLocked
+          ? ' Supply and on-chain standard are locked after Candy Machine deploy.'
+          : ' Change supply and Core settings anytime before Candy Machine deploy.'}
+      </p>
       <MintDetailsConfigFields
-        values={{ ...values, total_supply: String(launch.total_supply) }}
-        onChange={(next) => setValues({ ...next, total_supply: String(launch.total_supply) })}
+        values={values}
+        onChange={setValues}
         defaultWallet={launch.creator_wallet?.trim() ?? ''}
-        royaltiesLocked={isLaunchRoyaltyLocked(launch)}
+        royaltiesLocked={royaltiesLocked}
+        showSupplyField
+        supplyConfigLocked={supplyLocked}
       />
       <div className="mt-6 flex flex-wrap gap-2 border-t border-[#1A222B] pt-4">
         <DeployButton type="button" disabled={saving} onClick={() => void save()}>
@@ -122,18 +138,20 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
   if (embedded) {
     return (
       <>
-        <CommandCardSection first label="MINT_DETAILS · CREATOR_CONFIG">
+        <CommandCardSection id="mint-details" label="MINT DETAILS">
           {mintDetailsSection}
         </CommandCardSection>
-        <CommandCardSection label="HUB_CARD · COVER">{coverSection}</CommandCardSection>
+        <CommandCardSection label="HUB CARD · COVER">{coverSection}</CommandCardSection>
       </>
     )
   }
 
   return (
     <div className="grid gap-6">
-      <CommandCard label="MINT_DETAILS · CREATOR_CONFIG">{mintDetailsSection}</CommandCard>
-      <CommandCard label="HUB_CARD · COVER">{coverSection}</CommandCard>
+      <CommandCard id="mint-details" label="MINT DETAILS">
+        {mintDetailsSection}
+      </CommandCard>
+      <CommandCard label="HUB CARD · COVER">{coverSection}</CommandCard>
     </div>
   )
 }

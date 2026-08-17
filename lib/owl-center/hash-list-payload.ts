@@ -4,6 +4,7 @@ import { collectMintedNftMintsForLaunch } from '@/lib/owl-center/hash-list'
 import {
   formatHashListJson,
   formatHashListText,
+  orbisListCollectionUrl,
   suggestMagicEdenCollectionUrl,
   suggestTensorCollectionUrl,
 } from '@/lib/owl-center/marketplace-urls'
@@ -21,8 +22,10 @@ export type HashListPayload = {
   suggested_tensor_url: string | null
   collection_mint: string | null
   mint_network: 'mainnet' | 'devnet'
+  orbis_list_url: string
   me_submit_hint: string
   tensor_submit_hint: string
+  orbis_submit_hint: string
 }
 
 export async function buildHashListPayloadForLaunch(launchId: string): Promise<HashListPayload | null> {
@@ -44,9 +47,12 @@ export async function buildHashListPayloadForLaunch(launchId: string): Promise<H
     suggested_tensor_url: collectionMint ? suggestTensorCollectionUrl(collectionMint) : null,
     collection_mint: collectionMint || null,
     mint_network: network,
+    orbis_list_url: orbisListCollectionUrl(),
     me_submit_hint:
       'Upload hash_list_text to Magic Eden creator hub → Collection → Submit hash list. Then paste collection URL in admin when listed.',
     tensor_submit_hint:
       'Submit collection_mint on Tensor creator tools for verification. Then paste trade URL when listed.',
+    orbis_submit_hint:
+      'Open Orbis List Your Collection (#list), paste collection_mint, complete UA verify. Paste the live Orbis collection URL when indexed.',
   }
 }

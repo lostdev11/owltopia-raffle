@@ -1054,6 +1054,22 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       return
     }
 
+    const maxPerWalletRaw = ((formData.get('max_tickets_per_wallet') as string) ?? '').trim()
+    let maxTicketsPerWalletParsed: number | null = null
+    if (maxPerWalletRaw) {
+      maxTicketsPerWalletParsed = parseInt(maxPerWalletRaw, 10)
+      if (!Number.isFinite(maxTicketsPerWalletParsed) || maxTicketsPerWalletParsed <= 0) {
+        alert('Max tickets per person must be a positive whole number, or leave empty for no per-person limit.')
+        focusFormField('max_tickets_per_wallet')
+        return
+      }
+      if (maxTicketsParsed != null && maxTicketsPerWalletParsed > maxTicketsParsed) {
+        alert('Max tickets per person cannot exceed the raffle max tickets.')
+        focusFormField('max_tickets_per_wallet')
+        return
+      }
+    }
+
     const descriptionValue = ((formData.get('description') as string) ?? '').trim()
       ? (formData.get('description') as string)
       : ''
@@ -1095,6 +1111,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       ticket_price: tpParsed.value,
       currency,
       max_tickets: maxTicketsParsed,
+      max_tickets_per_wallet: maxTicketsPerWalletParsed,
       rank: rankValue && rankValue.trim() ? rankValue.trim() : null,
       floor_price: floorPriceValue,
       start_time: localDateTimeToUtc(startTime),
@@ -2458,6 +2475,21 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               placeholder="Leave empty for unlimited tickets"
               className="min-h-[44px] touch-manipulation"
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="max_tickets_per_wallet">Max tickets per person (optional)</Label>
+            <Input
+              id="max_tickets_per_wallet"
+              name="max_tickets_per_wallet"
+              type="number"
+              min={1}
+              placeholder="Leave empty for no per-person limit"
+              className="min-h-[44px] touch-manipulation"
+            />
+            <p className="text-xs text-muted-foreground">
+              Caps how many tickets one wallet can buy. Leave empty for no personal limit.
+            </p>
           </div>
 
           <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-4 space-y-3">

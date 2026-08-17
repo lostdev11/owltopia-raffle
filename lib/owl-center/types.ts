@@ -109,6 +109,7 @@ export type OwlCenterLaunchPublic = {
   wallet_mint_limit: number
   magic_eden_url: string | null
   tensor_url: string | null
+  orbis_url: string | null
   is_featured: boolean
   is_paused: boolean
   launch_deadline_at: string | null
@@ -153,6 +154,11 @@ export type OwlCenterLaunchPublic = {
   freeze_authority: string | null
   freeze_thawed_at: string | null
   freeze_progress: OwlCenterFreezeProgress
+  /**
+   * Partner multi-allowlist phases (Team / OG / WL / …) before PUBLIC.
+   * Empty = legacy single WL via creator_wl_enabled + phase_schedule.WHITELIST.
+   */
+  partner_allowlist_phases: import('@/lib/owl-center/partner-allowlist-phases').PartnerAllowlistPhase[]
 }
 
 export type SimpleMintEligibilityResponse = {
@@ -166,7 +172,11 @@ export type SimpleMintEligibilityResponse = {
   wallet_mint_limit: number
   unit_lamports_estimate: string | null
   sol_usd_price: number | null
+  /** Live mint unit price (active allowlist phase or public), USDC notional. */
   price_usdc: number | null
+  /** When minting in an allowlist window — phase key/label for UI. */
+  active_allowlist_key: string | null
+  active_allowlist_label: string | null
   /** Owltopia platform fee per mint (USD notional; collected as SOL on-chain). */
   platform_mint_fee_usdc: number
   /** Live lamports quote for platform fee (SOL/USD). */
@@ -196,6 +206,7 @@ export type CollectionMintStateResponse = {
     trading_links_active: boolean
     magic_eden_url: string | null
     tensor_url: string | null
+    orbis_url: string | null
     hash_list_ready: boolean
     sellout_prepared_at: string | null
     mint_addresses_recorded: number

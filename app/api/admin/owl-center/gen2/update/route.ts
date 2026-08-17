@@ -84,6 +84,8 @@ export async function POST(request: NextRequest) {
   else if (typeof body.magic_eden_url === 'string') patch.magic_eden_url = body.magic_eden_url.trim() || null
   if (body.tensor_url === null) patch.tensor_url = null
   else if (typeof body.tensor_url === 'string') patch.tensor_url = body.tensor_url.trim() || null
+  if (body.orbis_url === null) patch.orbis_url = null
+  else if (typeof body.orbis_url === 'string') patch.orbis_url = body.orbis_url.trim() || null
   if (body.minted_count !== undefined) {
     const n = Number(body.minted_count)
     if (!Number.isInteger(n) || n < 0) {

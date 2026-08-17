@@ -6,6 +6,7 @@ import {
   TransactionSignatureAlreadyUsedError,
   InsufficientTicketsError,
   ConfirmEntryInvalidStateError,
+  WalletTicketLimitError,
   saveTransactionSignature,
   attachEntryPaymentSignature,
   updateEntryStatus,
@@ -191,6 +192,7 @@ export async function POST(request: NextRequest) {
           err instanceof TxAlreadyUsedError ||
           err instanceof TransactionSignatureAlreadyUsedError ||
           err instanceof InsufficientTicketsError ||
+          err instanceof WalletTicketLimitError ||
           err instanceof ConfirmEntryInvalidStateError
         ) {
           return verifyBatchErr('confirm_failed', 400)

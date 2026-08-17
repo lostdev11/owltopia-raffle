@@ -269,6 +269,8 @@ export interface Raffle {
   /** Per-ticket price in `alternate_ticket_currency` (null when single-currency tickets). */
   alternate_ticket_price: number | null
   max_tickets: number | null
+  /** Optional confirmed-ticket cap per wallet for this raffle. NULL = unlimited per wallet. */
+  max_tickets_per_wallet: number | null
   min_tickets: number | null
   start_time: string
   end_time: string

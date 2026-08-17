@@ -16,6 +16,7 @@ import {
 } from '@/lib/nesting/token-stake-transfer'
 import { runGuardedOwlRewardClaim } from '@/lib/nesting/guarded-owl-reward-claim'
 import { thawWalletNftForPool } from '@/lib/nesting/nft-lock-service'
+import { getCoinArtUpgradeRewardMultiplierForAsset } from '@/lib/coin-upgrade/reward-boost'
 
 async function stakeOnChain(input: Parameters<StakingMutationAdapter['stakeIntoPool']>[0]) {
   if (input.pool.asset_type === 'token') {
@@ -60,12 +61,15 @@ async function stakeOnChain(input: Parameters<StakingMutationAdapter['stakeIntoP
       ? null
       : new Date(stakedAt.getTime() + input.pool.lock_period_days * 24 * 60 * 60 * 1000)
 
+  // Art-upgraded Owltopia coins earn boosted OWL (community vote: 1 -> 2 per day).
+  const artUpgradeMultiplier = await getCoinArtUpgradeRewardMultiplierForAsset(input.asset_identifier)
+
   const position = await insertStakingPosition({
     wallet_address: input.wallet,
     pool_id: input.pool.id,
     asset_identifier: input.asset_identifier,
     amount: input.amount,
-    reward_rate_snapshot: Number(input.pool.reward_rate),
+    reward_rate_snapshot: Number(input.pool.reward_rate) * artUpgradeMultiplier,
     reward_rate_unit_snapshot: input.pool.reward_rate_unit,
     reward_token_snapshot: input.pool.reward_token,
     staked_at: stakedAt.toISOString(),

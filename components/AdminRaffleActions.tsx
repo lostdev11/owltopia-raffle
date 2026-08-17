@@ -286,6 +286,7 @@ export function AdminRaffleActions({
   const [nftFloorInput, setNftFloorInput] = useState('')
   const [nftTicketInput, setNftTicketInput] = useState('')
   const [nftMaxInput, setNftMaxInput] = useState('')
+  const [nftMaxPerWalletInput, setNftMaxPerWalletInput] = useState('')
   const [nftEconomicsConfirm, setNftEconomicsConfirm] = useState(false)
   const [savingNftEconomics, setSavingNftEconomics] = useState(false)
 
@@ -312,6 +313,9 @@ export function AdminRaffleActions({
       r.ticket_price != null && Number.isFinite(r.ticket_price) ? String(r.ticket_price) : ''
     )
     setNftMaxInput(r.max_tickets != null ? String(r.max_tickets) : '')
+    setNftMaxPerWalletInput(
+      r.max_tickets_per_wallet != null ? String(r.max_tickets_per_wallet) : ''
+    )
     setNftEconomicsConfirm(false)
   }, [])
 
@@ -848,6 +852,17 @@ export function AdminRaffleActions({
         return
       }
       payload.max_tickets = m
+    }
+    if (nftMaxPerWalletInput.trim() !== '') {
+      const m = parseInt(nftMaxPerWalletInput.trim(), 10)
+      if (!Number.isFinite(m) || m <= 0) {
+        setMessage({
+          type: 'error',
+          text: 'Max tickets per person must be a positive whole number or left empty.',
+        })
+        return
+      }
+      payload.max_tickets_per_wallet = m
     }
 
     setSavingNftEconomics(true)
@@ -1392,6 +1407,18 @@ export function AdminRaffleActions({
                     value={nftMaxInput}
                     onChange={(e) => setNftMaxInput(e.target.value)}
                     placeholder="Leave empty for unlimited"
+                    className="touch-manipulation min-h-[44px]"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="admin-nft-max-per-wallet">Max tickets per person (optional)</Label>
+                  <Input
+                    id="admin-nft-max-per-wallet"
+                    inputMode="numeric"
+                    value={nftMaxPerWalletInput}
+                    onChange={(e) => setNftMaxPerWalletInput(e.target.value)}
+                    placeholder="Leave empty for no per-person limit"
                     className="touch-manipulation min-h-[44px]"
                     autoComplete="off"
                   />

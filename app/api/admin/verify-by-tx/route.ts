@@ -381,6 +381,29 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (raffle.max_tickets_per_wallet) {
+      const allEntries = await getEntriesByRaffleId(raffle.id)
+      const walletConfirmedTickets = allEntries
+        .filter(
+          e =>
+            e.status === 'confirmed' &&
+            e.id !== entry.id &&
+            e.wallet_address === entry.wallet_address
+        )
+        .reduce((sum, e) => sum + e.ticket_quantity, 0)
+
+      if (walletConfirmedTickets + entry.ticket_quantity > raffle.max_tickets_per_wallet) {
+        await updateEntryStatus(entry.id, 'rejected', transactionSignature)
+        return NextResponse.json(
+          {
+            error: `Cannot confirm entry: would exceed per-wallet ticket limit of ${raffle.max_tickets_per_wallet}`,
+            details: `This wallet already has ${walletConfirmedTickets} confirmed ticket(s); only ${Math.max(0, raffle.max_tickets_per_wallet - walletConfirmedTickets)} remaining for this wallet.`,
+          },
+          { status: 400 }
+        )
+      }
+    }
+
     // NOTE: For this admin-only restore endpoint, we've already:
     // - Fetched on-chain transaction details via getTransactionDetails
     // - Ensured the payment went to the configured raffle wallet

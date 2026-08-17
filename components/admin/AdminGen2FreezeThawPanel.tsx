@@ -14,6 +14,7 @@ type ThawPayload = {
   status: string
   magic_eden_url: string | null
   tensor_url: string | null
+  orbis_url: string | null
   minted_count: number
   total_supply: number
 }
@@ -160,9 +161,9 @@ export function AdminGen2FreezeThawPanel({ onChanged }: { onChanged?: () => void
             </p>
           ) : null}
 
-          {!data?.magic_eden_url && !data?.tensor_url ? (
+          {!data?.orbis_url && !data?.magic_eden_url && !data?.tensor_url ? (
             <p className="border border-[#FFD769]/35 bg-[#FFD769]/10 px-3 py-2 text-xs text-[#FFD769]">
-              Set Magic Eden / Tensor URLs above so thaw completion can flip to TRADING_ACTIVE automatically.
+              Set Orbis / Magic Eden / Tensor URLs above so thaw completion can flip to TRADING_ACTIVE automatically.
             </p>
           ) : null}
 

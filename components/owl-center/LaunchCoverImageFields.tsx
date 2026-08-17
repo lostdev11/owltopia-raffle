@@ -139,8 +139,8 @@ export function LaunchCoverImageFields({
       </label>
 
       {preview ? (
-        <div className="relative aspect-[4/3] border border-[#1A222B] bg-[#0F1419]">
-          <HubCardCoverImage imageUrl={preview} />
+        <div className="relative aspect-square max-w-sm overflow-hidden border border-[#1A222B] bg-[#0F1419]">
+          <HubCardCoverImage imageUrl={preview} fit="cover" />
         </div>
       ) : null}
 
