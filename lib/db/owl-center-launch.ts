@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
 import { parseActivePhases, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
+import { parsePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
 import { parseWalletSplitsFromDb } from '@/lib/owl-center/wallet-splits'
 import { isOpaqueOwlCenterLaunchSlug } from '@/lib/owl-center/launch-slug'
 import {
@@ -175,6 +176,7 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
     freeze_authority: data.freeze_authority != null ? String(data.freeze_authority) : null,
     freeze_thawed_at: data.freeze_thawed_at != null ? String(data.freeze_thawed_at) : null,
     freeze_progress: parseFreezeProgress(data.freeze_progress),
+    partner_allowlist_phases: parsePartnerAllowlistPhases(data.partner_allowlist_phases),
   }
 }
 
@@ -427,6 +429,8 @@ export async function updateOwlCenterLaunchByIdAdmin(
     freeze_enabled: boolean
     unfreeze_date: string | null
     slug: string
+    mint_standard: 'token_metadata' | 'core'
+    partner_allowlist_phases: import('@/lib/owl-center/partner-allowlist-phases').PartnerAllowlistPhase[]
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()

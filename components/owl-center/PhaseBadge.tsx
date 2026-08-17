@@ -16,13 +16,19 @@ export function PhaseBadge({
   phase,
   pulse,
   presaleSoldOut,
+  overrideLabel,
 }: {
   phase: OwlCenterPhase
   pulse?: boolean
   presaleSoldOut?: boolean
+  /** When set, replaces the default phase label (e.g. scheduled public open). */
+  overrideLabel?: string | null
 }) {
   const label =
-    phase === 'PRESALE' && presaleSoldOut ? `${owlCenterPhaseLabel(phase)} · sold out` : owlCenterPhaseLabel(phase)
+    overrideLabel?.trim() ||
+    (phase === 'PRESALE' && presaleSoldOut
+      ? `${owlCenterPhaseLabel(phase)} · sold out`
+      : owlCenterPhaseLabel(phase))
 
   return (
     <span

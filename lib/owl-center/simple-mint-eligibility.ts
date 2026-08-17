@@ -1,8 +1,17 @@
 import { Connection, PublicKey } from '@solana/web3.js'
 
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
+import { getLaunchWlWallet, sumLaunchWlPhaseUsedMints } from '@/lib/db/owl-center-launch-wl-wallets'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
+import { launchScheduledPublicReason } from '@/lib/owl-center/launch-mint-open'
+import {
+  formatAllowlistOpensReason,
+  getLaunchActiveAllowlistPhase,
+  isLaunchWaitingForWhitelist,
+  isLaunchWhitelistWindowOpen,
+} from '@/lib/owl-center/launch-wl-window'
 import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/lib/owl-center/mint-policy'
+import { isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import { OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS, isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
@@ -108,12 +117,52 @@ export async function buildSimpleMintEligibility(
       : 'Sold out'
   } else if (launch.active_phase !== 'PUBLIC') {
     reason = `Mint opens during PUBLIC phase (current: ${launch.active_phase})`
+  } else if (isLaunchWaitingForWhitelist(launch)) {
+    reason = formatAllowlistOpensReason(launch)
+  } else if (!isLaunchWhitelistWindowOpen(launch) && !isPhaseOpenBySchedule(launch, 'PUBLIC')) {
+    // No early allowlist window — honor scheduled PUBLIC open (#110).
+    reason = launchScheduledPublicReason(launch) ?? 'Public mint is not open yet'
   } else if (!wallet) {
     reason = 'Connect wallet to mint'
   } else if (walletRemaining <= 0) {
     reason = `Wallet limit reached (${launch.wallet_mint_limit} per wallet)`
   } else {
     max_mintable = Math.min(walletRemaining, remaining)
+
+    if (isLaunchWhitelistWindowOpen(launch)) {
+      const activePhase = getLaunchActiveAllowlistPhase(launch)
+      const phaseKey = activePhase?.key ?? 'wl'
+      const phaseSupply = Math.max(0, Math.floor(Number(activePhase?.supply ?? 0) || 0))
+      const phaseUsed = await sumLaunchWlPhaseUsedMints(launch.id, phaseKey)
+      const phaseRemaining = phaseSupply > 0 ? Math.max(0, phaseSupply - phaseUsed) : 0
+
+      if (phaseSupply < 1) {
+        max_mintable = 0
+        reason = activePhase
+          ? `${activePhase.label} supply is not set — creator must set phase supply in Mint details`
+          : 'Allowlist phase supply is not set'
+      } else if (phaseRemaining <= 0) {
+        max_mintable = 0
+        reason = `${activePhase?.label ?? 'Allowlist'} phase is sold out (${phaseUsed}/${phaseSupply})`
+      } else {
+        const wlRow = await getLaunchWlWallet(launch.id, wallet, phaseKey)
+        if (!wlRow) {
+          max_mintable = 0
+          reason = activePhase
+            ? `Wallet is not on the ${activePhase.label} list`
+            : 'Wallet is not on this collection whitelist'
+        } else {
+          const wlRemaining = Math.max(0, wlRow.allowed_mints - wlRow.used_mints)
+          if (wlRemaining <= 0) {
+            max_mintable = 0
+            reason = `${activePhase?.label ?? 'Whitelist'} mint allocation exhausted`
+          } else {
+            max_mintable = Math.min(max_mintable, wlRemaining, phaseRemaining)
+          }
+        }
+      }
+    }
+
     is_eligible = max_mintable > 0
     if (is_eligible && platformFeeEnabled && wallet && platformFeeQuote?.ok) {
       const feeBal = await assertOwlCenterPlatformMintFeeSolBalance(
