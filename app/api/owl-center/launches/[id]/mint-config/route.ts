@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { requireLaunchMintEditorSession } from '@/lib/owl-center/creator-access'
 import { buildMintDetailsPatchFromBody, bodyHasMintConfigFields } from '@/lib/owl-center/launch-mint-config-patch'
 import { syncLaunchHubCoverImage } from '@/lib/owl-center/launch-cover-image'
+import { getAssetPackageByLaunchId, upsertAssetPackageForLaunch } from '@/lib/db/owl-center-asset-package'
 import { getOwlCenterLaunchByIdAdmin, updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -76,6 +77,16 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
   if (!updated) return jsonError('Update failed', 500)
   if (!hasMintFields && coverRaw === undefined) return jsonError('No fields to update', 400)
+
+  if (
+    hasMintFields &&
+    updated.total_supply !== launch.total_supply
+  ) {
+    const existing = await getAssetPackageByLaunchId(id)
+    if (existing) {
+      await upsertAssetPackageForLaunch(id, { expected_supply: updated.total_supply })
+    }
+  }
 
   const db = getSupabaseAdmin()
   await db.from('owl_center_activity_logs').insert({

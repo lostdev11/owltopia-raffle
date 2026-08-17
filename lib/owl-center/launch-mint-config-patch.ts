@@ -1,3 +1,5 @@
+import { parseStandardFreezeConfig } from '@/lib/owl-center/freeze-config'
+import { isLaunchSupplyConfigLocked } from '@/lib/owl-center/launch-edit-locks'
 import { parseMintDetailsConfig } from '@/lib/owl-center/launch-mint-config'
 import { isLaunchRoyaltyLocked, launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import { parseWalletSplitsFromBody, walletSplitsEqual } from '@/lib/owl-center/wallet-splits'
@@ -5,6 +7,7 @@ import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import type { updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 
 export const MINT_CONFIG_BODY_KEYS = new Set([
+  'total_supply',
   'mint_price',
   'public_price',
   'wl_price',
@@ -31,6 +34,9 @@ export const MINT_CONFIG_BODY_KEYS = new Set([
   'royalty_splits',
   'mint_fund_splits',
   'treasury_wallet',
+  'mint_standard',
+  'freeze_enabled',
+  'unfreeze_date',
 ])
 
 export function bodyHasMintConfigFields(body: Record<string, unknown>): boolean {
@@ -41,6 +47,22 @@ export function buildMintDetailsPatchFromBody(
   body: Record<string, unknown>,
   launch: OwlCenterLaunchPublic
 ): Parameters<typeof updateOwlCenterLaunchByIdAdmin>[1] | { error: string } {
+  const supplyLocked = isLaunchSupplyConfigLocked(launch)
+  const requestedSupply =
+    body.total_supply != null && body.total_supply !== '' ? Number(body.total_supply) : null
+
+  if (
+    supplyLocked &&
+    requestedSupply != null &&
+    Number.isFinite(requestedSupply) &&
+    requestedSupply !== launch.total_supply
+  ) {
+    return {
+      error:
+        'Total supply is locked after Candy Machine deploy (or once mints exist). Contact Owltopia if you need a change.',
+    }
+  }
+
   const parsed = parseMintDetailsConfig({
     ...body,
     total_supply: body.total_supply ?? launch.total_supply,
@@ -53,6 +75,31 @@ export function buildMintDetailsPatchFromBody(
     airdrop_supply: body.airdrop_supply ?? launch.airdrop_supply,
   })
   if ('error' in parsed) return parsed
+
+  const wantsStandardFreeze =
+    body.mint_standard !== undefined ||
+    body.freeze_enabled !== undefined ||
+    body.unfreeze_date !== undefined
+  const standardFreeze = wantsStandardFreeze
+    ? parseStandardFreezeConfig({
+        mint_standard: body.mint_standard ?? launch.mint_standard,
+        freeze_enabled: body.freeze_enabled ?? launch.freeze_enabled,
+        unfreeze_date: body.unfreeze_date ?? launch.unfreeze_date ?? '',
+      })
+    : null
+  if (standardFreeze && 'error' in standardFreeze) return standardFreeze
+
+  if (
+    supplyLocked &&
+    standardFreeze &&
+    (standardFreeze.mint_standard !== launch.mint_standard ||
+      standardFreeze.freeze_enabled !== Boolean(launch.freeze_enabled))
+  ) {
+    return {
+      error:
+        'Mint standard / freeze settings are locked after Candy Machine deploy (or once mints exist).',
+    }
+  }
 
   if (
     isLaunchRoyaltyLocked(launch) &&
@@ -110,6 +157,16 @@ export function buildMintDetailsPatchFromBody(
   if (body.mint_fund_splits !== undefined || body.treasury_wallet !== undefined) {
     patch.mint_fund_splits = parsed.mint_fund_splits
     patch.treasury_wallet = parsed.treasury_wallet
+  }
+  if (standardFreeze) {
+    patch.mint_standard = standardFreeze.mint_standard
+    patch.freeze_enabled = standardFreeze.freeze_enabled
+    patch.unfreeze_date = standardFreeze.unfreeze_date
+    if (!standardFreeze.freeze_enabled) {
+      patch.freeze_status = 'disabled'
+    } else if (launch.freeze_status === 'disabled' || !launch.freeze_status) {
+      patch.freeze_status = 'pending'
+    }
   }
 
   return patch

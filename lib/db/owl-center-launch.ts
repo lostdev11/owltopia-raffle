@@ -336,6 +336,7 @@ export async function updateOwlCenterLaunchByIdAdmin(
     freeze_progress: OwlCenterFreezeProgress
     freeze_enabled: boolean
     unfreeze_date: string | null
+    mint_standard: 'token_metadata' | 'core'
     partner_allowlist_phases: import('@/lib/owl-center/partner-allowlist-phases').PartnerAllowlistPhase[]
   }>
 ): Promise<OwlCenterLaunchPublic | null> {

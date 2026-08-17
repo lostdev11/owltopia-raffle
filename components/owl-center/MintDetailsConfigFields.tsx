@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 
 import type { MintDetailsFormValues } from '@/lib/owl-center/launch-mint-config'
+import { OWL_CENTER_MAX_LAUNCH_SUPPLY } from '@/lib/owl-center/launch-limits'
 import {
   nextPresetForPhases,
   PARTNER_ALLOWLIST_MAX_PHASES,
@@ -20,6 +21,10 @@ type Props = {
   defaultWallet?: string
   /** When true, royalty cannot be changed (Candy Machine already deployed). */
   royaltiesLocked?: boolean
+  /** Show editable total supply (creator Manage collection). */
+  showSupplyField?: boolean
+  /** When true, total supply + mint standard/freeze cannot change. */
+  supplyConfigLocked?: boolean
 }
 
 export function MintDetailsConfigFields({
@@ -28,6 +33,8 @@ export function MintDetailsConfigFields({
   compact,
   defaultWallet = '',
   royaltiesLocked = false,
+  showSupplyField = false,
+  supplyConfigLocked = false,
 }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false)
 
@@ -48,9 +55,35 @@ export function MintDetailsConfigFields({
     onChange({ ...values, [key]: v })
 
   const supply = Number(values.total_supply) || 0
+  const standardLocked = royaltiesLocked || supplyConfigLocked
 
   return (
     <div className="grid gap-4">
+      {showSupplyField ? (
+        <div className="grid gap-3 border border-[#1A222B] bg-[#0F1419]/60 p-4">
+          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
+            Collection supply
+          </p>
+          <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+            Total supply (how many NFTs)
+            <input
+              type="number"
+              min={1}
+              max={OWL_CENTER_MAX_LAUNCH_SUPPLY}
+              disabled={supplyConfigLocked}
+              value={values.total_supply}
+              onChange={(e) => set('total_supply', e.target.value)}
+              className="min-h-[44px] w-36 touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8] disabled:opacity-50"
+            />
+          </label>
+          <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
+            {supplyConfigLocked
+              ? 'Locked after Candy Machine deploy (or once mints exist).'
+              : 'You can change this until the Candy Machine is deployed. Keep it aligned with your staged art count.'}
+          </p>
+        </div>
+      ) : null}
+
       <div className="grid gap-3 border border-[#1A222B] bg-[#0F1419]/60 p-4">
         <p className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
           On-chain standard
@@ -63,6 +96,7 @@ export function MintDetailsConfigFields({
           Mint standard
           <select
             value={values.mint_standard}
+            disabled={standardLocked}
             onChange={(e) => {
               const next = e.target.value === 'token_metadata' ? 'token_metadata' : 'core'
               onChange({
@@ -71,7 +105,7 @@ export function MintDetailsConfigFields({
                 freeze_enabled: next === 'core' ? values.freeze_enabled : false,
               })
             }}
-            className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+            className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8] disabled:opacity-50"
           >
             <option value="core">Metaplex Core (recommended)</option>
             <option value="token_metadata">Token Metadata (legacy)</option>
@@ -81,7 +115,7 @@ export function MintDetailsConfigFields({
           <input
             type="checkbox"
             checked={values.freeze_enabled}
-            disabled={values.mint_standard !== 'core'}
+            disabled={standardLocked || values.mint_standard !== 'core'}
             onChange={(e) => set('freeze_enabled', e.target.checked)}
             className="mt-1 h-4 w-4 shrink-0 touch-manipulation accent-[#00FF9C] disabled:opacity-50"
           />
@@ -100,8 +134,9 @@ export function MintDetailsConfigFields({
             <input
               type="datetime-local"
               value={values.unfreeze_date}
+              disabled={standardLocked}
               onChange={(e) => set('unfreeze_date', e.target.value)}
-              className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+              className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8] disabled:opacity-50"
             />
           </label>
         ) : null}
