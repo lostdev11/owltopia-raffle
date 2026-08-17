@@ -59,7 +59,11 @@ function installPatchedHistory(currentState: Record<string, unknown>) {
 }
 
 {
-  const g = globalThis as typeof globalThis & { window?: Window & typeof globalThis }
+  // Omit required DOM `window` so `delete` is valid under strict TS
+  type GlobalWithOptionalWindow = Omit<typeof globalThis, 'window'> & {
+    window?: Window & typeof globalThis
+  }
+  const g = globalThis as GlobalWithOptionalWindow
   const prev = g.window
   const mock = installPatchedHistory({
     __NA: true,
