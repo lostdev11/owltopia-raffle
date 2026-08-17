@@ -92,7 +92,7 @@ export function MintShareLinkPanel({ slug, collectionName, embedded, anchorId, f
 
       {shareMsg ? <p className="text-center font-mono text-[10px] text-[#9BA8B4]">{shareMsg}</p> : null}
       <p className="font-mono text-[10px] leading-snug text-[#5C6773]">
-        Short link — X, Discord, and iMessage show the collection art preview.
+        Short link uses the collection name — X, Discord, and iMessage show the art preview.
       </p>
     </div>
   )
