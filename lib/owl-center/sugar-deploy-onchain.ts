@@ -23,7 +23,11 @@ import {
 import { mplCandyMachine } from '@metaplex-foundation/mpl-candy-machine'
 import { mplTokenMetadata } from '@metaplex-foundation/mpl-token-metadata'
 
-import { publicSimpleCandyGuardUmiGuards, publicSimpleGuardOptsFromLaunch } from '@/lib/owl-center/sugar-public-simple-guards'
+import {
+  publicSimpleCandyGuardUmiGroupsFromPlan,
+  publicSimpleCandyGuardUmiGuardsFromPlan,
+} from '@/lib/owl-center/sugar-public-simple-guards'
+import { buildPublicSimpleGuardPlan } from '@/lib/owl-center/public-simple-guard-plan'
 import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import { walletSplitsToMetaplexCreators } from '@/lib/owl-center/wallet-splits'
 import {
@@ -60,6 +64,12 @@ export type OnchainSugarDeployInput = {
     | 'creator_presale_enabled'
     | 'wl_supply'
     | 'presale_supply'
+    | 'treasury_wallet'
+    | 'public_price_usdc'
+    | 'creator_mint_price'
+    | 'creator_mint_currency'
+    | 'partner_allowlist_phases'
+    | 'wl_price_usdc'
   >
   configLines: SugarDeployConfigLine[]
   collectionMetadataUri: string
@@ -220,9 +230,13 @@ export async function deployPublicSimpleCandyMachineOnchain(
       }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
     }
 
+    const planned = await buildPublicSimpleGuardPlan(launch)
+    if (!planned.ok) return { ok: false, error: planned.error }
+
     await createCandyGuard(umi, {
       base: guardBase,
-      guards: publicSimpleCandyGuardUmiGuards(publicSimpleGuardOptsFromLaunch(launch)),
+      guards: publicSimpleCandyGuardUmiGuardsFromPlan(planned.plan),
+      groups: publicSimpleCandyGuardUmiGroupsFromPlan(planned.plan),
     }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
 
     const candyGuard = findCandyGuardPda(umi, { base: guardBase.publicKey })

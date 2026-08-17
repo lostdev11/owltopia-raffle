@@ -54,6 +54,10 @@
     {
       "path": "/api/cron/coin-upgrade-repair",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/public-simple-sync-guards",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

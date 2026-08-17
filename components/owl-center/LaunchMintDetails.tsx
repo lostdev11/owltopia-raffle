@@ -7,6 +7,7 @@ import { resolveMintOpensAt } from '@/lib/owl-center/launch-mint-config'
 import { getLaunchMintPriceDisplay } from '@/lib/owl-center/launch-price-quotes'
 import {
   buildPartnerMintPhaseSchedule,
+  publicSimpleSettlementLabel,
 } from '@/lib/owl-center/partner-mint-phase-schedule'
 import { resolvePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
 import { formatRoyaltyPercentLabel, launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
@@ -151,7 +152,7 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
         {launch.mint_mode === 'public_simple' ? (
           <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
             <dt className="text-[#5C6773]">Settlement</dt>
-            <dd className="text-[#E8EEF2]">USDC price · pay in SOL</dd>
+            <dd className="text-[#E8EEF2]">{publicSimpleSettlementLabel(launch)}</dd>
           </div>
         ) : null}
         <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">

@@ -174,6 +174,8 @@ export type SimpleMintEligibilityResponse = {
   sol_usd_price: number | null
   /** Live mint unit price (active allowlist phase or public), USDC notional. */
   price_usdc: number | null
+  /** SOL public price when public is SOL-denominated. */
+  price_sol: number | null
   /** When minting in an allowlist window — phase key/label for UI. */
   active_allowlist_key: string | null
   active_allowlist_label: string | null

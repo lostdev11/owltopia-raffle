@@ -6,8 +6,12 @@ import assert from 'node:assert/strict'
 
 import {
   buildPartnerMintPhaseSchedule,
+  formatPartnerMintConsolePriceBits,
   formatPartnerPhasePriceUsdc,
   partnerAllowlistPhaseEndsAt,
+  publicSimpleSettlementLabel,
+  publicSimpleSolMintPrice,
+  resolvePartnerMintConsolePhase,
   resolvePartnerMintUnitPrice,
 } from '../lib/owl-center/partner-mint-phase-schedule'
 import type { OwlCenterLaunchPublic } from '../lib/owl-center/types'
@@ -34,6 +38,8 @@ function launch(
       | 'creator_presale_enabled'
       | 'active_phase'
       | 'is_paused'
+      | 'creator_mint_price'
+      | 'creator_mint_currency'
     >
   > = {}
 ): Pick<
@@ -51,6 +57,8 @@ function launch(
   | 'presale_supply'
   | 'creator_presale_enabled'
   | 'active_phase'
+  | 'creator_mint_price'
+  | 'creator_mint_currency'
 > {
   return {
     partner_allowlist_phases: [
@@ -70,6 +78,8 @@ function launch(
     presale_supply: 0,
     creator_presale_enabled: false,
     active_phase: 'PUBLIC',
+    creator_mint_price: null,
+    creator_mint_currency: 'SOL',
     ...overrides,
   }
 }
@@ -100,6 +110,51 @@ assert.equal(price.allowlist_label, 'OG')
 const afterPublic = resolvePartnerMintUnitPrice(launch(), Date.parse(later) + 1000)
 assert.equal(afterPublic.from_allowlist, false)
 assert.equal(afterPublic.price_usdc, 25)
+assert.equal(afterPublic.price_sol, null)
+
+const breppeLike = launch({
+  partner_allowlist_phases: [
+    { key: 'wl', label: 'Whitelist', starts_at: future, supply: 222, price_usdc: 9 },
+  ],
+  public_supply: 0,
+  public_price_usdc: null,
+  creator_mint_price: 0.15,
+  creator_mint_currency: 'SOL',
+  wl_supply: 222,
+})
+const breppePublic = resolvePartnerMintUnitPrice(breppeLike, Date.parse('2026-08-17T12:00:00.000Z'))
+assert.equal(breppePublic.from_allowlist, false)
+assert.equal(breppePublic.price_usdc, null)
+assert.equal(breppePublic.price_sol, 0.15)
+const breppeRows = buildPartnerMintPhaseSchedule(breppeLike, Date.parse('2026-08-17T12:00:00.000Z'))
+assert.equal(breppeRows.find((r) => r.key === 'public')?.price_sol, 0.15)
+assert.equal(breppeRows.find((r) => r.key === 'wl')?.price_usdc, 9)
+
+const breppeNow = Date.parse('2026-08-17T12:00:00.000Z')
+const breppeConsole = resolvePartnerMintConsolePhase(breppeLike, breppeNow)
+assert.equal(breppeConsole?.key, 'wl')
+assert.equal(formatPartnerMintConsolePriceBits(breppeConsole), '$9 USDC · pay in SOL')
+assert.equal(
+  formatPartnerMintConsolePriceBits(breppeRows.find((r) => r.key === 'public') ?? null),
+  '0.15 SOL · pay in SOL'
+)
+assert.equal(publicSimpleSettlementLabel(breppeLike), 'WL in USDC · public in SOL')
+assert.equal(
+  resolvePartnerMintConsolePhase(breppeLike, Date.parse(later) + 1000)?.key,
+  'public'
+)
+
+assert.equal(publicSimpleSolMintPrice(breppeLike), 0.15)
+assert.equal(
+  publicSimpleSolMintPrice(
+    launch({
+      public_price_usdc: 0,
+      creator_mint_price: 0.15,
+      creator_mint_currency: 'SOL',
+    })
+  ),
+  0.15
+)
 
 assert.equal(formatPartnerPhasePriceUsdc(9), '$9 USDC')
 assert.equal(formatPartnerPhasePriceUsdc(0), 'Free')

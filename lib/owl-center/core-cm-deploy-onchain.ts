@@ -12,7 +12,11 @@ import {
   type Umi,
 } from '@metaplex-foundation/umi'
 
-import { publicSimpleCandyGuardUmiGuards, publicSimpleGuardOptsFromLaunch } from '@/lib/owl-center/sugar-public-simple-guards'
+import {
+  publicSimpleCandyGuardUmiGroupsFromPlan,
+  publicSimpleCandyGuardUmiGuardsFromPlan,
+} from '@/lib/owl-center/sugar-public-simple-guards'
+import { buildPublicSimpleGuardPlan } from '@/lib/owl-center/public-simple-guard-plan'
 import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import { walletSplitsToMetaplexCreators } from '@/lib/owl-center/wallet-splits'
 import {
@@ -57,6 +61,12 @@ export type OnchainCoreDeployInput = {
     | 'creator_presale_enabled'
     | 'wl_supply'
     | 'presale_supply'
+    | 'treasury_wallet'
+    | 'public_price_usdc'
+    | 'creator_mint_price'
+    | 'creator_mint_currency'
+    | 'partner_allowlist_phases'
+    | 'wl_price_usdc'
   >
   configLines: SugarDeployConfigLine[]
   collectionMetadataUri: string
@@ -158,6 +168,9 @@ export async function deployPublicSimpleCoreCandyMachineOnchain(
       plugins,
     }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
 
+    const planned = await buildPublicSimpleGuardPlan(launch)
+    if (!planned.ok) return { ok: false, error: planned.error }
+
     const createIx = await create(umi, {
       candyMachine,
       collection: collection.publicKey,
@@ -171,7 +184,8 @@ export async function deployPublicSimpleCoreCandyMachineOnchain(
         uriLength: maxUriLength(configLines),
         isSequential: false,
       }),
-      guards: publicSimpleCandyGuardUmiGuards(publicSimpleGuardOptsFromLaunch(launch)),
+      guards: publicSimpleCandyGuardUmiGuardsFromPlan(planned.plan),
+      groups: publicSimpleCandyGuardUmiGroupsFromPlan(planned.plan),
     })
     await createIx.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
 

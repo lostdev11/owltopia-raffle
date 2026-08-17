@@ -10,7 +10,12 @@ import { MintQuantityInput, parseMintQuantityText } from '@/components/owl-cente
 import { MintSuccessOverlay } from '@/components/owl-center/MintSuccessOverlay'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
-import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
+import {
+  formatPartnerMintConsolePriceBits,
+  resolvePartnerMintConsolePhase,
+} from '@/lib/owl-center/partner-mint-phase-schedule'
+import { publicSimpleMintGuardGroupLabel } from '@/lib/owl-center/public-simple-guard-plan'
+import { isLaunchWhitelistWindowOpen } from '@/lib/owl-center/launch-wl-window'
 import { isPublicSimpleMintOpen } from '@/lib/owl-center/phase-schedule'
 import { postCollectionConfirmMintWithRetry } from '@/lib/owl-center/confirm-mint-client'
 import { finalizeMintSessionOptimistic } from '@/lib/owl-center/mint-finalize-client'
@@ -120,7 +125,11 @@ export function CollectionMintPanel({
 
   const trading = launch.active_phase === 'TRADING_ACTIVE'
   const soldOut = launch.active_phase === 'SOLD_OUT' || remaining <= 0
-  const waitingForSchedule = !isPublicSimpleMintOpen(launch) || elig?.mint_window_open === false
+  const waitingForSchedule =
+    elig?.mint_window_open === false ||
+    (elig?.mint_window_open !== true &&
+      !isPublicSimpleMintOpen(launch) &&
+      !isLaunchWhitelistWindowOpen(launch))
   const mintClosed = trading || soldOut || mintControls.disabled || waitingForSchedule
 
   const dismissSuccess = useCallback(() => {
@@ -227,7 +236,7 @@ export function CollectionMintPanel({
       setStep('error')
       return
     }
-    if (elig.mint_window_open === false || !isPublicSimpleMintOpen(launch)) {
+    if (elig.mint_window_open === false) {
       setErr(elig.reason ?? 'Mint is not open yet')
       setStep('error')
       return
@@ -244,6 +253,8 @@ export function CollectionMintPanel({
     try {
       setStep('preparing_mint')
       setMintProgress({ current: 0, total: n, phase: 'chain' })
+      const guardGroup = publicSimpleMintGuardGroupLabel(launch, elig.active_allowlist_key)
+      const mintPhase = elig.active_allowlist_key ? 'WHITELIST' : 'PUBLIC'
       const minted = await raceMintSessionBudget(
         outerDeadline,
         launch.mint_standard === 'core'
@@ -255,6 +266,7 @@ export function CollectionMintPanel({
               launch,
               mintNetwork,
               sessionDeadline,
+              guardGroup,
               collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
               platformFeeLamports:
                 elig?.platform_mint_fee_lamports_estimate != null
@@ -274,7 +286,8 @@ export function CollectionMintPanel({
               candyMachineId: getLaunchCandyMachineId(launch, mintNetwork),
               collectionMint: getLaunchCollectionMint(launch, mintNetwork),
               quantity: n,
-              phase: 'PUBLIC',
+              phase: mintPhase,
+              guardGroupOverride: guardGroup,
               launch,
               mintNetwork,
               sessionDeadline,
@@ -355,14 +368,19 @@ export function CollectionMintPanel({
     }
   }
 
-  const livePriceUsdc = elig?.price_usdc ?? launch.public_price_usdc
-  const pricePaid = livePriceUsdc != null && livePriceUsdc > 0
-  const priceLabel = formatPhasePriceSolOrFree(elig?.unit_lamports_estimate ?? null, {
-    paid: pricePaid,
+  const consolePhase = useMemo(
+    () => resolvePartnerMintConsolePhase(launch, Date.now(), elig?.active_allowlist_key),
+    [launch, elig?.active_allowlist_key]
+  )
+  const quotingConsolePhase =
+    consolePhase != null &&
+    ((Boolean(elig?.active_allowlist_key) && elig?.active_allowlist_key === consolePhase.key) ||
+      (consolePhase.kind === 'public' && !elig?.active_allowlist_key))
+  const phaseName = consolePhase?.label ?? elig?.active_allowlist_label ?? 'Public'
+  const priceBits = formatPartnerMintConsolePriceBits(consolePhase, {
+    liveSolLamports: elig?.unit_lamports_estimate,
+    quotingThisPhase: quotingConsolePhase,
   })
-  const usdcNotional =
-    livePriceUsdc == null ? null : livePriceUsdc <= 0 ? 'Free' : `$${livePriceUsdc} USDC`
-  const phaseName = elig?.active_allowlist_label ?? (elig?.active_allowlist_key ? 'Allowlist' : 'Public')
   const platformFeeLabel =
     elig?.platform_mint_fee_label ??
     formatOwlCenterPlatformMintFeeSolLabel(
@@ -414,8 +432,7 @@ export function CollectionMintPanel({
       <div className="space-y-4">
         <p className="break-words font-mono text-xs leading-relaxed text-[#9BA8B4]">
           {phaseName}
-          {usdcNotional ? ` · ${usdcNotional}` : ''}
-          {pricePaid ? ` · ${priceLabel} (pay in SOL)` : ` · ${priceLabel}`}
+          {priceBits ? ` · ${priceBits}` : ''}
           {' · '}
           {platformFeeLabel}
           {' · '}

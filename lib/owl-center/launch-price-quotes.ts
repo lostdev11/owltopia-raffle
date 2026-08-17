@@ -3,6 +3,7 @@ import { formatCreatorMintPriceLabel } from '@/lib/owl-center/platform-mint-fee'
 import { launchHasPresaleProgram } from '@/lib/owl-center/launch-presale'
 import { formatPhasePriceSol } from '@/lib/owl-center/format-phase-price-sol'
 import { resolvePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
+import { publicSimpleSolMintLamports, publicSimpleSolMintPrice } from '@/lib/owl-center/partner-mint-phase-schedule'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 export type LaunchPriceQuotes = {
@@ -25,6 +26,7 @@ export async function getLaunchPriceLamportsQuotes(launch: OwlCenterLaunchPublic
   const wlUsdc =
     allowlists.find((p) => p.price_usdc != null && p.price_usdc > 0)?.price_usdc ?? launch.wl_price_usdc
   const publicUsdc = launch.public_price_usdc
+  const solPublicLamports = publicSimpleSolMintLamports(launch)
 
   const [whitelist, pub] = await Promise.all([
     wlUsdc != null && (launch.creator_wl_enabled || launch.wl_supply > 0 || allowlists.length > 0)
@@ -36,7 +38,7 @@ export async function getLaunchPriceLamportsQuotes(launch: OwlCenterLaunchPublic
   return {
     presale: null,
     whitelist: whitelist ? whitelist.unitLamports.toString() : null,
-    public: pub ? pub.unitLamports.toString() : null,
+    public: pub ? pub.unitLamports.toString() : solPublicLamports,
   }
 }
 
@@ -76,8 +78,17 @@ export async function getLaunchMintPriceDisplay(launch: OwlCenterLaunchPublic): 
   }
 
   let publicLabel: string | null = null
-  if (launch.public_supply > 0) {
-    if (launch.public_price_usdc != null) {
+  const solPublic = publicSimpleSolMintPrice(launch)
+  const showPublic =
+    launch.public_supply > 0 ||
+    allowlists.length > 0 ||
+    launch.wl_supply > 0 ||
+    solPublic != null ||
+    launch.public_price_usdc != null
+  if (showPublic) {
+    if (solPublic != null) {
+      publicLabel = formatCreatorMintPriceLabel(solPublic, 'SOL')
+    } else if (launch.public_price_usdc != null) {
       if (launch.public_price_usdc <= 0) {
         publicLabel = 'Free'
       } else {

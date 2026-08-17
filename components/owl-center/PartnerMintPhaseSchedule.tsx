@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
+import { formatCreatorMintPriceLabel } from '@/lib/owl-center/platform-mint-fee'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
 import {
   buildPartnerMintPhaseSchedule,
@@ -21,6 +22,9 @@ function statusLabel(row: PartnerMintPhaseScheduleRow): string | null {
 }
 
 function priceLine(row: PartnerMintPhaseScheduleRow, liveSolLamports: string | null | undefined): string {
+  if (row.price_sol != null && row.price_sol > 0) {
+    return `${formatCreatorMintPriceLabel(row.price_sol, 'SOL')} · pay in SOL`
+  }
   const usdc = formatPartnerPhasePriceUsdc(row.price_usdc)
   if (row.is_active && row.price_usdc != null && row.price_usdc > 0) {
     const sol = formatPhasePriceSolOrFree(liveSolLamports, { paid: true })
@@ -69,7 +73,7 @@ export function PartnerMintPhaseSchedule({
   return (
     <CommandCard label="MINT // phases">
       <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.25em] text-[#5C6773]">
-        Phase schedule · prices in USDC, paid in SOL
+        Phase schedule · WL in USDC, public in SOL or USDC
       </p>
       <ul className="space-y-3">
         {rows.map((row) => {

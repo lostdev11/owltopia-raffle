@@ -5,7 +5,7 @@ import { getLaunchWlWallet, sumLaunchWlPhaseUsedMints } from '@/lib/db/owl-cente
 import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { launchScheduledPublicReason } from '@/lib/owl-center/launch-mint-open'
-import { resolvePartnerMintUnitPrice } from '@/lib/owl-center/partner-mint-phase-schedule'
+import { resolvePartnerMintUnitPrice, publicSimpleSolMintLamports } from '@/lib/owl-center/partner-mint-phase-schedule'
 import {
   formatAllowlistOpensReason,
   getLaunchActiveAllowlistPhase,
@@ -78,7 +78,8 @@ export async function buildSimpleMintEligibility(
   const wallet_minted = wallet ? await walletPublicMintCount(launch.id, wallet, mint_network) : 0
   const walletRemaining = Math.max(0, launch.wallet_mint_limit - wallet_minted)
   const scheduleClosed = publicSimpleMintClosedInfo(launch)
-  const mint_window_open = scheduleClosed == null
+  const allowlistOpen = isLaunchWhitelistWindowOpen(launch)
+  const mint_window_open = allowlistOpen || scheduleClosed == null
 
   const prices_lamports = await getLaunchPriceLamportsQuotes(launch)
   const unitPrice = resolvePartnerMintUnitPrice(launch)
@@ -92,6 +93,8 @@ export async function buildSimpleMintEligibility(
       // Free allowlist phase (price 0 or unset treated as free for quote).
       unit_lamports_estimate = null
     }
+  } else if (unitPrice.price_sol != null) {
+    unit_lamports_estimate = publicSimpleSolMintLamports(launch)
   } else if (price_usdc != null && price_usdc <= 0) {
     unit_lamports_estimate = null
   }
@@ -115,7 +118,14 @@ export async function buildSimpleMintEligibility(
   }
 
   if (platformFeeEnabled && platformFeeQuote?.ok === true) {
-    mint_sol_needed_lamports = String(platformFeeQuote.lamports + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS)
+    const priceLamports = unit_lamports_estimate != null ? BigInt(unit_lamports_estimate) : 0n
+    mint_sol_needed_lamports = String(
+      platformFeeQuote.lamports + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS + priceLamports
+    )
+  } else if (unit_lamports_estimate != null) {
+    mint_sol_needed_lamports = String(
+      OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS + BigInt(unit_lamports_estimate)
+    )
   }
 
   const prefetchedBalance =
@@ -139,10 +149,10 @@ export async function buildSimpleMintEligibility(
       : 'Sold out'
   } else if (launch.active_phase !== 'PUBLIC') {
     reason = `Mint opens during PUBLIC phase (current: ${launch.active_phase})`
-  } else if (scheduleClosed) {
-    reason = scheduleClosed.reason
   } else if (isLaunchWaitingForWhitelist(launch)) {
     reason = formatAllowlistOpensReason(launch)
+  } else if (!isLaunchWhitelistWindowOpen(launch) && scheduleClosed) {
+    reason = scheduleClosed.reason
   } else if (!isLaunchWhitelistWindowOpen(launch) && !isPhaseOpenBySchedule(launch, 'PUBLIC')) {
     // No early allowlist window — honor scheduled PUBLIC open (#110).
     reason = launchScheduledPublicReason(launch) ?? 'Public mint is not open yet'
@@ -195,7 +205,8 @@ export async function buildSimpleMintEligibility(
         platformFeeQuote.lamports,
         getLaunchSolanaRpcUrl(mint_network),
         1,
-        prefetchedBalance
+        prefetchedBalance,
+        unit_lamports_estimate != null ? BigInt(unit_lamports_estimate) : 0n
       )
       if (!feeBal.ok) {
         is_eligible = false
@@ -218,6 +229,7 @@ export async function buildSimpleMintEligibility(
     unit_lamports_estimate,
     sol_usd_price: null,
     price_usdc,
+    price_sol: unitPrice.price_sol,
     active_allowlist_key: unitPrice.allowlist_key,
     active_allowlist_label: unitPrice.allowlist_label,
     platform_mint_fee_usdc: owlCenterPlatformMintFeeUsd(),
