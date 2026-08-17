@@ -833,6 +833,11 @@ export function RaffleDetailClient({
         .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)
     : 0
 
+  const walletTicketsRemaining =
+    raffle.max_tickets_per_wallet != null
+      ? Math.max(0, Number(raffle.max_tickets_per_wallet) - userTickets)
+      : null
+
   // Pending entries for this wallet that have a tx signature (confirming on-chain)
   const userPendingTickets = connected && publicKey
     ? entries
@@ -1024,11 +1029,22 @@ export function RaffleDetailClient({
   const showRefundTerminalButton =
     minThresholdRefundRules && statusAllowsTerminalFinalize && raffleHasUnrefundedConfirmedSales
 
-  /** Per-transaction clamp: raffle cap minus sold, or DB max when raffle has no max_tickets */
-  const maxPurchaseQuantity =
-    availableTickets !== null ? Math.max(0, availableTickets) : MAX_TICKET_QUANTITY_PER_ENTRY
+  /** Per-transaction clamp: raffle cap, per-wallet cap, and DB INT max */
+  const maxPurchaseQuantity = Math.min(
+    availableTickets !== null ? Math.max(0, availableTickets) : MAX_TICKET_QUANTITY_PER_ENTRY,
+    walletTicketsRemaining !== null ? walletTicketsRemaining : MAX_TICKET_QUANTITY_PER_ENTRY,
+    MAX_TICKET_QUANTITY_PER_ENTRY
+  )
 
-  const quantityInputMax = availableTickets !== null ? maxPurchaseQuantity : undefined
+  const quantityInputMax =
+    availableTickets !== null || walletTicketsRemaining !== null
+      ? maxPurchaseQuantity
+      : undefined
+
+  const atWalletTicketLimit =
+    walletTicketsRemaining !== null && walletTicketsRemaining <= 0
+  const ticketsUnavailableToBuy =
+    (availableTickets !== null && availableTickets <= 0) || atWalletTicketLimit
 
   const handlePurchase = async () => {
     if (!connected || !publicKey) {
@@ -1043,6 +1059,17 @@ export function RaffleDetailClient({
 
     if (ticketPaymentCurrency === 'OWL' && !isOwlEnabled()) {
       setError('OWL entry is not enabled yet — mint address pending.')
+      return
+    }
+
+    if (
+      raffle.max_tickets_per_wallet != null &&
+      walletTicketsRemaining !== null &&
+      walletTicketsRemaining <= 0
+    ) {
+      setError(
+        `This raffle limits each wallet to ${raffle.max_tickets_per_wallet} ticket${raffle.max_tickets_per_wallet === 1 ? '' : 's'}. You already hold the maximum.`
+      )
       return
     }
 
@@ -1164,6 +1191,14 @@ export function RaffleDetailClient({
 
   const handleAddToCart = () => {
     setCartAddedHint(false)
+    if (ticketsUnavailableToBuy) {
+      setError(
+        atWalletTicketLimit
+          ? `This raffle limits each wallet to ${raffle.max_tickets_per_wallet} ticket${raffle.max_tickets_per_wallet === 1 ? '' : 's'}.`
+          : 'No tickets available.'
+      )
+      return
+    }
     const res = addCartItem(raffle, ticketQuantity)
     if (!res.ok) {
       setError(res.error)
@@ -4007,6 +4042,16 @@ export function RaffleDetailClient({
                   </p>
                 </div>
               )}
+              {raffle.max_tickets_per_wallet != null && (
+                <div>
+                  <p className={classes.labelText + ' text-muted-foreground'}>Max per person</p>
+                  <p className={classes.contentText + ' font-bold'}>
+                    {connected
+                      ? `${userTickets} / ${raffle.max_tickets_per_wallet}`
+                      : raffle.max_tickets_per_wallet}
+                  </p>
+                </div>
+              )}
               <div>
                 <p className={classes.labelText + ' text-muted-foreground'}>Status</p>
                 <div className="mt-3 sm:mt-2 space-y-1">
@@ -4477,6 +4522,7 @@ export function RaffleDetailClient({
                     !dualSolBamboo &&
                     !purchasesBlocked &&
                     (availableTickets === null || availableTickets > 0) &&
+                    !atWalletTicketLimit &&
                     userTickets === 0
                   }
                 />
@@ -4486,7 +4532,7 @@ export function RaffleDetailClient({
                     purchasesBlocked ||
                     isCreator ||
                     isProcessing ||
-                    (availableTickets !== null && availableTickets <= 0)
+                    ticketsUnavailableToBuy
                   }
                   size={classes.buttonSize as any}
                   style={
@@ -4503,6 +4549,8 @@ export function RaffleDetailClient({
                     ? 'Your Raffle'
                     : availableTickets !== null && availableTickets <= 0
                     ? 'Sold Out'
+                    : atWalletTicketLimit
+                    ? 'Wallet Limit Reached'
                     : isProcessing
                     ? 'Processing...'
                     : 'Enter Raffle'}
@@ -4872,6 +4920,22 @@ export function RaffleDetailClient({
                 )}
               </div>
             )}
+
+            {raffle.max_tickets_per_wallet != null && (
+              <div className="p-3 rounded-lg bg-muted border">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Your wallet limit</span>
+                  <span className="font-semibold">
+                    {userTickets} / {raffle.max_tickets_per_wallet}
+                  </span>
+                </div>
+                {atWalletTicketLimit && (
+                  <p className="text-xs text-destructive mt-1">
+                    You already hold the maximum tickets allowed per wallet for this raffle.
+                  </p>
+                )}
+              </div>
+            )}
             
               <div className="space-y-2">
                 <Label htmlFor="dialog-quantity">Number of Tickets</Label>
@@ -4883,12 +4947,18 @@ export function RaffleDetailClient({
                   value={ticketQuantityDisplay}
                   onChange={(e) => handleQuantityChange(e.target.value)}
                   onBlur={handleQuantityBlur}
-                  disabled={availableTickets !== null && availableTickets <= 0}
+                  disabled={ticketsUnavailableToBuy}
                   className="text-base sm:text-sm h-11 sm:h-10"
                 />
               {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
                 <p className="text-xs text-muted-foreground">
                   Maximum {availableTickets} ticket{availableTickets !== 1 ? 's' : ''} available
+                </p>
+              )}
+              {walletTicketsRemaining !== null && walletTicketsRemaining > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  You can buy up to {walletTicketsRemaining} more ticket
+                  {walletTicketsRemaining !== 1 ? 's' : ''} on this wallet
                 </p>
               )}
             </div>
@@ -4927,7 +4997,8 @@ export function RaffleDetailClient({
                 !dualSolBamboo &&
                 ticketQuantity === 1 &&
                 userTickets === 0 &&
-                (availableTickets === null || availableTickets > 0)
+                (availableTickets === null || availableTickets > 0) &&
+                !atWalletTicketLimit
               }
             />
 
@@ -4984,7 +5055,7 @@ export function RaffleDetailClient({
               variant="secondary"
               onClick={handleAddToCart}
               disabled={
-                (availableTickets !== null && availableTickets <= 0) ||
+                ticketsUnavailableToBuy ||
                 !connected ||
                 isCreator ||
                 isProcessing
@@ -4997,7 +5068,7 @@ export function RaffleDetailClient({
             <Button
               onClick={handlePurchase}
               disabled={
-                (availableTickets !== null && availableTickets <= 0) ||
+                ticketsUnavailableToBuy ||
                 !connected ||
                 isCreator ||
                 isProcessing
@@ -5014,6 +5085,8 @@ export function RaffleDetailClient({
                 ? 'Processing...'
                 : availableTickets !== null && availableTickets <= 0
                 ? 'Sold Out'
+                : atWalletTicketLimit
+                ? 'Wallet Limit Reached'
                 : 'Buy Tickets'}
             </Button>
           </DialogFooter>

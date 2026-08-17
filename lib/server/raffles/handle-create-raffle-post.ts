@@ -34,6 +34,10 @@ import {
   validateNftMaxTickets,
   validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
+import {
+  parseMaxTicketsPerWalletInput,
+  validateMaxTicketsPerWallet,
+} from '@/lib/raffles/max-tickets-per-wallet'
 import { buildDuplicateNftPrizeConflictBody } from '@/lib/raffles/duplicate-nft-prize-conflict'
 import {
   buildDuplicatePartnerCryptoPrizeConflictBody,
@@ -398,6 +402,19 @@ export async function handleCreateRafflePost(
       maxTickets = parsed
     }
 
+    let maxTicketsPerWallet: number | null = null
+    if (body.max_tickets_per_wallet !== undefined) {
+      const parsedPerWallet = parseMaxTicketsPerWalletInput(body.max_tickets_per_wallet)
+      if (!parsedPerWallet.ok) {
+        return NextResponse.json({ error: parsedPerWallet.error }, { status: 400 })
+      }
+      const perWalletOk = validateMaxTicketsPerWallet(parsedPerWallet.value, maxTickets)
+      if (!perWalletOk.ok) {
+        return NextResponse.json({ error: perWalletOk.error }, { status: 400 })
+      }
+      maxTicketsPerWallet = perWalletOk.value
+    }
+
     const effectiveTicketCurrency = requestedCurrency || 'SOL'
     if (effectiveTicketCurrency === 'OWL' && adminRole === null) {
       return NextResponse.json(
@@ -573,6 +590,7 @@ export async function handleCreateRafflePost(
         alternate_ticket_currency,
         alternate_ticket_price,
         max_tickets: maxTickets,
+        max_tickets_per_wallet: maxTicketsPerWallet,
         min_tickets: minTickets,
         start_time: startTime,
         end_time: body.end_time,
@@ -807,6 +825,7 @@ export async function handleCreateRafflePost(
         alternate_ticket_currency,
         alternate_ticket_price,
         max_tickets: maxTickets,
+        max_tickets_per_wallet: maxTicketsPerWallet,
         min_tickets: minTickets,
         start_time: startTime,
         end_time: body.end_time,
