@@ -564,7 +564,11 @@ export function Gen2MintPanel({
           Primary mint is closed. Buy or sell Gen2 on Magic Eden or Tensor.
         </p>
         <div className="mt-4">
-          <TradingButtons magicEdenUrl={launch.magic_eden_url} tensorUrl={launch.tensor_url} />
+          <TradingButtons
+            orbisUrl={launch.orbis_url}
+            magicEdenUrl={launch.magic_eden_url}
+            tensorUrl={launch.tensor_url}
+          />
         </div>
       </MintPanelShell>
     )
@@ -579,7 +583,11 @@ export function Gen2MintPanel({
           secondary markets below.
         </p>
         <div className="mt-4">
-          <TradingButtons magicEdenUrl={launch.magic_eden_url} tensorUrl={launch.tensor_url} />
+          <TradingButtons
+            orbisUrl={launch.orbis_url}
+            magicEdenUrl={launch.magic_eden_url}
+            tensorUrl={launch.tensor_url}
+          />
         </div>
       </MintPanelShell>
     )

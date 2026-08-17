@@ -149,6 +149,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
               launch={launch}
               mintCount={marketplace.mint_addresses_recorded}
               hashListReady={marketplace.hash_list_ready}
+              orbisUrl={marketplace.orbis_url}
               magicEdenUrl={marketplace.magic_eden_url}
               tensorUrl={marketplace.tensor_url}
               tradingActive={trading || marketplace.trading_links_active}
@@ -158,6 +159,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
             <CommandCard label="MARKETPLACES">
               <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">Trade on secondary</p>
               <TradingButtons
+                orbisUrl={marketplace.orbis_url ?? launch.orbis_url}
                 magicEdenUrl={marketplace.magic_eden_url ?? launch.magic_eden_url}
                 tensorUrl={marketplace.tensor_url ?? launch.tensor_url}
               />

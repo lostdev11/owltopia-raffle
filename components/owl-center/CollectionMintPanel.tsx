@@ -377,7 +377,11 @@ export function CollectionMintPanel({
   if (trading) {
     return (
       <CommandCard label="TRADE // marketplaces">
-        <TradingButtons magicEdenUrl={launch.magic_eden_url} tensorUrl={launch.tensor_url} />
+        <TradingButtons
+          orbisUrl={launch.orbis_url}
+          magicEdenUrl={launch.magic_eden_url}
+          tensorUrl={launch.tensor_url}
+        />
       </CommandCard>
     )
   }

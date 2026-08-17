@@ -144,6 +144,7 @@ export async function POST(request: NextRequest) {
       wallet_mint_limit: mintConfig.wallet_mint_limit,
       magic_eden_url: null,
       tensor_url: null,
+      orbis_url: null,
       is_featured: false,
       is_paused: true,
       launch_deadline_at: mintConfig.launch_deadline_at,

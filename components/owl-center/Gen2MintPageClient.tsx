@@ -296,22 +296,21 @@ export function Gen2MintPageClient() {
     state.phase_breakdown?.find((row) => row.phase === 'PUBLIC')?.remaining ?? supply.remaining
 
   const marketplace = state.marketplace ?? {
-
     trading_links_active: false,
-
     magic_eden_url: null,
-
     tensor_url: null,
-
+    orbis_url: null,
   }
 
+  const orbisHref = launch.orbis_url?.trim()
   const meHref = launch.magic_eden_url?.trim()
-
   const teHref = launch.tensor_url?.trim()
 
   const showSecondaryLinks =
-
-    marketplace.trading_links_active && ((meHref != null && meHref !== '') || (teHref != null && teHref !== ''))
+    marketplace.trading_links_active &&
+    ((orbisHref != null && orbisHref !== '') ||
+      (meHref != null && meHref !== '') ||
+      (teHref != null && teHref !== ''))
 
 
 
@@ -329,7 +328,7 @@ export function Gen2MintPageClient() {
 
         <aside className="mb-6 border border-[#FF9C9C]/40 bg-[#FF9C9C]/10 px-4 py-3 font-mono text-xs leading-relaxed text-[#FFD6D6]">
 
-          Admin notice: trading activation is on but Magic Eden / Tensor URLs are missing. Update in{' '}
+          Admin notice: trading activation is on but Orbis / Magic Eden / Tensor URLs are missing. Update in{' '}
 
           <Link href="/admin/owl-center" className="text-[#00FF9C] underline">
 
@@ -527,6 +526,26 @@ export function Gen2MintPageClient() {
         {showSecondaryLinks ? (
 
           <div className="flex flex-wrap gap-3">
+
+            {orbisHref ? (
+
+              <a
+
+                href={orbisHref}
+
+                target="_blank"
+
+                rel="noreferrer"
+
+                className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#00FF9C]/35 px-5 text-sm font-bold text-[#00FF9C] hover:bg-[#00FF9C]/10"
+
+              >
+
+                Orbis
+
+              </a>
+
+            ) : null}
 
             {meHref ? (
 

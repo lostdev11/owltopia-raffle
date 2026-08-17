@@ -132,6 +132,7 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
     wallet_mint_limit: Number(data.wallet_mint_limit ?? 1),
     magic_eden_url: data.magic_eden_url != null ? String(data.magic_eden_url) : null,
     tensor_url: data.tensor_url != null ? String(data.tensor_url) : null,
+    orbis_url: data.orbis_url != null ? String(data.orbis_url) : null,
     is_featured: Boolean(data.is_featured),
     is_paused: Boolean(data.is_paused),
     launch_deadline_at: normalizeTimestamp(data.launch_deadline_at),
@@ -345,6 +346,7 @@ export async function updateOwlCenterLaunchAdmin(
     devnet_collection_mint: string | null
     magic_eden_url: string | null
     tensor_url: string | null
+    orbis_url: string | null
     minted_count: number
     metadata_ready: boolean
     assets_ready: boolean
@@ -385,6 +387,7 @@ export async function updateOwlCenterLaunchByIdAdmin(
     devnet_collection_mint: string | null
     magic_eden_url: string | null
     tensor_url: string | null
+    orbis_url: string | null
     minted_count: number
     metadata_ready: boolean
     assets_ready: boolean
