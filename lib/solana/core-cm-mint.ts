@@ -56,6 +56,9 @@ import { invalidLaunchMintIdReason, validateSolanaPubkeyInput } from '@/lib/sola
 import { walletAdapterIsPhantom } from '@/lib/solana/phantom-sign-and-send-transaction'
 import { assertTransactionSimulatesClean } from '@/lib/solana/phantom-presimulate'
 
+/** mintV1 with Candy Guard comfortably fits in 800k CU (same ceiling as Gen2 mintV2). */
+const MINT_COMPUTE_UNIT_LIMIT = 800_000
+
 function mergeCoreGuardSets(defaults: DefaultGuardSet, group: DefaultGuardSet | null): DefaultGuardSet {
   if (!group) return defaults
   const merged: Record<string, Option<unknown>> = { ...(defaults as unknown as Record<string, Option<unknown>>) }

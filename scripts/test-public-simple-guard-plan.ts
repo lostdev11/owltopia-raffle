@@ -80,7 +80,6 @@ async function main() {
   const quoteUsdc = async (usdc: number) => BigInt(usdc * 1_000_000)
 
   const breppe = await buildPublicSimpleGuardPlan(launch(), { quoteUsdc })
-  assert.equal(breppe.ok, true)
   if (!breppe.ok) throw new Error(breppe.error)
   assert.equal(breppe.plan.groups.length, 2)
   assert.equal(breppe.plan.defaultSolLamports, 0n)
@@ -104,7 +103,6 @@ async function main() {
     }),
     { quoteUsdc }
   )
-  assert.equal(publicOnly.ok, true)
   if (!publicOnly.ok) throw new Error(publicOnly.error)
   assert.equal(publicOnly.plan.groups.length, 0)
   assert.equal(publicOnly.plan.defaultSolLamports, 150_000_000n)
