@@ -34,8 +34,8 @@ export function CollectionCard({
 
   return (
     <article className="flex flex-col border border-[#1A222B] bg-[#10161C]/85">
-      <div className="relative aspect-[4/3] border-b border-[#1A222B] bg-[#0F1419]">
-        <HubCardCoverImage imageUrl={launch.image_url} />
+      <div className="relative aspect-square overflow-hidden border-b border-[#1A222B] bg-[#0F1419]">
+        <HubCardCoverImage imageUrl={launch.image_url} fit="cover" />
         <span className="absolute left-2 top-2 rounded-none border border-[#00FF9C]/30 bg-[#0F1419]/90 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest text-[#00FF9C]">
           Solana
         </span>
