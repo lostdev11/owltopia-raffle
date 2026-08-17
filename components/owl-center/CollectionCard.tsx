@@ -15,7 +15,7 @@ function hrefForLaunch(slug: string): string {
 
 function ctaHref(launch: OwlCenterLaunchPublic): string {
   if (launch.active_phase === 'TRADING_ACTIVE') {
-    return launch.magic_eden_url || launch.tensor_url || hrefForLaunch(launch.slug)
+    return launch.orbis_url || launch.magic_eden_url || launch.tensor_url || hrefForLaunch(launch.slug)
   }
   return hrefForLaunch(launch.slug)
 }

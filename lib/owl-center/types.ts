@@ -109,6 +109,7 @@ export type OwlCenterLaunchPublic = {
   wallet_mint_limit: number
   magic_eden_url: string | null
   tensor_url: string | null
+  orbis_url: string | null
   is_featured: boolean
   is_paused: boolean
   launch_deadline_at: string | null
@@ -197,6 +198,7 @@ export type CollectionMintStateResponse = {
     trading_links_active: boolean
     magic_eden_url: string | null
     tensor_url: string | null
+    orbis_url: string | null
     hash_list_ready: boolean
     sellout_prepared_at: string | null
     mint_addresses_recorded: number

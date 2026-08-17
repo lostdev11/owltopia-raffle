@@ -93,6 +93,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   if (s('hash_list_url') !== undefined) patch.hash_list_url = s('hash_list_url') ?? null
   if (s('magic_eden_url') !== undefined) patch.magic_eden_url = s('magic_eden_url') ?? null
   if (s('tensor_url') !== undefined) patch.tensor_url = s('tensor_url') ?? null
+  if (s('orbis_url') !== undefined) patch.orbis_url = s('orbis_url') ?? null
   if ('notes' in body && typeof body.notes === 'string') patch.notes = body.notes.slice(0, 8000) || null
 
   if ('trading_links_active' in body && typeof body.trading_links_active === 'boolean') {
@@ -107,11 +108,17 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   if (me) patch.magic_eden_status = me
   const te = parseStatus(body.tensor_status)
   if (te) patch.tensor_status = te
+  const orbis = parseStatus(body.orbis_status)
+  if (orbis) patch.orbis_status = orbis
 
   if (action === 'mark_ready_indexing') {
     patch.metadata_status = 'READY_FOR_INDEXING'
+    patch.orbis_status = 'READY_FOR_INDEXING'
     patch.magic_eden_status = 'READY_FOR_INDEXING'
     patch.tensor_status = 'READY_FOR_INDEXING'
+  }
+  if (action === 'mark_orbis_listed') {
+    patch.orbis_status = 'LISTED'
   }
   if (action === 'mark_me_listed') {
     patch.magic_eden_status = 'LISTED'

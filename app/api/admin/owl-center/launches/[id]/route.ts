@@ -55,6 +55,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   }
   if (typeof body.magic_eden_url === 'string') patch.magic_eden_url = body.magic_eden_url.trim() || null
   if (typeof body.tensor_url === 'string') patch.tensor_url = body.tensor_url.trim() || null
+  if (typeof body.orbis_url === 'string') patch.orbis_url = body.orbis_url.trim() || null
   if (body.mint_network === 'devnet' || body.mint_network === 'mainnet') {
     patch.mint_network = body.mint_network
   }

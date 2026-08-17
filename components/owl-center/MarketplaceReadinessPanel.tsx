@@ -6,6 +6,7 @@ import { CommandCard } from '@/components/owl-center/CommandCard'
 import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { MagicEdenHashListPanel } from '@/components/owl-center/MagicEdenHashListPanel'
+import { OrbisListingPanel } from '@/components/owl-center/OrbisListingPanel'
 import { CreatorMarketplaceLockedSection } from '@/components/owl-center/CreatorMarketplaceLockedSection'
 import { MarketplaceStatusBadge } from '@/components/owl-center/MarketplaceStatusBadge'
 import { ReadinessChecklist, type ReadinessChecklistItem } from '@/components/owl-center/ReadinessChecklist'
@@ -66,10 +67,12 @@ export function MarketplaceReadinessPanel({
   const [hashListUrl, setHashListUrl] = useState('')
   const [meUrl, setMeUrl] = useState('')
   const [tensorUrl, setTensorUrl] = useState('')
+  const [orbisUrl, setOrbisUrl] = useState('')
   const [metadataStatus, setMetadataStatus] = useState<string>('NOT_READY')
   const [verifiedStatus, setVerifiedStatus] = useState<string>('NOT_READY')
   const [meStatus, setMeStatus] = useState<string>('NOT_READY')
   const [tensorStatus, setTensorStatus] = useState<string>('NOT_READY')
+  const [orbisStatus, setOrbisStatus] = useState<string>('NOT_READY')
   const [tradingActive, setTradingActive] = useState(false)
   const [notes, setNotes] = useState('')
   const [confirmTrading, setConfirmTrading] = useState(false)
@@ -82,9 +85,10 @@ export function MarketplaceReadinessPanel({
     { id: '4', label: 'Collection mint verified', checked: false },
     { id: '5', label: 'Mint completed or active', checked: false },
     { id: '6', label: 'Hash list generated', checked: false },
-    { id: '7', label: 'Magic Eden indexed / claimed', checked: false },
-    { id: '8', label: 'Tensor indexed / verified', checked: false },
-    { id: '9', label: 'Trading links activated in Owl Center', checked: false },
+    { id: '7', label: 'Orbis listed / claimed', checked: false },
+    { id: '8', label: 'Magic Eden indexed / claimed', checked: false },
+    { id: '9', label: 'Tensor indexed / verified', checked: false },
+    { id: '10', label: 'Trading links activated in Owl Center', checked: false },
   ])
 
   const applyRow = useCallback((r: OwlCenterMarketplaceReadiness) => {
@@ -94,10 +98,12 @@ export function MarketplaceReadinessPanel({
     setHashListUrl(r.hash_list_url ?? '')
     setMeUrl(r.magic_eden_url ?? '')
     setTensorUrl(r.tensor_url ?? '')
+    setOrbisUrl(r.orbis_url ?? '')
     setMetadataStatus(r.metadata_status)
     setVerifiedStatus(r.verified_collection_status)
     setMeStatus(r.magic_eden_status)
     setTensorStatus(r.tensor_status)
+    setOrbisStatus(r.orbis_status)
     setTradingActive(r.trading_links_active)
     setNotes(r.notes ?? '')
   }, [])
@@ -189,19 +195,21 @@ export function MarketplaceReadinessPanel({
       <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
         {creatorMode ? (
           <>
-            Sell-out is done — Owl Center already generated your hash list and suggested URLs. Submit the list on Magic
-            Eden (manual), verify on Tensor, paste your live links below, then go live on your mint page.
+            Sell-out is done — Owl Center generated your hash list and suggested ME/Tensor URLs. List on Orbis first
+            (collection mint), then optionally submit the hash list on Magic Eden and verify on Tensor. Paste live links
+            below and go live on your mint page.
           </>
         ) : (
           <>
-            Owl Center does not directly upload to Magic Eden or Tensor in V1. Solana NFT collections are indexed from on-chain
-            metadata. Paste final marketplace URLs after indexing or claiming. Use verified collection metadata and permanent image /
-            metadata storage. Trading links should only be activated once the collection is indexed and ready.
+            Owl Center does not auto-upload to Orbis, Magic Eden, or Tensor in V1. Prefer Orbis listing (collection mint
+            + UA verify). Paste final marketplace URLs after indexing. Trading links should only be activated once at
+            least one marketplace is ready.
           </>
         )}
       </p>
 
       <div className="mb-6 flex flex-wrap gap-2">
+        <MarketplaceStatusBadge label="ORBIS" status={orbisStatus as OwlCenterMarketplaceReadiness['orbis_status']} />
         <MarketplaceStatusBadge label="ME" status={meStatus as OwlCenterMarketplaceReadiness['magic_eden_status']} />
         <MarketplaceStatusBadge label="TENSOR" status={tensorStatus as OwlCenterMarketplaceReadiness['tensor_status']} />
         <MarketplaceStatusBadge label="META" status={metadataStatus as OwlCenterMarketplaceReadiness['metadata_status']} />
@@ -216,7 +224,16 @@ export function MarketplaceReadinessPanel({
         </div>
       ) : null}
 
-      <div className="mb-6">
+      <div className="mb-6 space-y-4">
+        <OrbisListingPanel
+          embedded
+          launchId={launchId}
+          hashListApiPath={hashApi}
+          collectionMint={collectionMint || null}
+          onCollectionMint={(mint) => {
+            if (mint && !collectionMint.trim()) setCollectionMint(mint)
+          }}
+        />
         <MagicEdenHashListPanel
           embedded
           launchId={launchId}
@@ -258,6 +275,15 @@ export function MarketplaceReadinessPanel({
         </label>
           </>
         ) : null}
+        <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] md:col-span-2">
+          Orbis URL
+          <input
+            value={orbisUrl}
+            onChange={(e) => setOrbisUrl(e.target.value)}
+            placeholder="https://www.orbisonsol.io/marketplace/…"
+            className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+          />
+        </label>
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] md:col-span-2">
           Magic Eden URL
           <input
@@ -326,6 +352,20 @@ export function MarketplaceReadinessPanel({
           <select
             value={tensorStatus}
             onChange={(e) => setTensorStatus(e.target.value)}
+            className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm"
+          >
+            {OWL_CENTER_MARKETPLACE_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+          Orbis status
+          <select
+            value={orbisStatus}
+            onChange={(e) => setOrbisStatus(e.target.value)}
             className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm"
           >
             {OWL_CENTER_MARKETPLACE_STATUSES.map((s) => (
@@ -410,9 +450,11 @@ export function MarketplaceReadinessPanel({
                     verified_collection_status: verifiedStatus,
                     magic_eden_status: meStatus,
                     tensor_status: tensorStatus,
+                    orbis_status: orbisStatus,
                   }),
               magic_eden_url: meUrl.trim() || null,
               tensor_url: tensorUrl.trim() || null,
+              orbis_url: orbisUrl.trim() || null,
               trading_links_active: tradingActive,
               notes: notes.trim() || null,
               confirm_trading_transition: confirmTrading,
@@ -427,6 +469,9 @@ export function MarketplaceReadinessPanel({
             <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'mark_ready_indexing' })}>
               Mark ready for indexing
             </DeployButton>
+            <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'mark_orbis_listed' })}>
+              Mark Orbis listed
+            </DeployButton>
             <DeployButton type="button" variant="ghost" onClick={() => void save({ action: 'mark_me_listed' })}>
               Mark ME listed
             </DeployButton>
@@ -437,6 +482,16 @@ export function MarketplaceReadinessPanel({
               Activate trading links
             </DeployButton>
           </>
+        ) : null}
+        {orbisUrl.trim() ? (
+          <a
+            href={orbisUrl.trim()}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-[44px] touch-manipulation items-center border border-[#1A222B] px-4 text-xs uppercase tracking-wide text-[#9BA8B4] hover:border-[#00FF9C]/35"
+          >
+            Open Orbis
+          </a>
         ) : null}
         {meUrl.trim() ? (
           <a
@@ -463,7 +518,8 @@ export function MarketplaceReadinessPanel({
       {launchProp ? (
         <p className="mt-4 font-mono text-[10px] text-[#5C6773]">
           Launch mirror · status={launchProp.status} phase={launchProp.active_phase} · marketplace_ready=
-          {String(launchProp.marketplace_ready)} · ME={launchProp.magic_eden_url ?? '—'} · TE={launchProp.tensor_url ?? '—'}
+          {String(launchProp.marketplace_ready)} · Orbis={launchProp.orbis_url ?? '—'} · ME=
+          {launchProp.magic_eden_url ?? '—'} · TE={launchProp.tensor_url ?? '—'}
         </p>
       ) : null}
 

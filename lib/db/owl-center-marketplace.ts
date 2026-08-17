@@ -1,6 +1,12 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { OwlCenterMarketplaceReadiness } from '@/lib/owl-center/asset-types'
 
+const TERMINAL_STATUSES = ['LISTED', 'CLAIMED', 'VERIFIED'] as const
+
+function isTerminalStatus(status: string): boolean {
+  return (TERMINAL_STATUSES as readonly string[]).includes(status)
+}
+
 function mapMarketplaceRow(row: Record<string, unknown>): OwlCenterMarketplaceReadiness {
   return {
     id: String(row.id),
@@ -12,10 +18,12 @@ function mapMarketplaceRow(row: Record<string, unknown>): OwlCenterMarketplaceRe
     sellout_prepared_at: row.sellout_prepared_at != null ? String(row.sellout_prepared_at) : null,
     magic_eden_url: row.magic_eden_url != null ? String(row.magic_eden_url) : null,
     tensor_url: row.tensor_url != null ? String(row.tensor_url) : null,
+    orbis_url: row.orbis_url != null ? String(row.orbis_url) : null,
     metadata_status: String(row.metadata_status ?? 'NOT_READY') as OwlCenterMarketplaceReadiness['metadata_status'],
     verified_collection_status: String(row.verified_collection_status ?? 'NOT_READY') as OwlCenterMarketplaceReadiness['verified_collection_status'],
     magic_eden_status: String(row.magic_eden_status ?? 'NOT_READY') as OwlCenterMarketplaceReadiness['magic_eden_status'],
     tensor_status: String(row.tensor_status ?? 'NOT_READY') as OwlCenterMarketplaceReadiness['tensor_status'],
+    orbis_status: String(row.orbis_status ?? 'NOT_READY') as OwlCenterMarketplaceReadiness['orbis_status'],
     trading_links_active: Boolean(row.trading_links_active),
     notes: row.notes != null ? String(row.notes) : null,
     created_at: String(row.created_at ?? ''),
@@ -44,10 +52,12 @@ export async function upsertMarketplaceReadinessForLaunch(
     sellout_prepared_at: string | null
     magic_eden_url: string | null
     tensor_url: string | null
+    orbis_url: string | null
     metadata_status: OwlCenterMarketplaceReadiness['metadata_status']
     verified_collection_status: OwlCenterMarketplaceReadiness['verified_collection_status']
     magic_eden_status: OwlCenterMarketplaceReadiness['magic_eden_status']
     tensor_status: OwlCenterMarketplaceReadiness['tensor_status']
+    orbis_status: OwlCenterMarketplaceReadiness['orbis_status']
     trading_links_active: boolean
     notes: string | null
   }>
@@ -83,15 +93,17 @@ export async function syncLaunchMarketplaceFieldsFromRow(
   row: OwlCenterMarketplaceReadiness
 ): Promise<void> {
   const db = getSupabaseAdmin()
-  const terminalStatuses = ['LISTED', 'CLAIMED', 'VERIFIED'] as const
-  const marketplace_ready =
-    terminalStatuses.includes(row.magic_eden_status as (typeof terminalStatuses)[number]) &&
-    terminalStatuses.includes(row.tensor_status as (typeof terminalStatuses)[number])
+  const meOk = isTerminalStatus(row.magic_eden_status)
+  const teOk = isTerminalStatus(row.tensor_status)
+  const orbisOk = isTerminalStatus(row.orbis_status)
+  // Orbis alone can mark ready; legacy path still requires ME + Tensor together.
+  const marketplace_ready = orbisOk || (meOk && teOk)
 
   const me = row.magic_eden_url?.trim() || null
   const te = row.tensor_url?.trim() || null
-  const shouldMirrorUrls =
-    row.trading_links_active || (me != null && me !== '' && te != null && te !== '')
+  const orbis = row.orbis_url?.trim() || null
+  const hasAnyUrl = Boolean(me || te || orbis)
+  const shouldMirrorUrls = row.trading_links_active || hasAnyUrl
 
   const launchPatch: Record<string, unknown> = {
     marketplace_ready,
@@ -102,6 +114,7 @@ export async function syncLaunchMarketplaceFieldsFromRow(
   if (shouldMirrorUrls) {
     launchPatch.magic_eden_url = me
     launchPatch.tensor_url = te
+    launchPatch.orbis_url = orbis
   }
 
   await db.from('owl_center_launches').update(launchPatch).eq('id', launchId)

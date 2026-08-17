@@ -4,23 +4,35 @@ const btnGhost =
   'inline-flex min-h-[44px] touch-manipulation items-center justify-center border border-[#1A222B] px-6 font-semibold uppercase tracking-wide text-[#9BA8B4] hover:border-[#00FF9C]/35 hover:text-[#E8EEF2]'
 
 export function TradingButtons({
+  orbisUrl,
   magicEdenUrl,
   tensorUrl,
 }: {
+  orbisUrl?: string | null
   magicEdenUrl: string | null
   tensorUrl: string | null
 }) {
-  if (!magicEdenUrl && !tensorUrl) {
+  if (!orbisUrl && !magicEdenUrl && !tensorUrl) {
     return (
       <p className="font-mono text-xs text-[#FFD769]">
-        // Marketplace links coming soon — Magic Eden & Tensor URLs are set in Owl Center admin at mint-out.
+        // Marketplace links coming soon — Orbis, Magic Eden & Tensor URLs are set in Owl Center at mint-out.
       </p>
     )
   }
   return (
     <div className="flex flex-wrap gap-3">
+      {orbisUrl ? (
+        <a href={orbisUrl} target="_blank" rel="noreferrer" className={`${btnPrimary} min-w-[140px]`}>
+          Orbis
+        </a>
+      ) : null}
       {magicEdenUrl ? (
-        <a href={magicEdenUrl} target="_blank" rel="noreferrer" className={`${btnPrimary} min-w-[140px]`}>
+        <a
+          href={magicEdenUrl}
+          target="_blank"
+          rel="noreferrer"
+          className={`${orbisUrl ? btnGhost : btnPrimary} min-w-[140px]`}
+        >
           Magic Eden
         </a>
       ) : null}

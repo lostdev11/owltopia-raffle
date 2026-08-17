@@ -42,6 +42,7 @@ function launch(
     wallet_mint_limit: 5,
     magic_eden_url: null,
     tensor_url: null,
+    orbis_url: null,
     is_featured: false,
     is_paused: true,
     launch_deadline_at: null,

@@ -24,12 +24,13 @@ export type SelloutMarketplacePrepResult = {
   mint_count?: number
   magic_eden_url?: string | null
   tensor_url?: string | null
+  orbis_url?: string | null
   hash_list_download_path?: string
 }
 
 /**
  * On sell-out: generate hash list, suggest ME/Tensor URLs, mark READY_FOR_INDEXING.
- * Magic Eden / Tensor still require creator-hub hash list submit (no public auto-upload API).
+ * Orbis / Magic Eden / Tensor still require one-time manual creator listing (no public auto-upload API).
  */
 /** Run sell-out prep when supply is exhausted but hash list / ME URLs are not stored yet. */
 export async function ensureSelloutMarketplacePrepIfNeeded(
@@ -71,6 +72,7 @@ export async function runSelloutMarketplacePrep(
       mint_count: existing.hash_list_text.split('\n').filter(Boolean).length,
       magic_eden_url: existing.magic_eden_url,
       tensor_url: existing.tensor_url,
+      orbis_url: existing.orbis_url,
       hash_list_download_path: `/api/owl-center/collections/${launch.slug}/hash-list`,
     }
   }
@@ -91,13 +93,14 @@ export async function runSelloutMarketplacePrep(
     magic_eden_url: meUrl,
     tensor_url: tensorUrl,
     metadata_status: 'READY_FOR_INDEXING',
+    orbis_status: 'READY_FOR_INDEXING',
     magic_eden_status: 'READY_FOR_INDEXING',
     tensor_status: 'READY_FOR_INDEXING',
     sellout_prepared_at: new Date().toISOString(),
     notes: [
       `Sell-out prep ${new Date().toISOString()}`,
       `${mints.length} mint(s) in hash list.`,
-      'Submit hash list at Magic Eden creator hub, then mark LISTED in admin.',
+      'List on Orbis (collection mint → marketplace#list), then optional ME hash list / Tensor verify. Mark LISTED in admin when live.',
     ].join(' '),
   })
 
@@ -109,7 +112,7 @@ export async function runSelloutMarketplacePrep(
 
   await getSupabaseAdmin().from('owl_center_activity_logs').insert({
     launch_id: launch.id,
-    message: `SELL_OUT marketplace prep · ${mints.length} mint(s) · hash list ready · ME=${meUrl ?? '—'}`,
+    message: `SELL_OUT marketplace prep · ${mints.length} mint(s) · hash list ready · Orbis+ME+Tensor ready for indexing`,
     event_type: 'system',
   })
 
@@ -118,6 +121,7 @@ export async function runSelloutMarketplacePrep(
     mint_count: mints.length,
     magic_eden_url: meUrl,
     tensor_url: tensorUrl,
+    orbis_url: row.orbis_url,
     hash_list_download_path: `/api/owl-center/collections/${launch.slug}/hash-list`,
   }
 }
