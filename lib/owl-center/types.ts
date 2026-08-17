@@ -172,7 +172,11 @@ export type SimpleMintEligibilityResponse = {
   wallet_mint_limit: number
   unit_lamports_estimate: string | null
   sol_usd_price: number | null
+  /** Live mint unit price (active allowlist phase or public), USDC notional. */
   price_usdc: number | null
+  /** When minting in an allowlist window — phase key/label for UI. */
+  active_allowlist_key: string | null
+  active_allowlist_label: string | null
   /** Owltopia platform fee per mint (USD notional; collected as SOL on-chain). */
   platform_mint_fee_usdc: number
   /** Live lamports quote for platform fee (SOL/USD). */

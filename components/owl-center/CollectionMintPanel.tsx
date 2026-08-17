@@ -348,9 +348,14 @@ export function CollectionMintPanel({
     }
   }
 
+  const livePriceUsdc = elig?.price_usdc ?? launch.public_price_usdc
+  const pricePaid = livePriceUsdc != null && livePriceUsdc > 0
   const priceLabel = formatPhasePriceSolOrFree(elig?.unit_lamports_estimate ?? null, {
-    paid: launch.public_price_usdc != null && launch.public_price_usdc > 0,
+    paid: pricePaid,
   })
+  const usdcNotional =
+    livePriceUsdc == null ? null : livePriceUsdc <= 0 ? 'Free' : `$${livePriceUsdc} USDC`
+  const phaseName = elig?.active_allowlist_label ?? (elig?.active_allowlist_key ? 'Allowlist' : 'Public')
   const platformFeeLabel =
     elig?.platform_mint_fee_label ??
     formatOwlCenterPlatformMintFeeSolLabel(
@@ -398,10 +403,16 @@ export function CollectionMintPanel({
         explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}
         onClose={dismissSuccess}
       />
-      <CommandCard label={`MINT // public · ${mintNetwork}`}>
+      <CommandCard label={`MINT // ${phaseName.toLowerCase()} · ${mintNetwork}`}>
       <div className="space-y-4">
         <p className="break-words font-mono text-xs leading-relaxed text-[#9BA8B4]">
-          {priceLabel} · {platformFeeLabel} · limit {launch.wallet_mint_limit}/wallet/phase
+          {phaseName}
+          {usdcNotional ? ` · ${usdcNotional}` : ''}
+          {pricePaid ? ` · ${priceLabel} (pay in SOL)` : ` · ${priceLabel}`}
+          {' · '}
+          {platformFeeLabel}
+          {' · '}
+          limit {launch.wallet_mint_limit}/wallet/phase
           {elig && connected ? ` · you: ${elig.wallet_minted}/${elig.wallet_mint_limit}` : ''} · {remaining}{' '}
           remaining
         </p>

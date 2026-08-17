@@ -2,8 +2,10 @@ import { Connection, PublicKey } from '@solana/web3.js'
 
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { getLaunchWlWallet, sumLaunchWlPhaseUsedMints } from '@/lib/db/owl-center-launch-wl-wallets'
+import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { launchScheduledPublicReason } from '@/lib/owl-center/launch-mint-open'
+import { resolvePartnerMintUnitPrice } from '@/lib/owl-center/partner-mint-phase-schedule'
 import {
   formatAllowlistOpensReason,
   getLaunchActiveAllowlistPhase,
@@ -72,7 +74,20 @@ export async function buildSimpleMintEligibility(
   const walletRemaining = Math.max(0, launch.wallet_mint_limit - wallet_minted)
 
   const prices_lamports = await getLaunchPriceLamportsQuotes(launch)
-  const unit_lamports_estimate = prices_lamports.public
+  const unitPrice = resolvePartnerMintUnitPrice(launch)
+  const price_usdc = unitPrice.price_usdc
+  let unit_lamports_estimate: string | null = prices_lamports.public
+  if (unitPrice.from_allowlist) {
+    if (price_usdc != null && price_usdc > 0) {
+      const q = await getOptionalLamportsQuoteForUsdc(price_usdc)
+      unit_lamports_estimate = q ? q.unitLamports.toString() : null
+    } else {
+      // Free allowlist phase (price 0 or unset treated as free for quote).
+      unit_lamports_estimate = null
+    }
+  } else if (price_usdc != null && price_usdc <= 0) {
+    unit_lamports_estimate = null
+  }
   const platformFeeQuote = platformFeeEnabled ? await resolveOwlCenterPlatformMintFeeLamports() : null
   const platform_mint_fee_lamports_estimate =
     platformFeeQuote?.ok === true ? platformFeeQuote.lamports.toString() : null
@@ -193,7 +208,9 @@ export async function buildSimpleMintEligibility(
     wallet_mint_limit: launch.wallet_mint_limit,
     unit_lamports_estimate,
     sol_usd_price: null,
-    price_usdc: launch.public_price_usdc,
+    price_usdc,
+    active_allowlist_key: unitPrice.allowlist_key,
+    active_allowlist_label: unitPrice.allowlist_label,
     platform_mint_fee_usdc: owlCenterPlatformMintFeeUsd(),
     platform_mint_fee_lamports_estimate,
     platform_mint_fee_label: formatOwlCenterPlatformMintFeeSolLabel(
