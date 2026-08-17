@@ -66,6 +66,7 @@ function baseRaffle(overrides: Partial<Raffle> = {}): Raffle {
     alternate_ticket_currency: null,
     alternate_ticket_price: null,
     max_tickets: null,
+    max_tickets_per_wallet: null,
     min_tickets: null,
     start_time: past,
     end_time: later,

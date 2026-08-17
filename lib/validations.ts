@@ -118,6 +118,7 @@ export const rafflesPostBody = z.object({
   start_time: z.string().optional(),
   status: z.enum(['draft', 'live', 'ready_to_draw', 'completed']).optional(),
   max_tickets: z.number().int().positive().optional().nullable(),
+  max_tickets_per_wallet: z.number().int().positive().optional().nullable(),
   min_tickets: z.number().int().positive().optional().nullable(),
   prize_type: z.enum(['crypto', 'nft']).optional(),
   prize_amount: z.number().optional(),

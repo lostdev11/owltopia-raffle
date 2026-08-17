@@ -5,6 +5,7 @@ import {
   TxAlreadyUsedError,
   InsufficientTicketsError,
   ConfirmEntryInvalidStateError,
+  WalletTicketLimitError,
 } from '@/lib/db/entries'
 import { getRaffleById } from '@/lib/db/raffles'
 import { verifyTransaction } from '@/lib/verify-transaction'
@@ -120,6 +121,8 @@ export async function POST(request: NextRequest) {
             ? 'Transaction already used for another entry'
             : error instanceof InsufficientTicketsError
               ? error.message
+              : error instanceof WalletTicketLimitError
+                ? error.message
               : error instanceof ConfirmEntryInvalidStateError
                 ? error.message
                 : error instanceof Error

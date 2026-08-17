@@ -8,6 +8,7 @@ import {
   ConfirmEntryInvalidStateError,
   TransactionSignatureAlreadyUsedError,
   ComplimentaryQuotaExceededError,
+  WalletTicketLimitError,
   saveTransactionSignature,
   attachEntryPaymentSignature,
 } from '@/lib/db/entries'
@@ -231,6 +232,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
     if (error instanceof InsufficientTicketsError) {
+      return NextResponse.json(ERROR_BODY, { status: 400 })
+    }
+    if (error instanceof WalletTicketLimitError) {
       return NextResponse.json(ERROR_BODY, { status: 400 })
     }
     if (error instanceof ConfirmEntryInvalidStateError) {
