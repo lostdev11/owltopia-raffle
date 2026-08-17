@@ -126,18 +126,20 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
   if (embedded) {
     return (
       <>
-        <CommandCardSection first label="MINT_DETAILS · CREATOR_CONFIG">
+        <CommandCardSection id="mint-details" label="MINT DETAILS">
           {mintDetailsSection}
         </CommandCardSection>
-        <CommandCardSection label="HUB_CARD · COVER">{coverSection}</CommandCardSection>
+        <CommandCardSection label="HUB CARD · COVER">{coverSection}</CommandCardSection>
       </>
     )
   }
 
   return (
     <div className="grid gap-6">
-      <CommandCard label="MINT_DETAILS · CREATOR_CONFIG">{mintDetailsSection}</CommandCard>
-      <CommandCard label="HUB_CARD · COVER">{coverSection}</CommandCard>
+      <CommandCard id="mint-details" label="MINT DETAILS">
+        {mintDetailsSection}
+      </CommandCard>
+      <CommandCard label="HUB CARD · COVER">{coverSection}</CommandCard>
     </div>
   )
 }

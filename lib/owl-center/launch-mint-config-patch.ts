@@ -27,6 +27,8 @@ export const MINT_CONFIG_BODY_KEYS = new Set([
   'public_start',
   'public_phase_start',
   'phase_schedule',
+  'allowlist_phases',
+  'partner_allowlist_phases',
   'royalty_percent',
   'seller_fee_basis_points',
   'royalty_splits',
@@ -66,6 +68,7 @@ export function buildMintDetailsPatchFromBody(
     total_supply: body.total_supply ?? launch.total_supply,
     presale_enabled: body.presale_enabled ?? launch.creator_presale_enabled,
     wl_enabled: body.wl_enabled ?? launch.creator_wl_enabled,
+    allowlist_phases: body.allowlist_phases ?? body.partner_allowlist_phases ?? launch.partner_allowlist_phases,
     mint_price: body.mint_price ?? body.public_price ?? launch.creator_mint_price,
     currency: body.currency ?? launch.creator_mint_currency,
     // Form has no airdrop field; preserve the existing GEN1 pool so saves don't zero it.
@@ -145,6 +148,7 @@ export function buildMintDetailsPatchFromBody(
     creator_mint_currency: parsed.creator_mint_currency,
     creator_launch_date: parsed.launch_deadline_at,
     seller_fee_basis_points: parsed.seller_fee_basis_points,
+    partner_allowlist_phases: parsed.partner_allowlist_phases,
   }
 
   if (body.royalty_splits !== undefined) {
