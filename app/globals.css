@@ -1375,7 +1375,12 @@ input[type="submit"] {
   }
 }
 
-/** Compact Owl Center launch tiles — ~300px covers, centered on mobile and desktop. */
+/**
+ * Owl Center launch tiles.
+ * Mobile: fill the content column so a lone card cannot hug the left gutter.
+ * sm+: compact ~300px tiles, centered as a group (no per-card mx-auto — that
+ * spreads two tiles to opposite ends of a flex row).
+ */
 .owl-center-collection-card-grid {
   display: flex;
   width: 100%;
@@ -1386,8 +1391,19 @@ input[type="submit"] {
 }
 
 .owl-center-collection-card-grid > * {
-  flex: 0 1 300px;
-  width: min(100%, 300px);
-  max-width: 300px;
+  box-sizing: border-box;
+  flex: 1 1 100%;
+  width: 100%;
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+@media (min-width: 640px) {
+  .owl-center-collection-card-grid > * {
+    flex: 0 1 300px;
+    width: min(100%, 300px);
+    max-width: 300px;
+    margin-inline: 0;
+  }
 }
 

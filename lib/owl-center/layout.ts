@@ -2,5 +2,5 @@
 export const OWL_CENTER_PAGE_GUTTER =
   'mx-auto box-border w-full min-w-0 max-w-6xl pl-[max(0.75rem,env(safe-area-inset-left,0px))] pr-[max(0.75rem,env(safe-area-inset-right,0px))] sm:px-4' as const
 
-/** Compact launch cards — ~300px tiles, centered in the Owl Center page shell. */
+/** Launch cards — full-width on mobile, compact centered ~300px tiles from sm up. */
 export const OWL_CENTER_COLLECTION_CARD_GRID = 'owl-center-collection-card-grid' as const
