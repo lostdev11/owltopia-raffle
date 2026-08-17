@@ -1375,11 +1375,13 @@ input[type="submit"] {
   }
 }
 
-/** Compact Owl Center launch tiles — keeps square covers ~240–300px, not half-viewport. */
+/** Compact Owl Center launch tiles — ~300px covers, centered on mobile and desktop. */
 .owl-center-collection-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 300px));
-  justify-content: start;
+  width: 100%;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 300px));
+  justify-content: center;
+  justify-items: center;
   gap: 1rem;
 }
 
