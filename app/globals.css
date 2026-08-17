@@ -1374,3 +1374,12 @@ input[type="submit"] {
     background: transparent;
   }
 }
+
+/** Compact Owl Center launch tiles — keeps square covers ~240–300px, not half-viewport. */
+.owl-center-collection-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 300px));
+  justify-content: start;
+  gap: 1rem;
+}
+
