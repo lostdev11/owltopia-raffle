@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {
   parseMaxTicketsPerWalletInput,
   validateMaxTicketsPerWallet,
-} from '../lib/raffles/max-tickets-per-wallet.ts'
+} from '../lib/raffles/max-tickets-per-wallet'
 
 const okNull = validateMaxTicketsPerWallet(null, 100)
 assert.equal(okNull.ok, true)
