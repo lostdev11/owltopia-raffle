@@ -30,7 +30,10 @@ export function publicSimpleGuardOptsFromLaunch(
   }
 }
 
-function solPaymentGuard(lamportsAmt: bigint, destination: string | null) {
+function solPaymentGuard(
+  lamportsAmt: bigint,
+  destination: string | null
+): DefaultGuardSetArgs['solPayment'] {
   if (lamportsAmt <= 0n || !destination) return none()
   return some({
     lamports: lamports(lamportsAmt),
@@ -38,12 +41,12 @@ function solPaymentGuard(lamportsAmt: bigint, destination: string | null) {
   })
 }
 
-function startDateGuard(iso: string | null | undefined) {
+function startDateGuard(iso: string | null | undefined): DefaultGuardSetArgs['startDate'] {
   const startDateIso = iso?.trim() || null
   return startDateIso ? some({ date: dateTime(startDateIso) }) : none()
 }
 
-function endDateGuard(iso: string | null | undefined) {
+function endDateGuard(iso: string | null | undefined): DefaultGuardSetArgs['endDate'] {
   const endDateIso = iso?.trim() || null
   return endDateIso ? some({ date: dateTime(endDateIso) }) : none()
 }
