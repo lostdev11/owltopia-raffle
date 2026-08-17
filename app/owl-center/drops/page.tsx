@@ -4,6 +4,7 @@ import { CollectionCard } from '@/components/owl-center/CollectionCard'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { listOwlCenterLaunchesPublic } from '@/lib/db/owl-center-launch'
 import { getGen2PresaleSoldOutForDisplay } from '@/lib/gen2-presale/owl-center-presale-status'
+import { OWL_CENTER_COLLECTION_CARD_GRID } from '@/lib/owl-center/layout'
 import { PLATFORM_NAME } from '@/lib/site-config'
 
 export const metadata: Metadata = {
@@ -27,7 +28,7 @@ export default async function OwlCenterDropsPage() {
       {live.length === 0 ? (
         <p className="font-mono text-sm text-[#5C6773]">No active primary mints — check trading or upcoming.</p>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className={OWL_CENTER_COLLECTION_CARD_GRID}>
           {live.map((l) => (
             <CollectionCard key={l.id} launch={l} presaleSoldOut={l.slug === 'gen2' ? presaleSoldOut : false} />
           ))}

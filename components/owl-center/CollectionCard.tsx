@@ -33,14 +33,14 @@ export function CollectionCard({
   const scheduledPublicLabel = launchPublicPhaseBadgeLabel(launch)
 
   return (
-    <article className="flex flex-col border border-[#1A222B] bg-[#10161C]/85">
+    <article className="flex w-full max-w-[300px] flex-col border border-[#1A222B] bg-[#10161C]/85">
       <div className="relative aspect-square overflow-hidden border-b border-[#1A222B] bg-[#0F1419]">
         <HubCardCoverImage imageUrl={launch.image_url} fit="cover" />
         <span className="absolute left-2 top-2 rounded-none border border-[#00FF9C]/30 bg-[#0F1419]/90 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest text-[#00FF9C]">
           Solana
         </span>
       </div>
-      <div className="flex flex-1 flex-col gap-3 p-4">
+      <div className="flex flex-1 flex-col gap-2.5 p-3">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={launch.status} />
           <PhaseBadge
@@ -51,13 +51,13 @@ export function CollectionCard({
           />
         </div>
         <div>
-          <h3 className="font-display text-xl text-[#F4FBF8]">{launch.name}</h3>
+          <h3 className="font-display text-lg leading-tight text-[#F4FBF8]">{launch.name}</h3>
           <p className="mt-1 font-mono text-xs text-[#5C6773]">
             {launch.creator_wallet ? `Creator ${launch.creator_wallet.slice(0, 4)}…` : 'Owltopia'}
           </p>
         </div>
         <LaunchMintDetails launch={launch} />
-        <div className="mt-auto flex flex-wrap gap-2 pt-2">
+        <div className="mt-auto flex flex-wrap gap-2 pt-1">
           {internal ? (
             <Link href={href} className={`${owlCenterBtnPrimary} w-full sm:w-auto`}>
               {label}
