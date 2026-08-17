@@ -11,6 +11,7 @@ import { CollectionSoldOutPanel } from '@/components/owl-center/CollectionSoldOu
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { LaunchPhaseTimeline } from '@/components/owl-center/LaunchPhaseTimeline'
 import { MintAllocationBar } from '@/components/owl-center/MintAllocationBar'
+import { PartnerMintPhaseSchedule } from '@/components/owl-center/PartnerMintPhaseSchedule'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { PhaseBadge } from '@/components/owl-center/PhaseBadge'
 import { StatPanel } from '@/components/owl-center/StatPanel'
@@ -135,6 +136,10 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
             </div>
           ) : null}
           <LaunchPhaseTimeline active={launch.active_phase} launch={launch} userMintPhase={userMintPhase} />
+          <PartnerMintPhaseSchedule
+            launch={launch}
+            liveUnitLamports={elig?.unit_lamports_estimate}
+          />
           <CollectionMintPanel
             slug={slug}
             launch={launch}
