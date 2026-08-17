@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { randomUUID } from 'node:crypto'
 
 import { getSessionFromRequest } from '@/lib/auth-server'
 import { getOwlCenterLaunchAccess } from '@/lib/owl-center/launch-access'
@@ -10,6 +9,7 @@ import { parseStandardFreezeConfig } from '@/lib/owl-center/freeze-config'
 import { mergeValidationChecklist, validateAssetPackageInput } from '@/lib/owl-center/asset-validation'
 import { upsertAssetPackageForLaunch } from '@/lib/db/owl-center-asset-package'
 import { upsertMarketplaceReadinessForLaunch } from '@/lib/db/owl-center-marketplace'
+import { generateUniqueOwlCenterLaunchSlug } from '@/lib/db/owl-center-launch-slug'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
     if (!v.ok) return jsonError(v.errors.join('; '), 400)
   }
 
-  const slug = `sub-${randomUUID().replace(/-/g, '')}`
+  const slug = await generateUniqueOwlCenterLaunchSlug(name)
 
   const db = getSupabaseAdmin()
   const imageUrl = collectionImageUrl || logoUrl || null

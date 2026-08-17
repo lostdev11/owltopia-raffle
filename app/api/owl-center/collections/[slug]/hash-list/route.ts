@@ -5,11 +5,10 @@ import { formatHashListText } from '@/lib/owl-center/marketplace-urls'
 import { ensureSelloutMarketplacePrepIfNeeded } from '@/lib/owl-center/sellout-marketplace-prep'
 import { getOwlCenterLaunchBySlug, getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 import { getMarketplaceReadinessByLaunchId } from '@/lib/db/owl-center-marketplace'
+import { parseOwlCenterCollectionSlugParam } from '@/lib/owl-center/launch-slug'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
-
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 
 /** Download hash list (mint addresses) for ME / Tensor creator submission. */
 export async function GET(request: NextRequest, context: { params: Promise<{ slug: string }> }) {
@@ -20,8 +19,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   }
 
   const { slug: raw } = await context.params
-  const slug = raw?.trim().toLowerCase() ?? ''
-  if (!SLUG_RE.test(slug) || slug === 'gen2') {
+  const slug = parseOwlCenterCollectionSlugParam(raw)
+  if (!slug) {
     return NextResponse.json({ error: 'Invalid collection slug' }, { status: 400 })
   }
 
@@ -47,14 +46,14 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   const format = request.nextUrl.searchParams.get('format')
   if (format === 'json') {
     const mints = text.split('\n').filter(Boolean)
-    return NextResponse.json({ slug, mint_count: mints.length, mints })
+    return NextResponse.json({ slug: launch.slug, mint_count: mints.length, mints })
   }
 
   return new NextResponse(text + '\n', {
     status: 200,
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${slug}-hash-list.txt"`,
+      'Content-Disposition': `attachment; filename="${launch.slug}-hash-list.txt"`,
       'Cache-Control': 'no-store',
     },
   })
