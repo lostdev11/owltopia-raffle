@@ -33,7 +33,6 @@ export type PublicSimpleGuardLaunch = Pick<
   | 'presale_supply'
   | 'wl_price_usdc'
   | 'public_price_usdc'
-  | 'public_supply'
   | 'creator_mint_price'
   | 'creator_mint_currency'
   | 'treasury_wallet'
