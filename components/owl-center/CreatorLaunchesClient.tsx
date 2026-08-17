@@ -23,6 +23,10 @@ type LaunchRow = {
   symbol: string | null
   status: string
   active_phase: string
+  active_phases?: string[]
+  is_paused?: boolean
+  phase_schedule?: Record<string, string>
+  launch_deadline_at?: string | null
   total_supply: number
   minted_count: number
   wallet_mint_limit: number
@@ -136,7 +140,12 @@ export function CreatorLaunchesClient() {
           ) : null}
           {launches.map((l) => {
             const listingUnlocked = isLaunchMarketplaceListingUnlocked(l)
-            const friendly = friendlyLaunchStatus(l.status, l.active_phase)
+            const friendly = friendlyLaunchStatus(l.status, l.active_phase, {
+              phase_schedule: l.phase_schedule,
+              launch_deadline_at: l.launch_deadline_at,
+              active_phases: l.active_phases,
+              is_paused: l.is_paused,
+            })
             const adminLabels = isAdmin && !previewPartner && !isPartnerPreview
             return (
             <CommandCard key={l.id} label={adminLabels ? `${l.status} · ${l.active_phase}` : friendly.label}>
