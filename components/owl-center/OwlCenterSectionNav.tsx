@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import { replaceClientUrl } from '@/lib/client/replace-url'
 import type { OwlCenterGen2Section } from '@/lib/owl-center/nav'
 import { cn } from '@/lib/utils'
 
@@ -19,9 +20,7 @@ export function OwlCenterSectionNav({
     if (!el) return
     el.scrollIntoView({ behavior: 'smooth', block: 'start' })
     setActiveId(id)
-    if (typeof history !== 'undefined' && history.replaceState) {
-      history.replaceState(null, '', `#${id}`)
-    }
+    replaceClientUrl(`#${id}`)
   }, [])
 
   useEffect(() => {

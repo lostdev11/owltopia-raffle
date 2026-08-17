@@ -30,6 +30,7 @@ import {
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { isMobileDevice } from '@/lib/utils'
+import { replaceClientUrl } from '@/lib/client/replace-url'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { useConnection } from '@solana/wallet-adapter-react'
@@ -646,7 +647,7 @@ export default function DashboardPage() {
     } else if (err) {
       setDiscordLinkFlash(discordOAuthReturnMessage(err))
     }
-    window.history.replaceState({}, '', '/dashboard')
+    replaceClientUrl('/dashboard')
     void loadDashboard({ silent: true })
   }, [loadDashboard])
 
