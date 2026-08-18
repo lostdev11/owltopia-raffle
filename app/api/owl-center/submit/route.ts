@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       treasury_wallet: body.treasury_wallet ?? null,
       magic_eden_url: body.magic_eden_url ?? null,
       tensor_url: body.tensor_url ?? null,
+      orbis_url: body.orbis_url ?? null,
       status: 'PENDING_REVIEW',
     })
     .select('id')

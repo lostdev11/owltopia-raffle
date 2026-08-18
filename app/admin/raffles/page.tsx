@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { getAdminPendingCancellationRaffles, getRaffles, getEntriesByRaffleId } from '@/lib/db/raffles'
@@ -169,13 +170,21 @@ export default async function AdminRafflesPage() {
   ])
 
   return (
-    <AdminRafflesPageClient
-      activeRafflesWithEntries={activeRafflesWithEntries}
-      futureRafflesWithEntries={futureRafflesWithEntries}
-      pastRafflesWithEntries={pastRafflesWithEntries}
-      pausedPendingRafflesWithEntries={pausedPendingRafflesWithEntries}
-      cancelledRecoveryRafflesWithEntries={cancelledRecoveryRafflesWithEntries}
-      pendingCancellationRafflesWithEntries={pendingCancellationRafflesWithEntries}
-    />
+    <Suspense
+      fallback={
+        <div className="container mx-auto py-8 px-4">
+          <p className="text-muted-foreground">Loading raffles…</p>
+        </div>
+      }
+    >
+      <AdminRafflesPageClient
+        activeRafflesWithEntries={activeRafflesWithEntries}
+        futureRafflesWithEntries={futureRafflesWithEntries}
+        pastRafflesWithEntries={pastRafflesWithEntries}
+        pausedPendingRafflesWithEntries={pausedPendingRafflesWithEntries}
+        cancelledRecoveryRafflesWithEntries={cancelledRecoveryRafflesWithEntries}
+        pendingCancellationRafflesWithEntries={pendingCancellationRafflesWithEntries}
+      />
+    </Suspense>
   )
 }

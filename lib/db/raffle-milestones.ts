@@ -92,6 +92,7 @@ export async function updateRaffleMilestone(
   patch: Partial<
     Pick<
       RaffleMilestone,
+      | 'winner_mode'
       | 'status'
       | 'unlocked_at'
       | 'winner_wallet'
@@ -113,6 +114,24 @@ export async function updateRaffleMilestone(
   if (error) {
     throw new Error(`Failed to update milestone: ${error.message}`)
   }
+}
+
+/** Update winner selection mode; returns the updated row. */
+export async function updateRaffleMilestoneWinnerMode(
+  milestoneId: string,
+  winnerMode: RaffleMilestone['winner_mode']
+): Promise<RaffleMilestone | null> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('raffle_milestones')
+    .update({ winner_mode: winnerMode, updated_at: new Date().toISOString() })
+    .eq('id', milestoneId)
+    .select('*')
+    .maybeSingle()
+  if (error) {
+    throw new Error(`Failed to update milestone winner mode: ${error.message}`)
+  }
+  if (!data) return null
+  return mapRow(data as Record<string, unknown>)
 }
 
 /** Milestones that still require escrow before ticket sales / publish. */

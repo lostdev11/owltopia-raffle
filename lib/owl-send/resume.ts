@@ -1,5 +1,5 @@
 import type { OwlSendLine } from '@/lib/owl-send/batch'
-import { chunkOwlSendBatches } from '@/lib/owl-send/batch'
+import { chunkOwlSendBatches, chunkOwlSendNftLines } from '@/lib/owl-send/batch'
 
 export type OwlSendBatchProgressSnapshot = {
   index: number
@@ -96,7 +96,7 @@ export function buildResumeRemainingPlan(params: {
     }
   }
 
-  const batches = chunkOwlSendBatches(remaining)
+  const batches = chunkOwlSendNftLines(remaining)
   const batchProgress: OwlSendBatchProgressSnapshot[] = batches.map((_, i) => ({
     index: i,
     total: batches.length,
@@ -169,7 +169,7 @@ export function buildResumeSkippingFrozenPlan(params: {
     }
   }
 
-  const batches = chunkOwlSendBatches(remaining)
+  const batches = chunkOwlSendNftLines(remaining)
   const batchProgress: OwlSendBatchProgressSnapshot[] = batches.map((_, i) => ({
     index: i,
     total: batches.length,
@@ -184,4 +184,117 @@ export function buildResumeSkippingFrozenPlan(params: {
     skippedFrozen,
     skippedSent,
   }
+}
+
+export type PartialOwlSendBatchSuccess = {
+  batches: OwlSendLine[][]
+  batchProgress: OwlSendBatchProgressSnapshot[]
+  preparedLines: OwlSendLine[]
+  nextIndex: number
+  deferredCount: number
+}
+
+/**
+ * After a prefix of the current approval lands, keep those lines as the completed
+ * batch and insert the unsent tail as the next approval(s).
+ */
+export function applyPartialOwlSendBatchSuccess(params: {
+  preparedLines: OwlSendLine[]
+  batches: OwlSendLine[][]
+  batchProgress: OwlSendBatchProgressSnapshot[]
+  batchIndex: number
+  sentLines: OwlSendLine[]
+  deferredLines: OwlSendLine[]
+  signature: string
+}): PartialOwlSendBatchSuccess {
+  const { batchIndex, sentLines, deferredLines, signature } = params
+  const nextBatches = [...params.batches]
+  nextBatches[batchIndex] = sentLines
+  const extra = chunkOwlSendNftLines(deferredLines)
+  nextBatches.splice(batchIndex + 1, 0, ...extra)
+
+  const nextProgress: OwlSendBatchProgressSnapshot[] = nextBatches.map((_, i) => {
+    if (i < batchIndex) {
+      const prev = params.batchProgress[i]
+      return {
+        index: i,
+        total: nextBatches.length,
+        status: prev?.status ?? 'pending',
+        signature: prev?.signature,
+        error: prev?.error,
+        failedMints: prev?.failedMints,
+      }
+    }
+    if (i === batchIndex) {
+      return {
+        index: i,
+        total: nextBatches.length,
+        status: 'done',
+        signature,
+      }
+    }
+    return {
+      index: i,
+      total: nextBatches.length,
+      status: i === batchIndex + 1 ? 'ready' : 'pending',
+    }
+  })
+
+  return {
+    batches: nextBatches,
+    batchProgress: nextProgress,
+    preparedLines: nextBatches.flat(),
+    nextIndex: batchIndex + 1,
+    deferredCount: deferredLines.length,
+  }
+}
+
+/**
+ * Split a failed oversized approval so Retry uses a smaller packet.
+ */
+export function splitOversizedOwlSendBatch(params: {
+  batches: OwlSendLine[][]
+  batchProgress: OwlSendBatchProgressSnapshot[]
+  batchIndex: number
+  error: string
+}): { batches: OwlSendLine[][]; batchProgress: OwlSendBatchProgressSnapshot[] } | null {
+  const lines = params.batches[params.batchIndex]
+  if (!lines || lines.length < 2) return null
+  const maxPer = Math.max(1, Math.ceil(lines.length / 2))
+  const pieces = chunkOwlSendBatches(lines, maxPer)
+  if (pieces.length < 2) return null
+
+  const nextBatches = [...params.batches]
+  nextBatches.splice(params.batchIndex, 1, ...pieces)
+  const nextProgress: OwlSendBatchProgressSnapshot[] = nextBatches.map((_, i) => {
+    if (i < params.batchIndex) {
+      const prev = params.batchProgress[i]
+      return {
+        index: i,
+        total: nextBatches.length,
+        status: prev?.status ?? 'pending',
+        signature: prev?.signature,
+        error: prev?.error,
+        failedMints: prev?.failedMints,
+      }
+    }
+    if (i === params.batchIndex) {
+      return {
+        index: i,
+        total: nextBatches.length,
+        status: 'failed',
+        error: params.error,
+      }
+    }
+    const shift = i - (pieces.length - 1)
+    const prev = params.batchProgress[shift]
+    return {
+      index: i,
+      total: nextBatches.length,
+      status: prev?.status === 'done' ? 'done' : i === params.batchIndex + 1 ? 'pending' : (prev?.status ?? 'pending'),
+      signature: prev?.signature,
+    }
+  })
+
+  return { batches: nextBatches, batchProgress: nextProgress }
 }

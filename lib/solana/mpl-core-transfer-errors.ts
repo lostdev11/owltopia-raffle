@@ -14,6 +14,39 @@ export function isMplCoreNoApprovalsError(message: string): boolean {
   )
 }
 
+/**
+ * fetchAsset / deserialize failed because the address is not an Mpl Core asset account.
+ * Common when escrow fallbacks try Core after wallet-RPC missed an SPL/Token Metadata NFT
+ * (SDK: AssetAccountData + EnumDiscriminatorOutOfRangeError).
+ */
+export function isMplCoreWrongAccountTypeError(message: string): boolean {
+  const m = message.toLowerCase()
+  return (
+    m.includes('assetaccountdata') ||
+    m.includes('not of the expected type') ||
+    m.includes('enumdiscriminatoroutofrange') ||
+    (m.includes('enum discriminator out of range') && m.includes('expected a number between'))
+  )
+}
+
+/**
+ * Strip noisy Kinobi/SDK stack text from escrow fallback failures for UI copy.
+ */
+export function sanitizeEscrowTransferFallbackError(message: string): string {
+  const trimmed = message.trim()
+  if (!trimmed) return trimmed
+  if (isMplCoreWrongAccountTypeError(trimmed)) {
+    return (
+      'This NFT is not a Metaplex Core asset (in-app Core transfer does not apply). ' +
+      'If it is a normal SPL / Token Metadata NFT, refresh and retry, or send it manually to escrow and paste the signature.'
+    )
+  }
+  // Keep the first meaningful line; drop "Source: SDK / Caused By:" dumps when long.
+  const firstLine = trimmed.split('\n').map((l) => l.trim()).find(Boolean) ?? trimmed
+  if (firstLine.length <= 280) return firstLine
+  return `${firstLine.slice(0, 277)}…`
+}
+
 /** Solscan “account” view for an MPL Core asset id (same address you use in wallets). */
 export function solscanMplCoreAssetUrl(assetAddress: string): string {
   const q = /devnet/i.test(resolvePublicSolanaRpcUrl()) ? '?cluster=devnet' : ''

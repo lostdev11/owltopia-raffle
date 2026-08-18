@@ -7,7 +7,6 @@ import { Gen2GeneratorLinkPanel } from '@/components/owl-center/Gen2GeneratorLin
 import { AssetPackagePanel } from '@/components/owl-center/AssetPackagePanel'
 import { AssetPackageUploadPanel } from '@/components/owl-center/AssetPackageUploadPanel'
 import { CollectionLaunchOpsCard } from '@/components/owl-center/CollectionLaunchOpsCard'
-import { AdminCoreCollectionThawPanel } from '@/components/admin/AdminCoreCollectionThawPanel'
 import { SugarDeployPanel } from '@/components/owl-center/SugarDeployPanel'
 import { AssetValidationChecklist } from '@/components/owl-center/AssetValidationChecklist'
 import { SugarBatchScanner } from '@/components/owl-center/SugarBatchScanner'
@@ -550,8 +549,6 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
       </CommandCard>
 
       <AssetPackagePanel pkg={assetPackage} />
-
-      <AdminCoreCollectionThawPanel launch={launch} onChanged={() => void load()} />
 
       <CollectionLaunchOpsCard
         launchId={launchId}

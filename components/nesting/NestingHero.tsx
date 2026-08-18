@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import { replaceClientUrl } from '@/lib/client/replace-url'
 import { nestingClaimReadyButtonClass } from '@/lib/nesting/ui-classes'
 import { cn } from '@/lib/utils'
 
@@ -9,9 +10,7 @@ function scrollToPerches() {
   const el = document.getElementById('perches')
   if (!el) return
   el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  if (typeof history !== 'undefined' && history.replaceState) {
-    history.replaceState(null, '', '#perches')
-  }
+  replaceClientUrl('#perches')
 }
 
 export function NestingHero() {

@@ -70,6 +70,21 @@ const nextConfig = {
       { source: '/favicon.ico', destination: '/icon.png' },
     ]
   },
+  // Keep old phishing-shaped raffle URLs working after slug renames.
+  async redirects() {
+    return [
+      {
+        source: '/raffles/legendary-dumpster-14',
+        destination: '/raffles/dumpster-14',
+        permanent: true,
+      },
+      {
+        source: '/raffles/legendary-dumpster-14/:path*',
+        destination: '/raffles/dumpster-14/:path*',
+        permanent: true,
+      },
+    ]
+  },
   // Silence Turbopack/webpack config mismatch when using custom webpack config
   turbopack: {
     // Use this directory as workspace root so Next doesn't warn about parent lockfile

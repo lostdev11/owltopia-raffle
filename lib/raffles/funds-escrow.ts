@@ -204,7 +204,12 @@ export async function payoutCreatorAndPlatformFromFundsEscrow(raffle: Raffle): P
     return { ok: false, error: 'Invalid platform fee amount.' }
   }
 
-  const currency = (raffle.currency || 'SOL').toUpperCase() as 'SOL' | 'USDC' | 'OWL'
+  const currency = (raffle.currency || 'SOL').toUpperCase() as
+    | 'SOL'
+    | 'USDC'
+    | 'OWL'
+    | 'BAMBOO'
+    | 'GOATS'
   const connection = getSolanaConnection()
   const escrowPubkey = kp.publicKey
   const creatorPk = new PublicKey(creatorWallet)
@@ -371,6 +376,7 @@ export async function refundEntryFromFundsEscrow(
     | 'USDC'
     | 'OWL'
     | 'BAMBOO'
+    | 'GOATS'
   const connection = getSolanaConnection()
   const escrowPubkey = kp.publicKey
   const buyerPk = new PublicKey(entry.wallet_address.trim())

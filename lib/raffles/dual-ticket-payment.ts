@@ -24,7 +24,7 @@ export function acceptedTicketPaymentCurrencies(raffle: Raffle): RaffleCurrency[
 
 function normalizeAltCurrency(s: string): RaffleCurrency {
   const u = s.trim().toUpperCase()
-  if (u === 'SOL' || u === 'USDC' || u === 'OWL' || u === 'BAMBOO') return u
+  if (u === 'SOL' || u === 'USDC' || u === 'OWL' || u === 'BAMBOO' || u === 'GOATS') return u
   return 'SOL'
 }
 

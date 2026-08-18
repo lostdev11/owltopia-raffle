@@ -106,7 +106,7 @@ async function fetchLaunch(db, launchId) {
   if (!launchId) return null
   const { data, error } = await db
     .from('owl_center_launches')
-    .select('id,slug,name,symbol,total_supply,creator_wallet,description,seller_fee_basis_points')
+    .select('id,slug,name,symbol,total_supply,creator_wallet,description,seller_fee_basis_points,royalty_splits')
     .eq('id', launchId)
     .maybeSingle()
   if (error) throw error
@@ -128,14 +128,38 @@ async function downloadZip(db, storagePath) {
   return Buffer.from(await data.arrayBuffer())
 }
 
-function rewriteMetadataJson(rawJson, imageUri) {
-  const parsed = JSON.parse(rawJson)
-  parsed.image = imageUri
-  if (parsed.properties && typeof parsed.properties === 'object' && Array.isArray(parsed.properties.files)) {
-    parsed.properties.files = parsed.properties.files.map((f) =>
-      typeof f.uri === 'string' && f.uri.endsWith('.png') ? { ...f, uri: imageUri } : f
-    )
+function applyLaunchRoyalties(parsed, launch) {
+  const bps = Number(launch?.seller_fee_basis_points)
+  parsed.seller_fee_basis_points = Number.isFinite(bps) && bps >= 0 ? Math.floor(bps) : 500
+  const splits =
+    Array.isArray(launch?.royalty_splits) && launch.royalty_splits.length > 0
+      ? launch.royalty_splits
+      : [{ address: launch?.creator_wallet, share: 100 }]
+  const creators = splits
+    .filter((row) => row && typeof row.address === 'string' && row.address.length >= 32 && Number(row.share) > 0)
+    .map((row) => ({
+      address: row.address,
+      share: Math.round(Number(row.share)),
+      verified: false,
+    }))
+  if (!parsed.properties || typeof parsed.properties !== 'object') {
+    parsed.properties = { category: 'image' }
   }
+  if (creators.length) parsed.properties.creators = creators
+  return parsed
+}
+
+function rewriteMetadataJson(rawJson, imageUri, launch) {
+  const parsed = JSON.parse(rawJson)
+  if (imageUri) {
+    parsed.image = imageUri
+    if (parsed.properties && typeof parsed.properties === 'object' && Array.isArray(parsed.properties.files)) {
+      parsed.properties.files = parsed.properties.files.map((f) =>
+        typeof f.uri === 'string' && f.uri.endsWith('.png') ? { ...f, uri: imageUri } : f
+      )
+    }
+  }
+  applyLaunchRoyalties(parsed, launch)
   return `${JSON.stringify(parsed, null, 2)}\n`
 }
 
@@ -251,19 +275,29 @@ async function main() {
     throw new Error('No Sugar asset files (N.png / N.json) found in the staged ZIP — check its contents.')
   }
 
-  // Patch token metadata JSON with on-chain Arweave image URIs (matches Phase B upload).
-  // Skipped in pre-upload mode — `sugar upload` rewrites image URIs itself.
-  if (!preUpload) {
-    for (let i = 0; i < 10000; i++) {
-      const pngLink = progress.uploaded[`assets/${i}.png`]
-      const jsonPath = path.join(assetsDir, `${i}.json`)
-      if (!pngLink || !fs.existsSync(jsonPath)) {
-        if (i > 0 && !progress.uploaded[`assets/${i}.png`]) break
-        continue
-      }
-      const raw = fs.readFileSync(jsonPath, 'utf8')
-      fs.writeFileSync(jsonPath, rewriteMetadataJson(raw, pngLink))
+  // Patch token + collection metadata JSON with image URIs and launch royalties.
+  // Royalties are stamped even in pre-upload mode so Sugar CLI JSON matches on-chain.
+  for (let i = 0; i < 10000; i++) {
+    const pngLink = progress.uploaded[`assets/${i}.png`]
+    const jsonPath = path.join(assetsDir, `${i}.json`)
+    if (!fs.existsSync(jsonPath)) {
+      if (i > 0 && !progress.uploaded[`assets/${i}.png`] && !fs.existsSync(path.join(assetsDir, `${i}.png`))) break
+      continue
     }
+    const imageUri = preUpload ? null : pngLink
+    const raw = fs.readFileSync(jsonPath, 'utf8')
+    fs.writeFileSync(jsonPath, rewriteMetadataJson(raw, imageUri, launch))
+  }
+  const collectionJsonPath = path.join(assetsDir, 'collection.json')
+  if (fs.existsSync(collectionJsonPath)) {
+    const collectionImage =
+      (!preUpload &&
+        (progress.uploaded['assets/collection.png'] || progress.uploaded['assets/0.png'])) ||
+      null
+    fs.writeFileSync(
+      collectionJsonPath,
+      rewriteMetadataJson(fs.readFileSync(collectionJsonPath, 'utf8'), collectionImage, launch)
+    )
   }
 
   // Generator export has collection.json but often no collection.png — use #0 art for Sugar.

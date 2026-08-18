@@ -8,6 +8,7 @@ import {
   ComplimentaryQuotaExceededError,
   InsufficientTicketsError,
   TxAlreadyUsedError,
+  WalletTicketLimitError,
 } from '@/lib/db/entries'
 import {
   isReferralAttributionActive,
@@ -103,6 +104,7 @@ export async function POST(request: NextRequest) {
       if (
         e instanceof TxAlreadyUsedError ||
         e instanceof InsufficientTicketsError ||
+        e instanceof WalletTicketLimitError ||
         e instanceof ConfirmEntryInvalidStateError
       ) {
         return NextResponse.json(ERROR_BODY, { status: 400 })

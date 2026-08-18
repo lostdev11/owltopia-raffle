@@ -24,6 +24,12 @@ export function CurrencyIcon({ currency, className = '', size = 20 }: CurrencyIc
     setPartnerPrizeImageError(false)
   }, [currency])
 
+  const code = currency.trim().toUpperCase()
+  // Partner logos for these tickers are not used as UI badges (browse chips, cards, checkout).
+  if (code === 'BAMBOO' || code === 'GOATS') {
+    return null
+  }
+
   if (currency === 'SOL') {
     const w = size
     const h = Math.max(1, Math.round((size * 311) / 397))

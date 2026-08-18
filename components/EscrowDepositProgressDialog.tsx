@@ -9,16 +9,22 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { AlertCircle, Loader2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
 
 export type EscrowDepositProgressStep = 'wallet' | 'chain' | 'verify' | 'sign_in'
+
+export type EscrowDepositProgressPhase = 'loading' | 'result' | 'success'
 
 export type EscrowDepositProgressDialogProps = {
   open: boolean
   title: string
   description: ReactNode
-  /** Default: spinner + loading copy. Use `result` for in-app messages that replaced blocking alerts. */
-  phase?: 'loading' | 'result'
+  /**
+   * `loading` — spinner.
+   * `result` — attention / pending (amber).
+   * `success` — confirmed live/scheduled (green success box).
+   */
+  phase?: EscrowDepositProgressPhase
   /** Escrow sub-step for loading phase (wallet approval, chain confirm, server verify). */
   step?: EscrowDepositProgressStep
   /** Shown during verify retries (e.g. attempt 3 of 14). */
@@ -41,7 +47,7 @@ function stepTitle(step: EscrowDepositProgressStep | undefined, fallbackTitle: s
     case 'sign_in':
       return 'Sign in to finish'
     case 'verify':
-      return 'Verifying prize in escrow'
+      return 'Finishing raffle creation'
     default:
       return fallbackTitle
   }
@@ -77,8 +83,8 @@ function stepDescription(
     case 'verify':
       return (
         <p>
-          Checking that your prize reached platform escrow so the raffle can go live. We retry
-          automatically
+          Checking that your prize reached platform escrow so we can finish creating your raffle. We
+          retry automatically
           {verifyAttempt && verifyAttempt.max > 0 ? ` (up to ${verifyAttempt.max} tries)` : ''}.
           {verifyAttempt && verifyAttempt.current > 0 ? (
             <span className="block mt-2 font-medium text-foreground">
@@ -108,7 +114,10 @@ export function EscrowDepositProgressDialog({
   onCancel,
 }: EscrowDepositProgressDialogProps) {
   const isLoading = phase === 'loading'
-  const displayTitle = isLoading && step ? stepTitle(step, title) : title
+  const isSuccess = phase === 'success'
+  // Prefer the caller title (e.g. create flow: "Your raffle is being created") over step labels.
+  const displayTitle =
+    title.trim() || (isLoading && step ? stepTitle(step, 'Working…') : 'Working…')
   const displayDescription = isLoading
     ? stepDescription(step, description, verifyAttempt) ?? description
     : description
@@ -117,7 +126,11 @@ export function EscrowDepositProgressDialog({
   return (
     <Dialog open={open}>
       <DialogContent
-        className="sm:max-w-md touch-manipulation [&>button]:hidden"
+        className={
+          isSuccess
+            ? 'sm:max-w-md touch-manipulation [&>button]:hidden border-emerald-500/35'
+            : 'sm:max-w-md touch-manipulation [&>button]:hidden'
+        }
         onPointerDownOutside={(e) => {
           if (!primaryAction && !canCancel) e.preventDefault()
         }}
@@ -126,28 +139,51 @@ export function EscrowDepositProgressDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle className="pr-6 text-left">{displayTitle}</DialogTitle>
+          <DialogTitle className={`pr-6 text-left ${isSuccess ? 'text-emerald-100' : ''}`}>
+            {displayTitle}
+          </DialogTitle>
           <DialogDescription className="sr-only">
-            {isLoading ? 'Deposit and verification in progress' : 'Deposit or verification needs attention'}
+            {isLoading
+              ? 'Deposit and verification in progress'
+              : isSuccess
+                ? 'Raffle created successfully'
+                : 'Deposit or verification needs attention'}
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4 text-left">
-          <div className="flex gap-3" role="status" aria-live="polite">
-            {isLoading ? (
-              <Loader2
-                className="h-5 w-5 shrink-0 animate-spin text-foreground mt-0.5"
-                aria-hidden
-              />
-            ) : (
-              <AlertCircle
-                className="h-5 w-5 shrink-0 text-amber-500 mt-0.5"
-                aria-hidden
-              />
-            )}
-            <div className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-              {displayDescription}
+          {isSuccess ? (
+            <div
+              className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-4 py-3"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="flex gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500/20">
+                  <CheckCircle2 className="h-6 w-6 text-emerald-400" aria-hidden />
+                </div>
+                <div className="min-w-0 text-sm leading-relaxed text-emerald-50/90 whitespace-pre-wrap">
+                  {displayDescription}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex gap-3" role="status" aria-live="polite">
+              {isLoading ? (
+                <Loader2
+                  className="h-5 w-5 shrink-0 animate-spin text-foreground mt-0.5"
+                  aria-hidden
+                />
+              ) : (
+                <AlertCircle
+                  className="h-5 w-5 shrink-0 text-amber-500 mt-0.5"
+                  aria-hidden
+                />
+              )}
+              <div className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                {displayDescription}
+              </div>
+            </div>
+          )}
           {primaryAction ? (
             <Button
               type="button"

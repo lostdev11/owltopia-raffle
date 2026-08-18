@@ -116,6 +116,120 @@ export function isPhaseOpenBySchedule(
   return nowMs >= startMs
 }
 
+export type PublicSimpleMintWindowLaunch = Pick<
+  OwlCenterLaunchPublic,
+  | 'launch_deadline_at'
+  | 'phase_schedule'
+  | 'creator_wl_enabled'
+  | 'creator_presale_enabled'
+  | 'wl_supply'
+  | 'presale_supply'
+>
+
+/**
+ * True when the launch has presale/WL configured ahead of PUBLIC.
+ * public_simple collections still mint only in PUBLIC — those earlier phases must finish
+ * (or PUBLIC must have its own start) before the mint button opens.
+ */
+export function launchHasQueuedMintPhases(launch: PublicSimpleMintWindowLaunch): boolean {
+  return (
+    Boolean(launch.creator_wl_enabled) ||
+    (launch.wl_supply ?? 0) > 0 ||
+    Boolean(launch.creator_presale_enabled) ||
+    (launch.presale_supply ?? 0) > 0
+  )
+}
+
+function laterIso(a: string, b: string): string {
+  const aMs = parseIsoMs(a)
+  const bMs = parseIsoMs(b)
+  if (aMs == null) return b
+  if (bMs == null) return a
+  return aMs >= bMs ? a : b
+}
+
+/**
+ * When PUBLIC mint is allowed for a public_simple launch.
+ * - Explicit PUBLIC start, floored by mint-opens (kickoff) when both exist
+ * - Single-phase with only kickoff → that timestamp
+ * - Presale/WL configured and PUBLIC has no start → null (not scheduled; must not open)
+ */
+export function getPublicSimpleMintOpensAt(launch: PublicSimpleMintWindowLaunch): string | null {
+  const publicStart = launch.phase_schedule?.PUBLIC ?? null
+  const kickoff = launch.launch_deadline_at ?? null
+  if (publicStart && kickoff) return laterIso(publicStart, kickoff)
+  if (publicStart) return publicStart
+  if (launchHasQueuedMintPhases(launch)) return null
+  return kickoff
+}
+
+export function isPublicSimpleMintOpen(
+  launch: PublicSimpleMintWindowLaunch,
+  nowMs: number = Date.now()
+): boolean {
+  const opensAt = getPublicSimpleMintOpensAt(launch)
+  if (!opensAt) return !launchHasQueuedMintPhases(launch)
+  const startMs = parseIsoMs(opensAt)
+  if (startMs == null) return !launchHasQueuedMintPhases(launch)
+  return nowMs >= startMs
+}
+
+export type PublicSimpleMintClosedInfo = {
+  reason: string
+  opensAt: string | null
+}
+
+/** Copy for the mint console when PUBLIC is not live yet. */
+export function publicSimpleMintClosedInfo(
+  launch: PublicSimpleMintWindowLaunch,
+  nowMs: number = Date.now()
+): PublicSimpleMintClosedInfo | null {
+  if (isPublicSimpleMintOpen(launch, nowMs)) return null
+
+  const opensAt = getPublicSimpleMintOpensAt(launch)
+  if (opensAt) {
+    const publicStart = launch.phase_schedule?.PUBLIC
+    const kickoff = launch.launch_deadline_at
+    const opensMs = parseIsoMs(opensAt)
+    const label =
+      publicStart && parseIsoMs(publicStart) === opensMs
+        ? 'Public mint'
+        : kickoff && parseIsoMs(kickoff) === opensMs
+          ? 'Mint'
+          : 'Public mint'
+    return { reason: `${label} opens ${formatMintDate(opensAt)}`, opensAt }
+  }
+
+  const wlStart = launch.phase_schedule?.WHITELIST ?? null
+  if (wlStart) {
+    const wlMs = parseIsoMs(wlStart)
+    if (wlMs != null && nowMs < wlMs) {
+      return { reason: `Whitelist opens ${formatMintDate(wlStart)}`, opensAt: wlStart }
+    }
+  }
+  const presaleStart = launch.phase_schedule?.PRESALE ?? null
+  if (presaleStart) {
+    const presaleMs = parseIsoMs(presaleStart)
+    if (presaleMs != null && nowMs < presaleMs) {
+      return { reason: `Presale opens ${formatMintDate(presaleStart)}`, opensAt: presaleStart }
+    }
+  }
+  return { reason: 'Public mint is not scheduled yet — set a public start date', opensAt: null }
+}
+
+/**
+ * On-chain Candy Guard startDate. Far-future when earlier phases exist but PUBLIC has no start,
+ * so the CM cannot be minted against until the creator actually schedules public.
+ */
+export const PUBLIC_SIMPLE_UNSCHEDULED_START_ISO = '2099-01-01T00:00:00.000Z'
+
+export function resolvePublicSimpleGuardStartDateIso(launch: PublicSimpleMintWindowLaunch): string | null {
+  const opensAt = getPublicSimpleMintOpensAt(launch)
+  if (opensAt) return opensAt
+  if (launchHasQueuedMintPhases(launch)) return PUBLIC_SIMPLE_UNSCHEDULED_START_ISO
+  return null
+}
+
 /**
  * Legacy fixed window from AIRDROP kickoff (used when no concurrent paid phase is admin-active).
  * Gen1 + presale free redemption stay open while PRESALE / PUBLIC (etc.) are in `active_phases`;

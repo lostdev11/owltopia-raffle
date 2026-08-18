@@ -198,6 +198,19 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      if (raffle.max_tickets_per_wallet != null) {
+        const maxPerWallet = Number(raffle.max_tickets_per_wallet)
+        if (Number.isFinite(maxPerWallet) && maxPerWallet > 0) {
+          const allEntries = await getEntriesByRaffleId(raffle.id)
+          const walletConfirmedTickets = allEntries
+            .filter(e => e.status === 'confirmed' && e.wallet_address === walletAddressStr)
+            .reduce((sum, e) => sum + Number(e.ticket_quantity), 0)
+          if (walletConfirmedTickets + ticketQuantityNum > maxPerWallet) {
+            return NextResponse.json(ERROR_BODY, { status: 400 })
+          }
+        }
+      }
+
       const fullPrice = ticketPrice * ticketQuantityNum
       if (!Number.isFinite(fullPrice) || fullPrice <= 0) return NextResponse.json(ERROR_BODY, { status: 400 })
 
@@ -244,7 +257,7 @@ export async function POST(request: NextRequest) {
 
     if (!unifiedCurrency) return NextResponse.json(ERROR_BODY, { status: 400 })
 
-    const tokenInfo = getTokenInfo(unifiedCurrency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO')
+    const tokenInfo = getTokenInfo(unifiedCurrency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS')
     if (unifiedCurrency !== 'SOL' && !tokenInfo.mintAddress) {
       return NextResponse.json(ERROR_BODY, { status: 500 })
     }

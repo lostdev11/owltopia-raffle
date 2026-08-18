@@ -57,7 +57,6 @@ export async function GET(request: NextRequest) {
 
     const role = await getOwlVisionAdminRole(walletAddress)
     const isAdmin = role !== null
-
     return NextResponse.json({
       isAdmin,
       role: isAdmin ? role : undefined,
@@ -65,8 +64,12 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Error checking admin status:', error instanceof Error ? error.message : 'Unknown error')
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      {
+        error: 'Internal server error',
+        isAdmin: false,
+        checkFailed: true,
+      },
+      { status: 503 }
     )
   }
 }

@@ -28,6 +28,8 @@ import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
 import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
 import { getSupabasePublishableKey, getSupabaseSecretKey } from '@/lib/supabase-env'
+import { raffleSlugStorageCandidates } from '@/lib/raffles/slug-aliases'
+import { sanitizeRaffleSlug } from '@/lib/raffles/slugify'
 import {
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
@@ -114,7 +116,7 @@ async function checkNftMigrationApplied(): Promise<boolean> {
 
 /** After `image_url` / optional `image_fallback_url` (migrations 036, 038, 040 tail). */
 const RAFFLE_TAIL_CORE =
-  ',prize_amount,prize_currency,ticket_price,currency,alternate_ticket_currency,alternate_ticket_price,max_tickets,min_tickets,start_time,end_time,original_end_time,time_extension_count,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx'
+  ',prize_amount,prize_currency,ticket_price,currency,alternate_ticket_currency,alternate_ticket_price,max_tickets,max_tickets_per_wallet,min_tickets,start_time,end_time,original_end_time,time_extension_count,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx'
 
 /** Funds-escrow + creator claim (migration 044). Included in minimal select so fallback queries still populate dashboard claim tracker. */
 const RAFFLE_TAIL_FUNDS_ESCROW =
@@ -787,6 +789,16 @@ export async function getAdminPendingCancellationRaffles(): Promise<GetRafflesRe
 }
 
 export async function getRaffleBySlug(slug: string) {
+  const candidates = raffleSlugStorageCandidates(slug)
+  for (const candidate of candidates) {
+    const found = await getRaffleBySlugExact(candidate)
+    if (found) return found
+  }
+  return null
+}
+
+/** Exact slug match only (no alias resolution). */
+async function getRaffleBySlugExact(slug: string) {
   return withRetry(async () => {
     const client = getSupabaseForRead()
     const columns = await getRaffleColumns()
@@ -987,6 +999,11 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
       if (row.alternate_ticket_price == null || row.alternate_ticket_price === '') return null
       const n = Number(row.alternate_ticket_price)
       return Number.isFinite(n) && n > 0 ? n : null
+    })(),
+    max_tickets_per_wallet: (() => {
+      if (row.max_tickets_per_wallet == null || row.max_tickets_per_wallet === '') return null
+      const n = Number(row.max_tickets_per_wallet)
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : null
     })(),
     time_extension_count,
     draw_algo: (row.draw_algo as string | null | undefined) ?? null,
@@ -1370,10 +1387,11 @@ export async function getEntriesByRaffleId(raffleId: string) {
  * If the slug already exists, appends a number (e.g., "my-raffle-2")
  */
 export async function generateUniqueSlug(baseSlug: string): Promise<string> {
-  let slug = baseSlug
+  const cleaned = sanitizeRaffleSlug(baseSlug)
+  let slug = cleaned
   let counter = 1
   
-  // Check if slug exists, and if so, append a number
+  // Check if slug exists (including slug-alias targets), and if so, append a number
   while (true) {
     const existing = await getRaffleBySlug(slug)
     
@@ -1384,12 +1402,12 @@ export async function generateUniqueSlug(baseSlug: string): Promise<string> {
     
     // Slug exists, try with a number appended
     counter++
-    slug = `${baseSlug}-${counter}`
+    slug = `${cleaned}-${counter}`
     
     // Safety check to prevent infinite loops
     if (counter > 1000) {
       // Fallback to timestamp-based slug
-      slug = `${baseSlug}-${Date.now()}`
+      slug = `${cleaned}-${Date.now()}`
       break
     }
   }
@@ -1592,6 +1610,7 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     alternate_ticket_currency: raffle.alternate_ticket_currency ?? null,
     alternate_ticket_price: raffle.alternate_ticket_price ?? null,
     max_tickets: raffle.max_tickets,
+    max_tickets_per_wallet: raffle.max_tickets_per_wallet ?? null,
     min_tickets: raffle.min_tickets,
     start_time: raffle.start_time,
     end_time: raffle.end_time,

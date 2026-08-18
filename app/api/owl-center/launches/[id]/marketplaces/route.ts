@@ -98,12 +98,16 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   const s = (key: string) => pickStr(key)
   if (s('magic_eden_url') !== undefined) patch.magic_eden_url = s('magic_eden_url') ?? null
   if (s('tensor_url') !== undefined) patch.tensor_url = s('tensor_url') ?? null
+  if (s('orbis_url') !== undefined) patch.orbis_url = s('orbis_url') ?? null
   if ('notes' in body && typeof body.notes === 'string') patch.notes = body.notes.slice(0, 8000) || null
 
   if ('trading_links_active' in body && typeof body.trading_links_active === 'boolean') {
     patch.trading_links_active = body.trading_links_active
   }
 
+  if (action === 'mark_orbis_listed') {
+    patch.orbis_status = 'LISTED'
+  }
   if (action === 'mark_me_listed') {
     patch.magic_eden_status = 'LISTED'
   }

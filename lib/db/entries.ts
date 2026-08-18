@@ -35,6 +35,14 @@ export class InsufficientTicketsError extends Error {
   }
 }
 
+/** Thrown when confirm RPCs raise wallet_ticket_limit (per-wallet max). */
+export class WalletTicketLimitError extends Error {
+  constructor(message = 'Would exceed maximum tickets per wallet for this raffle') {
+    super(message)
+    this.name = 'WalletTicketLimitError'
+  }
+}
+
 /** Thrown when confirm_entry_with_tx RPC raises invalid_state. */
 export class ConfirmEntryInvalidStateError extends Error {
   constructor(message = 'Invalid entry state for confirmation') {
@@ -109,6 +117,7 @@ export interface ConfirmEntryWithTxResult {
 function mapRpcError(message: string): never {
   if (message.includes('tx_already_used')) throw new TxAlreadyUsedError()
   if (message.includes('insufficient_tickets')) throw new InsufficientTicketsError()
+  if (message.includes('wallet_ticket_limit')) throw new WalletTicketLimitError()
   if (message.includes('batch_empty')) throw new ConfirmEntryInvalidStateError(message)
   if (message.includes('invalid_state')) throw new ConfirmEntryInvalidStateError(message)
   if (message.includes('invalid_token')) throw new ConfirmEntryInvalidStateError(message)
@@ -843,6 +852,9 @@ export interface RaffleInfoForEntry {
   prize_deposited_at?: string | null
   prize_returned_at?: string | null
   prize_standard?: string | null
+  /** Prize art for list thumbs (already selected in getEntriesByWallet). */
+  image_url?: string | null
+  image_fallback_url?: string | null
 }
 
 export interface EntryWithRaffle {

@@ -9,6 +9,7 @@ import {
   TransactionSignatureAlreadyUsedError,
   TxAlreadyUsedError,
   updateEntryStatus,
+  WalletTicketLimitError,
 } from '@/lib/db/entries'
 import {
   isDefinitiveOnChainFailure,
@@ -175,6 +176,8 @@ async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
               console.log(`Cart batch confirm skipped (invalid state): ${e.message}`)
             } else if (e instanceof InsufficientTicketsError) {
               console.warn(`Cart batch auto-verify: insufficient tickets`, e.message)
+            } else if (e instanceof WalletTicketLimitError) {
+              console.warn(`Cart batch auto-verify: wallet ticket limit`, e.message)
             } else if (
               e instanceof TxAlreadyUsedError ||
               e instanceof TransactionSignatureAlreadyUsedError
@@ -213,6 +216,8 @@ async function verifyPendingEntries(raffleId: string, pendingEntries: Entry[]) {
             console.log(`Entry ${entry.id} skipped confirm (no longer pending or already finalized)`)
           } else if (e instanceof InsufficientTicketsError) {
             console.warn(`Auto-verify: insufficient tickets for entry ${entry.id} on raffle ${raffleId}`)
+          } else if (e instanceof WalletTicketLimitError) {
+            console.warn(`Auto-verify: wallet ticket limit for entry ${entry.id} on raffle ${raffleId}`)
           } else if (e instanceof TxAlreadyUsedError) {
             console.warn(`Auto-verify: tx already used for entry ${entry.id}`)
           } else {

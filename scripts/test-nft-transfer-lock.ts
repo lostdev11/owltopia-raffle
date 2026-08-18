@@ -109,12 +109,12 @@ assert.ok(part.sendable.some((n) => n.mint === 'leftover'))
   if (!mix.ok) assert.match(mix.title, /pNFT/i)
   const alone = gateOwlSendPnftSelection([meego])
   assert.equal(alone.ok, true)
+  // Multi-pNFT is allowed (sequential 1-per-approval), same as multi-cNFT.
   const multi = gateOwlSendPnftSelection([
     meego,
     baseNft({ mint: 'meego2', frozen: true, delegated: false, interface: 'ProgrammableNFT' }),
   ])
-  assert.equal(multi.ok, false)
-  if (!multi.ok) assert.match(multi.title, /one at a time/i)
+  assert.equal(multi.ok, true)
 }
 
 console.log('test-nft-transfer-lock: ok')

@@ -6,11 +6,12 @@
  * wallet approvals are needed and why.
  */
 
-import { chunkOwlSendBatches, type OwlSendLine } from '@/lib/owl-send/batch'
+import { packOwlSendClassicNftLines, type OwlSendLine } from '@/lib/owl-send/batch'
 import {
   OWL_SEND_MAX_CNFT_PER_TX,
   OWL_SEND_MAX_CORE_PER_TX,
-  OWL_SEND_MAX_PER_TX,
+  OWL_SEND_MAX_PER_TX_NFT_ONE,
+  OWL_SEND_MAX_PER_TX_NFT_SCATTER,
   OWL_SEND_MAX_PNFT_PER_TX,
 } from '@/lib/owl-send/constants'
 import {
@@ -64,7 +65,8 @@ export function owlSendKindLabel(kind: OwlSendAssetKind): string {
 export function owlSendMaxPerTxForKind(kind: OwlSendAssetKind): number {
   switch (kind) {
     case 'classic':
-      return OWL_SEND_MAX_PER_TX
+      // Upper bound for preview; actual pack uses recipient-aware classic packing.
+      return OWL_SEND_MAX_PER_TX_NFT_ONE
     case 'pnft':
       return OWL_SEND_MAX_PNFT_PER_TX
     case 'core':
@@ -75,30 +77,28 @@ export function owlSendMaxPerTxForKind(kind: OwlSendAssetKind): number {
 }
 
 export function owlSendApprovalWhy(kind: OwlSendAssetKind, count: number): string {
-  const max = owlSendMaxPerTxForKind(kind)
   switch (kind) {
     case 'classic':
-      return count > max
-        ? `Classic SPL — up to ${max} per approval`
-        : `Classic SPL transfer (up to ${max}/approval)`
+      return `Classic SPL — up to ${OWL_SEND_MAX_PER_TX_NFT_ONE}/approval (≤${OWL_SEND_MAX_PER_TX_NFT_SCATTER} when many wallets)`
     case 'pnft':
-      return max === 1
+      return count <= 1
         ? 'pNFT — Token Metadata (one per approval for now)'
-        : `pNFT — Token Metadata (up to ${max}/approval)`
+        : `pNFT — Token Metadata (up to ${OWL_SEND_MAX_PNFT_PER_TX}/approval)`
     case 'core':
-      return max === 1
+      return count <= 1
         ? 'Metaplex Core — one per approval for now'
-        : `Metaplex Core (up to ${max}/approval)`
+        : `Metaplex Core (up to ${OWL_SEND_MAX_CORE_PER_TX}/approval)`
     case 'cnft':
-      return max === 1
+      return count <= 1
         ? 'Compressed NFT — one per approval for now'
-        : `Compressed NFT (up to ${max}/approval)`
+        : `Compressed NFT (up to ${OWL_SEND_MAX_CNFT_PER_TX}/approval)`
   }
 }
 
 /**
  * Pack prepared send lines into kind-pure approval chunks.
  * `kindByMint` comes from the picker classification of the same selection.
+ * Classic chunks use recipient-aware packing (packet-size safe).
  */
 export function packOwlSendApprovalQueue(params: {
   lines: OwlSendLine[]
@@ -125,8 +125,10 @@ export function packOwlSendApprovalQueue(params: {
   for (const kind of KIND_ORDER) {
     const group = buckets[kind]
     if (group.length < 1) continue
-    const max = owlSendMaxPerTxForKind(kind)
-    const chunks = chunkOwlSendBatches(group, max)
+    const chunks =
+      kind === 'classic'
+        ? packOwlSendClassicNftLines(group)
+        : group.map((line) => [line])
     for (const lines of chunks) {
       out.push({
         kind,
@@ -165,7 +167,9 @@ export function previewOwlSendApprovalQueue(nfts: WalletNft[]): {
   for (const kind of KIND_ORDER) {
     const count = counts[kind]
     if (count < 1) continue
-    const max = owlSendMaxPerTxForKind(kind)
+    // Classic preview uses scatter-safe size (worst case) until recipients are known.
+    const max =
+      kind === 'classic' ? OWL_SEND_MAX_PER_TX_NFT_SCATTER : owlSendMaxPerTxForKind(kind)
     const approvals = Math.ceil(count / max)
     totalApprovals += approvals
     byKind.push({

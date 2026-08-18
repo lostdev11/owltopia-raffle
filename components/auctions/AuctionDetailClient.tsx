@@ -182,7 +182,7 @@ export function AuctionDetailClient({ slug }: { slug: string }) {
     }
   }
 
-  const claim = async (path: 'claim-prize' | 'claim-proceeds' | 'claim-prize-return') => {
+  const claim = async (path: 'claim-prize' | 'claim-prize-return') => {
     if (!auction) return
     setBusy(true)
     setError(null)
@@ -358,20 +358,29 @@ export function AuctionDetailClient({ slug }: { slug: string }) {
       ) : null}
 
       {auction.status === 'successful_pending_claims' ? (
-        <div className="flex flex-wrap gap-2">
+        <div className="space-y-3">
           {isWinner && !auction.prize_claimed_at ? (
             <Button disabled={busy} onClick={() => void claim('claim-prize')} className="min-h-[44px]">
               Claim prize
             </Button>
           ) : null}
           {viewerIsCreator && !auction.creator_claimed_at ? (
-            <Button
-              disabled={busy}
-              onClick={() => void claim('claim-proceeds')}
-              className="min-h-[44px]"
+            <div
+              className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-3 sm:px-4 sm:py-3.5 space-y-1"
+              role="status"
             >
-              Claim proceeds (net after fee)
-            </Button>
+              <p className="text-sm font-medium text-foreground">Auction proceeds ready</p>
+              <p className="text-sm text-muted-foreground">
+                Claim your net funds from{' '}
+                <Link
+                  href="/dashboard?tab=hosting"
+                  className="text-primary font-medium underline underline-offset-2 hover:no-underline"
+                >
+                  My Dashboard → Hosting
+                </Link>
+                .
+              </p>
+            </div>
           ) : null}
         </div>
       ) : null}

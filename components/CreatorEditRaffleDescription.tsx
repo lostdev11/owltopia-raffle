@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { replaceClientUrl } from '@/lib/client/replace-url'
 import { descriptionContainsBlockedLinks } from '@/lib/raffle-description-links'
 import { Edit, Loader2 } from 'lucide-react'
 
@@ -31,7 +32,7 @@ function clearEditDescriptionQuery() {
   if (!url.searchParams.has('editDescription')) return
   url.searchParams.delete('editDescription')
   const next = `${url.pathname}${url.search}${url.hash}`
-  window.history.replaceState(window.history.state, '', next)
+  replaceClientUrl(next)
 }
 
 /**

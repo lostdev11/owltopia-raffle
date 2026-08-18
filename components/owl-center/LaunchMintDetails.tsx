@@ -5,8 +5,13 @@ import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
 import { launchHasPresaleProgram, launchShowsPresaleOverage } from '@/lib/owl-center/launch-presale'
 import { resolveMintOpensAt } from '@/lib/owl-center/launch-mint-config'
 import { getLaunchMintPriceDisplay } from '@/lib/owl-center/launch-price-quotes'
+import {
+  buildPartnerMintPhaseSchedule,
+  publicSimpleSettlementLabel,
+} from '@/lib/owl-center/partner-mint-phase-schedule'
+import { resolvePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
 import { formatRoyaltyPercentLabel, launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
-import { formatMintDate, getMintCountdownInfo } from '@/lib/owl-center/phase-schedule'
+import { formatMintDate, formatPhaseStartShort, getMintCountdownInfo } from '@/lib/owl-center/phase-schedule'
 
 type PhaseRow = { label: string; supply: number; note?: string }
 
@@ -29,13 +34,31 @@ function phaseRows(launch: OwlCenterLaunchPublic): PhaseRow[] {
       note: 'overage',
     })
   }
-  if (launch.wl_supply > 0) {
+
+  const allowlists = resolvePartnerAllowlistPhases(launch)
+  if (allowlists.length > 0) {
+    for (const phase of allowlists) {
+      const start = formatPhaseStartShort(phase.starts_at)
+      rows.push({
+        label: phase.label,
+        supply: phase.supply,
+        note: start ? `opens ${start}` : 'FCFS',
+      })
+    }
+  } else if (launch.wl_supply > 0) {
     rows.push({ label: 'WL', supply: launch.wl_supply, note: 'FCFS' })
   }
+
   if (launch.slug === 'gen2') {
     rows.push({
       label: 'Public',
-      supply: Math.max(0, launch.total_supply - launch.airdrop_supply - launch.presale_supply - (launch.presale_overage_supply ?? 0)),
+      supply: Math.max(
+        0,
+        launch.total_supply -
+          launch.airdrop_supply -
+          launch.presale_supply -
+          (launch.presale_overage_supply ?? 0)
+      ),
       note: 'unlimited · GEN1 + presale reserved',
     })
   } else if (launch.public_supply > 0) {
@@ -49,6 +72,8 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
   const prices = await getLaunchMintPriceDisplay(launch)
   const countdown = getMintCountdownInfo(launch)
   const mintOpensAt = resolveMintOpensAt(launch)
+  const schedule = buildPartnerMintPhaseSchedule(launch)
+  const showScheduleTimes = launch.mint_mode === 'public_simple' && schedule.some((r) => r.starts_at)
 
   return (
     <div className="space-y-3 border-t border-[#1A222B] pt-3">
@@ -70,6 +95,19 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
           ))}
         </dl>
       ) : null}
+      {showScheduleTimes ? (
+        <dl className="space-y-1.5 border-t border-[#1A222B]/80 pt-2 font-mono text-xs text-[#9BA8B4]">
+          {schedule.map((row) => (
+            <div key={`t-${row.key}`} className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
+              <dt className="text-[#5C6773]">{row.label}</dt>
+              <dd className="text-[#E8EEF2]">
+                {formatPhaseStartShort(row.starts_at) ?? 'TBA'}
+                {row.wallet_mint_limit != null ? ` · ${row.wallet_mint_limit}/wallet` : ''}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
       <dl className="space-y-1.5 font-mono text-xs text-[#9BA8B4]">
         {prices.presale ? (
           <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
@@ -77,12 +115,19 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
             <dd className="text-[#00FF9C]">{prices.presale}</dd>
           </div>
         ) : null}
-        {prices.whitelist ? (
-          <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
-            <dt className="text-[#5C6773]">Whitelist</dt>
-            <dd className="text-[#E8EEF2]">{prices.whitelist}</dd>
-          </div>
-        ) : null}
+        {prices.allowlist_phases.length > 0
+          ? prices.allowlist_phases.map((row) => (
+              <div key={row.label} className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
+                <dt className="text-[#5C6773]">{row.label}</dt>
+                <dd className="text-[#E8EEF2]">{row.price}</dd>
+              </div>
+            ))
+          : prices.whitelist ? (
+              <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
+                <dt className="text-[#5C6773]">Whitelist</dt>
+                <dd className="text-[#E8EEF2]">{prices.whitelist}</dd>
+              </div>
+            ) : null}
         {prices.public ? (
           <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
             <dt className="text-[#5C6773]">Public</dt>
@@ -101,9 +146,13 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
         ) : launch.wallet_mint_limit > 0 ? (
           <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
             <dt className="text-[#5C6773]">Per wallet</dt>
-            <dd className="text-[#E8EEF2]">
-              {launch.wallet_mint_limit} max / phase
-            </dd>
+            <dd className="text-[#E8EEF2]">{launch.wallet_mint_limit} max / phase</dd>
+          </div>
+        ) : null}
+        {launch.mint_mode === 'public_simple' ? (
+          <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
+            <dt className="text-[#5C6773]">Settlement</dt>
+            <dd className="text-[#E8EEF2]">{publicSimpleSettlementLabel(launch)}</dd>
           </div>
         ) : null}
         <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">

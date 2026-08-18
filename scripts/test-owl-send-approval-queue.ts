@@ -34,7 +34,7 @@ assert.equal(classifyOwlSendAssetKind(nft({ mint: 'a', interface: 'V1_NFT' })), 
 assert.equal(classifyOwlSendAssetKind(nft({ mint: 'b', interface: 'ProgrammableNFT' })), 'pnft')
 assert.equal(classifyOwlSendAssetKind(nft({ mint: 'c', interface: 'MplCoreAsset' })), 'core')
 assert.equal(classifyOwlSendAssetKind(nft({ mint: 'd', compressed: true })), 'cnft')
-assert.equal(owlSendMaxPerTxForKind('classic'), 5)
+assert.equal(owlSendMaxPerTxForKind('classic'), 4)
 assert.equal(owlSendMaxPerTxForKind('pnft'), 1)
 
 {
@@ -62,11 +62,11 @@ assert.equal(owlSendMaxPerTxForKind('pnft'), 1)
     kindByMint: owlSendKindByMintFromNfts(selected),
   })
   assert.equal(queue.length, 5)
-  // Classic first, packed ≤5
+  // Classic first — recipient-aware pack (same wallet → ≤4)
   assert.equal(queue[0]!.kind, 'classic')
-  assert.equal(queue[0]!.lines.length, 5)
+  assert.equal(queue[0]!.lines.length, 4)
   assert.equal(queue[1]!.kind, 'classic')
-  assert.equal(queue[1]!.lines.length, 1)
+  assert.equal(queue[1]!.lines.length, 2)
   assert.equal(queue[2]!.kind, 'pnft')
   assert.equal(queue[2]!.lines.length, 1)
   assert.equal(queue[3]!.kind, 'pnft')

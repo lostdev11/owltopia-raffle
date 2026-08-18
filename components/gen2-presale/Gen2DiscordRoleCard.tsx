@@ -6,6 +6,7 @@ import { AlertCircle, CheckCircle2, Loader2, MessageCircle } from 'lucide-react'
 import { Gen2LinkedWalletsPanel } from '@/components/gen2-presale/Gen2LinkedWalletsPanel'
 import { Button } from '@/components/ui/button'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
+import { replaceClientUrl } from '@/lib/client/replace-url'
 import { COMMUNITY_DISCORD_INVITE_URL } from '@/lib/site-config'
 import { cn } from '@/lib/utils'
 
@@ -124,7 +125,7 @@ export function Gen2DiscordRoleCard({ connected, walletAddress, className }: Pro
       sp.delete('discord_error')
       const qs = sp.toString()
       const next = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
-      window.history.replaceState({}, '', next)
+      replaceClientUrl(next)
       void refreshStatus()
     } else if (err) {
       setOauthFlash(discordOAuthReturnMessage(err))
@@ -132,7 +133,7 @@ export function Gen2DiscordRoleCard({ connected, walletAddress, className }: Pro
       sp.delete('discord_error')
       const qs = sp.toString()
       const next = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
-      window.history.replaceState({}, '', next)
+      replaceClientUrl(next)
     }
   }, [refreshStatus])
 

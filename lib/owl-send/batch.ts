@@ -1,4 +1,16 @@
-import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
+import {
+  OWL_SEND_MAX_PER_TX,
+  OWL_SEND_MAX_PER_TX_NFT_ONE,
+  OWL_SEND_MAX_PER_TX_NFT_SCATTER,
+  OWL_SEND_MAX_SELECT,
+  OWL_SEND_MAX_SPECIAL_PER_TX,
+  owlSendClassicApprovalSize,
+} from '@/lib/owl-send/constants'
+import {
+  isDasCompressedNft,
+  isDasMplCoreInterface,
+} from '@/lib/solana/prize-nft-standard'
+import { isProgrammableNftInterface } from '@/lib/solana/nft-transfer-lock'
 
 export type OwlSendLine = {
   mint: string
@@ -7,6 +19,10 @@ export type OwlSendLine = {
   name?: string | null
   tokenAccount?: string | null
   image?: string | null
+  /** DAS `compression.compressed` — Bubblegum leaf, not classic SPL. */
+  compressed?: boolean | null
+  /** DAS asset interface (e.g. ProgrammableNFT, MplCoreAsset, V1_NFT). */
+  interface?: string | null
 }
 
 /** Cap selection to product max (20). */
@@ -25,6 +41,67 @@ export function chunkOwlSendBatches<T>(
     chunks.push(items.slice(i, i + size))
   }
   return chunks
+}
+
+function lineNeedsSpecialPath(line: Pick<OwlSendLine, 'compressed' | 'interface'>): boolean {
+  if (isDasCompressedNft({ compressed: line.compressed, interface: line.interface })) return true
+  if (isDasMplCoreInterface(line.interface)) return true
+  if (isProgrammableNftInterface(line.interface)) return true
+  return false
+}
+
+/** Per-approval size: classic SPL 3–4 (packet headroom); cNFT / pNFT / Core ≤1. */
+export function owlSendNftApprovalSize(
+  lines: Array<Pick<OwlSendLine, 'compressed' | 'interface' | 'recipient'>>
+): number {
+  if (lines.some(lineNeedsSpecialPath)) return OWL_SEND_MAX_SPECIAL_PER_TX
+  const uniqueRecipients = new Set(
+    lines.map((l) => (l.recipient ?? '').trim()).filter(Boolean)
+  ).size
+  return owlSendClassicApprovalSize(uniqueRecipients)
+}
+
+/**
+ * Pack classic NFT lines so wallet,N allotments stay together.
+ *
+ * Same-wallet groups (2+) use the one-wallet limit (4) — 4 Gen2s to one dest
+ * is ~867 bytes and leaves Jupiter/Phantom injection headroom.
+ * Singleton 1:1 lines pack at the scatter limit (3).
+ * Mixing a 4-owl allotment with the next wallet (old 5-wide slice) is what
+ * blew the packet on Jupiter.
+ */
+export function packOwlSendClassicNftLines(lines: OwlSendLine[]): OwlSendLine[][] {
+  const groups = new Map<string, OwlSendLine[]>()
+  const order: string[] = []
+  for (const line of lines) {
+    const key = (line.recipient ?? '').trim() || line.mint
+    if (!groups.has(key)) {
+      order.push(key)
+      groups.set(key, [])
+    }
+    groups.get(key)!.push(line)
+  }
+
+  const chunks: OwlSendLine[][] = []
+  const singles: OwlSendLine[] = []
+  for (const key of order) {
+    const group = groups.get(key) ?? []
+    if (group.length >= 2) {
+      chunks.push(...chunkOwlSendBatches(group, OWL_SEND_MAX_PER_TX_NFT_ONE))
+    } else if (group[0]) {
+      singles.push(group[0])
+    }
+  }
+  chunks.push(...chunkOwlSendBatches(singles, OWL_SEND_MAX_PER_TX_NFT_SCATTER))
+  return chunks
+}
+
+/** Chunk NFT send lines with the correct per-approval size for the asset type. */
+export function chunkOwlSendNftLines(lines: OwlSendLine[]): OwlSendLine[][] {
+  if (lines.some(lineNeedsSpecialPath)) {
+    return chunkOwlSendBatches(lines, OWL_SEND_MAX_SPECIAL_PER_TX)
+  }
+  return packOwlSendClassicNftLines(lines)
 }
 
 export type NftScatterEntry = {
@@ -122,8 +199,32 @@ function shuffleInPlace<T>(items: T[]): void {
  * - `randomize: true` with `wallet,N` counts — shuffle NFTs, assign exactly N to each wallet
  *   (sum of counts must equal selected NFT count; bare wallets count as 1 when mixed).
  */
+export type OwlSendScatterMint = {
+  mint: string
+  name?: string | null
+  tokenAccount?: string | null
+  image?: string | null
+  compressed?: boolean | null
+  interface?: string | null
+}
+
+function scatterMintToLine(
+  m: OwlSendScatterMint,
+  recipient: string
+): OwlSendLine {
+  return {
+    mint: m.mint,
+    name: m.name,
+    tokenAccount: m.tokenAccount,
+    image: m.image,
+    compressed: m.compressed,
+    interface: m.interface,
+    recipient,
+  }
+}
+
 export function pairScatterLines(params: {
-  mints: Array<{ mint: string; name?: string | null; tokenAccount?: string | null; image?: string | null }>
+  mints: Array<OwlSendScatterMint>
   recipients?: string[]
   entries?: NftScatterEntry[]
   randomize?: boolean
@@ -167,13 +268,9 @@ export function pairScatterLines(params: {
         error: `Scatter needs the same number of NFTs and wallets (${mints.length} NFT${mints.length === 1 ? '' : 's'}, ${recipientsRaw.length} wallet${recipientsRaw.length === 1 ? '' : 's'}). Turn on randomize to split NFTs across fewer wallets.`,
       }
     }
-    const lines: OwlSendLine[] = mints.map((m, i) => ({
-      mint: m.mint,
-      name: m.name,
-      tokenAccount: m.tokenAccount,
-      image: m.image,
-      recipient: recipientsRaw[i]!,
-    }))
+    const lines: OwlSendLine[] = mints.map((m, i) =>
+      scatterMintToLine(m, recipientsRaw[i]!)
+    )
     return { ok: true, lines }
   }
 
@@ -203,13 +300,7 @@ export function pairScatterLines(params: {
     for (const a of allotments) {
       for (let i = 0; i < a.count; i++) slots.push(a.recipient)
     }
-    const lines: OwlSendLine[] = mints.map((m, i) => ({
-      mint: m.mint,
-      name: m.name,
-      tokenAccount: m.tokenAccount,
-      image: m.image,
-      recipient: slots[i]!,
-    }))
+    const lines: OwlSendLine[] = mints.map((m, i) => scatterMintToLine(m, slots[i]!))
     return { ok: true, lines }
   }
 
@@ -230,13 +321,9 @@ export function pairScatterLines(params: {
   }
 
   shuffleInPlace(mints)
-  const lines: OwlSendLine[] = mints.map((m, i) => ({
-    mint: m.mint,
-    name: m.name,
-    tokenAccount: m.tokenAccount,
-    image: m.image,
-    recipient: uniqueRecipients[i % uniqueRecipients.length]!,
-  }))
+  const lines: OwlSendLine[] = mints.map((m, i) =>
+    scatterMintToLine(m, uniqueRecipients[i % uniqueRecipients.length]!)
+  )
   return { ok: true, lines }
 }
 

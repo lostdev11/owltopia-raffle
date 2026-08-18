@@ -31,11 +31,15 @@ import { prependOwlSendComputeBudget } from '@/lib/owl-send/compute-budget'
 import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
 import { OWL_SEND_MAX_PER_TX } from '@/lib/owl-send/constants'
 import type { OwlSendLine } from '@/lib/owl-send/batch'
+import { isOwlSendPacketSizeError, owlSendTxFitsSafePacket } from '@/lib/owl-send/tx-size'
 import {
   attributeOwlSendFrozenFailures,
   findFrozenOwlSendMints,
 } from '@/lib/owl-send/attribute-batch-failure'
-import { resolveOwlSendSplHolder } from '@/lib/owl-send/resolve-spl-holder'
+import {
+  resolveMintTokenProgram,
+  resolveOwlSendSplHolder,
+} from '@/lib/owl-send/resolve-spl-holder'
 import {
   isOwlSendFrozenTransferError,
   isOwlSendWalletExtensionError,
@@ -50,7 +54,7 @@ import { sendTransactionWithTimeout } from '@/lib/solana/send-transaction-with-t
 import { tokenRecordAccountExists } from '@/lib/solana/nft-transfer-lock'
 
 export type OwlSendBatchResult =
-  | { ok: true; signature: string; newAtaCount: number }
+  | { ok: true; signature: string; newAtaCount: number; sentMints?: string[] }
   | { ok: false; error: string; failedMints?: string[] }
 
 /** UI phases while a batch is in flight (wallet approve → RPC confirm). */
@@ -80,14 +84,14 @@ async function resolveHolder(
   })
 }
 
-async function buildOwlSendSplNftTransaction(params: {
+export async function buildOwlSendSplNftTransaction(params: {
   connection: Connection
   owner: PublicKey
   lines: OwlSendLine[]
   /** Owltopia holder discount (bps). */
   feeDiscountBps?: number
 }): Promise<
-  | { ok: true; tx: Transaction; newAtaCount: number }
+  | { ok: true; tx: Transaction; newAtaCount: number; includedCount: number }
   | { ok: false; error: string; failedMints: string[] }
 > {
   const { connection, owner, lines } = params
@@ -132,11 +136,18 @@ async function buildOwlSendSplNftTransaction(params: {
             error: `Could not find a transferable SPL token account for ${line.name ?? line.mint.slice(0, 8)}. Compressed / Core / pNFTs may need a single-NFT send.`,
           }
         }
+        // Mint owner is authoritative — never create a dest ATA with the wrong program
+        // (classic Token CPI against a Token-2022 mint → IncorrectProgramId).
+        const mintProgram = await resolveMintTokenProgram(connection, mintPk)
+        const tokenProgram =
+          mintProgram && !mintProgram.equals(holder.tokenProgram)
+            ? mintProgram
+            : holder.tokenProgram
         const destAta = await getAssociatedTokenAddress(
           mintPk,
           recipientPk,
           false,
-          holder.tokenProgram,
+          tokenProgram,
           ASSOCIATED_TOKEN_PROGRAM_ID
         )
         return {
@@ -145,7 +156,7 @@ async function buildOwlSendSplNftTransaction(params: {
             mintPk,
             recipientPk,
             line,
-            tokenProgram: holder.tokenProgram,
+            tokenProgram,
             tokenAccount: holder.tokenAccount,
             destAta,
           },
@@ -254,67 +265,88 @@ async function buildOwlSendSplNftTransaction(params: {
     'processed'
   )
 
-  const tx = new Transaction()
-  let newAtaCount = 0
+  // Attach blockhash once so Phantom/adapter do not hang on getLatestBlockhash during "approve".
+  const { blockhash } = await connection.getLatestBlockhash('processed')
 
-  for (let i = 0; i < resolved.length; i++) {
-    const r = resolved[i]!
-    const info = destInfos[i]
-    const ownerProgram = info?.owner
-    const hasAta =
-      !!info &&
-      (ownerProgram?.equals(TOKEN_PROGRAM_ID) || ownerProgram?.equals(TOKEN_2022_PROGRAM_ID))
+  const assemble = (count: number, includeRevoke: boolean) => {
+    const slice = resolved.slice(0, count)
+    const sliceFee = getOwlSendFeeLamportsForCount(slice.length, params.feeDiscountBps ?? 0)
+    const tx = new Transaction()
+    let newAtaCount = 0
 
-    if (!hasAta) {
+    for (let i = 0; i < slice.length; i++) {
+      const r = slice[i]!
+      const info = destInfos[i]
+      const ownerProgram = info?.owner
+      const hasAta =
+        !!info &&
+        (ownerProgram?.equals(TOKEN_PROGRAM_ID) || ownerProgram?.equals(TOKEN_2022_PROGRAM_ID))
+
+      if (!hasAta) {
+        tx.add(
+          createAssociatedTokenAccountInstruction(
+            owner,
+            r.destAta,
+            r.recipientPk,
+            r.mintPk,
+            r.tokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
+          )
+        )
+        newAtaCount += 1
+      }
+
+      if (includeRevoke && revokeIndexes.has(i)) {
+        tx.add(createRevokeInstruction(r.tokenAccount, owner, [], r.tokenProgram))
+      }
+
       tx.add(
-        createAssociatedTokenAccountInstruction(
-          owner,
+        createTransferInstruction(
+          r.tokenAccount,
           r.destAta,
-          r.recipientPk,
-          r.mintPk,
-          r.tokenProgram,
-          ASSOCIATED_TOKEN_PROGRAM_ID
+          owner,
+          1n,
+          [],
+          r.tokenProgram
         )
       )
-      newAtaCount += 1
     }
 
-    if (revokeIndexes.has(i)) {
-      tx.add(createRevokeInstruction(r.tokenAccount, owner, [], r.tokenProgram))
-    }
-
-    tx.add(
-      createTransferInstruction(
-        r.tokenAccount,
-        r.destAta,
-        owner,
-        1n,
-        [],
-        r.tokenProgram
+    if (sliceFee > 0 && treasury) {
+      tx.add(
+        SystemProgram.transfer({
+          fromPubkey: owner,
+          toPubkey: new PublicKey(treasury),
+          lamports: sliceFee,
+        })
       )
-    )
+    }
+
+    // Raise CU above the 200k default — revoke+ATA+transfer otherwise fails wallet sim
+    // (Jupiter/Phantom never show approve).
+    prependOwlSendComputeBudget(tx)
+    tx.feePayer = owner
+    tx.recentBlockhash = blockhash
+    return { tx, newAtaCount }
   }
 
-  if (feeLamports > 0 && treasury) {
-    tx.add(
-      SystemProgram.transfer({
-        fromPubkey: owner,
-        toPubkey: new PublicKey(treasury),
-        lamports: feeLamports,
-      })
-    )
+  // Fit under the safe packet budget so Jupiter/Phantom Lighthouse ixs still fit.
+  // Drop leftover-CM revokes first (owner can transfer without revoke); then peel NFTs.
+  let includedCount = resolved.length
+  let includeRevoke = true
+  let assembled = assemble(includedCount, includeRevoke)
+  while (includedCount > 1 && !owlSendTxFitsSafePacket(assembled.tx)) {
+    if (includeRevoke) {
+      includeRevoke = false
+      assembled = assemble(includedCount, false)
+      continue
+    }
+    includedCount -= 1
+    includeRevoke = true
+    assembled = assemble(includedCount, true)
   }
 
-  // Raise CU above the 200k default — revoke+ATA+transfer×5 otherwise fails wallet sim
-  // (Jupiter/Phantom never show approve).
-  prependOwlSendComputeBudget(tx)
-
-  // Attach blockhash here so Phantom/adapter do not hang on getLatestBlockhash during "approve".
-  tx.feePayer = owner
-  const { blockhash } = await connection.getLatestBlockhash('processed')
-  tx.recentBlockhash = blockhash
-
-  return { ok: true, tx, newAtaCount }
+  return { ok: true, tx: assembled.tx, newAtaCount: assembled.newAtaCount, includedCount }
 }
 
 function humanizeOwlSendSendError(msg: string): string {
@@ -327,11 +359,24 @@ function humanizeOwlSendSendError(msg: string): string {
   ) {
     return 'This approval needs more compute than Solana\'s default budget. Hard-refresh OwlSend and retry — batches now request a higher compute limit.'
   }
+  // ATA Create against a non-SPL mint (cNFT asset id) or Token vs Token-2022 mismatch.
+  // Keep wording broad so single-NFT send can fall through to Bubblegum / Core / TM.
+  if (
+    m.includes('incorrectprogramid') ||
+    m.includes('incorrect program id')
+  ) {
+    return (
+      'This NFT is not a classic SPL hold (cNFT / Core / Token-2022 mismatch). ' +
+      'OwlSend will retry the compressed / Core / Token Metadata path — or send it alone.'
+    )
+  }
   return msg
 }
 
 /**
- * Send up to 5 classic SPL / Token-2022 NFTs + Owl fee in one wallet approval.
+ * Send classic SPL / Token-2022 NFTs + Owl fee in one wallet approval.
+ * Shrinks the packet (drop leftover-CM revokes, then peel NFTs) so Jupiter/Phantom
+ * Lighthouse guards still fit under Solana's 1232-byte limit.
  * Returns an error if any asset is not a simple SPL hold (pNFT/Core/cNFT need the special path).
  */
 export async function sendOwlSendSplNftBatch(params: {
@@ -436,15 +481,20 @@ export async function sendOwlSendSplNftBatch(params: {
       OWL_SEND_CONFIRM_TIMEOUT_MS,
       OWL_SEND_CONFIRM_TIMEOUT_HINT
     )
-    return { ok: true, signature, newAtaCount: built.newAtaCount }
+    return {
+      ok: true,
+      signature,
+      newAtaCount: built.newAtaCount,
+      sentMints: lines.slice(0, built.includedCount).map((l) => l.mint),
+    }
   } catch (e) {
     const msg = humanizeOwlSendSendError(e instanceof Error ? e.message : String(e))
-    if (/too large|versionedtransaction too large|transaction too large/i.test(msg)) {
+    if (isOwlSendPacketSizeError(msg) || /too large|versionedtransaction too large|transaction too large/i.test(msg)) {
       return {
         ok: false,
         error:
-          'This batch does not fit in one Solana transaction (often when many new token accounts are created). Remove an NFT or send to wallets that already hold that collection, then retry.',
-        failedMints: lines.map((l) => l.mint),
+          'This batch does not fit in one Solana transaction (often when sending Gen2s to new wallets). OwlSend will use a smaller approval — tap Retry.',
+        failedMints: [],
       }
     }
 

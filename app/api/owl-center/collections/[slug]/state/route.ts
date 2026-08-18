@@ -3,11 +3,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { buildCollectionMintState } from '@/lib/owl-center/collection-mint-state'
 import { getOwlCenterAdminWallet } from '@/lib/owl-center/admin-access'
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
+import { parseOwlCenterCollectionSlugParam } from '@/lib/owl-center/launch-slug'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
-
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 
 export async function GET(request: NextRequest, context: { params: Promise<{ slug: string }> }) {
   const ip = getClientIp(request)
@@ -17,8 +16,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   }
 
   const { slug: raw } = await context.params
-  const slug = raw?.trim().toLowerCase() ?? ''
-  if (!SLUG_RE.test(slug) || slug === 'gen2') {
+  const slug = parseOwlCenterCollectionSlugParam(raw)
+  if (!slug) {
     return NextResponse.json({ error: 'Invalid collection slug' }, { status: 400 })
   }
 
@@ -29,7 +28,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   }
 
   const adminWallet = await getOwlCenterAdminWallet(request)
-  const state = await buildCollectionMintState(slug, { includeSystemLogs: !!adminWallet })
+  const state = await buildCollectionMintState(launch.slug, { includeSystemLogs: !!adminWallet })
   if (!state) return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
 
   return NextResponse.json(state)

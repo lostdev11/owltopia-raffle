@@ -3526,8 +3526,9 @@ export default function AdminDashboardPage() {
                   Owl Center
                 </CardTitle>
                 <CardDescription>
-                  Launchpad hub — all launches, Gen2 console, mint schedules, phase auto-advance, presale tenants, and
-                  partner demo collections. Public: /owl-center
+                  Launchpad hub — all launches, Gen2 console, mint schedules, phase auto-advance, partner
+                  presales, and partner demo collections. Public: /owl-center · Approvals:{' '}
+                  /admin/owl-center-presale
                 </CardDescription>
               </CardHeader>
             </Link>
@@ -3631,6 +3632,20 @@ export default function AdminDashboardPage() {
                     <CardDescription>
                       Nest perches (coins, Gen 1, Gen 2), public landing toggle, rev-share roster, and support playbook
                       for holder wallet diagnostics / heal.
+                    </CardDescription>
+                  </CardHeader>
+                </Link>
+              </Card>
+              <Card className="hover:border-primary transition-colors cursor-pointer">
+                <Link href="/admin/coin-upgrade">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Sparkles className="h-5 w-5" />
+                      Coin art upgrade
+                    </CardTitle>
+                    <CardDescription>
+                      Optional paid Owltopia Coin art upgrade: sales stats, and the one-tap Phantom authorize for
+                      Gembird (/coin-upgrade/authorize).
                     </CardDescription>
                   </CardHeader>
                 </Link>

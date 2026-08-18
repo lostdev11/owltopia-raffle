@@ -64,10 +64,12 @@ export type OwlCenterMarketplaceReadiness = {
   sellout_prepared_at: string | null
   magic_eden_url: string | null
   tensor_url: string | null
+  orbis_url: string | null
   metadata_status: OwlCenterMarketplaceTrackStatus
   verified_collection_status: OwlCenterMarketplaceTrackStatus
   magic_eden_status: OwlCenterMarketplaceTrackStatus
   tensor_status: OwlCenterMarketplaceTrackStatus
+  orbis_status: OwlCenterMarketplaceTrackStatus
   trading_links_active: boolean
   notes: string | null
   created_at: string

@@ -98,7 +98,6 @@ import {
   ExternalLink,
   XCircle,
   Loader2,
-  Coins,
   CheckCircle,
   Ticket,
   RefreshCw,
@@ -121,16 +120,21 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
 import { HOLDER_LOOKUP_MAX_ATTEMPTS } from '@/lib/solana/holder-lookup-retries'
-import { getFungibleHolderInWallet, getNftHolderInWallet } from '@/lib/solana/wallet-tokens'
+import {
+  getFungibleHolderInWallet,
+  getNftHolderInWalletWithRpcFallback,
+} from '@/lib/solana/wallet-tokens'
 import { isNftHolderTransferLocked } from '@/lib/solana/nft-transfer-lock'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import {
   isMplCoreNoApprovalsError,
   mplCoreNoApprovalsEscrowMessage,
+  sanitizeEscrowTransferFallbackError,
 } from '@/lib/solana/mpl-core-transfer-errors'
 import { formatPhantomBlockedEscrowMessage } from '@/lib/solana/phantom-safe-umi-send'
 import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
+import { tryEscrowDepositFallbacks } from '@/lib/solana/escrow-deposit-fallbacks'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 import {
   logEscrowDepositAbort,
@@ -168,6 +172,7 @@ import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { getEscrowPrizeClaimSuccessCopy } from '@/lib/raffles/claim-prize-success-copy'
 import { getRaffleDisplayTitle } from '@/lib/raffles/nft-prize-raffle-title'
+import { buildRafflesHostBrowseHref } from '@/lib/raffles/host-wallet-copy'
 import { ClaimSuccessOverlay } from '@/components/ClaimSuccessOverlay'
 import { extractTransactionSignature } from '@/lib/claims/extract-transaction-signature'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
@@ -310,8 +315,6 @@ export function RaffleDetailClient({
   const [claimPrizePhase, setClaimPrizePhase] = useState<'idle' | 'loading' | 'success'>('idle')
   const [claimPrizeTxSignature, setClaimPrizeTxSignature] = useState<string | null>(null)
   const [claimPrizeAlreadyClaimed, setClaimPrizeAlreadyClaimed] = useState(false)
-  const [claimProceedsLoading, setClaimProceedsLoading] = useState(false)
-  const [claimProceedsError, setClaimProceedsError] = useState<string | null>(null)
   const [claimRefundLoadingEntryId, setClaimRefundLoadingEntryId] = useState<string | null>(null)
   const [isClaimingAllRefunds, setIsClaimingAllRefunds] = useState(false)
   const [claimRefundError, setClaimRefundError] = useState<string | null>(null)
@@ -341,6 +344,7 @@ export function RaffleDetailClient({
   } | null>(null)
   const walletAddress = publicKey?.toBase58() ?? ''
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
+  const hostBrowseHref = buildRafflesHostBrowseHref(creatorWallet)
   const isCreator =
     connected &&
     !!walletAddress &&
@@ -829,6 +833,11 @@ export function RaffleDetailClient({
         .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)
     : 0
 
+  const walletTicketsRemaining =
+    raffle.max_tickets_per_wallet != null
+      ? Math.max(0, Number(raffle.max_tickets_per_wallet) - userTickets)
+      : null
+
   // Pending entries for this wallet that have a tx signature (confirming on-chain)
   const userPendingTickets = connected && publicKey
     ? entries
@@ -1020,11 +1029,22 @@ export function RaffleDetailClient({
   const showRefundTerminalButton =
     minThresholdRefundRules && statusAllowsTerminalFinalize && raffleHasUnrefundedConfirmedSales
 
-  /** Per-transaction clamp: raffle cap minus sold, or DB max when raffle has no max_tickets */
-  const maxPurchaseQuantity =
-    availableTickets !== null ? Math.max(0, availableTickets) : MAX_TICKET_QUANTITY_PER_ENTRY
+  /** Per-transaction clamp: raffle cap, per-wallet cap, and DB INT max */
+  const maxPurchaseQuantity = Math.min(
+    availableTickets !== null ? Math.max(0, availableTickets) : MAX_TICKET_QUANTITY_PER_ENTRY,
+    walletTicketsRemaining !== null ? walletTicketsRemaining : MAX_TICKET_QUANTITY_PER_ENTRY,
+    MAX_TICKET_QUANTITY_PER_ENTRY
+  )
 
-  const quantityInputMax = availableTickets !== null ? maxPurchaseQuantity : undefined
+  const quantityInputMax =
+    availableTickets !== null || walletTicketsRemaining !== null
+      ? maxPurchaseQuantity
+      : undefined
+
+  const atWalletTicketLimit =
+    walletTicketsRemaining !== null && walletTicketsRemaining <= 0
+  const ticketsUnavailableToBuy =
+    (availableTickets !== null && availableTickets <= 0) || atWalletTicketLimit
 
   const handlePurchase = async () => {
     if (!connected || !publicKey) {
@@ -1039,6 +1059,17 @@ export function RaffleDetailClient({
 
     if (ticketPaymentCurrency === 'OWL' && !isOwlEnabled()) {
       setError('OWL entry is not enabled yet — mint address pending.')
+      return
+    }
+
+    if (
+      raffle.max_tickets_per_wallet != null &&
+      walletTicketsRemaining !== null &&
+      walletTicketsRemaining <= 0
+    ) {
+      setError(
+        `This raffle limits each wallet to ${raffle.max_tickets_per_wallet} ticket${raffle.max_tickets_per_wallet === 1 ? '' : 's'}. You already hold the maximum.`
+      )
       return
     }
 
@@ -1160,6 +1191,14 @@ export function RaffleDetailClient({
 
   const handleAddToCart = () => {
     setCartAddedHint(false)
+    if (ticketsUnavailableToBuy) {
+      setError(
+        atWalletTicketLimit
+          ? `This raffle limits each wallet to ${raffle.max_tickets_per_wallet} ticket${raffle.max_tickets_per_wallet === 1 ? '' : 's'}.`
+          : 'No tickets available.'
+      )
+      return
+    }
     const res = addCartItem(raffle, ticketQuantity)
     if (!res.ok) {
       setError(res.error)
@@ -1904,82 +1943,69 @@ export function RaffleDetailClient({
       }
 
       // SPL / Token‑2022 path (existing behavior)
-      let holder = await getNftHolderInWallet(connection, mint, publicKey)
+      let holder = await getNftHolderInWalletWithRpcFallback(connection, mint, publicKey)
       for (
         let attempt = 0;
         attempt < HOLDER_LOOKUP_MAX_ATTEMPTS - 1 && !holder;
         attempt++
       ) {
         await new Promise((r) => setTimeout(r, 800))
-        holder = await getNftHolderInWallet(connection, mint, publicKey)
+        holder = await getNftHolderInWalletWithRpcFallback(connection, mint, publicKey)
       }
       if (!holder) {
-        let transferFallbackDetails: string | null = null
-        // Auto-fallbacks: try compressed NFT transfer first, then Mpl Core transfer.
-        // This keeps "transfer to escrow" wallet-sign flow working across common NFT standards.
-        if (raffle.prize_standard !== 'mpl_core' && walletAdapter) {
-          try {
-            logEscrowDepositPath(depositLogCtx, 'fallback_compressed', {
-              note: 'No SPL token account found; trying compressed transfer',
-            })
-            const sig = await transferCompressedNftToEscrow({
-              connection,
-              wallet: walletAdapter,
-              assetId: transferAssetId,
-              escrowAddress,
-              sendTransaction,
-            })
-            await afterWalletSignature(sig, 'fallback_compressed')
+        // Auto-fallbacks: Token Metadata first (classic/pNFT), then compressed, then Core.
+        // Previously we skipped Token Metadata here, so wallet-RPC misses produced Core
+        // AssetAccountData / EnumDiscriminatorOutOfRangeError noise on normal SPL mints.
+        if (walletAdapter) {
+          const fallback = await tryEscrowDepositFallbacks({
+            connection,
+            wallet: walletAdapter,
+            assetId: transferAssetId,
+            escrowAddress,
+            sendTransaction,
+            logCtx: depositLogCtx,
+            // Prefer DB standard when set; otherwise default TM-first ordering.
+            dasInterface:
+              raffle.prize_standard === 'mpl_core'
+                ? 'MplCoreAsset'
+                : raffle.prize_standard === 'compressed'
+                  ? 'V1_NFT_COMPRESSED'
+                  : raffle.prize_standard === 'spl' || raffle.prize_standard === 'token2022'
+                    ? 'V1_NFT'
+                    : null,
+            compressedHint: raffle.prize_standard === 'compressed' ? true : null,
+            skipTokenMetadata: false,
+          })
+          if (fallback.ok) {
+            await afterWalletSignature(fallback.signature, fallback.path)
             return
-          } catch (e) {
-            // Not a compressed NFT (or proof/build failed); continue to Core fallback.
-            transferFallbackDetails = e instanceof Error ? e.message : String(e)
-            logEscrowDepositAbort(depositLogCtx, 'fallback_compressed_failed', {
-              detail: transferFallbackDetails,
-            })
           }
-          try {
-            logEscrowDepositPath(depositLogCtx, 'fallback_mpl_core', {
-              note: 'Trying Metaplex Core transfer after compressed failed or N/A',
-            })
-            const sig = await transferMplCoreToEscrow({
-              connection,
-              wallet: walletAdapter,
-              assetId: transferAssetId,
-              escrowAddress,
-              sendTransaction,
-            })
-            await afterWalletSignature(sig, 'fallback_mpl_core')
-            return
-          } catch (e) {
-            // Fall through to the detailed not-found guidance below.
-            transferFallbackDetails = e instanceof Error ? e.message : String(e)
-            logEscrowDepositAbort(depositLogCtx, 'fallback_mpl_core_failed', {
-              detail: transferFallbackDetails,
-            })
+          const transferFallbackDetails = fallback.displayError || fallback.lastError
+          const detailsSuffix = transferFallbackDetails
+            ? ` Details: ${sanitizeEscrowTransferFallbackError(transferFallbackDetails)}`
+            : ''
+          logEscrowDepositAbort(depositLogCtx, 'no_auto_transfer_path', {
+            mintShort,
+            details: detailsSuffix || undefined,
+          })
+          if (fallback.mplCoreNoApprovals) {
+            setDepositEscrowError(
+              mplCoreNoApprovalsEscrowMessage(mintShort, { fullAssetId: transferAssetId })
+            )
+            setShowManualEscrowFallback(false)
+          } else {
+            setDepositEscrowError(
+              `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then paste the transfer signature below and tap Submit signature. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.${detailsSuffix}`
+            )
+            setShowManualEscrowFallback(true)
           }
+          return
         }
-        const detailsSuffix = transferFallbackDetails
-          ? ` Details: ${transferFallbackDetails}`
-          : ''
-        logEscrowDepositAbort(depositLogCtx, 'no_auto_transfer_path', {
-          mintShort,
-          details: detailsSuffix || undefined,
-        })
-        if (
-          transferFallbackDetails &&
-          isMplCoreNoApprovalsError(transferFallbackDetails)
-        ) {
-          setDepositEscrowError(
-            mplCoreNoApprovalsEscrowMessage(mintShort, { fullAssetId: transferAssetId })
-          )
-          setShowManualEscrowFallback(false)
-        } else {
-          setDepositEscrowError(
-            `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then paste the transfer signature below and tap Submit signature. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.${detailsSuffix}`
-          )
-          setShowManualEscrowFallback(true)
-        }
+        logEscrowDepositAbort(depositLogCtx, 'no_auto_transfer_path', { mintShort })
+        setDepositEscrowError(
+          `We could not build an automatic transfer transaction for this NFT in-app (mint: ${mintShort}). You can still deposit it now: send the NFT directly to the escrow wallet in your wallet app, then paste the transfer signature below and tap Submit signature. Supported in-app auto transfer standards: SPL Token, Token-2022, Mpl Core, and compressed NFTs.`
+        )
+        setShowManualEscrowFallback(true)
         return
       }
       if (!('tokenProgram' in holder) || !('tokenAccount' in holder)) {
@@ -2458,40 +2484,6 @@ export function RaffleDetailClient({
     sendCancellationFeeAndGetSignature,
   ])
 
-  const handleClaimProceeds = useCallback(async () => {
-    setClaimProceedsError(null)
-    setActionClaimSuccess(null)
-    setClaimProceedsLoading(true)
-    try {
-      const res = await fetch(`/api/raffles/${raffle.id}/claim-proceeds`, {
-        method: 'POST',
-        credentials: 'include',
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setClaimProceedsError(
-          typeof (data as { error?: string }).error === 'string'
-            ? (data as { error: string }).error
-            : 'Could not claim proceeds. Sign in on My Dashboard if you are not signed in yet.'
-        )
-        return
-      }
-      const alreadyClaimed = (data as { alreadyClaimed?: boolean }).alreadyClaimed === true
-      presentActionClaimSuccess({
-        tx: extractTransactionSignature(data),
-        heading: alreadyClaimed ? 'Proceeds already claimed' : 'Proceeds claimed!',
-        message: alreadyClaimed
-          ? 'Creator proceeds were already sent to your wallet.'
-          : 'Net ticket proceeds were sent to your wallet.',
-      })
-      router.refresh()
-    } catch (e) {
-      setClaimProceedsError(e instanceof Error ? e.message : 'Request failed')
-    } finally {
-      setClaimProceedsLoading(false)
-    }
-  }, [presentActionClaimSuccess, raffle.id, router])
-
   const handleCreatorClaimPrizeBackFromEscrow = useCallback(async () => {
     setError(null)
     setActionClaimSuccess(null)
@@ -2932,21 +2924,22 @@ export function RaffleDetailClient({
             raffleUsesFundsEscrow(raffle) &&
             !raffle.creator_claimed_at &&
             !!raffle.settled_at?.trim() && (
-              <Button
-                variant="default"
-                size="default"
-                onClick={handleClaimProceeds}
-                disabled={claimProceedsLoading}
-                className="touch-manipulation min-h-[44px] text-sm sm:text-base"
-                title="Claim your net ticket proceeds from funds escrow (platform fee goes to treasury in the same transaction)."
+              <div
+                className="w-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-3 sm:px-4 sm:py-3.5 space-y-1"
+                role="status"
               >
-                {claimProceedsLoading ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Coins className="mr-2 h-4 w-4" />
-                )}
-                Claim proceeds
-              </Button>
+                <p className="text-sm font-medium text-foreground">Ticket proceeds ready</p>
+                <p className="text-sm text-muted-foreground">
+                  Claim your net funds from{' '}
+                  <Link
+                    href="/dashboard?tab=hosting"
+                    className="text-primary font-medium underline underline-offset-2 hover:no-underline"
+                  >
+                    My Dashboard → Hosting
+                  </Link>
+                  .
+                </p>
+              </div>
             )}
         </div>
         {referralEnabled ? (
@@ -2963,6 +2956,7 @@ export function RaffleDetailClient({
             milestones={initialMilestones}
             entries={entries}
             sessionWallet={sessionWallet}
+            isAdmin={adminCapable}
             onRefresh={() => router.refresh()}
           />
         )}
@@ -3026,11 +3020,6 @@ export function RaffleDetailClient({
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        {claimProceedsError && (
-          <p className="text-sm text-destructive mb-2" role="alert">
-            {claimProceedsError}
-          </p>
-        )}
         {canViewOfferPanel && (
           <Card className="border-primary/25">
             <CardHeader className="pb-2">
@@ -3776,7 +3765,7 @@ export function RaffleDetailClient({
                             <>
                               {raffle.ticket_price.toFixed(4).replace(/\.?0+$/, '')} {raffle.currency}
                               <CurrencyIcon
-                                currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                                currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                                 size={14}
                                 className="inline-block"
                               />
@@ -4023,7 +4012,7 @@ export function RaffleDetailClient({
                       <>
                         {raffle.ticket_price.toFixed(6).replace(/\.?0+$/, '')} {raffle.currency}
                         <CurrencyIcon
-                          currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                          currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                           size={imageSize === 'small' ? 16 : 20}
                           className="inline-block"
                         />
@@ -4050,6 +4039,16 @@ export function RaffleDetailClient({
                   <p className={classes.labelText + ' text-muted-foreground'}>Available Tickets</p>
                   <p className={classes.contentText + ' font-bold'}>
                     {availableTickets !== null ? availableTickets : raffle.max_tickets}
+                  </p>
+                </div>
+              )}
+              {raffle.max_tickets_per_wallet != null && (
+                <div>
+                  <p className={classes.labelText + ' text-muted-foreground'}>Max per person</p>
+                  <p className={classes.contentText + ' font-bold'}>
+                    {connected
+                      ? `${userTickets} / ${raffle.max_tickets_per_wallet}`
+                      : raffle.max_tickets_per_wallet}
                   </p>
                 </div>
               )}
@@ -4113,17 +4112,41 @@ export function RaffleDetailClient({
               </div>
               <div>
                 <p className={classes.labelText + ' text-muted-foreground'}>Created By</p>
-                {creatorDisplayName ? (
-                  <p className={classes.contentText + ' font-semibold'}>{creatorDisplayName}</p>
-                ) : null}
-                <p
-                  className={
-                    (creatorDisplayName ? 'text-sm ' : classes.contentText + ' font-semibold ') +
-                    'font-mono break-all text-foreground/90'
-                  }
-                >
-                  {creatorWallet || 'Unknown'}
-                </p>
+                {creatorDisplayName && hostBrowseHref ? (
+                  <>
+                    <p className={classes.contentText + ' font-semibold'}>
+                      <Link
+                        href={hostBrowseHref}
+                        className="text-primary font-semibold hover:underline underline-offset-2 touch-manipulation"
+                        title="View all raffles by this host"
+                      >
+                        {creatorDisplayName}
+                      </Link>
+                    </p>
+                    <p className="text-sm font-mono break-all text-foreground/90">{creatorWallet}</p>
+                  </>
+                ) : creatorDisplayName ? (
+                  <>
+                    <p className={classes.contentText + ' font-semibold'}>{creatorDisplayName}</p>
+                    <p className="text-sm font-mono break-all text-foreground/90">
+                      {creatorWallet || 'Unknown'}
+                    </p>
+                  </>
+                ) : hostBrowseHref ? (
+                  <p className={classes.contentText + ' font-semibold font-mono break-all'}>
+                    <Link
+                      href={hostBrowseHref}
+                      className="text-primary font-semibold hover:underline underline-offset-2 touch-manipulation font-mono break-all"
+                      title="View all raffles by this host"
+                    >
+                      {creatorWallet}
+                    </Link>
+                  </p>
+                ) : (
+                  <p className={classes.contentText + ' font-semibold font-mono break-all text-foreground/90'}>
+                    Unknown
+                  </p>
+                )}
               </div>
             </div>
 
@@ -4499,6 +4522,7 @@ export function RaffleDetailClient({
                     !dualSolBamboo &&
                     !purchasesBlocked &&
                     (availableTickets === null || availableTickets > 0) &&
+                    !atWalletTicketLimit &&
                     userTickets === 0
                   }
                 />
@@ -4508,7 +4532,7 @@ export function RaffleDetailClient({
                     purchasesBlocked ||
                     isCreator ||
                     isProcessing ||
-                    (availableTickets !== null && availableTickets <= 0)
+                    ticketsUnavailableToBuy
                   }
                   size={classes.buttonSize as any}
                   style={
@@ -4525,6 +4549,8 @@ export function RaffleDetailClient({
                     ? 'Your Raffle'
                     : availableTickets !== null && availableTickets <= 0
                     ? 'Sold Out'
+                    : atWalletTicketLimit
+                    ? 'Wallet Limit Reached'
                     : isProcessing
                     ? 'Processing...'
                     : 'Enter Raffle'}
@@ -4894,6 +4920,22 @@ export function RaffleDetailClient({
                 )}
               </div>
             )}
+
+            {raffle.max_tickets_per_wallet != null && (
+              <div className="p-3 rounded-lg bg-muted border">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Your wallet limit</span>
+                  <span className="font-semibold">
+                    {userTickets} / {raffle.max_tickets_per_wallet}
+                  </span>
+                </div>
+                {atWalletTicketLimit && (
+                  <p className="text-xs text-destructive mt-1">
+                    You already hold the maximum tickets allowed per wallet for this raffle.
+                  </p>
+                )}
+              </div>
+            )}
             
               <div className="space-y-2">
                 <Label htmlFor="dialog-quantity">Number of Tickets</Label>
@@ -4905,12 +4947,18 @@ export function RaffleDetailClient({
                   value={ticketQuantityDisplay}
                   onChange={(e) => handleQuantityChange(e.target.value)}
                   onBlur={handleQuantityBlur}
-                  disabled={availableTickets !== null && availableTickets <= 0}
+                  disabled={ticketsUnavailableToBuy}
                   className="text-base sm:text-sm h-11 sm:h-10"
                 />
               {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
                 <p className="text-xs text-muted-foreground">
                   Maximum {availableTickets} ticket{availableTickets !== 1 ? 's' : ''} available
+                </p>
+              )}
+              {walletTicketsRemaining !== null && walletTicketsRemaining > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  You can buy up to {walletTicketsRemaining} more ticket
+                  {walletTicketsRemaining !== 1 ? 's' : ''} on this wallet
                 </p>
               )}
             </div>
@@ -4930,7 +4978,7 @@ export function RaffleDetailClient({
                           : 'border-input bg-background text-muted-foreground hover:bg-muted/60'
                       }`}
                     >
-                      {c === 'BAMBOO' ? 'Bamboo (BAMBOO)' : c}
+                      {c === 'BAMBOO' ? 'Bamboo (BAMBOO)' : c === 'GOATS' ? 'GOATS OF SOLANA (GOATS)' : c}
                     </button>
                   ))}
                 </div>
@@ -4949,7 +4997,8 @@ export function RaffleDetailClient({
                 !dualSolBamboo &&
                 ticketQuantity === 1 &&
                 userTickets === 0 &&
-                (availableTickets === null || availableTickets > 0)
+                (availableTickets === null || availableTickets > 0) &&
+                !atWalletTicketLimit
               }
             />
 
@@ -4958,7 +5007,7 @@ export function RaffleDetailClient({
               <div className="text-xl font-bold flex items-center gap-2">
                 {purchaseAmount.toFixed(6)} {ticketPaymentCurrency}
                 <CurrencyIcon
-                  currency={ticketPaymentCurrency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                  currency={ticketPaymentCurrency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                   size={20}
                   className="inline-block"
                 />
@@ -5006,7 +5055,7 @@ export function RaffleDetailClient({
               variant="secondary"
               onClick={handleAddToCart}
               disabled={
-                (availableTickets !== null && availableTickets <= 0) ||
+                ticketsUnavailableToBuy ||
                 !connected ||
                 isCreator ||
                 isProcessing
@@ -5019,7 +5068,7 @@ export function RaffleDetailClient({
             <Button
               onClick={handlePurchase}
               disabled={
-                (availableTickets !== null && availableTickets <= 0) ||
+                ticketsUnavailableToBuy ||
                 !connected ||
                 isCreator ||
                 isProcessing
@@ -5036,6 +5085,8 @@ export function RaffleDetailClient({
                 ? 'Processing...'
                 : availableTickets !== null && availableTickets <= 0
                 ? 'Sold Out'
+                : atWalletTicketLimit
+                ? 'Wallet Limit Reached'
                 : 'Buy Tickets'}
             </Button>
           </DialogFooter>

@@ -39,7 +39,10 @@ import { findFrozenOwlSendMints } from '@/lib/owl-send/attribute-batch-failure'
 import {
   isOwlSendCompressedNft,
   isOwlSendProgrammableNft,
+  owlSendCanAddToSelection,
+  owlSendFilterCompatibleSelection,
   owlSendNftProblemLabel,
+  owlSendSelectionApprovalSize,
   owlSendSkippedFrozenNotice,
   partitionLiveFrozenForOwlSend,
   partitionOwlSendByFrozen,
@@ -64,6 +67,7 @@ import { isJupiterBrowser } from '@/lib/utils'
 import {
   buildTokenScatterLines,
   chunkOwlSendBatches,
+  chunkOwlSendNftLines,
   collapseRecipientsToNftScatterPaste,
   expandNftScatterEntries,
   pairScatterLines,
@@ -73,10 +77,12 @@ import {
   type OwlSendTokenScatterLine,
 } from '@/lib/owl-send/batch'
 import {
+  applyPartialOwlSendBatchSuccess,
   buildResumeRemainingPlan,
   buildResumeSkippingFrozenPlan,
   collectSentMintsFromBatches,
   collectSentMintsFromLedger,
+  splitOversizedOwlSendBatch,
 } from '@/lib/owl-send/resume'
 import {
   clearOwlSendNftDraft,
@@ -85,8 +91,10 @@ import {
   type OwlSendNftSessionDraft,
 } from '@/lib/owl-send/session-draft'
 import {
+  OWL_SEND_CHAIN_APPROVAL_GAP_MS,
   OWL_SEND_MAX_PER_TX,
   OWL_SEND_MAX_SELECT,
+  OWL_SEND_MAX_SPECIAL_PER_TX,
   type OwlSendAssetTab,
   type OwlSendMode,
 } from '@/lib/owl-send/constants'
@@ -96,11 +104,26 @@ import {
   packOwlSendApprovalQueue,
   previewOwlSendApprovalQueue,
 } from '@/lib/owl-send/approval-queue'
+import { owlSendNftSendButtonLabel } from '@/lib/owl-send/send-button-label'
+import { isOwlSendPacketSizeError } from '@/lib/owl-send/tx-size'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { formatOwlSendFeeSol, getOwlSendFeeSol, getOwlSendFeeSolForDiscount } from '@/lib/owl-send/fee'
 import type { OwlSendHolderRoleName } from '@/lib/owl-send/holder-discount'
 import { sendOwlSendNftBatch } from '@/lib/owl-send/send-batch'
-import type { OwlSendSendPhase } from '@/lib/owl-send/send-spl-nft-batch'
+import {
+  buildOwlSendSplNftTransaction,
+  type OwlSendSendPhase,
+} from '@/lib/owl-send/send-spl-nft-batch'
+import {
+  owlSendBatchesCanSignAll,
+  sendOwlSendSignedBatchGroup,
+  walletSupportsOwlSendSignAll,
+} from '@/lib/owl-send/sign-all'
+import {
+  OWL_SEND_BUILD_TIMEOUT_HINT,
+  OWL_SEND_BUILD_TIMEOUT_MS,
+  withOwlSendTimeout,
+} from '@/lib/owl-send/confirm'
 import { sendOwlSendTokenLines, sendOwlSendTokensToOne } from '@/lib/owl-send/send-tokens'
 import { recordOwlSendLedger } from '@/lib/owl-send/record-ledger'
 import { useOwlSendAdminAccess } from '@/lib/owl-send/use-owl-send-admin-access'
@@ -461,6 +484,14 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     [selectedNfts]
   )
 
+  const nftApprovalSize = useMemo(() => {
+    const unique =
+      mode === 'scatter'
+        ? new Set(activeScatterRecipients.filter(Boolean)).size || 3
+        : 1
+    return owlSendSelectionApprovalSize(selectedNfts, { uniqueRecipients: unique })
+  }, [selectedNfts, mode, activeScatterRecipients])
+
   const cost = useMemo(() => {
     if (preparedLines && preparedLines.length > 0) {
       return buildOwlSendCostEstimate({
@@ -515,10 +546,28 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setBatches([])
     setBatchProgress([])
     setSessionError(null)
+
     setSelectedMints((prev) => {
       const next = new Set(prev)
-      if (next.has(nft.mint)) next.delete(nft.mint)
-      else if (next.size < OWL_SEND_MAX_SELECT) next.add(nft.mint)
+      if (next.has(nft.mint)) {
+        next.delete(nft.mint)
+        setCnftGate(null)
+        return next
+      }
+      if (next.size >= OWL_SEND_MAX_SELECT) return prev
+
+      const already = nfts.filter((n) => next.has(n.mint))
+      const mix = owlSendCanAddToSelection({ selected: already, candidate: nft })
+      if (!mix.ok) {
+        setCnftGate({
+          title: mix.title,
+          detail: mix.detail,
+          cnftMints: mix.cnftMints,
+        })
+        return prev
+      }
+      setCnftGate(null)
+      next.add(nft.mint)
       return next
     })
   }
@@ -528,7 +577,24 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setBatches([])
     setBatchProgress([])
     setSessionError(null)
-    setSelectedMints(new Set(mints.slice(0, OWL_SEND_MAX_SELECT)))
+
+    const currentSelected = nfts.filter((n) => selectedMints.has(n.mint))
+    const mintSet = new Set(mints.map((m) => m.trim()).filter(Boolean))
+    const candidates = nfts.filter((n) => mintSet.has(n.mint))
+    const filtered = owlSendFilterCompatibleSelection({
+      currentSelected,
+      candidates,
+    })
+    if (filtered.gate && !filtered.gate.ok) {
+      setCnftGate({
+        title: filtered.gate.title,
+        detail: filtered.gate.detail,
+        cnftMints: filtered.gate.cnftMints,
+      })
+    } else {
+      setCnftGate(null)
+    }
+    setSelectedMints(new Set(filtered.mints.slice(0, OWL_SEND_MAX_SELECT)))
   }
 
   /**
@@ -681,6 +747,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
           tokenAccount: n.tokenAccount,
         }),
         image: n.image,
+        compressed: n.compressed,
+        interface: n.interface,
         recipient: dest,
       }))
     } else {
@@ -709,6 +777,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
             tokenAccount: n.tokenAccount,
           }),
           image: n.image,
+          compressed: n.compressed,
+          interface: n.interface,
         })),
         entries,
         randomize: randomizeScatter,
@@ -852,64 +922,301 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     }
 
     sendCancelledRef.current = false
-    setSendPhase('building')
-    setSendPhaseStartedAt(Date.now())
-    workingProgress = workingProgress.map((b) =>
-      b.index === workingIndex ? { ...b, status: 'sending', error: undefined } : b
-    )
-    setBatchProgress(workingProgress)
     setSessionError(null)
+    setSuccessPopup(null)
 
-    const result = await sendOwlSendNftBatch({
-      connection,
-      owner: publicKey,
-      walletAdapter: wallet?.adapter ?? null,
-      sendTransaction,
-      lines,
-      feeDiscountBps: discountBps,
-      onPhase: (phase) => {
-        if (!sendCancelledRef.current) setSendPhase(phase)
-      },
-    })
+    const remainingForSignAll = workingBatches.slice(workingIndex)
+    const useSignAll =
+      walletSupportsOwlSendSignAll(wallet?.adapter ?? null) &&
+      owlSendBatchesCanSignAll(remainingForSignAll)
 
-    if (sendCancelledRef.current) {
-      setSendPhase(null)
-      setSendPhaseStartedAt(null)
-      return
+    if (useSignAll) {
+      setActiveBatch(workingIndex)
+      setSendPhase('building')
+      setSendPhaseStartedAt(Date.now())
+      workingProgress = workingProgress.map((b) =>
+        b.index >= workingIndex && b.status !== 'done'
+          ? { ...b, status: 'sending' as const, error: undefined }
+          : b
+      )
+      setBatchProgress(workingProgress)
+
+      try {
+        const built: Array<{
+          tx: import('@solana/web3.js').Transaction
+          lines: OwlSendLine[]
+          newAtaCount: number
+        }> = []
+        const queue = remainingForSignAll.map((batch) => [...batch])
+        while (queue.length > 0) {
+          if (sendCancelledRef.current) {
+            setSendPhase(null)
+            setSendPhaseStartedAt(null)
+            return
+          }
+          const nextLines = queue.shift()!
+          const builtOne = await withOwlSendTimeout(
+            buildOwlSendSplNftTransaction({
+              connection,
+              owner: publicKey,
+              lines: nextLines,
+              feeDiscountBps: discountBps,
+            }),
+            OWL_SEND_BUILD_TIMEOUT_MS,
+            OWL_SEND_BUILD_TIMEOUT_HINT
+          )
+          if (!builtOne.ok) {
+            throw new Error(builtOne.error)
+          }
+          built.push({
+            tx: builtOne.tx,
+            lines: nextLines.slice(0, builtOne.includedCount),
+            newAtaCount: builtOne.newAtaCount,
+          })
+          if (builtOne.includedCount < nextLines.length) {
+            queue.unshift(nextLines.slice(builtOne.includedCount))
+          }
+        }
+
+        const group = await sendOwlSendSignedBatchGroup({
+          connection,
+          owner: publicKey,
+          walletAdapter: wallet?.adapter ?? null,
+          built,
+          onPhase: (phase) => {
+            if (!sendCancelledRef.current) setSendPhase(phase)
+          },
+        })
+
+        if (sendCancelledRef.current) {
+          setSendPhase(null)
+          setSendPhaseStartedAt(null)
+          return
+        }
+
+        const accumulatedItems = group.flatMap((g, i) =>
+          owlSendSuccessItemsFromNftLines(built[i]!.lines, { showRecipient: mode === 'scatter' })
+        )
+        workingProgress = workingProgress.map((b) => {
+          if (b.index < workingIndex) return b
+          const offset = b.index - workingIndex
+          const row = group[offset]
+          if (!row) return { ...b, status: 'pending' as const }
+          return { ...b, status: 'done' as const, signature: row.signature }
+        })
+        if (built.length !== remainingForSignAll.length) {
+          const rebuiltLines = [
+            ...workingBatches.slice(0, workingIndex).flat(),
+            ...built.flatMap((b) => b.lines),
+          ]
+          const rebuiltBatches = [
+            ...workingBatches.slice(0, workingIndex),
+            ...built.map((b) => b.lines),
+          ]
+          workingBatches = rebuiltBatches
+          workingPrepared = rebuiltLines
+          workingProgress = rebuiltBatches.map((_, i) => ({
+            index: i,
+            total: rebuiltBatches.length,
+            status: (i < workingIndex
+              ? workingProgress[i]?.status
+              : 'done') as 'pending' | 'ready' | 'sending' | 'done' | 'failed',
+            signature:
+              i < workingIndex
+                ? workingProgress[i]?.signature
+                : group[i - workingIndex]?.signature,
+          }))
+        }
+        setBatches(workingBatches)
+        setPreparedLines(workingPrepared)
+        setBatchProgress(workingProgress)
+        setRetryMints([])
+        setSendPhase(null)
+        setSendPhaseStartedAt(null)
+        for (let i = 0; i < group.length; i++) {
+          const row = group[i]!
+          void recordOwlSendLedger({
+            fromWallet: publicKey.toBase58(),
+            mode: mode === 'scatter' ? 'nft_scatter' : 'nft_one',
+            assetKind: 'nft',
+            txSignature: row.signature,
+            batchIndex: workingIndex + i,
+            feeDiscountBps: discountBps,
+            lines: built[i]!.lines.map((l) => ({
+              recipient: l.recipient,
+              mint: l.mint,
+              name: l.name ?? null,
+            })),
+            ensureSiws: ensureLedgerSiws,
+          }).then(() => setLedgerRefreshKey((k) => k + 1))
+        }
+        setSuccessPopup({
+          title:
+            group.length > 1
+              ? `All ${group.length} batches sent`
+              : 'NFTs sent successfully',
+          detail:
+            mode === 'scatter'
+              ? `${accumulatedItems.length} NFT${accumulatedItems.length === 1 ? '' : 's'} transferred in one wallet approval.`
+              : `${accumulatedItems.length} NFT${accumulatedItems.length === 1 ? '' : 's'} transferred in one wallet approval.`,
+          signature: group[group.length - 1]!.signature,
+          items: accumulatedItems,
+        })
+        void loadAssets()
+        return
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        setSendPhase(null)
+        setSendPhaseStartedAt(null)
+        setBatchProgress((prev) =>
+          prev.map((b) =>
+            b.index === workingIndex
+              ? { ...b, status: 'failed' as const, error: msg }
+              : b.index > workingIndex && b.status === 'sending'
+                ? { ...b, status: 'pending' as const }
+                : b
+          )
+        )
+        setActiveBatch(workingIndex)
+        setSessionError(msg)
+        return
+      }
     }
 
-    setSendPhase(null)
-    setSendPhaseStartedAt(null)
+    const chainStartIndex = workingIndex
+    const accumulatedItems: ReturnType<typeof owlSendSuccessItemsFromNftLines> = []
+    let lastSignature = ''
+    let sentInChain = 0
 
-    if (result.ok) {
-      const nextProgress = workingProgress.map((b) =>
-        b.index === workingIndex
-          ? { ...b, status: 'done' as const, signature: result.signature }
-          : b.index === workingIndex + 1 && b.status === 'pending'
-            ? { ...b, status: 'ready' as const }
-            : b
+    while (workingIndex < workingBatches.length) {
+      lines = workingBatches[workingIndex]
+      if (!lines?.length) break
+
+      setActiveBatch(workingIndex)
+      setSendPhase('building')
+      setSendPhaseStartedAt(Date.now())
+      workingProgress = workingProgress.map((b) =>
+        b.index === workingIndex ? { ...b, status: 'sending', error: undefined } : b
       )
-      setBatchProgress(nextProgress)
+      setBatchProgress(workingProgress)
       setBatches(workingBatches)
       setPreparedLines(workingPrepared)
-      if (workingIndex + 1 < workingBatches.length) setActiveBatch(workingIndex + 1)
-      const sent = new Set(lines.map((l) => l.mint))
+
+      const result = await sendOwlSendNftBatch({
+        connection,
+        owner: publicKey,
+        walletAdapter: wallet?.adapter ?? null,
+        sendTransaction,
+        lines,
+        feeDiscountBps: discountBps,
+        onPhase: (phase) => {
+          if (!sendCancelledRef.current) setSendPhase(phase)
+        },
+      })
+
+      if (sendCancelledRef.current) {
+        setSendPhase(null)
+        setSendPhaseStartedAt(null)
+        return
+      }
+
+      if (!result.ok) {
+        const sizeSplit =
+          isOwlSendPacketSizeError(result.error) || /too large/i.test(result.error)
+            ? splitOversizedOwlSendBatch({
+                batches: workingBatches,
+                batchProgress: workingProgress,
+                batchIndex: workingIndex,
+                error: result.error,
+              })
+            : null
+        setSendPhase(null)
+        setSendPhaseStartedAt(null)
+        if (sizeSplit) {
+          setBatches(sizeSplit.batches)
+          setPreparedLines(sizeSplit.batches.flat())
+          setBatchProgress(sizeSplit.batchProgress)
+          setSessionNotice(
+            sentInChain > 0
+              ? `${sentInChain} approval${sentInChain === 1 ? '' : 's'} already confirmed — this one was split so Retry can finish the rest.`
+              : 'Split this approval so the next Retry fits in one Solana transaction.'
+          )
+        } else {
+          setBatches(workingBatches)
+          setPreparedLines(workingPrepared)
+          setBatchProgress(
+            workingProgress.map((b) =>
+              b.index === workingIndex
+                ? {
+                    ...b,
+                    status: 'failed' as const,
+                    error: result.error,
+                    failedMints: result.failedMints,
+                  }
+                : b
+            )
+          )
+        }
+        setActiveBatch(workingIndex)
+        if (result.failedMints?.length) {
+          setRetryMints((prev) => [...new Set([...prev, ...result.failedMints!])])
+        }
+        setSessionError(result.error)
+        if (sentInChain > 0 && lastSignature) {
+          setSuccessPopup({
+            title:
+              sentInChain === 1
+                ? 'Partial send — first approval ok'
+                : `Partial send — ${sentInChain} approvals ok`,
+            detail: 'Remaining approvals were not sent. Tap Retry to continue the rest in one shot.',
+            signature: lastSignature,
+            items: accumulatedItems,
+          })
+        }
+        return
+      }
+
+      const sentMintSet = new Set(result.sentMints?.length ? result.sentMints : lines.map((l) => l.mint))
+      const sentLines = lines.filter((l) => sentMintSet.has(l.mint))
+      const deferredLines = lines.filter((l) => !sentMintSet.has(l.mint))
+
+      if (deferredLines.length > 0 && sentLines.length > 0) {
+        const split = applyPartialOwlSendBatchSuccess({
+          preparedLines: workingPrepared,
+          batches: workingBatches,
+          batchProgress: workingProgress,
+          batchIndex: workingIndex,
+          sentLines,
+          deferredLines,
+          signature: result.signature,
+        })
+        workingBatches = split.batches
+        workingProgress = split.batchProgress
+        workingPrepared = split.preparedLines
+        setBatches(workingBatches)
+        setBatchProgress(workingProgress)
+        setPreparedLines(workingPrepared)
+      } else {
+        workingProgress = workingProgress.map((b) =>
+          b.index === workingIndex
+            ? { ...b, status: 'done' as const, signature: result.signature }
+            : b.index === workingIndex + 1 && b.status === 'pending'
+              ? { ...b, status: 'ready' as const }
+              : b
+        )
+        setBatchProgress(workingProgress)
+      }
+
+      const sent = new Set(sentLines.map((l) => l.mint))
       setRetryMints((prev) => prev.filter((m) => !sent.has(m)))
-      const successItems = owlSendSuccessItemsFromNftLines(lines, {
-        showRecipient: mode === 'scatter',
-      })
-      setSuccessPopup({
-        title:
-          workingBatches.length > 1
-            ? `Batch ${workingIndex + 1} of ${workingBatches.length} sent`
-            : 'NFTs sent successfully',
-        detail:
-          mode === 'scatter'
-            ? `${lines.length} NFT${lines.length === 1 ? '' : 's'} transferred. Fee paid to Owltopia treasury.`
-            : `${lines.length} NFT${lines.length === 1 ? '' : 's'} → ${shorten(lines[0]?.recipient ?? '')}. Fee paid to Owltopia treasury.`,
-        signature: result.signature,
-        items: successItems,
-      })
+      accumulatedItems.push(
+        ...owlSendSuccessItemsFromNftLines(sentLines, {
+          showRecipient: mode === 'scatter',
+        })
+      )
+      lastSignature = result.signature
+      sentInChain += 1
+
       void recordOwlSendLedger({
         fromWallet: publicKey.toBase58(),
         mode: mode === 'scatter' ? 'nft_scatter' : 'nft_one',
@@ -917,35 +1224,55 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         txSignature: result.signature,
         batchIndex: workingIndex,
         feeDiscountBps: discountBps,
-        lines: lines.map((l) => ({
+        lines: sentLines.map((l) => ({
           recipient: l.recipient,
           mint: l.mint,
           name: l.name ?? null,
         })),
         ensureSiws: ensureLedgerSiws,
       }).then(() => setLedgerRefreshKey((k) => k + 1))
-      void loadAssets()
-    } else {
-      setBatches(workingBatches)
-      setPreparedLines(workingPrepared)
-      setBatchProgress(
-        workingProgress.map((b) =>
-          b.index === workingIndex
-            ? {
-                ...b,
-                status: 'failed' as const,
-                error: result.error,
-                failedMints: result.failedMints,
-              }
-            : b
-        )
-      )
+
+      const hasMore = workingIndex + 1 < workingBatches.length
+      if (!hasMore || sendCancelledRef.current) break
+
+      workingIndex += 1
       setActiveBatch(workingIndex)
-      if (result.failedMints?.length) {
-        setRetryMints((prev) => [...new Set([...prev, ...result.failedMints!])])
+      await new Promise<void>((resolve) => setTimeout(resolve, OWL_SEND_CHAIN_APPROVAL_GAP_MS))
+      if (sendCancelledRef.current) {
+        setSendPhase(null)
+        setSendPhaseStartedAt(null)
+        return
       }
-      setSessionError(result.error)
     }
+
+    setSendPhase(null)
+    setSendPhaseStartedAt(null)
+    setBatches(workingBatches)
+    setPreparedLines(workingPrepared)
+    if (workingIndex + 1 < workingBatches.length) setActiveBatch(workingIndex + 1)
+
+    const totalApprovals = workingBatches.length
+    const remainingAtStart = totalApprovals - chainStartIndex
+    const finishedRemaining = sentInChain >= remainingAtStart
+    setSuccessPopup({
+      title:
+        finishedRemaining && chainStartIndex === 0 && totalApprovals > 1
+          ? `All ${totalApprovals} approvals sent`
+          : finishedRemaining && totalApprovals === 1
+            ? 'NFTs sent successfully'
+            : sentInChain > 1
+              ? `${sentInChain} approvals sent`
+              : totalApprovals > 1
+                ? `Approval ${workingIndex + 1} of ${totalApprovals} sent`
+                : 'NFTs sent successfully',
+      detail:
+        mode === 'scatter'
+          ? `${accumulatedItems.length} NFT${accumulatedItems.length === 1 ? '' : 's'} transferred. Fee paid to Owltopia treasury.`
+          : `${accumulatedItems.length} NFT${accumulatedItems.length === 1 ? '' : 's'} → ${shorten(workingBatches[chainStartIndex]?.[0]?.recipient ?? lines[0]?.recipient ?? '')}. Fee paid to Owltopia treasury.`,
+      signature: lastSignature,
+      items: accumulatedItems,
+    })
+    void loadAssets()
   }
 
   const fetchLedgerSentMints = async (wallet: string): Promise<Set<string>> => {
@@ -1444,7 +1771,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                 setBatchProgress([])
               }}
             >
-              Deselect those NFTs
+              Deselect conflicting NFTs
             </Button>
             <Button
               type="button"
@@ -1475,9 +1802,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               </span>
             </>
           ) : null}
-          {' '}
-          — cheaper than FoxySend. Owltopia Gen1/Gen2 holders get up to 50% off. Solana rent is shown
-          separately when a recipient needs a new token account.
+          . Owltopia Gen1/Gen2 holders get up to 50% off. Solana rent is shown separately when a
+          recipient needs a new token account.
         </p>
         {connected && publicKey && (holderFeeLoading || holderFee) ? (
           <p className="text-xs text-muted-foreground">
@@ -1610,9 +1936,12 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     </Button>
                   </div>
                   <CardDescription>
-                    Up to {OWL_SEND_MAX_SELECT} NFTs · {OWL_SEND_MAX_PER_TX} per wallet
-                    approval · only Nested/frozen assets fail on-chain (leftover Gen2 CM
-                    delegates after thaw are fine)
+                    Up to {OWL_SEND_MAX_SELECT} NFTs ·{' '}
+                    {nftApprovalSize === OWL_SEND_MAX_SPECIAL_PER_TX
+                      ? `${OWL_SEND_MAX_SPECIAL_PER_TX} cNFT/pNFT per wallet approval (sequential)`
+                      : `${nftApprovalSize} classic NFTs per wallet approval`}
+                    {' · '}
+                    cNFTs and classic NFTs can’t mix — you’ll get a prompt if you try
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1686,7 +2015,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                   </CardTitle>
                   <CardDescription>
                     {mode === 'send_to_one'
-                      ? 'All selected NFTs go to this wallet (batches of 5).'
+                      ? nftApprovalSize === OWL_SEND_MAX_SPECIAL_PER_TX
+                        ? 'All selected NFTs go to this wallet (1 cNFT/pNFT per approval).'
+                        : `All selected NFTs go to this wallet (batches of ${nftApprovalSize}).`
                       : randomizeScatter
                         ? 'Paste wallets (one per line), or wallet,N for exact counts — e.g. walletA,5 then walletB,1. Counts must sum to selected NFTs; otherwise split evenly.'
                         : pairPerNft
@@ -2034,6 +2365,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       {cost.batchCount > 1 ? (
                         <p className="text-xs text-muted-foreground">
                           {cost.batchCount} wallet approvals · we auto-split by NFT type
+                          {nftApprovalSize === OWL_SEND_MAX_SPECIAL_PER_TX
+                            ? ` · specials ≤${OWL_SEND_MAX_SPECIAL_PER_TX}/approval`
+                            : ` · classic ≤${nftApprovalSize}/approval`}
                         </p>
                       ) : null}
                       {selectedNfts.length > 0 && batches.length === 0 ? (
@@ -2114,6 +2448,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     <ol className="space-y-2">
                       {batchProgress.map((b) => {
                         const lines = batches[b.index] ?? []
+                        const uniqueWallets = new Set(
+                          lines.map((l) => l.recipient.trim()).filter(Boolean)
+                        ).size
                         return (
                           <li
                             key={b.index}
@@ -2147,7 +2484,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                             <p className="mt-1 text-xs text-muted-foreground">
                               {lines.length} NFT{lines.length === 1 ? '' : 's'}
                               {mode === 'scatter'
-                                ? ` → ${lines.length} wallet${lines.length === 1 ? '' : 's'}`
+                                ? ` → ${uniqueWallets} wallet${uniqueWallets === 1 ? '' : 's'}`
                                 : ` → ${shorten(lines[0]?.recipient ?? '')}`}
                               {' · '}
                               {formatOwlSendFeeSol(feeSol * lines.length)} fee
@@ -2233,21 +2570,26 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                             ) : (
                               <Send className="h-4 w-4" />
                             )}
-                            {batchProgress[activeBatch]?.status === 'sending'
-                              ? sendPhase === 'confirming'
-                                ? `Confirming ${activeBatch + 1} of ${batches.length}…`
-                                : sendPhase === 'approving'
-                                  ? `Approve in wallet (${activeBatch + 1} of ${batches.length})…`
-                                  : `Sending ${activeBatch + 1} of ${batches.length}…`
-                              : batchProgress[activeBatch]?.status === 'failed'
-                                ? isOwlSendFrozenTransferError(sessionError ?? '')
-                                  ? `Skip frozen & retry ${activeBatch + 1}`
-                                  : `Retry ${activeBatch + 1} of ${batches.length}`
-                                : batches.length === 1
-                                  ? 'Are you sure? Send'
-                                  : activeBatch === 0
-                                    ? `Are you sure? Send 1 of ${batches.length}`
-                                    : `Are you sure? Send ${activeBatch + 1} of ${batches.length}`}
+                            {batchProgress[activeBatch]?.status === 'failed' &&
+                            isOwlSendFrozenTransferError(sessionError ?? '')
+                              ? `Skip frozen & retry ${activeBatch + 1}`
+                              : owlSendNftSendButtonLabel({
+                                  batchesTotal: batches.length,
+                                  activeIndex: activeBatch,
+                                  status: batchProgress[activeBatch]?.status,
+                                  sendPhase,
+                                  remainingFromActive: batchProgress.filter(
+                                    (b, i) => i >= activeBatch && b.status !== 'done'
+                                  ).length,
+                                  signAll:
+                                    walletSupportsOwlSendSignAll(wallet?.adapter ?? null) &&
+                                    owlSendBatchesCanSignAll(
+                                      batches.filter(
+                                        (_, i) =>
+                                          i >= activeBatch && batchProgress[i]?.status !== 'done'
+                                      )
+                                    ),
+                                })}
                           </Button>
                           {nftSending ? (
                             <Button
@@ -2262,8 +2604,17 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                         </div>
                         {!nftSending && batchProgress[activeBatch]?.status !== 'failed' ? (
                           <p className="text-xs text-muted-foreground">
-                            Opens your wallet for this transfer only — remaining approvals wait until
-                            you confirm the next one.
+                            {batches.length > 1
+                              ? walletSupportsOwlSendSignAll(wallet?.adapter ?? null) &&
+                                owlSendBatchesCanSignAll(
+                                  batches.filter(
+                                    (_, i) =>
+                                      i >= activeBatch && batchProgress[i]?.status !== 'done'
+                                  )
+                                )
+                                ? 'One wallet sheet signs every batch. Solana still sends them as separate transactions — you only approve once.'
+                                : 'This wallet signs one batch at a time. Phantom can sign all batches in one sheet. Solana cannot fit all 20 in a single transaction.'
+                              : 'Opens your wallet for this transfer.'}
                           </p>
                         ) : null}
                         {canResumeRemaining ? (
@@ -2291,8 +2642,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                               ? 'Check Jupiter for the approve prompt (Mobile: stay in the Jupiter globe browser). If nothing appears, Cancel, reconnect Jupiter, then Retry.'
                               : `Check ${walletName} for the approve prompt (mobile: open the wallet app). If nothing appears, Cancel and Retry.`
                             : 'Confirming on-chain can take up to ~90s on mobile/busy RPC.'}{' '}
-                        Cancel marks this approval failed — reject any open wallet popup, check
-                        Solscan, then Retry or Resume remaining.
+                        Cancel stops the remaining batches — reject any open wallet popup, check
+                        Solscan, then Retry to send the rest in one shot.
                       </p>
                     ) : null}
                   </CardContent>

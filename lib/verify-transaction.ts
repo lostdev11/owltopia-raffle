@@ -304,7 +304,7 @@ export async function verifyTransaction(
         }
       }
       return { valid: false, error: `USDC verification failed: Could not verify transfer of ${expectedAmount} USDC. Raffle: ${raffle.slug} (${raffle.title}), Entry ID: ${entry.id}` }
-    } else if (expectedCurrency === 'OWL' || expectedCurrency === 'BAMBOO') {
+    } else if (expectedCurrency === 'OWL' || expectedCurrency === 'BAMBOO' || expectedCurrency === 'GOATS') {
       const tokenInfo = getTokenInfo(expectedCurrency)
       if (!tokenInfo.mintAddress) {
         return { valid: false, error: `${expectedCurrency} mint address not configured` }

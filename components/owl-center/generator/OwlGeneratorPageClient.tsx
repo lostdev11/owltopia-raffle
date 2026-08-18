@@ -21,6 +21,7 @@ import { GeneratorCloudSavePanel } from '@/components/owl-center/generator/Gener
 import { GeneratorRuleLinter } from '@/components/owl-center/generator/GeneratorRuleLinter'
 import { GeneratorSupplySimulator } from '@/components/owl-center/generator/GeneratorSupplySimulator'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
+import { useOwlCenterView } from '@/components/owl-center/OwlCenterViewProvider'
 import { canvasToDataUrl, compositeTraitsToCanvas } from '@/lib/owl-center/generator/composite'
 import {
   createDemoProject,
@@ -84,9 +85,12 @@ function uid() {
   return crypto.randomUUID()
 }
 
-export function OwlGeneratorPageClient({ gen2Mode = false }: { gen2Mode?: boolean }) {
+export function OwlGeneratorPageClient({ gen2Mode: gen2ModeProp = false }: { gen2Mode?: boolean }) {
   const router = useRouter()
   const { connected } = useWallet()
+  const { isOwlCenterAdmin } = useOwlCenterView()
+  // Gen2 export/stage is admin-only; approved partners still get the full trait generator.
+  const gen2Mode = Boolean(gen2ModeProp && isOwlCenterAdmin)
   const [project, setProject] = useState<GeneratorProject | null>(null)
   const [loading, setLoading] = useState(true)
   const [selection, setSelection] = useState<TraitSelection>({})

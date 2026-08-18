@@ -4,6 +4,10 @@ import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getFullAccountKeysForTransaction } from '@/lib/verify-transaction'
 import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
 import type { OwlSendLedgerLine } from '@/lib/db/owl-send-ledger'
+import {
+  collectMplCoreTransferV1FromTx,
+  mplCoreTransferCoversLedgerLine,
+} from '@/lib/owl-send/mpl-core-ledger-transfers'
 
 export type VerifyOwlSendLedgerTxResult =
   | { ok: true }
@@ -13,7 +17,9 @@ export type VerifyOwlSendLedgerTxResult =
  * Verify an OwlSend ledger claim against the on-chain transaction.
  * - Tx exists and succeeded
  * - Fee payer matches fromWallet (session-bound caller)
- * - Each claimed mint shows a positive token delta to the claimed recipient (when mint present)
+ * - Each claimed mint shows a positive SPL token delta to the claimed recipient, OR
+ *   an MPL Core TransferV1 (asset → new_owner) for that mint/recipient
+ *   (Core NFTs have no SPL token accounts / token-balance rows)
  * - When feeLamports > 0 and treasury is configured, treasury SOL balance increased
  */
 export async function verifyOwlSendLedgerTx(params: {
@@ -87,6 +93,13 @@ export async function verifyOwlSendLedgerTx(params: {
   }
   const preMap = balMap(pre)
   const postMap = balMap(post)
+  const coreTransfers = collectMplCoreTransferV1FromTx(
+    {
+      transaction: transaction.transaction,
+      meta: transaction.meta,
+    },
+    keys
+  )
 
   if (params.lines.length < 1) {
     return { ok: false, error: 'No ledger lines to verify.' }
@@ -110,24 +123,37 @@ export async function verifyOwlSendLedgerTx(params: {
     const before = preMap.get(key) ?? 0n
     const after = postMap.get(key) ?? 0n
     const delta = after - before
-    if (delta <= 0n) {
-      return {
-        ok: false,
-        error: `On-chain token transfer to ${recipient.slice(0, 4)}… for mint ${mint.slice(0, 4)}… not found.`,
-      }
-    }
-    if (line.amount_raw != null && String(line.amount_raw).trim() !== '') {
-      try {
-        const expected = BigInt(String(line.amount_raw).trim())
-        if (expected > 0n && delta < expected) {
-          return {
-            ok: false,
-            error: `Token amount to ${recipient.slice(0, 4)}… is less than claimed.`,
+    if (delta > 0n) {
+      if (line.amount_raw != null && String(line.amount_raw).trim() !== '') {
+        try {
+          const expected = BigInt(String(line.amount_raw).trim())
+          if (expected > 0n && delta < expected) {
+            return {
+              ok: false,
+              error: `Token amount to ${recipient.slice(0, 4)}… is less than claimed.`,
+            }
           }
+        } catch {
+          return { ok: false, error: 'Invalid amount_raw in ledger lines.' }
         }
-      } catch {
-        return { ok: false, error: 'Invalid amount_raw in ledger lines.' }
       }
+      continue
+    }
+
+    // MPL Core (and similar non-SPL) assets never produce token-balance deltas.
+    if (
+      mplCoreTransferCoversLedgerLine(coreTransfers, {
+        mint,
+        recipient,
+        fromWallet: fromPk.toBase58(),
+      })
+    ) {
+      continue
+    }
+
+    return {
+      ok: false,
+      error: `On-chain token transfer to ${recipient.slice(0, 4)}… for mint ${mint.slice(0, 4)}… not found.`,
     }
   }
 

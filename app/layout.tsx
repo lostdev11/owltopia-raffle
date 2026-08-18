@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { Suspense } from 'react'
-import { Plus_Jakarta_Sans, Bebas_Neue } from 'next/font/google'
+import localFont from 'next/font/local'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import {
@@ -30,16 +30,26 @@ import { PlatformMusicProvider } from '@/components/PlatformMusic'
 // Avoid static prerender so client components (WalletProvider, etc.) don't run with React null during build
 export const dynamic = 'force-dynamic'
 
-const plusJakartaSans = Plus_Jakarta_Sans({ 
-  subsets: ['latin'],
+// Self-hosted so production builds do not fetch Google Fonts (Turbopack 404s
+// stale gstatic v12 URLs baked into next/font/google).
+const plusJakartaSans = localFont({
+  src: [
+    { path: './fonts/plus-jakarta-sans-latin-300-normal.woff2', weight: '300', style: 'normal' },
+    { path: './fonts/plus-jakarta-sans-latin-400-normal.woff2', weight: '400', style: 'normal' },
+    { path: './fonts/plus-jakarta-sans-latin-500-normal.woff2', weight: '500', style: 'normal' },
+    { path: './fonts/plus-jakarta-sans-latin-600-normal.woff2', weight: '600', style: 'normal' },
+    { path: './fonts/plus-jakarta-sans-latin-700-normal.woff2', weight: '700', style: 'normal' },
+    { path: './fonts/plus-jakarta-sans-latin-800-normal.woff2', weight: '800', style: 'normal' },
+  ],
   variable: '--font-plus-jakarta-sans',
-  weight: ['300', '400', '500', '600', '700', '800'],
+  display: 'swap',
 })
 
-const bebasNeue = Bebas_Neue({
-  subsets: ['latin'],
+const bebasNeue = localFont({
+  src: './fonts/bebas-neue-latin-400-normal.woff2',
   variable: '--font-bebas-neue',
   weight: '400',
+  display: 'swap',
 })
 
 export const viewport = {
