@@ -70,6 +70,193 @@ Campaigns may be:
 - Trusting an unvalidated string
 - Showing the full wallet in the public embed (count + “you’re in” ephemeral only)
 
+## User-friendly UX (required, not polish)
+
+Security and UX are the same product here. If partners or members get confused, they fall back to public chat — which is exactly what we are trying to avoid.
+
+### Design principles
+
+1. **Members click; partners slash.** Community never needs to learn `/owltopia-wl`. One green button on a pinned embed is the whole member flow.
+2. **Plain language over jargon.** Say “whitelist spot” and “wallet address,” not `phase_key` or `bulkUpsert`. Partner replies can stay technical in logs; user-facing copy cannot.
+3. **Always show state.** Open / closed / full / role required must be obvious on the embed without running a command.
+4. **Confirm success in private.** Every submit gets an ephemeral reply only the member sees. Never post wallets in the channel.
+5. **Sensible defaults.** Most partners want: phase `wl`, cap none, 1 spot per wallet, current channel. Advanced options stay optional.
+6. **Recoverable mistakes.** Wrong wallet while open → partner removes or member uses “Change wallet” (phase 1.5). Accidental close → `/owltopia-wl open` again.
+7. **One place to finish.** Export and push live on the Partners dashboard *and* Discord, with the dashboard link in every partner ephemeral reply.
+
+### Member flow (target: under 30 seconds)
+
+```text
+See pinned embed in #whitelist
+  → Tap “Submit wallet”
+  → (If linked) Confirm with one tap
+  → (If not linked) Paste address OR tap “Link wallet on Owltopia” then return
+  → Ephemeral: “You’re on the OG list · 7xK4…AbCd · 1 mint spot”
+```
+
+**Linked wallet path (preferred):**
+
+- Button label: **Submit wallet** (not “Register pubkey”).
+- Ephemeral embed:
+  - Title: **Confirm your whitelist spot**
+  - Body: `Use linked wallet **7xK4…AbCd** for **OG whitelist**?`
+  - Buttons: **Yes, submit** (primary) · **Use a different wallet** (secondary → modal)
+  - Footer: `Free to join · no payment · never share your seed phrase`
+
+**No linked wallet:**
+
+- Modal title: **Submit Solana wallet**
+- Single field: `Wallet address` — placeholder `e.g. 7xK4…your Phantom address`
+- On submit: validate → success ephemeral, or one-line error with fix hint (see errors below).
+
+**After submit:**
+
+- Ephemeral success (never public):
+  - `You’re on the list`
+  - `Phase: OG · Wallet: 7xK4…AbCd · Spots: 1`
+  - `We’ll announce when mint opens on Owltopia.`
+- If already submitted: `You’re already on this list with **7xK4…AbCd**.` (not a scary error)
+
+**Anti-phishing copy on every embed footer:**
+
+> Only use the **Submit wallet** button on this official Owltopia bot message. We never ask for SOL, seed phrases, or DMs.
+
+### Public campaign embed (lives in channel)
+
+Use a Discord embed (not a wall of text). Refresh on open / close / every N submissions (e.g. every 10 or on close) so the count stays honest without spamming edits.
+
+| Field | Example (open) | Example (closed) |
+|---|---|---|
+| Title | `OG Whitelist — My Collection` | same |
+| Description | `Tap **Submit wallet** below to register. One wallet per Discord account.` | `Submissions are closed. Mint list will be posted on Owltopia when ready.` |
+| Status | `Open` (green) | `Closed` (gray) |
+| Spots filled | `47 / 100` or `47 registered` | `100 / 100 · Full` |
+| Phase | `OG allowlist` | same |
+| Requirements | `@OG role required` or `Anyone in this server` | same |
+| Linked mint | `Collection: Cool Owls` + link to Owl Center mint page | same |
+
+**Button:**
+
+- Open: `[ Submit wallet ]` — style Primary (blurple/green brand)
+- Closed: `[ Submissions closed ]` — style Secondary, **disabled**
+- Full: auto-close + disabled button + status `Full`
+
+Pin the message when the partner runs `open` (bot needs **Manage Messages** or partner pins manually with a one-line hint).
+
+### Partner flow (target: first campaign without docs)
+
+**Guided create — prefer a 2-step wizard over one giant slash:**
+
+Option A (v1 recommended): **`/owltopia-wl setup`** opens an ephemeral checklist, then **`/owltopia-wl create`** with smart defaults.
+
+Option B (later): Discord modal wizard after `setup` (name → phase → channel → optional cap).
+
+**Create defaults:**
+
+| Option | Default | Notes |
+|---|---|---|
+| `phase` | `wl` | Autocomplete labels: Team, OG, Whitelist, WL 2, WL 3 |
+| `channel` | channel where command was run | Most partners create in `#whitelist` |
+| `spots` | `1` | Hide unless partner passes it |
+| `max` | unlimited | Show “optional cap” in command description |
+| `role` | none | When set, embed shows role name, not raw snowflake |
+| `launch` | none | Autocomplete partner’s launches by collection name |
+
+**After `create` + `open`, ephemeral success for partner:**
+
+```text
+Whitelist spot is live in #whitelist
+· Phase: OG · Cap: 100 · 1 spot per wallet
+· Next: pin the message, announce in announcements
+· When ready: /owltopia-wl close then export or push
+Dashboard: https://www.owltopia.xyz/partners/dashboard#wl-campaigns
+```
+
+**Partner command copy (user-facing descriptions):**
+
+| Command | Discord description (short) |
+|---|---|
+| `setup` | Step-by-step checklist for your first whitelist spot |
+| `create` | Open a new whitelist collection spot in a channel |
+| `open` | Post or turn the Submit wallet button back on |
+| `close` | Stop new submissions (you can reopen later) |
+| `status` | How many wallets registered and whether it’s open |
+| `list` | All whitelist spots in this server |
+| `export` | Download wallet list (link to dashboard CSV) |
+| `push` | Send wallets to your Owl Center mint list |
+
+**`/owltopia-wl list` output:** table-style ephemeral embed, not raw JSON:
+
+```text
+OG Whitelist · #whitelist · Open · 47/100
+Public WL · #general-wl · Closed · 312 wallets
+```
+
+Each row links to `status` / `export` hints.
+
+### Human-readable errors (members)
+
+| Situation | Message |
+|---|---|
+| Invalid address | `That doesn’t look like a Solana wallet. Copy the address from Phantom → Receive (starts with a letter/number, ~32–44 chars).` |
+| EVM `0x…` pasted | `That’s an Ethereum-style address. We need your **Solana** wallet from Phantom, Solflare, etc.` |
+| Missing role | `You need the **@OG** role to join this list. Ask a mod if you should have it.` |
+| Closed | `This whitelist is **closed**. Watch announcements for the mint link.` |
+| Full | `This list is **full** (100/100). Thanks for your interest!` |
+| Wallet taken | `That wallet is already registered on this list by another account.` |
+| Already submitted | `You’re already on this list with **7xK4…AbCd**.` |
+| Rate limit | `Slow down — try again in a minute.` |
+
+Never show stack traces, SQL, or internal ids to members.
+
+### Human-readable errors (partners)
+
+| Situation | Message |
+|---|---|
+| Not Partner Pro | Existing access message + link to dashboard |
+| Wrong server | Existing guild mismatch message |
+| Unknown launch | `Collection not found. Pick a launch from autocomplete or create it in Owl Center first.` |
+| Phase not on launch | `Your mint doesn’t have an **OG** phase yet. Add it under Manage collection → Mint details, then push again.` |
+| Push with 0 wallets | `No wallets to push — open the spot and wait for submissions, or export is empty.` |
+| Missing bot perms | `I need **Send Messages** and **Embed Links** in #whitelist to post the button.` |
+
+### Partners dashboard (web UX)
+
+Add a **Whitelist spots** section on `/partners/dashboard` (same card style as hosted raffles):
+
+- Table: name, phase, Discord channel, status, count, linked collection, actions
+- **Download CSV** — primary action (same button pattern as raffle entrant export)
+- **Push to Owl Center** — disabled until linked launch + at least 1 wallet; confirmation modal: `Add 47 wallets to OG allowlist? Existing entries are kept.`
+- **Copy wallet list** — one click, newline-separated, for paste into Manage collection
+- Deep link from Discord `export` / `status` so partners aren’t stuck on mobile Discord
+
+### Owl Center creator panel tweaks
+
+On `CreatorWlWalletsPanel`:
+
+- **Download CSV** / **Copy all wallets** for current phase (works without Discord)
+- If Discord campaign linked: banner `Discord spot · 47 wallets · Last push 2h ago · [Refresh from Discord]` (phase 2)
+
+Keep the existing paste textarea — Discord is an *additional* intake, not a replacement.
+
+### Mobile & accessibility
+
+- Large tap target: one primary button on the embed (Discord mobile friendly).
+- Modal: single field, no scrolling required.
+- Avoid relying on code blocks for instructions members must copy.
+- Status colors: green open, gray closed, amber “almost full” (≥90% of cap).
+- Role requirement: display `@RoleName`, never raw role id.
+
+### Copy deck (ready for implementation)
+
+**Embed title templates:** `{Phase label} Whitelist — {Collection or campaign name}`
+
+**Announcement snippet partners can paste:**
+
+> Whitelist is open in #whitelist — tap **Submit wallet** on the pinned Owltopia message. One wallet per person, no fee. Do **not** post your address in chat.
+
+**Reply-bot hint (optional phase 3):** when someone asks “how wl?” in configured servers → link to the open campaign channel if one exists.
+
 ## Partner commands
 
 Keep `/owltopia-partner` for billing/webhooks. Add a dedicated group so the partner command does not grow further:
@@ -187,14 +374,24 @@ Nice-to-have on `CreatorWlWalletsPanel`: **Copy wallets** / **Download CSV** for
 ### 1 — Collect + close + export (unlinked)
 
 - Tables + RLS deny-all
-- `/owltopia-wl create | open | close | status | list`
-- Channel embed + Submit button + modal / linked-wallet confirm
+- `/owltopia-wl setup | create | open | close | status | list`
+- Channel embed + Submit button + modal / linked-wallet confirm (UX spec above)
 - Unique user + unique wallet
 - Optional max + optional Discord role
-- Export: dashboard CSV + ephemeral wallet dump
-- Copy-wallets on Owl Center allowlist panel
+- Human-readable error messages (member + partner tables)
+- Export: dashboard CSV + copy wallets + Discord `export` links to dashboard
+- Copy-wallets / Download CSV on Owl Center allowlist panel
+- Partners dashboard **Whitelist spots** card
 
 **Acceptance:** Partner Pro in a linked guild opens a spot, members submit valid Solana addresses privately, partner closes, downloads a clean wallet list.
+
+**UX acceptance:**
+
+- [ ] Member completes submit in ≤3 taps when wallet is linked
+- [ ] Member never needs a slash command
+- [ ] Closed state is obvious on the embed (disabled button + gray status)
+- [ ] Invalid `0x…` address gets the Solana-specific error, not “invalid”
+- [ ] Partner sees “what to do next” after `create` / `close` without reading docs
 
 ### 2 — Push into Owl Center phases
 
@@ -208,10 +405,10 @@ Nice-to-have on `CreatorWlWalletsPanel`: **Copy wallets** / **Download CSV** for
 ### 3 — Polish (only if 1–2 stick)
 
 - Live-sync while open (submit → immediate upsert)
-- Partner can change a member’s wallet while open
-- Auto-close at `max_entries`
-- Multiple buttons on one embed (OG | WL) as an alternative to one campaign per phase
-- Reply-bot FAQ: “how do I get on WL?” → “use the Submit wallet button in the WL channel”
+- **Change wallet** button for members while campaign is open
+- Auto-close at `max_entries` + “almost full” embed color at 90%
+- Discord modal wizard for `setup` (replace multi-option slash)
+- Reply-bot FAQ: “how do I get on WL?” → link to open campaign channel
 
 ## Risks and decisions
 
@@ -225,6 +422,9 @@ Nice-to-have on `CreatorWlWalletsPanel`: **Copy wallets** / **Download CSV** for
 | Duplicate source of truth | Mint reads Owl Center only; Discord is intake |
 | Partner command sprawl | New `/owltopia-wl` group, same access helper |
 | Button interactions unimplemented | Must extend `/api/discord/interactions` beyond type 2 |
+| Confusing partner setup | `setup` checklist + defaults + dashboard mirror |
+| Members post wallets in chat anyway | Pin embed + announcement copy deck + anti-phishing footer |
+| Mobile Discord friction | Single-field modal + one primary button |
 
 **Spots per wallet:** Discord collection defaults to 1 mint spot. Partners who need 2+ set `spots` on create; push writes `allowed_mints`. Do not let members request extra spots in v1.
 
@@ -257,3 +457,11 @@ Manual:
 - Close updates the public embed
 - Export CSV opens on dashboard
 - Push shows wallets in Manage collection for that phase
+
+Manual UX (required before ship):
+
+- [ ] First-time partner follows `setup` → `create` → `open` without external docs
+- [ ] Member on mobile Discord: button → modal → success ephemeral
+- [ ] Member with linked wallet: button → confirm → success in 2 taps
+- [ ] Closed + full states visually distinct on embed
+- [ ] Partner finds CSV on dashboard from Discord `export` link on phone
