@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 
 import {
   applyMetaplexRoyaltyFields,
+  coreRoyaltiesPluginFromLaunch,
   metadataJsonNeedsRoyaltyFields,
   metadataRoyaltyFromLaunch,
   rewriteMetadataJson,
@@ -63,10 +64,10 @@ const rewritten = JSON.parse(
     royalty
   )
 ) as Record<string, unknown>
-assert.equal(rewritten.image, 'https://gateway.irys.xyz/token-image')
+assert.equal(rewritten.image, 'https://gateway.irys.xyz/token-image?ext=png')
 assert.equal(rewritten.seller_fee_basis_points, 1000)
 const files = (rewritten.properties as { files: Array<{ uri: string }> }).files
-assert.equal(files[0]?.uri, 'https://gateway.irys.xyz/token-image')
+assert.equal(files[0]?.uri, 'https://gateway.irys.xyz/token-image?ext=png')
 const jsonCreators = (rewritten.properties as { creators: Array<{ address: string }> }).creators
 assert.equal(jsonCreators[0]?.address, CREATOR)
 
@@ -79,8 +80,32 @@ const collectionRaw = JSON.stringify({
 const collectionRewritten = JSON.parse(
   rewriteMetadataJson(collectionRaw, 'https://gateway.irys.xyz/collection-image', 'collection.png', royalty)
 ) as Record<string, unknown>
-assert.equal(collectionRewritten.image, 'https://gateway.irys.xyz/collection-image')
+assert.equal(collectionRewritten.image, 'https://gateway.irys.xyz/collection-image?ext=png')
 assert.equal(collectionRewritten.seller_fee_basis_points, 1000)
+
+const alreadyExt = JSON.parse(
+  rewriteMetadataJson(
+    JSON.stringify(missing),
+    'https://gateway.irys.xyz/token-image?ext=png',
+    '45.png',
+    royalty
+  )
+) as Record<string, unknown>
+assert.equal(alreadyExt.image, 'https://gateway.irys.xyz/token-image?ext=png')
+
+const plugin = coreRoyaltiesPluginFromLaunch(launch())
+assert.ok(plugin)
+assert.equal(plugin.type, 'Royalties')
+assert.equal(plugin.basisPoints, 1000)
+assert.deepEqual(plugin.creators, [{ address: CREATOR, percentage: 100 }])
+assert.equal(
+  coreRoyaltiesPluginFromLaunch({
+    seller_fee_basis_points: 1000,
+    royalty_splits: null,
+    creator_wallet: '',
+  }),
+  null
+)
 
 const royaltyOnly = JSON.parse(rewriteMetadataJson(collectionRaw, null, 'collection.png', royalty)) as Record<
   string,

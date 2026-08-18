@@ -1,3 +1,4 @@
+import { walletSafeArweaveImageUri } from '@/lib/owl-center/arweave-gateway-uri'
 import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import { walletSplitsToMetaplexCreators } from '@/lib/owl-center/wallet-splits'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -14,6 +15,13 @@ export type MetadataJsonCreator = {
   verified: false
 }
 
+/** Core on-chain Royalties plugin args (percentage, not Metaplex JSON share). */
+export type CoreRoyaltiesPluginArgs = {
+  type: 'Royalties'
+  basisPoints: number
+  creators: Array<{ address: string; percentage: number }>
+}
+
 const MIN_PUBKEY_LEN = 32
 
 export function metadataRoyaltyFromLaunch(
@@ -25,6 +33,18 @@ export function metadataRoyaltyFromLaunch(
     creators: walletSplitsToMetaplexCreators(launch.royalty_splits, fallback).filter(
       (row) => row.address.trim().length >= MIN_PUBKEY_LEN && row.share > 0
     ),
+  }
+}
+
+export function coreRoyaltiesPluginFromLaunch(
+  launch: Pick<OwlCenterLaunchPublic, 'seller_fee_basis_points' | 'royalty_splits' | 'creator_wallet'>
+): CoreRoyaltiesPluginArgs | null {
+  const royalty = metadataRoyaltyFromLaunch(launch)
+  if (royalty.creators.length === 0) return null
+  return {
+    type: 'Royalties',
+    basisPoints: royalty.sellerFeeBasisPoints,
+    creators: royalty.creators.map((row) => ({ address: row.address, percentage: row.share })),
   }
 }
 
@@ -89,7 +109,12 @@ export function rewriteMetadataJson(
   royalty?: MetadataRoyaltyFields | null
 ): string {
   const parsed = JSON.parse(rawJson) as Record<string, unknown>
-  const image = imageUri?.trim()
+  const rawImage = imageUri?.trim()
+  const image = rawImage
+    ? /[?&]ext=/i.test(rawImage)
+      ? rawImage
+      : walletSafeArweaveImageUri(rawImage)
+    : ''
   if (image) {
     parsed.image = image
     if (parsed.properties && typeof parsed.properties === 'object') {

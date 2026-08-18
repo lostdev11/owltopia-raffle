@@ -15,6 +15,7 @@ import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 const SIG_REGEX = /^[1-9A-HJ-NP-Za-km-z]{64,128}$/
 
@@ -159,6 +160,13 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
       invalid_quantity: 'Invalid quantity',
     }
     return NextResponse.json({ error: human[err] ?? err }, { status })
+  }
+
+  // Candy Guard mintV1 cannot attach asset plugins. Stamp Core Royalties after confirm so
+  // DAS / Solscan / Orb stop reporting 0% (they ignore collection-inherited plugins).
+  if (!row.duplicate_tx && mintedList.length > 0 && launch.mint_standard === 'core') {
+    const { ensureCoreMintRoyaltiesAfterConfirm } = await import('@/lib/owl-center/core-asset-royalties')
+    await ensureCoreMintRoyaltiesAfterConfirm(launch, mintedList)
   }
 
   // Soft-consume launch WL spots after a successful (non-duplicate) confirm during the WL window.
