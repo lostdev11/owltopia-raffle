@@ -67,6 +67,7 @@
     "test:owl-center-launch-slug": "npx --yes tsx scripts/test-owl-center-launch-slug.ts",
     "test:metadata-royalty": "npx --yes tsx scripts/test-metadata-royalty.ts",
     "test:partner-launch-wl-wallets": "npx --yes tsx scripts/test-partner-launch-wl-wallets.ts",
+    "test:partner-mint-config-edit": "npx --yes tsx scripts/test-partner-mint-config-edit.ts",
     "test:discord-wl-campaigns": "npx --yes tsx scripts/test-discord-wl-campaigns.ts",
     "test:creator-launch-setup-checklist": "npx --yes tsx scripts/test-creator-launch-setup-checklist.ts",
     "test:owl-center-presale-pricing": "npx --yes tsx scripts/test-owl-center-presale-pricing.ts",

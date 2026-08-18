@@ -83,6 +83,7 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
       } else {
         setMsg('Mint details saved — collection cards will reflect on next load.')
       }
+      if (j.launch) setValues(mintDetailsFormFromLaunch(j.launch))
       onSaved?.()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'save_failed')

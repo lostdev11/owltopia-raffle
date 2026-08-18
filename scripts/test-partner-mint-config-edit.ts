@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict'
 import { buildMintDetailsPatchFromBody } from '@/lib/owl-center/launch-mint-config-patch'
+import {
+  defaultMintDetailsFormValues,
+  mintDetailsFormFromLaunch,
+  mintDetailsPayloadFromForm,
+  parseMintDetailsConfig,
+} from '@/lib/owl-center/launch-mint-config'
+import { datetimeLocalToIso, isoToDatetimeLocal } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 function baseLaunch(overrides: Partial<OwlCenterLaunchPublic> = {}): OwlCenterLaunchPublic {
@@ -95,3 +102,132 @@ assert.ok('error' in locked, 'supply change should fail when CM exists')
 assert.match(String(locked.error), /locked/i)
 
 console.log('ok: partner mint-config supply/core patch locks')
+
+// datetime-local without seconds must parse (Safari's Date() rejects this form).
+const localKickoff = '2026-08-20T14:00'
+const localIso = datetimeLocalToIso(localKickoff)
+assert.ok(localIso, 'datetime-local without seconds should parse')
+assert.match(localIso!, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+assert.equal(datetimeLocalToIso('2026-08-20T18:00:00.000Z'), '2026-08-20T18:00:00.000Z')
+assert.equal(datetimeLocalToIso('2026-06-26T16:00:00+00'), '2026-06-26T16:00:00.000Z')
+assert.equal(datetimeLocalToIso(''), null)
+assert.equal(isoToDatetimeLocal(localIso), localKickoff)
+
+const creatorWallet = 'Creator1111111111111111111111111111111111111'
+function dateForm(partial: Parameters<typeof defaultMintDetailsFormValues>[0]) {
+  return defaultMintDetailsFormValues({
+    royalty_splits: [{ address: creatorWallet, share: '100' }],
+    mint_fund_splits: [{ address: creatorWallet, share: '100' }],
+    ...partial,
+  })
+}
+
+const simplePayload = mintDetailsPayloadFromForm(
+  dateForm({
+    total_supply: '100',
+    public_price: '1',
+    launch_date: localKickoff,
+    public_start: '',
+  })
+)
+assert.equal(simplePayload.launch_date, localIso)
+assert.ok(!(simplePayload.launch_date == null), 'mint opens must not be sent as null')
+
+const simpleParsed = parseMintDetailsConfig(simplePayload)
+assert.ok(!('error' in simpleParsed), 'simple mint date parse should succeed')
+assert.equal(simpleParsed.launch_deadline_at, localIso)
+assert.equal(simpleParsed.phase_schedule.PUBLIC, localIso, 'single-phase copies mint opens → PUBLIC')
+assert.equal(simpleParsed.phase_schedule.AIRDROP, localIso)
+
+const simplePatch = buildMintDetailsPatchFromBody(simplePayload, baseLaunch())
+assert.ok(!('error' in simplePatch), 'simple mint date patch should succeed')
+assert.equal(simplePatch.launch_deadline_at, localIso)
+assert.equal(simplePatch.creator_launch_date, localIso)
+assert.equal(simplePatch.phase_schedule?.PUBLIC, localIso)
+
+const publicOnly = '2026-08-22T16:30'
+const publicIso = datetimeLocalToIso(publicOnly)
+const publicPayload = mintDetailsPayloadFromForm(
+  dateForm({
+    total_supply: '100',
+    public_price: '1',
+    launch_date: '',
+    public_start: publicOnly,
+  })
+)
+const publicParsed = parseMintDetailsConfig(publicPayload)
+assert.ok(!('error' in publicParsed))
+assert.equal(publicParsed.launch_deadline_at, null)
+assert.equal(publicParsed.phase_schedule.PUBLIC, publicIso)
+
+const wlStart = '2026-08-20T12:00'
+const publicStart = '2026-08-20T18:00'
+const wlPayload = mintDetailsPayloadFromForm(
+  dateForm({
+    total_supply: '100',
+    public_price: '1',
+    launch_date: localKickoff,
+    public_start: publicStart,
+    wl_enabled: true,
+    allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: wlStart, supply: '20', price: '10' }],
+  })
+)
+const wlStartIso = datetimeLocalToIso(wlStart)
+const publicStartIso = datetimeLocalToIso(publicStart)
+assert.equal((wlPayload.allowlist_phases as { start: string }[])[0]?.start, wlStartIso)
+
+const wlParsed = parseMintDetailsConfig(wlPayload)
+assert.ok(!('error' in wlParsed), 'allowlist mint dates should parse')
+assert.equal(wlParsed.launch_deadline_at, localIso)
+assert.equal(wlParsed.phase_schedule.PUBLIC, publicStartIso)
+assert.equal(wlParsed.phase_schedule.WHITELIST, wlStartIso)
+assert.equal(wlParsed.partner_allowlist_phases[0]?.starts_at, wlStartIso)
+
+const wlPatch = buildMintDetailsPatchFromBody(wlPayload, baseLaunch({ creator_wl_enabled: true, wl_supply: 20 }))
+assert.ok(!('error' in wlPatch))
+assert.equal(wlPatch.launch_deadline_at, localIso)
+assert.equal(wlPatch.phase_schedule?.PUBLIC, publicStartIso)
+assert.equal(wlPatch.partner_allowlist_phases?.[0]?.starts_at, wlStartIso)
+
+const reloaded = mintDetailsFormFromLaunch(
+  baseLaunch({
+    launch_deadline_at: localIso,
+    phase_schedule: { PUBLIC: publicStartIso!, WHITELIST: wlStartIso!, AIRDROP: localIso! },
+    creator_wl_enabled: true,
+    wl_supply: 20,
+    partner_allowlist_phases: [
+      { key: 'wl', label: 'Whitelist', starts_at: wlStartIso!, supply: 20, price_usdc: 10 },
+    ],
+  })
+)
+assert.equal(reloaded.launch_date, localKickoff)
+assert.equal(reloaded.public_start, publicStart)
+assert.equal(reloaded.allowlist_phases[0]?.start, wlStart)
+
+const bad = parseMintDetailsConfig({
+  total_supply: 10,
+  public_price: 1,
+  currency: 'SOL',
+  wallet_mint_limit: 5,
+  launch_date: 'not-a-date',
+})
+assert.ok('error' in bad)
+assert.match(String(bad.error), /mint open date/i)
+
+const rawLocal = parseMintDetailsConfig({
+  total_supply: 10,
+  public_price: 1,
+  currency: 'SOL',
+  wallet_mint_limit: 5,
+  launch_date: localKickoff,
+})
+assert.ok(!('error' in rawLocal), 'server must accept datetime-local mint opens')
+assert.equal(rawLocal.launch_deadline_at, localIso)
+assert.equal(rawLocal.phase_schedule.PUBLIC, localIso)
+
+const jsonRoundTrip = parseMintDetailsConfig(JSON.parse(JSON.stringify(simplePayload)) as Record<string, unknown>)
+assert.ok(!('error' in jsonRoundTrip))
+assert.equal(jsonRoundTrip.launch_deadline_at, localIso)
+
+console.log('ok: partner mint-config date save round-trip')
+
