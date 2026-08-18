@@ -145,6 +145,32 @@ assert.equal(simplePatch.launch_deadline_at, localIso)
 assert.equal(simplePatch.creator_launch_date, localIso)
 assert.equal(simplePatch.phase_schedule?.PUBLIC, localIso)
 
+const leftoverPublic = '2026-08-26T16:30'
+const movedBack = mintDetailsPayloadFromForm(
+  dateForm({
+    total_supply: '100',
+    public_price: '1',
+    launch_date: localKickoff,
+    public_start: leftoverPublic,
+  })
+)
+assert.equal(movedBack.launch_date, localIso)
+assert.equal(movedBack.public_start, localIso, 'simple mint: Mint opens overwrites a later Public start')
+const movedBackParsed = parseMintDetailsConfig(movedBack)
+assert.ok(!('error' in movedBackParsed))
+assert.equal(movedBackParsed.launch_deadline_at, localIso)
+assert.equal(movedBackParsed.phase_schedule.PUBLIC, localIso)
+const movedBackPatch = buildMintDetailsPatchFromBody(
+  movedBack,
+  baseLaunch({
+    launch_deadline_at: datetimeLocalToIso(leftoverPublic),
+    phase_schedule: { PUBLIC: datetimeLocalToIso(leftoverPublic)! },
+  })
+)
+assert.ok(!('error' in movedBackPatch))
+assert.equal(movedBackPatch.launch_deadline_at, localIso)
+assert.equal(movedBackPatch.phase_schedule?.PUBLIC, localIso)
+
 const publicOnly = '2026-08-22T16:30'
 const publicIso = datetimeLocalToIso(publicOnly)
 const publicPayload = mintDetailsPayloadFromForm(

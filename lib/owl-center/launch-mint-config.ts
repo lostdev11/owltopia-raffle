@@ -238,13 +238,13 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
     phase_schedule.WHITELIST = wl_start
   }
 
-  if (public_start) phase_schedule.PUBLIC = public_start
-  // Only auto-default PUBLIC to the kickoff time for simple single-phase launches.
-  // When there are earlier phases (presale/WL), defaulting PUBLIC to the kickoff would
-  // mislabel it as opening at the same wall-clock time as the first phase. Leave it
-  // unset so it shows as opening after the prior phase (or set an explicit public start).
-  else if (launch_deadline_at && !phase_schedule.PUBLIC && !presale_enabled && !wl_enabled) {
+  // Straight public mint: Mint opens is the date. Always copy it to PUBLIC so moving
+  // kickoff earlier actually moves the live mint time (a leftover later PUBLIC would
+  // otherwise win). Presale/WL still need an explicit public start.
+  if (!presale_enabled && !wl_enabled && launch_deadline_at) {
     phase_schedule.PUBLIC = launch_deadline_at
+  } else if (public_start) {
+    phase_schedule.PUBLIC = public_start
   }
 
   if (launch_deadline_at && !phase_schedule.AIRDROP) phase_schedule.AIRDROP = launch_deadline_at
@@ -388,6 +388,10 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
     start: formDateToPayload(row.start) ?? '',
   }))
   const wlEnabled = allowlist_phases.length > 0 || values.wl_enabled
+  // Straight public mint: Mint opens is the live date (so moving it back overwrites
+  // a leftover later Public start). Allowlist/presale keep an independent public start.
+  const resolvedPublicIso =
+    !wlEnabled && !values.presale_enabled ? (launchIso ?? publicIso) : publicIso
   const first = allowlist_phases[0]
   const wlIso = first?.start.trim()
     ? formDateToPayload(first.start)
@@ -429,11 +433,11 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
       ...(launchIso ? { AIRDROP: launchIso } : {}),
       ...(values.presale_enabled && presaleIso ? { PRESALE: presaleIso } : {}),
       ...(wlEnabled && wlIso ? { WHITELIST: wlIso } : {}),
-      ...(publicIso ? { PUBLIC: publicIso } : {}),
+      ...(resolvedPublicIso ? { PUBLIC: resolvedPublicIso } : {}),
     },
     presale_start: presaleIso,
     wl_start: wlIso,
-    public_start: publicIso,
+    public_start: resolvedPublicIso,
     royalty_percent: values.royalty_percent.trim() ? Number(values.royalty_percent) : undefined,
     royalty_splits: 'error' in royaltySplits ? values.royalty_splits : royaltySplits,
     mint_fund_splits: 'error' in mintFundSplits ? values.mint_fund_splits : mintFundSplits,

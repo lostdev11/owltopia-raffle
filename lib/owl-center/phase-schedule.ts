@@ -150,17 +150,20 @@ function laterIso(a: string, b: string): string {
 
 /**
  * When PUBLIC mint is allowed for a public_simple launch.
- * - Explicit PUBLIC start, floored by mint-opens (kickoff) when both exist
- * - Single-phase with only kickoff → that timestamp
+ * - Presale/WL: explicit PUBLIC start, floored by mint-opens (kickoff) when both exist
+ * - Straight public mint: Mint opens (kickoff) is the date — so moving it back takes effect
+ *   even if a leftover PUBLIC timestamp is later
  * - Presale/WL configured and PUBLIC has no start → null (not scheduled; must not open)
  */
 export function getPublicSimpleMintOpensAt(launch: PublicSimpleMintWindowLaunch): string | null {
   const publicStart = launch.phase_schedule?.PUBLIC ?? null
   const kickoff = launch.launch_deadline_at ?? null
-  if (publicStart && kickoff) return laterIso(publicStart, kickoff)
-  if (publicStart) return publicStart
-  if (launchHasQueuedMintPhases(launch)) return null
-  return kickoff
+  if (launchHasQueuedMintPhases(launch)) {
+    if (publicStart && kickoff) return laterIso(publicStart, kickoff)
+    if (publicStart) return publicStart
+    return null
+  }
+  return kickoff ?? publicStart
 }
 
 export function isPublicSimpleMintOpen(
