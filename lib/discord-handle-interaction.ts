@@ -23,6 +23,7 @@ import { getPartnerProMonthlyQuoteUsdcForDiscordTenant } from '@/lib/db/partner-
 import { assertDiscordPartnerCommandAccess } from '@/lib/discord-partner-command-access'
 import { handleDiscordMarketplaceCommand } from '@/lib/discord-marketplace-handle-interaction'
 import { handleDiscordRaffleAlertsCommand } from '@/lib/discord-raffle-alerts-handle-interaction'
+import { handleDiscordWlCommand } from '@/lib/discord-wl-handle-interaction'
 
 const MANAGE_WEBHOOKS_BIT = 1n << 29n
 
@@ -90,6 +91,7 @@ function botInviteUrl(): string | null {
 type DiscordInteraction = {
   type: number
   guild_id?: string
+  channel_id?: string
   member?: { permissions?: string; user?: { id: string } }
   data?: {
     name?: string
@@ -135,6 +137,9 @@ export async function handleDiscordApplicationCommand(
   }
   if (root === 'owltopia-alerts') {
     return handleDiscordRaffleAlertsCommand(interaction)
+  }
+  if (root === 'owltopia-wl') {
+    return handleDiscordWlCommand(interaction)
   }
   if (root !== 'owltopia-partner') {
     return ephemeral('Unknown command.')
