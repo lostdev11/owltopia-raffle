@@ -142,6 +142,37 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
 
   const activeLabel = apiPhases.find((p) => p.key === phaseKey)?.label ?? phaseKey
 
+  function walletsText() {
+    return rows.map((r) => r.wallet).join('\n')
+  }
+
+  async function copyWallets() {
+    const text = walletsText()
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setMsg(`Copied ${rows.length} wallet(s).`)
+      setErr(null)
+    } catch {
+      setErr('Could not copy wallets')
+    }
+  }
+
+  function downloadCsv() {
+    if (rows.length === 0) return
+    const header = 'wallet,phase_key,allowed_mints,used_mints'
+    const lines = rows.map((r) => `${r.wallet},${phaseKey},${r.allowed_mints},${r.used_mints}`)
+    const csv = `\uFEFF${header}\n${lines.join('\n')}`
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `wl-${phaseKey}-${launchId.slice(0, 8)}.csv`
+    a.rel = 'noopener'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const body = (
     <div className="grid gap-4">
       <p className="text-sm leading-relaxed text-[#9BA8B4]">
@@ -207,6 +238,12 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
         </DeployButton>
         <DeployButton type="button" variant="ghost" disabled={loading || saving} onClick={() => void load()}>
           Refresh
+        </DeployButton>
+        <DeployButton type="button" variant="ghost" disabled={loading || saving || rows.length === 0} onClick={() => void copyWallets()}>
+          Copy wallets
+        </DeployButton>
+        <DeployButton type="button" variant="ghost" disabled={loading || saving || rows.length === 0} onClick={() => downloadCsv()}>
+          Download CSV
         </DeployButton>
       </div>
 
