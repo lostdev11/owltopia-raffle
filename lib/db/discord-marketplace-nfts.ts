@@ -38,6 +38,8 @@ export type NftPurchaseIntent = {
   buyer_wallet: string
   price_amount: number
   currency: NftListingCurrency
+  /** Frozen ~$1 platform fee (lamports) at quote time; 0 when fee disabled. */
+  platform_fee_lamports: number
   memo: string
   status: 'pending' | 'confirmed' | 'expired' | 'superseded'
   confirmed_signature: string | null
@@ -79,6 +81,7 @@ function mapIntent(row: Record<string, unknown>): NftPurchaseIntent {
     buyer_wallet: String(row.buyer_wallet),
     price_amount: Number(row.price_amount),
     currency: row.currency as NftListingCurrency,
+    platform_fee_lamports: Number(row.platform_fee_lamports ?? 0),
     memo: String(row.memo),
     status: row.status as NftPurchaseIntent['status'],
     confirmed_signature: row.confirmed_signature != null ? String(row.confirmed_signature) : null,
@@ -258,12 +261,15 @@ export async function createNftPurchaseIntent(params: {
   buyer_wallet: string
   price_amount: number
   currency: NftListingCurrency
+  /** Frozen platform fee in lamports at quote time (0 when disabled). */
+  platform_fee_lamports?: number
   ttlHours?: number
 }): Promise<NftPurchaseIntent | null> {
   const reference_code = generateReferenceCode()
   const memo = `OWLSHOP:${reference_code}`
   const ttl = params.ttlHours ?? 2
   const expires_at = new Date(Date.now() + ttl * 60 * 60 * 1000).toISOString()
+  const platform_fee_lamports = Math.max(0, Math.floor(Number(params.platform_fee_lamports ?? 0)))
 
   const listingFilter = params.listing_id?.trim()
   if (listingFilter) {
@@ -271,6 +277,16 @@ export async function createNftPurchaseIntent(params: {
       .from('discord_marketplace_nft_purchase_intents')
       .update({ status: 'superseded' })
       .eq('listing_id', listingFilter)
+      .eq('discord_user_id', params.discord_user_id.trim())
+      .eq('status', 'pending')
+  }
+
+  const shopItemFilter = params.shop_item_id?.trim()
+  if (shopItemFilter) {
+    await getSupabaseAdmin()
+      .from('discord_marketplace_nft_purchase_intents')
+      .update({ status: 'superseded' })
+      .eq('shop_item_id', shopItemFilter)
       .eq('discord_user_id', params.discord_user_id.trim())
       .eq('status', 'pending')
   }
@@ -285,6 +301,7 @@ export async function createNftPurchaseIntent(params: {
       buyer_wallet: params.buyer_wallet.trim(),
       price_amount: params.price_amount,
       currency: params.currency,
+      platform_fee_lamports,
       memo,
       status: 'pending',
       expires_at,
