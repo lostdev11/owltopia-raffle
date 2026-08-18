@@ -99,6 +99,7 @@ async function main() {
       partner_allowlist_phases: [],
       creator_wl_enabled: false,
       wl_supply: 0,
+      launch_deadline_at: null,
       phase_schedule: { PUBLIC: '2026-08-24T13:45:00.000Z' },
     }),
     { quoteUsdc }
@@ -107,6 +108,19 @@ async function main() {
   assert.equal(publicOnly.plan.groups.length, 0)
   assert.equal(publicOnly.plan.defaultSolLamports, 150_000_000n)
   assert.equal(publicOnly.plan.defaultStartDateIso, '2026-08-24T13:45:00.000Z')
+
+  const simpleMovedBack = await buildPublicSimpleGuardPlan(
+    launch({
+      partner_allowlist_phases: [],
+      creator_wl_enabled: false,
+      wl_supply: 0,
+      launch_deadline_at: '2026-08-10T00:00:00.000Z',
+      phase_schedule: { PUBLIC: '2026-08-24T13:45:00.000Z' },
+    }),
+    { quoteUsdc }
+  )
+  if (!simpleMovedBack.ok) throw new Error(simpleMovedBack.error)
+  assert.equal(simpleMovedBack.plan.defaultStartDateIso, '2026-08-10T00:00:00.000Z')
 
   const missingDest = await buildPublicSimpleGuardPlan(
     launch({ treasury_wallet: null, creator_wallet: null }),

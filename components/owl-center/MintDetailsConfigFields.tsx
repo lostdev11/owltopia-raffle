@@ -239,7 +239,18 @@ export function MintDetailsConfigFields({
           <input
             type="datetime-local"
             value={values.launch_date}
-            onChange={(e) => set('launch_date', e.target.value)}
+            onChange={(e) => {
+              const launch_date = e.target.value
+              const simplePublic =
+                !values.presale_enabled && !values.wl_enabled && values.allowlist_phases.length === 0
+              const publicFollowsMintOpens =
+                simplePublic || !values.public_start.trim() || values.public_start === values.launch_date
+              onChange({
+                ...values,
+                launch_date,
+                public_start: publicFollowsMintOpens ? launch_date : values.public_start,
+              })
+            }}
             className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
         </label>
@@ -252,8 +263,8 @@ export function MintDetailsConfigFields({
             className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
           <span className="font-mono text-[10px] normal-case tracking-normal text-[#5C6773]">
-            Required when whitelist or presale is enabled — public stays closed until this time. Leave empty
-            only for a straight public mint (opens at “Mint opens”, or immediately if that is also empty).
+            Straight public mint: this follows Mint opens — change Mint opens to move the date. Required on its
+            own when whitelist or presale is enabled; public stays closed until this time.
           </span>
         </label>
       </div>
