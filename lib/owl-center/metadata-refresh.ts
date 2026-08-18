@@ -18,6 +18,7 @@ import {
 import { collectMintedNftMintsForLaunch } from '@/lib/owl-center/hash-list'
 import { isIrysUploadConfigured } from '@/lib/owl-center/irys-config'
 import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
+import { metadataRoyaltyFromLaunch } from '@/lib/owl-center/metadata-royalty'
 import {
   buildSugarDeployPackageFromJob,
   sugarConfigLineNameLength,
@@ -449,6 +450,7 @@ export async function runMetadataRefreshForLaunch(
         sourceJsonUri: preview.current_uri,
         displayName: preview.target_name,
         collectionName: launch.name,
+        royalty: metadataRoyaltyFromLaunch(launch),
       })
       if (!safeJson?.uri) {
         skipped.push({ mint: preview.mint, ok: false, error: 'Could not build wallet-safe metadata JSON' })
@@ -509,6 +511,7 @@ export async function runMetadataRefreshForLaunch(
           collectionName: targetName,
           network,
           sourceJsonUri: colMd.uri,
+          royalty: metadataRoyaltyFromLaunch(launch),
         })
         if (!safeCol?.uri) {
           collection = { ok: false, error: 'Could not build wallet-safe collection metadata JSON' }
