@@ -66,6 +66,7 @@
     "test:partner-nest-pool": "npx --yes tsx scripts/test-partner-nest-pool.ts",
     "test:owl-center-launch-slug": "npx --yes tsx scripts/test-owl-center-launch-slug.ts",
     "test:partner-launch-wl-wallets": "npx --yes tsx scripts/test-partner-launch-wl-wallets.ts",
+    "test:discord-wl-campaigns": "npx --yes tsx scripts/test-discord-wl-campaigns.ts",
     "test:creator-launch-setup-checklist": "npx --yes tsx scripts/test-creator-launch-setup-checklist.ts",
     "test:owl-center-presale-pricing": "npx --yes tsx scripts/test-owl-center-presale-pricing.ts",
     "test:filter-browse-host": "npx --yes tsx scripts/test-filter-browse-host.ts",
