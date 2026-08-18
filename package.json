@@ -65,6 +65,7 @@
     "test:owl-send-recover-ledger": "npx --yes tsx scripts/test-owl-send-recover-ledger.ts",
     "test:partner-nest-pool": "npx --yes tsx scripts/test-partner-nest-pool.ts",
     "test:owl-center-launch-slug": "npx --yes tsx scripts/test-owl-center-launch-slug.ts",
+    "test:metadata-royalty": "npx --yes tsx scripts/test-metadata-royalty.ts",
     "test:partner-launch-wl-wallets": "npx --yes tsx scripts/test-partner-launch-wl-wallets.ts",
     "test:creator-launch-setup-checklist": "npx --yes tsx scripts/test-creator-launch-setup-checklist.ts",
     "test:owl-center-presale-pricing": "npx --yes tsx scripts/test-owl-center-presale-pricing.ts",

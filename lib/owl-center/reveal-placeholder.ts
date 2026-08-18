@@ -6,6 +6,7 @@ import { buildOwlCenterWalletProxyImageUrl } from '@/lib/owl-center/metadata-jso
 import { walletSafeArweaveImageUri } from '@/lib/owl-center/arweave-gateway-uri'
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
 import { resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
+import { applyMetaplexRoyaltyFields, metadataRoyaltyFromLaunch } from '@/lib/owl-center/metadata-royalty'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 const REVEAL_PLACEHOLDER_JSON_PATH = 'assets/reveal-placeholder.json'
@@ -13,7 +14,10 @@ const REVEAL_PLACEHOLDER_PNG_PATH = 'assets/reveal-placeholder.png'
 
 /** Resolve placeholder metadata URI for reveal_day deploy (from job or auto-upload). */
 export async function resolveRevealPlaceholderMetadataUri(params: {
-  launch: Pick<OwlCenterLaunchPublic, 'name' | 'mint_mode' | 'mint_network'>
+  launch: Pick<
+    OwlCenterLaunchPublic,
+    'name' | 'mint_mode' | 'mint_network' | 'seller_fee_basis_points' | 'royalty_splits' | 'creator_wallet'
+  >
   job: OwlCenterAssetUploadJob
   existingUri?: string | null
 }): Promise<string | null> {
@@ -39,7 +43,7 @@ export async function resolveRevealPlaceholderMetadataUri(params: {
   }
 
   const collectionName = (launch.name ?? 'Collection').trim() || 'Collection'
-  const json = {
+  const json: Record<string, unknown> = {
     name: 'Unrevealed',
     description: `${collectionName} — art reveals on reveal day.`,
     image: primaryImage || undefined,
@@ -56,6 +60,7 @@ export async function resolveRevealPlaceholderMetadataUri(params: {
         : [],
     },
   }
+  applyMetaplexRoyaltyFields(json, metadataRoyaltyFromLaunch(launch))
 
   const { uri } = await uploadBufferToArweaveViaIrys(
     Buffer.from(JSON.stringify(json, null, 2), 'utf8'),
