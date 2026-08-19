@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { OwlCenterSaveNotice } from '@/components/owl-center/OwlCenterSaveNotice'
 import { creatorWlWalletsApiPath } from '@/lib/owl-center/creator-api-paths'
 import { launchHasWhitelistProgram } from '@/lib/owl-center/launch-wl-window'
 import {
@@ -109,8 +110,8 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
       const failN = j.failed?.length ?? 0
       setMsg(
         failN
-          ? `Added ${j.upserted ?? 0} wallet(s); ${failN} failed.`
-          : `Added ${j.upserted ?? 0} wallet(s) to ${phaseKey}.`
+          ? `Saved. Added ${j.upserted ?? 0} wallet(s); ${failN} failed.`
+          : `Saved. Added ${j.upserted ?? 0} wallet(s) to ${activeLabel}.`
       )
       setText('')
       await load()
@@ -131,7 +132,7 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
       )
       const j = (await res.json()) as { error?: string }
       if (!res.ok) throw new Error(j.error || 'Remove failed')
-      setMsg(`Removed ${wallet.slice(0, 4)}…`)
+      setMsg(`Saved. Removed ${wallet.slice(0, 4)}…`)
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Remove failed')
@@ -151,7 +152,7 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
     if (!text) return
     try {
       await navigator.clipboard.writeText(text)
-      setMsg(`Copied ${rows.length} wallet(s).`)
+      setMsg(`Saved. Copied ${rows.length} wallet(s).`)
       setErr(null)
     } catch {
       setErr('Could not copy wallets')
@@ -171,6 +172,8 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
     a.rel = 'noopener'
     a.click()
     URL.revokeObjectURL(url)
+    setMsg(`Saved. Downloaded ${rows.length} wallet(s) as CSV.`)
+    setErr(null)
   }
 
   const body = (
@@ -247,8 +250,10 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
         </DeployButton>
       </div>
 
-      {err ? <p className="font-mono text-xs text-[#FF9C9C]">{err}</p> : null}
-      {msg ? <p className="font-mono text-xs text-[#00FF9C]">{msg}</p> : null}
+      <div className="space-y-2">
+        <OwlCenterSaveNotice tone="error" message={err} />
+        <OwlCenterSaveNotice message={msg} />
+      </div>
 
       <div className="border-t border-[#1A222B] pt-4">
         <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-widest text-[#5C6773]">

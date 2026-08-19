@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
-import type { MintDetailsFormValues } from '@/lib/owl-center/launch-mint-config'
+import { applyMintOpensDate, type MintDetailsFormValues } from '@/lib/owl-center/launch-mint-config'
 import { OWL_CENTER_MAX_LAUNCH_SUPPLY } from '@/lib/owl-center/launch-limits'
 import {
   nextPresetForPhases,
@@ -239,18 +239,7 @@ export function MintDetailsConfigFields({
           <input
             type="datetime-local"
             value={values.launch_date}
-            onChange={(e) => {
-              const launch_date = e.target.value
-              const simplePublic =
-                !values.presale_enabled && !values.wl_enabled && values.allowlist_phases.length === 0
-              const publicFollowsMintOpens =
-                simplePublic || !values.public_start.trim() || values.public_start === values.launch_date
-              onChange({
-                ...values,
-                launch_date,
-                public_start: publicFollowsMintOpens ? launch_date : values.public_start,
-              })
-            }}
+            onChange={(e) => onChange(applyMintOpensDate(values, e.target.value))}
             className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
         </label>
@@ -263,8 +252,8 @@ export function MintDetailsConfigFields({
             className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
           <span className="font-mono text-[10px] normal-case tracking-normal text-[#5C6773]">
-            Straight public mint: this follows Mint opens — change Mint opens to move the date. Required on its
-            own when whitelist or presale is enabled; public stays closed until this time.
+            Follows Mint opens when you change that field. Edit this afterward only if public should start later
+            than allowlist or presale.
           </span>
         </label>
       </div>
