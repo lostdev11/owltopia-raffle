@@ -554,7 +554,13 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
         launchId={launchId}
         launch={launch}
         label={`${launch.status} · LAUNCH_OPS`}
-        onSaved={() => void load()}
+        onSaved={(saved) => {
+          if (saved) {
+            setBundle((prev) => (prev ? { ...prev, launch: saved } : prev))
+            return
+          }
+          void load()
+        }}
         showPresaleOverage
       />
 

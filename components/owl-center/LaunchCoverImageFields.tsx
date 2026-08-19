@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { HubCardCoverImage } from '@/components/owl-center/HubCardCoverImage'
+import { OwlCenterSaveNotice } from '@/components/owl-center/OwlCenterSaveNotice'
 import type { LaunchCoverCandidate } from '@/lib/owl-center/launch-cover-image'
 
 type Props = {
@@ -68,7 +69,7 @@ export function LaunchCoverImageFields({
       const j = (await res.json()) as { error?: string; launch?: { image_url?: string | null } }
       if (!res.ok) throw new Error(j.error || 'save_failed')
       const next = j.launch?.image_url ?? (coverUrl.trim() || null)
-      setMsg('Hub card cover saved.')
+      setMsg('Saved. Hub card cover updated.')
       onSaved?.(next)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'save_failed')
@@ -152,8 +153,10 @@ export function LaunchCoverImageFields({
           Refresh NFT list
         </DeployButton>
       </div>
-      {err ? <p className="font-mono text-xs text-[#FF9C9C]">{err}</p> : null}
-      {msg ? <p className="font-mono text-xs text-[#00FF9C]">{msg}</p> : null}
+      <div className="space-y-2">
+        <OwlCenterSaveNotice tone="error" message={err} />
+        <OwlCenterSaveNotice message={msg} />
+      </div>
     </div>
   )
 }

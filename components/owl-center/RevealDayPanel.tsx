@@ -8,6 +8,7 @@ import { Loader2 } from 'lucide-react'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { OwlCenterSaveNotice } from '@/components/owl-center/OwlCenterSaveNotice'
 import { sendRevealDayFeeSolTransfer } from '@/lib/solana/reveal-day-payment-client'
 import { resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -139,13 +140,13 @@ export function RevealDayPanel({
       const j = (await res.json()) as { ok?: boolean; error?: string; refreshed_count?: number }
       if (!res.ok || j.ok === false) throw new Error(j.error || 'action_failed')
       if (body.action === 'reveal_now' && typeof j.refreshed_count === 'number') {
-        setMsg(`Revealed ${j.refreshed_count} mint${j.refreshed_count === 1 ? '' : 's'} on-chain.`)
+        setMsg(`Saved. Revealed ${j.refreshed_count} mint${j.refreshed_count === 1 ? '' : 's'} on-chain.`)
       } else if (body.action === 'schedule') {
-        setMsg('Reveal scheduled — Owltopia will run the bulk update at your chosen time.')
+        setMsg('Saved. Reveal scheduled — Owltopia will run the bulk update at your chosen time.')
       } else if (body.action === 'enable') {
-        setMsg('Reveal Day enabled. Deploy the Candy Machine next (placeholder art until reveal).')
+        setMsg('Saved. Reveal Day enabled. Deploy the Candy Machine next (placeholder art until reveal).')
       } else if (body.action === 'confirm_payment') {
-        setMsg('Payment confirmed. You can schedule reveal day.')
+        setMsg('Saved. Payment confirmed. You can schedule reveal day.')
       }
       await load()
     } catch (e) {
@@ -317,8 +318,10 @@ export function RevealDayPanel({
         </div>
       )}
 
-      {err && status ? <p className="mt-3 font-mono text-xs text-[#FF9C9C]">{err}</p> : null}
-      {msg ? <p className="mt-3 font-mono text-xs text-[#00FF9C]">{msg}</p> : null}
+      <div className="mt-3 space-y-2">
+        <OwlCenterSaveNotice tone="error" message={err && status ? err : null} />
+        <OwlCenterSaveNotice message={msg} />
+      </div>
 
       {enabled && !status?.checklist.cm_deployed ? (
         <p className="mt-3 font-mono text-xs text-[#FFD769]">
