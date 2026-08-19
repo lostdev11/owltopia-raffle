@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { AdminPacksInventoryForm } from '@/components/admin/AdminPacksInventoryForm'
+import { PacksOpeningPreviewPanel } from '@/components/admin/PacksOpeningPreviewPanel'
 import { PacksAdminExtraDetails } from '@/components/admin/PacksAdminExtraDetails'
 import { getCachedAdmin, setCachedAdmin, getCachedAdminRole } from '@/lib/admin-check-cache'
 import { packPauseReasonLabel, packRtpPercentLabel } from '@/lib/packs/admin-copy'
@@ -254,6 +255,8 @@ export default function AdminPacksPage() {
               </Button>
             </div>
           </div>
+
+          <PacksOpeningPreviewPanel />
 
           <div className="rounded-lg border p-4">
             <AdminPacksInventoryForm
