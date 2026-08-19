@@ -71,23 +71,31 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      const j = (await res.json()) as {
+      const responseText = await res.text()
+      let j: {
         error?: string
         launch?: OwlCenterLaunchPublic
         guard_sync?: { ok?: boolean; status?: string; error?: string; reason?: string }
+        warnings?: string[]
+      }
+      try {
+        j = responseText ? (JSON.parse(responseText) as typeof j) : {}
+      } catch {
+        throw new Error(`Save failed (${res.status})`)
       }
       if (!res.ok) throw new Error(j.error || 'save_failed')
       const saved = j.launch
       if (saved) setValues(mintDetailsFormFromLaunch(saved))
       const opensLabel = formatMintDate(saved ? resolveMintOpensAt(saved) : payload.launch_date as string)
+      const warningSuffix = j.warnings?.length ? ` ${j.warnings.join(' ')}` : ''
       if (j.guard_sync && j.guard_sync.ok === false) {
         setMsg(
-          `Saved. Mint opens ${opensLabel}. On-chain Candy Guard was not updated (${j.guard_sync.error ?? 'unknown'}). Dates may still be site-only until guards are synced.`
+          `Saved. Mint opens ${opensLabel}. On-chain Candy Guard was not updated (${j.guard_sync.error ?? 'unknown'}). Dates may still be site-only until guards are synced.${warningSuffix}`
         )
       } else if (j.guard_sync?.status === 'updated') {
-        setMsg(`Saved. Mint opens ${opensLabel}. On-chain start date and per-wallet cap updated.`)
+        setMsg(`Saved. Mint opens ${opensLabel}. On-chain start date and per-wallet cap updated.${warningSuffix}`)
       } else {
-        setMsg(`Saved. Mint opens ${opensLabel}.`)
+        setMsg(`Saved. Mint opens ${opensLabel}.${warningSuffix}`)
       }
       onSaved?.(saved)
     } catch (e) {
