@@ -20,6 +20,11 @@ import {
   packInventoryPrizeStandardLabel,
   type PackInventoryPrizeStandard,
 } from '@/lib/packs/types'
+import {
+  formatPackDepositError,
+  packDepositDisabledReason,
+  packDepositRequirements,
+} from '@/lib/packs/deposit-requirements'
 import { packsNftBlockReason } from '@/lib/packs/inventory-eligibility'
 import { walletNftMintMatches } from '@/lib/raffles/wallet-nft-picker'
 import { depositPrizeNftToEscrowFromWallet } from '@/lib/solana/deposit-prize-nft-to-escrow-wallet'
@@ -136,7 +141,29 @@ export function AdminPacksInventoryForm({
   const allFloorsValid =
     drafts.length > 0 && drafts.every((d) => d.status === 'registered' || parseFloor(d.floor) != null)
   const pendingDrafts = drafts.filter((d) => d.status !== 'registered')
-  const canDeposit = Boolean(vaultAddress && publicKey && pendingDrafts.length > 0 && allFloorsValid && !busy)
+  const depositRequirements = useMemo(
+    () =>
+      packDepositRequirements({
+        vaultAddress,
+        walletConnected: Boolean(publicKey),
+        pendingCount: pendingDrafts.length,
+        allFloorsValid,
+        busy,
+      }),
+    [allFloorsValid, busy, pendingDrafts.length, publicKey, vaultAddress]
+  )
+  const depositDisabledReason = useMemo(
+    () =>
+      packDepositDisabledReason({
+        vaultAddress,
+        walletConnected: Boolean(publicKey),
+        pendingCount: pendingDrafts.length,
+        allFloorsValid,
+        busy,
+      }),
+    [allFloorsValid, busy, pendingDrafts.length, publicKey, vaultAddress]
+  )
+  const canDeposit = depositDisabledReason == null
 
   const loadWalletNfts = useCallback(async () => {
     if (!publicKey) return
@@ -272,7 +299,10 @@ export function AdminPacksInventoryForm({
             },
           })
           if (!dep.ok) {
-            patch(row.nft.mint, { status: 'failed', registerError: dep.error })
+            patch(row.nft.mint, {
+              status: 'failed',
+              registerError: formatPackDepositError(dep.error),
+            })
             continue
           }
           depositSig = dep.signature
@@ -413,7 +443,9 @@ export function AdminPacksInventoryForm({
                       {row.status !== 'pending' ? ` · ${row.status}` : ''}
                     </p>
                     {row.registerError && (
-                      <p className="text-xs text-destructive">{row.registerError}</p>
+                      <p className="text-xs text-destructive">
+                        {formatPackDepositError(row.registerError)}
+                      </p>
                     )}
                     {row.status === 'deposited' && row.depositSig && (
                       <p className="text-xs text-muted-foreground">
@@ -472,6 +504,29 @@ export function AdminPacksInventoryForm({
 
       {formError && <p className="text-sm text-destructive">{formError}</p>}
       {progress && <p className="text-sm text-muted-foreground">{progress}</p>}
+
+      <div className="rounded-md border bg-muted/20 p-3 text-sm">
+        <p className="font-medium">Before you can deposit</p>
+        <ul className="mt-2 space-y-1.5">
+          {depositRequirements.map((req) => (
+            <li
+              key={req.id}
+              className={req.met ? 'text-muted-foreground' : 'text-foreground'}
+            >
+              <span aria-hidden>{req.met ? '✓' : '○'}</span> {req.label}
+            </li>
+          ))}
+        </ul>
+        {pendingDrafts.length > 0 && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Ready to deposit: {pendingDrafts.length} NFT
+            {pendingDrafts.length === 1 ? '' : 's'}
+          </p>
+        )}
+        {depositDisabledReason && (
+          <p className="mt-2 text-xs text-amber-700 dark:text-amber-200">{depositDisabledReason}</p>
+        )}
+      </div>
 
       <Button
         type="button"
