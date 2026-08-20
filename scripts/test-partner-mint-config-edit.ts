@@ -7,6 +7,7 @@ import {
   mintDetailsPayloadFromForm,
   parseMintDetailsConfig,
   resolveMintOpensAt,
+  resolveMintOpensIsoForPatch,
 } from '@/lib/owl-center/launch-mint-config'
 import { datetimeLocalToIso, isoToDatetimeLocal } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -197,6 +198,45 @@ const publicEditedPatch = buildMintDetailsPatchFromBody(
 assert.ok(!('error' in publicEditedPatch))
 assert.equal(publicEditedPatch.launch_deadline_at, publicEditedIso, 'editing only Public start still moves mint opens')
 assert.equal(publicEditedPatch.phase_schedule?.PUBLIC, publicEditedIso)
+
+const sepLocal = '2026-09-24T09:44'
+const sepIso = datetimeLocalToIso(sepLocal)
+const allowlistSepPatch = buildMintDetailsPatchFromBody(
+  mintDetailsPayloadFromForm(
+    applyMintOpensDate(
+      dateForm({
+        total_supply: '100',
+        public_price: '1',
+        launch_date: leftoverPublic,
+        public_start: leftoverPublic,
+        wl_enabled: true,
+        allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: '2026-08-20T12:00', supply: '20', price: '10' }],
+      }),
+      sepLocal
+    )
+  ),
+  baseLaunch({
+    launch_deadline_at: datetimeLocalToIso(leftoverPublic),
+    phase_schedule: { PUBLIC: datetimeLocalToIso(leftoverPublic)! },
+    creator_wl_enabled: true,
+    wl_supply: 20,
+  })
+)
+assert.ok(!('error' in allowlistSepPatch))
+assert.equal(allowlistSepPatch.launch_deadline_at, sepIso, 'allowlist Aug→Sep mint opens')
+assert.equal(allowlistSepPatch.phase_schedule?.PUBLIC, sepIso)
+
+assert.equal(
+  resolveMintOpensIsoForPatch({
+    kickoff: datetimeLocalToIso(leftoverPublic),
+    requestedPublic: sepIso,
+    previousKickoff: datetimeLocalToIso(leftoverPublic),
+    previousPublic: datetimeLocalToIso(leftoverPublic),
+    hasQueuedPhases: true,
+  }),
+  sepIso,
+  'allowlist: editing only Public start moves mint opens'
+)
 
 assert.equal(datetimeLocalToIso('2026-08-24 15:44:00+00'), '2026-08-24T15:44:00.000Z')
 
