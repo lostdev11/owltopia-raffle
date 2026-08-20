@@ -288,7 +288,7 @@ export function PackOpeningExperience({
   const overlay = (
     <div
       className={cn(
-        'fixed inset-0 z-[9999] h-[100dvh] w-screen overflow-hidden overscroll-none',
+        'fixed inset-0 left-0 top-0 z-[9999] h-[100dvh] w-screen overflow-hidden overscroll-none bg-black',
         'touch-manipulation',
         className
       )}
@@ -296,14 +296,16 @@ export function PackOpeningExperience({
       aria-modal="true"
       aria-label="Pack opening experience"
     >
-      {/* Reveal environment (under white) */}
-      <div
-        className="absolute inset-0 flex flex-col items-center justify-center px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))]"
-        style={{
-          background:
-            'radial-gradient(circle at center, rgba(0,255,156,0.16) 0%, rgba(0,0,0,0.96) 45%, #000 80%)',
-        }}
-      >
+      {/* Reveal environment (under white). Opaque so the page never shows through. */}
+      <div className="absolute inset-0 flex flex-col bg-black">
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(circle at center, rgba(0,255,156,0.18) 0%, rgba(0,255,156,0.06) 38%, transparent 62%)',
+          }}
+          aria-hidden
+        />
         <div
           className={cn(
             'pointer-events-none absolute left-1/2 top-1/2 h-[min(70vw,420px)] w-[min(70vw,420px)]',
@@ -329,7 +331,8 @@ export function PackOpeningExperience({
 
         <div
           className={cn(
-            'relative z-[1] flex w-full max-w-md flex-col items-center text-center',
+            'relative z-[1] flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto',
+            'px-4 pt-[max(1rem,env(safe-area-inset-top))]',
             showReward
               ? reducedMotion
                 ? 'opacity-100'
@@ -344,7 +347,7 @@ export function PackOpeningExperience({
               : undefined
           }
         >
-          <div className="relative aspect-square w-[min(72vw,280px)]">
+          <div className="relative aspect-square w-[min(64vw,min(240px,34dvh))]">
             <div
               className={cn(
                 'relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl',
@@ -359,7 +362,7 @@ export function PackOpeningExperience({
 
           <p
             className={cn(
-              'mt-6 text-[11px] font-semibold uppercase tracking-[0.32em] text-[#00FF9C]/85 transition-opacity duration-500',
+              'mt-4 text-[11px] font-semibold uppercase tracking-[0.32em] text-[#00FF9C]/85 transition-opacity duration-500',
               showName ? 'opacity-100' : 'opacity-0'
             )}
           >
@@ -367,7 +370,7 @@ export function PackOpeningExperience({
           </p>
           <h2
             className={cn(
-              'mt-2 font-display text-3xl tracking-[0.04em] text-white transition-opacity duration-500 sm:text-4xl',
+              'mt-1 font-display text-2xl tracking-[0.04em] text-white transition-opacity duration-500 sm:text-3xl',
               showName ? 'opacity-100' : 'opacity-0'
             )}
           >
@@ -376,7 +379,7 @@ export function PackOpeningExperience({
 
           <div
             className={cn(
-              'mt-3 space-y-2 transition-opacity duration-500',
+              'mt-2 max-w-md space-y-1.5 text-center transition-opacity duration-500',
               showMeta ? 'opacity-100' : 'opacity-0'
             )}
           >
@@ -394,29 +397,31 @@ export function PackOpeningExperience({
               </p>
             ) : null}
           </div>
+        </div>
 
-          <div
-            className={cn(
-              'mt-8 flex w-full flex-col gap-3 sm:flex-row sm:justify-center',
-              'transition-opacity duration-500',
-              showControls ? 'opacity-100' : 'pointer-events-none opacity-0'
-            )}
+        <div
+          className={cn(
+            'relative z-[4] flex w-full shrink-0 flex-col gap-3 px-4',
+            'pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3',
+            'sm:flex-row sm:justify-center',
+            'transition-opacity duration-500',
+            showControls ? 'opacity-100' : 'pointer-events-none opacity-0'
+          )}
+        >
+          <button
+            type="button"
+            onClick={handleContinue}
+            className="inline-flex min-h-[48px] min-w-[180px] items-center justify-center rounded-xl border border-[#00FF9C]/45 bg-transparent px-6 text-sm font-bold uppercase tracking-wider text-[#00FF9C] transition hover:bg-[#00FF9C]/10"
           >
-            <button
-              type="button"
-              onClick={handleContinue}
-              className="inline-flex min-h-[48px] min-w-[180px] items-center justify-center rounded-xl border border-[#00FF9C]/45 bg-transparent px-6 text-sm font-bold uppercase tracking-wider text-[#00FF9C] transition hover:bg-[#00FF9C]/10"
-            >
-              Continue
-            </button>
-            <Link
-              href={`/packs/verify/${reward.openId}`}
-              className="inline-flex min-h-[48px] min-w-[180px] items-center justify-center gap-2 rounded-xl bg-[#00FF9C] px-6 text-sm font-bold uppercase tracking-wider text-[#062016] transition hover:bg-[#7DFFB8]"
-            >
-              <CheckCircle2 className="h-4 w-4" aria-hidden />
-              View item
-            </Link>
-          </div>
+            Continue
+          </button>
+          <Link
+            href={`/packs/verify/${reward.openId}`}
+            className="inline-flex min-h-[48px] min-w-[180px] items-center justify-center gap-2 rounded-xl bg-[#00FF9C] px-6 text-sm font-bold uppercase tracking-wider text-[#062016] transition hover:bg-[#7DFFB8]"
+          >
+            <CheckCircle2 className="h-4 w-4" aria-hidden />
+            View item
+          </Link>
         </div>
       </div>
 
