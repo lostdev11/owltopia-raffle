@@ -148,6 +148,15 @@ export function applyMintOpensDate(values: MintDetailsFormValues, launch_date: s
   return { ...values, launch_date, public_start: launch_date }
 }
 
+/**
+ * Straight public mint: if the two date fields diverged, the user edited Public start.
+ * Mint opens edits already copy into Public start, so equal fields mean Mint opens is the source.
+ */
+export function resolveSimpleMintDate(kickoff: string | null, publicStart: string | null): string | null {
+  if (kickoff && publicStart && !scheduleInstantsEqual(kickoff, publicStart)) return publicStart
+  return kickoff ?? publicStart
+}
+
 function requireScheduleEntry(
   raw: unknown,
   label: string
@@ -281,13 +290,29 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
   }
 
   const hasQueuedPhases = presale_enabled || wl_enabled || partner_allowlist_phases.length > 0
-  const publicIso = resolvePublicStartForSave({
-    kickoff: launch_deadline_at,
-    requestedPublic: public_start ?? phase_schedule.PUBLIC ?? null,
-    hasQueuedPhases,
-  })
-  if (publicIso) phase_schedule.PUBLIC = publicIso
-  else delete phase_schedule.PUBLIC
+  const requestedPublic = public_start ?? phase_schedule.PUBLIC ?? null
+  if (hasQueuedPhases) {
+    const publicIso = resolvePublicStartForSave({
+      kickoff: launch_deadline_at,
+      requestedPublic,
+      hasQueuedPhases,
+    })
+    if (publicIso) phase_schedule.PUBLIC = publicIso
+    else delete phase_schedule.PUBLIC
+  } else if (
+    requestedPublic &&
+    launch_deadline_at &&
+    !scheduleInstantsEqual(requestedPublic, launch_deadline_at)
+  ) {
+    // Keep the divergence so the patch can tell "user edited Public start" from leftover PUBLIC.
+    phase_schedule.PUBLIC = requestedPublic
+  } else if (launch_deadline_at) {
+    phase_schedule.PUBLIC = launch_deadline_at
+  } else if (requestedPublic) {
+    phase_schedule.PUBLIC = requestedPublic
+  } else {
+    delete phase_schedule.PUBLIC
+  }
 
   if (launch_deadline_at && !phase_schedule.AIRDROP) phase_schedule.AIRDROP = launch_deadline_at
 

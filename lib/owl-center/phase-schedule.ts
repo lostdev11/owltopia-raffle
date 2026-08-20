@@ -73,7 +73,9 @@ export type MintCountdownInfo = {
 
 function parseIsoMs(iso: string | null | undefined): number | null {
   if (!iso?.trim()) return null
-  const ms = new Date(iso).getTime()
+  const normalized = datetimeLocalToIso(iso)
+  if (!normalized) return null
+  const ms = Date.parse(normalized)
   return Number.isFinite(ms) ? ms : null
 }
 
