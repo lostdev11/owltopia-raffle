@@ -97,7 +97,12 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     if ('error' in patch) return jsonError(patch.error, 400)
     hasMintFields = true
     const savedRow = await updateOwlCenterLaunchByIdAdmin(id, patch)
-    if (!savedRow) return jsonError('Update failed', 500)
+    if (!savedRow) {
+      return jsonError(
+        'Could not save mint details. The collection row update failed — check supply, dates, and wallet splits, then try again.',
+        500
+      )
+    }
     updated = (await getOwlCenterLaunchByIdAdmin(id)) ?? savedRow
   }
 

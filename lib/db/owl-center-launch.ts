@@ -439,17 +439,31 @@ export async function updateOwlCenterLaunchByIdAdmin(
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()
-  const { data, error } = await db
-    .from('owl_center_launches')
-    .update({ ...patch, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select('*')
-    .single()
-  if (error || !data) {
+  const nextPatch: Record<string, unknown> = { ...patch, updated_at: new Date().toISOString() }
+  const unknownColumnRe = /Could not find the '([^']+)' column of 'owl_center_launches'/i
+
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const { data, error } = await db
+      .from('owl_center_launches')
+      .update(nextPatch)
+      .eq('id', id)
+      .select('*')
+      .single()
+    if (!error && data) return mapRow(data as Record<string, unknown>)
+
+    const missingColumn = error?.message?.match(unknownColumnRe)?.[1]
+    if (missingColumn && missingColumn in nextPatch) {
+      console.warn('updateOwlCenterLaunchByIdAdmin dropping unknown column', missingColumn, error?.message)
+      delete nextPatch[missingColumn]
+      continue
+    }
+
     console.error('updateOwlCenterLaunchByIdAdmin', error)
     return null
   }
-  return mapRow(data as Record<string, unknown>)
+
+  console.error('updateOwlCenterLaunchByIdAdmin exhausted unknown-column retries')
+  return null
 }
 
 export type InsertOwlCenterLaunchInput = {
