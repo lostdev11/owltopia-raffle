@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import Image from 'next/image'
 import Link from 'next/link'
 import { CheckCircle2, Coins, ImageIcon, Sparkles, Ticket } from 'lucide-react'
@@ -284,10 +285,10 @@ export function PackOpeningExperience({
       : stage === 'opening' || (stage === 'whiteTransition' && whiteOpaque && !openFailed))
   const openingVisible = stage === 'opening' || (stage === 'whiteTransition' && whiteOpaque && !openFailed)
 
-  return (
+  const overlay = (
     <div
       className={cn(
-        'fixed inset-0 z-[9999] overflow-hidden overscroll-none',
+        'fixed inset-0 z-[9999] h-[100dvh] w-screen overflow-hidden overscroll-none',
         'touch-manipulation',
         className
       )}
@@ -422,7 +423,7 @@ export function PackOpeningExperience({
       {/* Video layer */}
       {showVideoLayer ? (
         <div className="absolute inset-0 z-[2] flex items-center justify-center bg-black">
-          <div className="relative w-[min(90vw,520px)] max-h-[78dvh]">
+          <div className="relative flex h-[min(78dvh,720px)] w-[min(90vw,520px)] items-center justify-center">
             {showHoverLayer ? (
               hoverFailed ? (
                 <div
@@ -436,14 +437,14 @@ export function PackOpeningExperience({
                 </div>
               ) : (
                 <div
-                  className="transition-opacity ease-out"
+                  className="flex h-full w-full items-center justify-center transition-opacity ease-out"
                   style={{
                     transitionDuration: `${PACK_REVEAL_TIMING.videoCrossfadeMs}ms`,
                     opacity: stage === 'opening' ? 0 : 1,
                   }}
                 >
                   <PackHoverClip
-                    className="mx-auto max-h-[min(70dvh,520px)] w-full sm:max-h-[78dvh]"
+                    className="mx-auto max-h-full max-w-full object-contain"
                     onHoverFailed={() => setHoverFailed(true)}
                   />
                 </div>
@@ -454,8 +455,8 @@ export function PackOpeningExperience({
               <video
                 ref={openingRef}
                 className={cn(
-                  'mx-auto max-h-[78dvh] w-full object-contain',
-                  includeHoverGate ? 'absolute inset-0' : 'relative',
+                  'max-h-full max-w-full object-contain object-center',
+                  includeHoverGate ? 'absolute inset-0 m-auto h-full w-full' : 'relative',
                   openingVisible ? '' : 'pointer-events-none'
                 )}
                 style={{
@@ -534,4 +535,7 @@ export function PackOpeningExperience({
       />
     </div>
   )
+
+  if (typeof document === 'undefined') return overlay
+  return createPortal(overlay, document.body)
 }
