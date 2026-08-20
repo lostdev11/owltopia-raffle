@@ -1,6 +1,6 @@
 import { parseStandardFreezeConfig } from '@/lib/owl-center/freeze-config'
 import { isLaunchSupplyConfigLocked } from '@/lib/owl-center/launch-edit-locks'
-import { parseMintDetailsConfig, resolvePublicStartForSave } from '@/lib/owl-center/launch-mint-config'
+import { parseMintDetailsConfig, resolvePublicStartForSave, scheduleInstantsEqual } from '@/lib/owl-center/launch-mint-config'
 import { isLaunchRoyaltyLocked, launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import { parseWalletSplitsFromBody, walletSplitsEqual } from '@/lib/owl-center/wallet-splits'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -134,15 +134,27 @@ export function buildMintDetailsPatchFromBody(
     parsed.creator_presale_enabled ||
     parsed.creator_wl_enabled ||
     (parsed.partner_allowlist_phases?.length ?? 0) > 0
+  const kickoffChanged = Boolean(
+    parsed.launch_deadline_at && !scheduleInstantsEqual(parsed.launch_deadline_at, launch.launch_deadline_at)
+  )
+  const requestedPublic = parsed.phase_schedule.PUBLIC ?? null
+  const publicChanged = Boolean(
+    requestedPublic && !scheduleInstantsEqual(requestedPublic, launch.phase_schedule?.PUBLIC)
+  )
+  const mintOpensIso =
+    !hasQueuedPhases && publicChanged && !kickoffChanged
+      ? requestedPublic
+      : parsed.launch_deadline_at
   const publicIso = resolvePublicStartForSave({
-    kickoff: parsed.launch_deadline_at,
-    requestedPublic: parsed.phase_schedule.PUBLIC ?? null,
+    kickoff: mintOpensIso,
+    requestedPublic,
     previousPublic: launch.phase_schedule?.PUBLIC ?? null,
     hasQueuedPhases,
   })
   const phase_schedule = { ...parsed.phase_schedule }
   if (publicIso) phase_schedule.PUBLIC = publicIso
   else delete phase_schedule.PUBLIC
+  if (mintOpensIso && !phase_schedule.AIRDROP) phase_schedule.AIRDROP = mintOpensIso
 
   const patch: Parameters<typeof updateOwlCenterLaunchByIdAdmin>[1] = {
     total_supply: parsed.total_supply,
@@ -154,13 +166,13 @@ export function buildMintDetailsPatchFromBody(
     wl_price_usdc: parsed.wl_price_usdc,
     public_price_usdc: parsed.public_price_usdc,
     wallet_mint_limit: parsed.wallet_mint_limit,
-    launch_deadline_at: parsed.launch_deadline_at,
+    launch_deadline_at: mintOpensIso,
     phase_schedule,
     creator_presale_enabled: parsed.creator_presale_enabled,
     creator_wl_enabled: parsed.creator_wl_enabled,
     creator_mint_price: parsed.creator_mint_price,
     creator_mint_currency: parsed.creator_mint_currency,
-    creator_launch_date: parsed.launch_deadline_at,
+    creator_launch_date: mintOpensIso,
     seller_fee_basis_points: parsed.seller_fee_basis_points,
     partner_allowlist_phases: parsed.partner_allowlist_phases,
   }
