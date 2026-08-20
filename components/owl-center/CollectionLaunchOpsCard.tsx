@@ -1,6 +1,7 @@
 'use client'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
+import { AdminCoreAssetRoyaltiesPanel } from '@/components/admin/AdminCoreAssetRoyaltiesPanel'
 import { AdminCoreCollectionThawPanel } from '@/components/admin/AdminCoreCollectionThawPanel'
 import { CreatorDeleteLaunchPanel } from '@/components/owl-center/CreatorDeleteLaunchPanel'
 import { CreatorLaunchSetupChecklist } from '@/components/owl-center/CreatorLaunchSetupChecklist'
@@ -12,6 +13,7 @@ import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPan
 import { MintShareLinkPanel } from '@/components/owl-center/MintShareLinkPanel'
 import { RevealDayPanel } from '@/components/owl-center/RevealDayPanel'
 import {
+  creatorCoreRoyaltiesApiPath,
   creatorCoreThawApiPath,
   creatorHashListApiPath,
   creatorMarketplaceApiPath,
@@ -26,7 +28,7 @@ type Props = {
   launch: OwlCenterLaunchPublic
   /** Card header; defaults to status · phase. */
   label?: string
-  onSaved?: () => void
+  onSaved?: (launch?: OwlCenterLaunchPublic) => void
   /** Creator mint-config PATCH path; omit for admin default. */
   saveApiPath?: string
   /** Creator metadata refresh GET/POST path; omit for admin default. */
@@ -35,12 +37,15 @@ type Props = {
   revealDayApiPath?: string
   /** Creator Core thaw path; omit for admin default thaw API. */
   coreThawApiPath?: string
+  /** Creator Core royalties backfill path; omit for admin default. */
+  coreRoyaltiesApiPath?: string
   /** Guided launch checklist (Phase A). Default on. */
   showSetupChecklist?: boolean
   showMintConfig?: boolean
   /** Partner / creator whitelist wallet list (Manage collection). */
   showWlWallets?: boolean
   showCoreThaw?: boolean
+  showCoreRoyalties?: boolean
   showMarketplace?: boolean
   showPresaleOverage?: boolean
   marketplaceCompact?: boolean
@@ -62,10 +67,12 @@ export function CollectionLaunchOpsCard({
   metadataApiPath,
   revealDayApiPath,
   coreThawApiPath,
+  coreRoyaltiesApiPath,
   showSetupChecklist = true,
   showMintConfig = true,
   showWlWallets = true,
   showCoreThaw = true,
+  showCoreRoyalties = true,
   showMarketplace = true,
   showPresaleOverage = false,
   marketplaceCompact = false,
@@ -113,6 +120,15 @@ export function CollectionLaunchOpsCard({
           embedded
           launch={launch}
           apiPath={coreThawApiPath}
+          onChanged={onSaved}
+        />
+      ) : null}
+
+      {showCoreRoyalties ? (
+        <AdminCoreAssetRoyaltiesPanel
+          embedded
+          launch={launch}
+          apiPath={coreRoyaltiesApiPath}
           onChanged={onSaved}
         />
       ) : null}
@@ -172,6 +188,7 @@ export function creatorLaunchOpsCardProps(launchId: string, launch: OwlCenterLau
     marketplaceApiPath: creatorMarketplaceApiPath(launchId),
     hashListApiPath: creatorHashListApiPath(launchId),
     coreThawApiPath: creatorCoreThawApiPath(launchId),
+    coreRoyaltiesApiPath: creatorCoreRoyaltiesApiPath(launchId),
     marketplaceCreatorMode: true,
     showSetupChecklist: true,
   }

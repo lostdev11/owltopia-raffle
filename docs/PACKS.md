@@ -17,7 +17,7 @@ Assets (do not rename):
 - `/Animations/Pack hover.webm` (transparent, desktop) + `/Animations/Pack hover.webp` (transparent, iOS/WebKit)
 - `/Animations/Pack opening.mp4` — one-shot rip → white portal
 
-Config: `lib/packs/animations.ts`. Dev playground (local only): `/dev/pack-opening`.
+Config: `lib/packs/animations.ts`. Dev playground (local only): `/dev/pack-opening`. **Admin preview** (production): Admin → Packs → **Preview pack opening**.
 
 The `/packs` page is a single-composition hero (OWL PACKS brand, pack visual, one CTA). Odds, ticket credits, recent opens, and prize tiers live below the fold.
 

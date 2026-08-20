@@ -50,6 +50,22 @@ check('no dates → no on-chain startDate', resolvePublicSimpleGuardStartDateIso
   const live = { ...base, launch_deadline_at: PAST }
   check('past mint-opens → open', isPublicSimpleMintOpen(live, NOW) === true)
 }
+{
+  const leftoverPublic = '2026-08-26T15:46:00.000Z'
+  const movedBack = {
+    ...base,
+    launch_deadline_at: PAST,
+    phase_schedule: { PUBLIC: leftoverPublic },
+  }
+  check(
+    'simple mint: moving mint opens back wins over leftover later PUBLIC',
+    getPublicSimpleMintOpensAt(movedBack) === PAST
+  )
+  check(
+    'simple mint: earlier kickoff is live even if PUBLIC is still future',
+    isPublicSimpleMintOpen(movedBack, NOW) === true
+  )
+}
 
 console.log('WL configured, PUBLIC date missing (the Discord bug):')
 {

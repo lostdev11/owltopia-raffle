@@ -17,6 +17,37 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
 }
 
+async function safeGuardSync(updated: Awaited<ReturnType<typeof getOwlCenterLaunchByIdAdmin>>) {
+  if (!updated || updated.mint_mode !== 'public_simple') return { guard_sync: null, warning: null as string | null }
+  try {
+    return { guard_sync: await syncPublicSimpleCandyGuards(updated), warning: null as string | null }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    console.error('creator mint-config guard sync failed', message)
+    return {
+      guard_sync: { ok: false as const, error: message },
+      warning: `Candy Guard sync failed: ${message}`,
+    }
+  }
+}
+
+async function safeWriteActivityLog(entry: {
+  launch_id: string
+  message: string
+  event_type: string
+}) {
+  try {
+    const db = getSupabaseAdmin()
+    const { error } = await db.from('owl_center_activity_logs').insert(entry)
+    if (error) throw error
+    return null
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    console.error('creator mint-config activity log failed', message)
+    return `Activity log write failed: ${message}`
+  }
+}
+
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const ip = getClientIp(request)
   if (!rateLimit(`owl-launch-mint-config-get:${ip}`, 60, 60_000).allowed) {
@@ -79,19 +110,25 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   if (!updated) return jsonError('Update failed', 500)
   if (!hasMintFields && coverRaw === undefined) return jsonError('No fields to update', 400)
 
-  let guard_sync: Awaited<ReturnType<typeof syncPublicSimpleCandyGuards>> | null = null
-  if (hasMintFields && updated.mint_mode === 'public_simple') {
-    guard_sync = await syncPublicSimpleCandyGuards(updated)
-  }
+  const warnings: string[] = []
+  const { guard_sync, warning: guardWarning } = hasMintFields
+    ? await safeGuardSync(updated)
+    : { guard_sync: null, warning: null as string | null }
+  if (guardWarning) warnings.push(guardWarning)
   if (hasMintFields && updated.total_supply !== launch.total_supply) {
-    const existing = await getAssetPackageByLaunchId(id)
-    if (existing) {
-      await upsertAssetPackageForLaunch(id, { expected_supply: updated.total_supply })
+    try {
+      const existing = await getAssetPackageByLaunchId(id)
+      if (existing) {
+        await upsertAssetPackageForLaunch(id, { expected_supply: updated.total_supply })
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      console.error('creator mint-config asset package sync failed', message)
+      warnings.push(`Asset package sync failed: ${message}`)
     }
   }
 
-  const db = getSupabaseAdmin()
-  await db.from('owl_center_activity_logs').insert({
+  const logWarning = await safeWriteActivityLog({
     launch_id: id,
     message:
       coverRaw !== undefined && !hasMintFields
@@ -101,6 +138,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
           : 'Mint details updated (creator)',
     event_type: 'system',
   })
+  if (logWarning) warnings.push(logWarning)
 
-  return NextResponse.json({ ok: true, launch: updated, guard_sync })
+  return NextResponse.json({ ok: true, launch: updated, guard_sync, warnings })
 }

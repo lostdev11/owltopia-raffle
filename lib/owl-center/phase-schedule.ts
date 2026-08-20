@@ -73,7 +73,9 @@ export type MintCountdownInfo = {
 
 function parseIsoMs(iso: string | null | undefined): number | null {
   if (!iso?.trim()) return null
-  const ms = new Date(iso).getTime()
+  const normalized = datetimeLocalToIso(iso)
+  if (!normalized) return null
+  const ms = Date.parse(normalized)
   return Number.isFinite(ms) ? ms : null
 }
 
@@ -150,17 +152,20 @@ function laterIso(a: string, b: string): string {
 
 /**
  * When PUBLIC mint is allowed for a public_simple launch.
- * - Explicit PUBLIC start, floored by mint-opens (kickoff) when both exist
- * - Single-phase with only kickoff → that timestamp
+ * - Presale/WL: explicit PUBLIC start, floored by mint-opens (kickoff) when both exist
+ * - Straight public mint: Mint opens (kickoff) is the date — so moving it back takes effect
+ *   even if a leftover PUBLIC timestamp is later
  * - Presale/WL configured and PUBLIC has no start → null (not scheduled; must not open)
  */
 export function getPublicSimpleMintOpensAt(launch: PublicSimpleMintWindowLaunch): string | null {
   const publicStart = launch.phase_schedule?.PUBLIC ?? null
   const kickoff = launch.launch_deadline_at ?? null
-  if (publicStart && kickoff) return laterIso(publicStart, kickoff)
-  if (publicStart) return publicStart
-  if (launchHasQueuedMintPhases(launch)) return null
-  return kickoff
+  if (launchHasQueuedMintPhases(launch)) {
+    if (publicStart && kickoff) return laterIso(publicStart, kickoff)
+    if (publicStart) return publicStart
+    return null
+  }
+  return kickoff ?? publicStart
 }
 
 export function isPublicSimpleMintOpen(
@@ -303,13 +308,52 @@ export function formatPhaseStartShort(iso: string | null | undefined): string | 
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
-/** Convert `<input type="datetime-local">` value to ISO (local → UTC). */
+const DATETIME_LOCAL_RE =
+  /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/
+
+function parseAbsoluteIso(trimmed: string): string | null {
+  const candidates = [trimmed]
+  // `...+00` (no minutes) is invalid in some engines; `...+00:00` is not.
+  if (/[+-]\d{2}$/.test(trimmed)) candidates.push(`${trimmed}:00`)
+  for (const s of candidates) {
+    const d = new Date(s)
+    if (!Number.isNaN(d.getTime())) return d.toISOString()
+  }
+  return null
+}
+
+/**
+ * Convert `<input type="datetime-local">` value to ISO (local → UTC).
+ * Also passes through already-absolute timestamps (Z / offset) so a browser
+ * payload is not re-interpreted as local on the UTC server.
+ *
+ * `new Date("YYYY-MM-DDTHH:mm")` is Invalid Date in Safari (seconds required),
+ * which used to drop mint dates on save. Parse local components explicitly.
+ */
 export function datetimeLocalToIso(local: string): string | null {
   const trimmed = local.trim()
   if (!trimmed) return null
-  const d = new Date(trimmed)
-  if (Number.isNaN(d.getTime())) return null
-  return d.toISOString()
+
+  if (/[zZ]$/.test(trimmed) || /[+-]\d{2}(?::?\d{2})?$/.test(trimmed)) {
+    return parseAbsoluteIso(trimmed)
+  }
+
+  const m = trimmed.match(DATETIME_LOCAL_RE)
+  if (m) {
+    const ms = Number((m[7] ?? '0').padEnd(3, '0').slice(0, 3))
+    const d = new Date(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      Number(m[4]),
+      Number(m[5]),
+      Number(m[6] ?? 0),
+      ms
+    )
+    return Number.isNaN(d.getTime()) ? null : d.toISOString()
+  }
+
+  return parseAbsoluteIso(trimmed)
 }
 
 /** Format ISO for datetime-local input in local timezone. */

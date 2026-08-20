@@ -302,8 +302,126 @@ export const OWLTOPIA_ALERTS_SLASH_COMMAND = {
   ],
 } as const
 
+export const OWLTOPIA_WL_SLASH_COMMAND = {
+  name: 'owltopia-wl',
+  description: 'Collect Solana whitelist wallets in this server (Partner Pro)',
+  type: 1,
+  dm_permission: false,
+  options: [
+    {
+      name: 'setup',
+      description: 'Step-by-step checklist for your first whitelist spot',
+      type: 1,
+    },
+    {
+      name: 'create',
+      description: 'Open a new whitelist collection spot in a channel',
+      type: 1,
+      options: [
+        { name: 'name', description: 'Shown on the embed (e.g. OG Whitelist)', type: 3, required: true },
+        {
+          name: 'phase',
+          description: 'Allowlist phase (default: Whitelist)',
+          type: 3,
+          required: false,
+          choices: [
+            { name: 'Team', value: 'team' },
+            { name: 'OG', value: 'og' },
+            { name: 'Whitelist', value: 'wl' },
+            { name: 'WL 2', value: 'wl2' },
+            { name: 'WL 3', value: 'wl3' },
+          ],
+        },
+        {
+          name: 'channel',
+          description: 'Channel for the Submit wallet button (defaults to here)',
+          type: 7,
+          required: false,
+          channel_types: [0, 5],
+        },
+        {
+          name: 'max',
+          description: 'Optional cap (auto-closes when full)',
+          type: 4,
+          required: false,
+          min_value: 1,
+        },
+        {
+          name: 'spots',
+          description: 'Mint spots per wallet when pushed to Owl Center (default 1)',
+          type: 4,
+          required: false,
+          min_value: 1,
+          max_value: 50,
+        },
+        {
+          name: 'role',
+          description: 'Optional Discord role required to submit',
+          type: 8,
+          required: false,
+        },
+        {
+          name: 'launch',
+          description: 'Owl Center collection slug or id (optional)',
+          type: 3,
+          required: false,
+        },
+      ],
+    },
+    {
+      name: 'open',
+      description: 'Post or turn the Submit wallet button back on',
+      type: 1,
+      options: [{ name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false }],
+    },
+    {
+      name: 'close',
+      description: 'Stop new submissions (you can reopen later)',
+      type: 1,
+      options: [{ name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false }],
+    },
+    {
+      name: 'status',
+      description: 'How many wallets registered and whether it’s open',
+      type: 1,
+      options: [{ name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false }],
+    },
+    {
+      name: 'list',
+      description: 'All whitelist spots in this server',
+      type: 1,
+    },
+    {
+      name: 'export',
+      description: 'Download wallet list (link to dashboard CSV)',
+      type: 1,
+      options: [{ name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false }],
+    },
+    {
+      name: 'push',
+      description: 'Send wallets to your Owl Center mint list',
+      type: 1,
+      options: [
+        { name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false },
+        { name: 'launch', description: 'Owl Center collection slug or id', type: 3, required: false },
+      ],
+    },
+    {
+      name: 'remove',
+      description: 'Remove a wallet or Discord member from a spot',
+      type: 1,
+      options: [
+        { name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false },
+        { name: 'wallet', description: 'Solana wallet to remove', type: 3, required: false },
+        { name: 'member', description: 'Discord member to remove', type: 6, required: false },
+      ],
+    },
+  ],
+} as const
+
 export const ALL_DISCORD_SLASH_COMMANDS = [
   OWLTOPIA_PARTNER_SLASH_COMMAND,
   OWLTOPIA_SHOP_SLASH_COMMAND,
   OWLTOPIA_ALERTS_SLASH_COMMAND,
+  OWLTOPIA_WL_SLASH_COMMAND,
 ] as const

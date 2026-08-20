@@ -13,8 +13,8 @@ function basename(path: string): string {
 
 function classifyFile(path: string): AssetUploadFileEntry['kind'] {
   const base = basename(path).toLowerCase()
-  if (base === 'collection.json') return 'collection_meta'
-  if (base === 'collection.png') return 'collection_image'
+  if (base === 'collection.json' || base === 'reveal-placeholder.json') return 'collection_meta'
+  if (base === 'collection.png' || base === 'reveal-placeholder.png') return 'collection_image'
   if (base === 'traits.csv') return 'traits'
   const m = TOKEN_FILE_RE.exec(base)
   if (m) {
@@ -104,32 +104,6 @@ export async function readZipFileBuffer(zip: StagedZip, path: string): Promise<B
 
 export async function readZipFileText(zip: StagedZip, path: string): Promise<string | null> {
   return zip.readText(path)
-}
-
-export function rewriteMetadataJson(
-  rawJson: string,
-  imageUri: string,
-  pngBasename: string
-): string {
-  const parsed = JSON.parse(rawJson) as Record<string, unknown>
-  parsed.image = imageUri
-  if (parsed.properties && typeof parsed.properties === 'object') {
-    const props = parsed.properties as Record<string, unknown>
-    if (Array.isArray(props.files)) {
-      props.files = (props.files as Record<string, unknown>[]).map((f) => ({
-        ...f,
-        uri: typeof f.uri === 'string' && f.uri.endsWith('.png') ? imageUri : f.uri,
-      }))
-    }
-  }
-  if (!parsed.properties || typeof parsed.properties !== 'object') {
-    parsed.properties = {
-      files: [{ uri: imageUri, type: 'image/png' }],
-      category: 'image',
-    }
-  }
-  void pngBasename
-  return JSON.stringify(parsed, null, 2)
 }
 
 export function contentTypeForPath(path: string): string {

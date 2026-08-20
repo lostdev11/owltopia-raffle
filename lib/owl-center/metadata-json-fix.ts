@@ -7,6 +7,11 @@ import {
 } from '@/lib/owl-center/arweave-gateway-uri'
 import { uploadBufferToArweaveViaIrys } from '@/lib/owl-center/irys-uploader'
 import { irysGatewayMirrorHttpsUrls } from '@/lib/nft-media-uri'
+import {
+  applyMetaplexRoyaltyFields,
+  metadataJsonNeedsRoyaltyFields,
+  type MetadataRoyaltyFields,
+} from '@/lib/owl-center/metadata-royalty'
 import { getSiteBaseUrl } from '@/lib/site-config'
 
 export type WalletImageFile = {
@@ -88,7 +93,8 @@ export function imageUrlFromMetadataJson(json: Record<string, unknown>): string 
 export function rewriteJsonImageFields(
   json: Record<string, unknown>,
   images: WalletImageSet,
-  collectionName?: string | null
+  collectionName?: string | null,
+  royalty?: MetadataRoyaltyFields | null
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...json, image: images.primaryImage }
   if (collectionName?.trim()) {
@@ -106,6 +112,7 @@ export function rewriteJsonImageFields(
   props.files = images.files
   props.category = 'image'
   out.properties = props
+  applyMetaplexRoyaltyFields(out, royalty)
 
   return out
 }
@@ -213,6 +220,13 @@ export async function fetchMetadataJsonFromUri(
   return null
 }
 
+export function metadataJsonNeedsOffchainFix(
+  json: Record<string, unknown>,
+  network: 'mainnet' | 'devnet'
+): boolean {
+  return metadataJsonImageNeedsWalletFix(json, network) || metadataJsonNeedsRoyaltyFields(json)
+}
+
 /** Inspect only the on-chain metadata URI — never fall back to the upload job JSON. */
 export async function onChainMetadataJsonNeedsWalletFix(
   sourceJsonUri: string | null | undefined,
@@ -221,7 +235,7 @@ export async function onChainMetadataJsonNeedsWalletFix(
   if (!sourceJsonUri?.trim()) return true
   const json = await fetchMetadataJsonFromUri(sourceJsonUri, network)
   if (!json) return true
-  return metadataJsonImageNeedsWalletFix(json, network)
+  return metadataJsonNeedsOffchainFix(json, network)
 }
 
 async function loadTokenMetadataJson(
@@ -253,8 +267,9 @@ export async function ensureWalletSafeTokenMetadataJsonUri(params: {
   sourceJsonUri?: string | null
   displayName?: string | null
   collectionName?: string | null
+  royalty?: MetadataRoyaltyFields | null
 }): Promise<{ uri: string; reuploaded: boolean } | null> {
-  const { uploaded, tokenIndex, network, sourceJsonUri, displayName, collectionName } = params
+  const { uploaded, tokenIndex, network, sourceJsonUri, displayName, collectionName, royalty } = params
   const images = buildWalletImageSetFromUpload(uploaded, `assets/${tokenIndex}.png`, network)
   if (!images) return null
 
@@ -276,19 +291,26 @@ export async function ensureWalletSafeTokenMetadataJsonUri(params: {
   const sourceTxId = sourceJsonUri ? arweaveTxIdFromHttps(sourceJsonUri) : null
   const jobTxId = normalizedJobUri ? arweaveTxIdFromHttps(normalizedJobUri) : null
 
+  const royaltyMissing = Boolean(royalty && metadataJsonNeedsRoyaltyFields(json))
   if (
     !onChainNeedsFix &&
+    !royaltyMissing &&
     normalizedJobUri &&
     (!sourceTxId || !jobTxId || sourceTxId === jobTxId)
   ) {
     return { uri: normalizedJobUri, reuploaded: false }
   }
 
-  if (!metadataJsonImageNeedsWalletFix(json, network) && normalizedJobUri && sourceTxId !== jobTxId) {
+  if (
+    !metadataJsonNeedsOffchainFix(json, network) &&
+    !royaltyMissing &&
+    normalizedJobUri &&
+    sourceTxId !== jobTxId
+  ) {
     return { uri: normalizedJobUri, reuploaded: false }
   }
 
-  const fixed = rewriteJsonImageFields(json, images, collectionName)
+  const fixed = rewriteJsonImageFields(json, images, collectionName, royalty)
   const { uri } = await uploadBufferToArweaveViaIrys(
     Buffer.from(JSON.stringify(fixed, null, 2), 'utf8'),
     'application/json'
@@ -301,8 +323,9 @@ export async function ensureWalletSafeCollectionMetadataJsonUri(params: {
   collectionName: string
   network: 'mainnet' | 'devnet'
   sourceJsonUri?: string | null
+  royalty?: MetadataRoyaltyFields | null
 }): Promise<{ uri: string; reuploaded: boolean } | null> {
-  const { uploaded, collectionName, network, sourceJsonUri } = params
+  const { uploaded, collectionName, network, sourceJsonUri, royalty } = params
   const images =
     buildWalletImageSetFromUpload(uploaded, 'assets/collection.png', network) ??
     buildWalletImageSetFromUpload(uploaded, 'assets/0.png', network)
@@ -328,19 +351,26 @@ export async function ensureWalletSafeCollectionMetadataJsonUri(params: {
   const sourceTxId = sourceJsonUri ? arweaveTxIdFromHttps(sourceJsonUri) : null
   const jobTxId = normalizedJobUri ? arweaveTxIdFromHttps(normalizedJobUri) : null
 
+  const royaltyMissing = Boolean(royalty && metadataJsonNeedsRoyaltyFields(json))
   if (
     !onChainNeedsFix &&
+    !royaltyMissing &&
     normalizedJobUri &&
     (!sourceTxId || !jobTxId || sourceTxId === jobTxId)
   ) {
     return { uri: normalizedJobUri, reuploaded: false }
   }
 
-  if (!metadataJsonImageNeedsWalletFix(json, network) && normalizedJobUri && sourceTxId !== jobTxId) {
+  if (
+    !metadataJsonNeedsOffchainFix(json, network) &&
+    !royaltyMissing &&
+    normalizedJobUri &&
+    sourceTxId !== jobTxId
+  ) {
     return { uri: normalizedJobUri, reuploaded: false }
   }
 
-  const fixed = rewriteJsonImageFields(json, images, collectionName)
+  const fixed = rewriteJsonImageFields(json, images, collectionName, royalty)
   const { uri } = await uploadBufferToArweaveViaIrys(
     Buffer.from(JSON.stringify(fixed, null, 2), 'utf8'),
     'application/json'

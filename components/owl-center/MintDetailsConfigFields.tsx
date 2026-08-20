@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react'
 
-import type { MintDetailsFormValues } from '@/lib/owl-center/launch-mint-config'
+import { applyMintOpensDate, type MintDetailsFormValues } from '@/lib/owl-center/launch-mint-config'
 import { OWL_CENTER_MAX_LAUNCH_SUPPLY } from '@/lib/owl-center/launch-limits'
+import { datetimeLocalToIso, formatMintDate } from '@/lib/owl-center/phase-schedule'
 import {
   nextPresetForPhases,
   PARTNER_ALLOWLIST_MAX_PHASES,
@@ -53,6 +54,13 @@ export function MintDetailsConfigFields({
 
   const set = <K extends keyof MintDetailsFormValues>(key: K, v: MintDetailsFormValues[K]) =>
     onChange({ ...values, [key]: v })
+
+  const simplePublic =
+    !values.presale_enabled && !values.wl_enabled && values.allowlist_phases.length === 0
+  const setMintOpens = (raw: string) => onChange(applyMintOpensDate(values, raw))
+  const mintOpensPreview = values.launch_date.trim()
+    ? formatMintDate(datetimeLocalToIso(values.launch_date))
+    : null
 
   const supply = Number(values.total_supply) || 0
   const standardLocked = royaltiesLocked || supplyConfigLocked
@@ -239,23 +247,34 @@ export function MintDetailsConfigFields({
           <input
             type="datetime-local"
             value={values.launch_date}
-            onChange={(e) => set('launch_date', e.target.value)}
+            onChange={(e) => setMintOpens(e.target.value)}
+            onInput={(e) => setMintOpens(e.currentTarget.value)}
             className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
+          {mintOpensPreview ? (
+            <span className="font-mono text-[10px] normal-case tracking-normal text-[#00C97A]">
+              Saves as {mintOpensPreview}
+            </span>
+          ) : null}
         </label>
+        {simplePublic ? null : (
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
           Public phase starts
           <input
             type="datetime-local"
             value={values.public_start}
-            onChange={(e) => set('public_start', e.target.value)}
+            onChange={(e) => {
+              const public_start = e.target.value
+              onChange(simplePublic ? applyMintOpensDate(values, public_start) : { ...values, public_start })
+            }}
             className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
           <span className="font-mono text-[10px] normal-case tracking-normal text-[#5C6773]">
-            Required when whitelist or presale is enabled — public stays closed until this time. Leave empty
-            only for a straight public mint (opens at “Mint opens”, or immediately if that is also empty).
+            Follows Mint opens when you change that field. Edit this afterward only if public should start later
+            than allowlist or presale.
           </span>
         </label>
+        )}
       </div>
 
       <p className="font-mono text-[10px] text-[#5C6773]">{formatOwlCenterPlatformMintFeeLabel()} applies on top of creator price.</p>

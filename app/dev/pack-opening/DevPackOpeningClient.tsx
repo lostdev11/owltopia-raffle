@@ -7,59 +7,7 @@ import {
 } from '@/components/packs/PackOpeningExperience'
 import { PackHoverVideo } from '@/components/packs/PackHoverVideo'
 import { preloadPackAnimationVideos } from '@/lib/packs/animations'
-import type { PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
-
-function mockReward(category: 'owl' | 'sol' | 'nft'): PackOpenClientResult {
-  if (category === 'sol') {
-    return {
-      openId: '00000000-0000-4000-8000-000000000001',
-      category: 'sol',
-      prizeLabel: '0.1 SOL',
-      owlAmount: null,
-      solAmount: 0.1,
-      nftMint: null,
-      nftName: null,
-      nftImageUrl: null,
-      freeTicketCredits: 0,
-      payoutSignature: null,
-      openSeed: 'dev-preview-seed',
-      openCommitHash: 'dev-preview-commit',
-      revealMessage: 'You won 0.1 SOL (dev preview)',
-    }
-  }
-  if (category === 'nft') {
-    return {
-      openId: '00000000-0000-4000-8000-000000000002',
-      category: 'nft',
-      prizeLabel: 'Preview Owl NFT',
-      owlAmount: null,
-      solAmount: null,
-      nftMint: 'Prev1ew111111111111111111111111111111111111',
-      nftName: 'Preview Owl NFT',
-      nftImageUrl: '/logo.gif',
-      freeTicketCredits: 0,
-      payoutSignature: null,
-      openSeed: 'dev-preview-seed',
-      openCommitHash: 'dev-preview-commit',
-      revealMessage: 'You won Preview Owl NFT (dev preview)',
-    }
-  }
-  return {
-    openId: '00000000-0000-4000-8000-000000000003',
-    category: 'owl',
-    prizeLabel: '25 $OWL',
-    owlAmount: 25,
-    solAmount: null,
-    nftMint: null,
-    nftName: null,
-    nftImageUrl: null,
-    freeTicketCredits: 25,
-    payoutSignature: null,
-    openSeed: 'dev-preview-seed',
-    openCommitHash: 'dev-preview-commit',
-    revealMessage: 'You have won 25 free tickets on raffle site (dev preview)',
-  }
-}
+import { mockPackOpenReward } from '@/lib/packs/preview-reward'
 
 type Mode = 'hovering' | 'opening' | 'full' | 'reveal'
 
@@ -68,7 +16,7 @@ export function DevPackOpeningClient() {
   const [category, setCategory] = useState<'owl' | 'sol' | 'nft'>('nft')
   const [runKey, setRunKey] = useState(0)
 
-  const reward = useMemo(() => mockReward(category), [category])
+  const reward = useMemo(() => mockPackOpenReward(category), [category])
 
   useEffect(() => {
     preloadPackAnimationVideos({ opening: true })
@@ -113,7 +61,8 @@ export function DevPackOpeningClient() {
           </p>
           <h1 className="mt-2 font-display text-3xl tracking-wide">Pack opening preview</h1>
           <p className="mt-2 text-sm text-[#A9CBB9]">
-            Mock rewards only. Production purchases always use real open results.
+            Mock rewards only. Production purchases always use real open results. Admins can also
+            preview from Admin → Packs.
           </p>
         </div>
 

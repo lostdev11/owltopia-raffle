@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { OwlCenterSaveNotice } from '@/components/owl-center/OwlCenterSaveNotice'
 import { creatorWlWalletsApiPath } from '@/lib/owl-center/creator-api-paths'
 import { launchHasWhitelistProgram } from '@/lib/owl-center/launch-wl-window'
 import {
@@ -109,8 +110,8 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
       const failN = j.failed?.length ?? 0
       setMsg(
         failN
-          ? `Added ${j.upserted ?? 0} wallet(s); ${failN} failed.`
-          : `Added ${j.upserted ?? 0} wallet(s) to ${phaseKey}.`
+          ? `Saved. Added ${j.upserted ?? 0} wallet(s); ${failN} failed.`
+          : `Saved. Added ${j.upserted ?? 0} wallet(s) to ${activeLabel}.`
       )
       setText('')
       await load()
@@ -131,7 +132,7 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
       )
       const j = (await res.json()) as { error?: string }
       if (!res.ok) throw new Error(j.error || 'Remove failed')
-      setMsg(`Removed ${wallet.slice(0, 4)}…`)
+      setMsg(`Saved. Removed ${wallet.slice(0, 4)}…`)
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Remove failed')
@@ -141,6 +142,39 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
   }
 
   const activeLabel = apiPhases.find((p) => p.key === phaseKey)?.label ?? phaseKey
+
+  function walletsText() {
+    return rows.map((r) => r.wallet).join('\n')
+  }
+
+  async function copyWallets() {
+    const text = walletsText()
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setMsg(`Saved. Copied ${rows.length} wallet(s).`)
+      setErr(null)
+    } catch {
+      setErr('Could not copy wallets')
+    }
+  }
+
+  function downloadCsv() {
+    if (rows.length === 0) return
+    const header = 'wallet,phase_key,allowed_mints,used_mints'
+    const lines = rows.map((r) => `${r.wallet},${phaseKey},${r.allowed_mints},${r.used_mints}`)
+    const csv = `\uFEFF${header}\n${lines.join('\n')}`
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `wl-${phaseKey}-${launchId.slice(0, 8)}.csv`
+    a.rel = 'noopener'
+    a.click()
+    URL.revokeObjectURL(url)
+    setMsg(`Saved. Downloaded ${rows.length} wallet(s) as CSV.`)
+    setErr(null)
+  }
 
   const body = (
     <div className="grid gap-4">
@@ -208,10 +242,18 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
         <DeployButton type="button" variant="ghost" disabled={loading || saving} onClick={() => void load()}>
           Refresh
         </DeployButton>
+        <DeployButton type="button" variant="ghost" disabled={loading || saving || rows.length === 0} onClick={() => void copyWallets()}>
+          Copy wallets
+        </DeployButton>
+        <DeployButton type="button" variant="ghost" disabled={loading || saving || rows.length === 0} onClick={() => downloadCsv()}>
+          Download CSV
+        </DeployButton>
       </div>
 
-      {err ? <p className="font-mono text-xs text-[#FF9C9C]">{err}</p> : null}
-      {msg ? <p className="font-mono text-xs text-[#00FF9C]">{msg}</p> : null}
+      <div className="space-y-2">
+        <OwlCenterSaveNotice tone="error" message={err} />
+        <OwlCenterSaveNotice message={msg} />
+      </div>
 
       <div className="border-t border-[#1A222B] pt-4">
         <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-widest text-[#5C6773]">

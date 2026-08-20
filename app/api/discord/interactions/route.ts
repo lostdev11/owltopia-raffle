@@ -2,6 +2,11 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { editOriginalInteractionResponse } from '@/lib/discord-interaction-edit-original'
 import { handleDiscordApplicationCommand } from '@/lib/discord-handle-interaction'
 import {
+  handleDiscordWlDeferred,
+  handleDiscordWlImmediateComponent,
+} from '@/lib/discord-wl-handle-interaction'
+import { wlComponentNeedsImmediateResponse } from '@/lib/discord-wl/custom-id'
+import {
   normalizeDiscordApplicationPublicKeyHex,
   verifyDiscordInteractionRequest,
 } from '@/lib/discord-interactions-verify'
@@ -14,11 +19,42 @@ export const maxDuration = 60
 /** @see https://discord.com/developers/docs/interactions/receiving-and-responding */
 const DISCORD_INTERACTION_PING = 1
 const DISCORD_INTERACTION_APPLICATION_COMMAND = 2
+const DISCORD_INTERACTION_MESSAGE_COMPONENT = 3
+const DISCORD_INTERACTION_MODAL_SUBMIT = 5
 /** DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE — Discord allows ~3s; we finish via PATCH @original */
 const DISCORD_INTERACTION_DEFERRED_CHANNEL_MESSAGE = 5
 
 /** Discord Application “Public Key” (General Information) is 32 bytes → 64 hex chars. */
 const DISCORD_APP_PUBLIC_KEY_HEX_LENGTH = 64
+
+const EPHEMERAL_ERROR = {
+  type: 4,
+  data: { content: 'Something went wrong. Try again in a moment.', flags: 64 },
+}
+
+function deferHandler(
+  applicationId: string,
+  interactionToken: string,
+  run: () => Promise<Record<string, unknown>>
+) {
+  after(async () => {
+    try {
+      const response = await run()
+      await editOriginalInteractionResponse(applicationId, interactionToken, response)
+    } catch (e) {
+      console.error('[discord/interactions] deferred handler:', e)
+      try {
+        await editOriginalInteractionResponse(applicationId, interactionToken, EPHEMERAL_ERROR)
+      } catch (editErr) {
+        console.error('[discord/interactions] deferred error reply failed:', editErr)
+      }
+    }
+  })
+  return NextResponse.json({
+    type: DISCORD_INTERACTION_DEFERRED_CHANNEL_MESSAGE,
+    data: { flags: 64 },
+  })
+}
 
 /**
  * POST /api/discord/interactions
@@ -63,44 +99,48 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ type: DISCORD_INTERACTION_PING })
   }
 
+  const applicationId = typeof body.application_id === 'string' ? body.application_id : ''
+  const interactionToken = typeof body.token === 'string' ? body.token : ''
+  if (
+    (t === DISCORD_INTERACTION_APPLICATION_COMMAND ||
+      t === DISCORD_INTERACTION_MESSAGE_COMPONENT ||
+      t === DISCORD_INTERACTION_MODAL_SUBMIT) &&
+    (!applicationId || !interactionToken)
+  ) {
+    return NextResponse.json({
+      type: 4,
+      data: { content: 'Invalid interaction payload.', flags: 64 },
+    })
+  }
+
   if (t === DISCORD_INTERACTION_APPLICATION_COMMAND) {
-    const interaction = body as {
-      application_id?: string
-      token?: string
+    return deferHandler(applicationId, interactionToken, () => handleDiscordApplicationCommand(body as never))
+  }
+
+  if (t === DISCORD_INTERACTION_MESSAGE_COMPONENT || t === DISCORD_INTERACTION_MODAL_SUBMIT) {
+    const customId =
+      body.data && typeof body.data === 'object' && typeof (body.data as { custom_id?: unknown }).custom_id === 'string'
+        ? (body.data as { custom_id: string }).custom_id
+        : ''
+
+    if (t === DISCORD_INTERACTION_MESSAGE_COMPONENT && wlComponentNeedsImmediateResponse(customId)) {
+      try {
+        const response = await handleDiscordWlImmediateComponent(body as never)
+        return NextResponse.json(response)
+      } catch (e) {
+        console.error('[discord/interactions] immediate component:', e)
+        return NextResponse.json(EPHEMERAL_ERROR)
+      }
     }
-    const applicationId = interaction.application_id
-    const interactionToken = interaction.token
-    if (!applicationId || !interactionToken) {
+
+    if (!customId.startsWith('owlwl:')) {
       return NextResponse.json({
         type: 4,
-        data: { content: 'Invalid interaction payload.', flags: 64 },
+        data: { content: 'Unsupported interaction type.', flags: 64 },
       })
     }
 
-    after(async () => {
-      try {
-        const response = await handleDiscordApplicationCommand(body as never)
-        await editOriginalInteractionResponse(applicationId, interactionToken, response)
-      } catch (e) {
-        console.error('[discord/interactions] deferred handler:', e)
-        try {
-          await editOriginalInteractionResponse(applicationId, interactionToken, {
-            type: 4,
-            data: {
-              content: 'Something went wrong. Try again in a moment.',
-              flags: 64,
-            },
-          })
-        } catch (editErr) {
-          console.error('[discord/interactions] deferred error reply failed:', editErr)
-        }
-      }
-    })
-
-    return NextResponse.json({
-      type: DISCORD_INTERACTION_DEFERRED_CHANNEL_MESSAGE,
-      data: { flags: 64 },
-    })
+    return deferHandler(applicationId, interactionToken, () => handleDiscordWlDeferred(body as never))
   }
 
   return NextResponse.json({

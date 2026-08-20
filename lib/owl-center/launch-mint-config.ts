@@ -11,7 +11,7 @@ import {
   type PartnerAllowlistPhase,
   type PartnerAllowlistPhaseFormRow,
 } from '@/lib/owl-center/partner-allowlist-phases'
-import { datetimeLocalToIso } from '@/lib/owl-center/phase-schedule'
+import { datetimeLocalToIso, isoToDatetimeLocal } from '@/lib/owl-center/phase-schedule'
 import {
   DEFAULT_SELLER_FEE_BASIS_POINTS,
   basisPointsToPercent,
@@ -96,7 +96,75 @@ function pickInt(v: unknown, fallback: number, min = 0, max = 50_000): number {
 
 function parseScheduleEntry(v: unknown): string | null {
   if (typeof v !== 'string' || !v.trim()) return null
-  return datetimeLocalToIso(v.trim()) ?? (Number.isFinite(new Date(v).getTime()) ? new Date(v).toISOString() : null)
+  return datetimeLocalToIso(v.trim())
+}
+
+/** Keep the raw datetime-local value when ISO conversion fails so the server can still parse it. */
+function formDateToPayload(local: string): string | null {
+  const trimmed = local.trim()
+  if (!trimmed) return null
+  return datetimeLocalToIso(trimmed) ?? trimmed
+}
+
+function scheduleMs(raw: string | null | undefined): number | null {
+  if (!raw?.trim()) return null
+  const iso = datetimeLocalToIso(raw.trim()) ?? raw.trim()
+  const ms = Date.parse(iso)
+  return Number.isFinite(ms) ? ms : null
+}
+
+/** True when two schedule strings are the same instant (ISO or datetime-local). */
+export function scheduleInstantsEqual(a: string | null | undefined, b: string | null | undefined): boolean {
+  const am = scheduleMs(a)
+  const bm = scheduleMs(b)
+  if (am == null && bm == null) return !a?.trim() && !b?.trim()
+  return am != null && am === bm
+}
+
+/**
+ * PUBLIC start to persist with a mint-details save.
+ *
+ * Straight public mint: Mint opens is the live date.
+ * Allowlist/presale: keep an independent public start only when the request actually
+ * changed it. If Public start was left at the previous leftover time, copy Mint opens
+ * so moving the date back is visible after reload.
+ */
+export function resolvePublicStartForSave(opts: {
+  kickoff: string | null
+  requestedPublic: string | null
+  previousPublic?: string | null
+  hasQueuedPhases: boolean
+}): string | null {
+  const { kickoff, requestedPublic, previousPublic, hasQueuedPhases } = opts
+  if (!hasQueuedPhases) return kickoff ?? requestedPublic
+  if (!kickoff) return requestedPublic
+  if (!requestedPublic || scheduleInstantsEqual(requestedPublic, kickoff)) return kickoff
+  if (previousPublic !== undefined && scheduleInstantsEqual(requestedPublic, previousPublic)) return kickoff
+  return requestedPublic
+}
+
+/** Changing Mint opens also moves Public start; the public field can still be edited after. */
+export function applyMintOpensDate(values: MintDetailsFormValues, launch_date: string): MintDetailsFormValues {
+  return { ...values, launch_date, public_start: launch_date }
+}
+
+/**
+ * Straight public mint: if the two date fields diverged, the user edited Public start.
+ * Mint opens edits already copy into Public start, so equal fields mean Mint opens is the source.
+ */
+export function resolveSimpleMintDate(kickoff: string | null, publicStart: string | null): string | null {
+  if (kickoff && publicStart && !scheduleInstantsEqual(kickoff, publicStart)) return publicStart
+  return kickoff ?? publicStart
+}
+
+function requireScheduleEntry(
+  raw: unknown,
+  label: string
+): { ok: true; iso: string | null } | { ok: false; error: string } {
+  if (typeof raw !== 'string' || !raw.trim()) return { ok: true, iso: null }
+  const iso = parseScheduleEntry(raw)
+  if (!iso) return { ok: false, error: `Invalid ${label}` }
+  return { ok: true, iso }
 }
 
 /** Build mint config from launch submission or admin PATCH body. */
@@ -186,12 +254,9 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
     public_supply += total_supply - (presale_supply + wl_supply + public_supply + airdrop_supply)
   }
 
-  let launch_deadline_at: string | null = null
-  if (typeof body.launch_date === 'string' && body.launch_date.trim()) {
-    launch_deadline_at = parseScheduleEntry(body.launch_date)
-  } else if (typeof body.launch_deadline_at === 'string' && body.launch_deadline_at.trim()) {
-    launch_deadline_at = parseScheduleEntry(body.launch_deadline_at)
-  }
+  const launchDateParsed = requireScheduleEntry(body.launch_date ?? body.launch_deadline_at, 'mint open date')
+  if (!launchDateParsed.ok) return launchDateParsed
+  const launch_deadline_at = launchDateParsed.iso
 
   const phase_schedule: Record<string, string> = {}
   const rawSchedule = body.phase_schedule
@@ -202,9 +267,18 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
     }
   }
 
-  const presale_start = parseScheduleEntry(body.presale_start)
-  const wl_start = parseScheduleEntry(body.wl_start)
-  const public_start = parseScheduleEntry(body.public_start ?? body.public_phase_start)
+  const presaleStartParsed = requireScheduleEntry(body.presale_start, 'presale start date')
+  if (!presaleStartParsed.ok) return presaleStartParsed
+  const wlStartParsed = requireScheduleEntry(body.wl_start, 'whitelist start date')
+  if (!wlStartParsed.ok) return wlStartParsed
+  const publicStartParsed = requireScheduleEntry(
+    body.public_start ?? body.public_phase_start,
+    'public phase start date'
+  )
+  if (!publicStartParsed.ok) return publicStartParsed
+  const presale_start = presaleStartParsed.iso
+  const wl_start = wlStartParsed.iso
+  const public_start = publicStartParsed.iso
 
   if (presale_enabled && presale_start) phase_schedule.PRESALE = presale_start
 
@@ -215,13 +289,29 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
     phase_schedule.WHITELIST = wl_start
   }
 
-  if (public_start) phase_schedule.PUBLIC = public_start
-  // Only auto-default PUBLIC to the kickoff time for simple single-phase launches.
-  // When there are earlier phases (presale/WL), defaulting PUBLIC to the kickoff would
-  // mislabel it as opening at the same wall-clock time as the first phase. Leave it
-  // unset so it shows as opening after the prior phase (or set an explicit public start).
-  else if (launch_deadline_at && !phase_schedule.PUBLIC && !presale_enabled && !wl_enabled) {
+  const hasQueuedPhases = presale_enabled || wl_enabled || partner_allowlist_phases.length > 0
+  const requestedPublic = public_start ?? phase_schedule.PUBLIC ?? null
+  if (hasQueuedPhases) {
+    const publicIso = resolvePublicStartForSave({
+      kickoff: launch_deadline_at,
+      requestedPublic,
+      hasQueuedPhases,
+    })
+    if (publicIso) phase_schedule.PUBLIC = publicIso
+    else delete phase_schedule.PUBLIC
+  } else if (
+    requestedPublic &&
+    launch_deadline_at &&
+    !scheduleInstantsEqual(requestedPublic, launch_deadline_at)
+  ) {
+    // Keep the divergence so the patch can tell "user edited Public start" from leftover PUBLIC.
+    phase_schedule.PUBLIC = requestedPublic
+  } else if (launch_deadline_at) {
     phase_schedule.PUBLIC = launch_deadline_at
+  } else if (requestedPublic) {
+    phase_schedule.PUBLIC = requestedPublic
+  } else {
+    delete phase_schedule.PUBLIC
   }
 
   if (launch_deadline_at && !phase_schedule.AIRDROP) phase_schedule.AIRDROP = launch_deadline_at
@@ -322,7 +412,7 @@ export function mintDetailsFormFromLaunch(launch: OwlCenterLaunchPublic): MintDe
 
   const splitForms = walletSplitFormRowsFromLaunch(launch)
   const phases = resolvePartnerAllowlistPhases(launch)
-  const allowlist_phases = formRowsFromPartnerAllowlistPhases(phases, isoToDatetimeLocalShort)
+  const allowlist_phases = formRowsFromPartnerAllowlistPhases(phases, (iso) => isoToDatetimeLocal(iso))
 
   return {
     total_supply: String(launch.total_supply),
@@ -330,30 +420,23 @@ export function mintDetailsFormFromLaunch(launch: OwlCenterLaunchPublic): MintDe
     wl_price: launch.wl_price_usdc != null ? String(launch.wl_price_usdc) : '',
     currency,
     wallet_mint_limit: String(launch.wallet_mint_limit),
-    launch_date: launch.launch_deadline_at ? isoToDatetimeLocalShort(launch.launch_deadline_at) : '',
-    public_start: launch.phase_schedule?.PUBLIC ? isoToDatetimeLocalShort(launch.phase_schedule.PUBLIC) : '',
+    launch_date: isoToDatetimeLocal(launch.launch_deadline_at),
+    public_start: isoToDatetimeLocal(launch.phase_schedule?.PUBLIC),
     presale_enabled: launch.creator_presale_enabled || launch.presale_supply > 0,
     presale_supply: String(launch.presale_supply || ''),
     presale_overage_supply: String(launch.presale_overage_supply || ''),
-    presale_start: launch.phase_schedule?.PRESALE ? isoToDatetimeLocalShort(launch.phase_schedule.PRESALE) : '',
+    presale_start: isoToDatetimeLocal(launch.phase_schedule?.PRESALE),
     wl_enabled: phases.length > 0 || launch.creator_wl_enabled || launch.wl_supply > 0,
     wl_supply: String(launch.wl_supply || ''),
-    wl_start: launch.phase_schedule?.WHITELIST ? isoToDatetimeLocalShort(launch.phase_schedule.WHITELIST) : '',
+    wl_start: isoToDatetimeLocal(launch.phase_schedule?.WHITELIST),
     allowlist_phases,
     royalty_percent: String(basisPointsToPercent(launchSellerFeeBasisPoints(launch))),
     royalty_splits: splitForms.royalty_splits,
     mint_fund_splits: splitForms.mint_fund_splits,
     mint_standard: launch.mint_standard === 'token_metadata' ? 'token_metadata' : 'core',
     freeze_enabled: Boolean(launch.freeze_enabled),
-    unfreeze_date: launch.unfreeze_date ? isoToDatetimeLocalShort(launch.unfreeze_date) : '',
+    unfreeze_date: isoToDatetimeLocal(launch.unfreeze_date),
   }
-}
-
-function isoToDatetimeLocalShort(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Record<string, unknown> {
@@ -362,16 +445,25 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
 
   // Convert datetime-local values to ISO here (in the browser) so the
   // local→UTC offset uses the admin's timezone, not the server's (UTC).
-  const launchIso = datetimeLocalToIso(values.launch_date)
-  const presaleIso = datetimeLocalToIso(values.presale_start)
-  const publicIso = datetimeLocalToIso(values.public_start)
+  // Fall back to the raw field if conversion fails so the date is not dropped.
+  const launchIso = formDateToPayload(values.launch_date)
+  const presaleIso = formDateToPayload(values.presale_start)
+  const publicIso = formDateToPayload(values.public_start)
 
-  const allowlist_phases = values.allowlist_phases
+  const allowlist_phases = values.allowlist_phases.map((row) => ({
+    ...row,
+    start: formDateToPayload(row.start) ?? '',
+  }))
   const wlEnabled = allowlist_phases.length > 0 || values.wl_enabled
+  const resolvedPublicIso = resolvePublicStartForSave({
+    kickoff: launchIso,
+    requestedPublic: publicIso,
+    hasQueuedPhases: wlEnabled || values.presale_enabled,
+  })
   const first = allowlist_phases[0]
   const wlIso = first?.start.trim()
-    ? datetimeLocalToIso(first.start)
-    : datetimeLocalToIso(values.wl_start)
+    ? formDateToPayload(first.start)
+    : formDateToPayload(values.wl_start)
 
   // Leave price keys out when the field is blank so an empty input preserves
   // the existing price instead of silently overwriting it with 0.
@@ -409,11 +501,11 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
       ...(launchIso ? { AIRDROP: launchIso } : {}),
       ...(values.presale_enabled && presaleIso ? { PRESALE: presaleIso } : {}),
       ...(wlEnabled && wlIso ? { WHITELIST: wlIso } : {}),
-      ...(publicIso ? { PUBLIC: publicIso } : {}),
+      ...(resolvedPublicIso ? { PUBLIC: resolvedPublicIso } : {}),
     },
     presale_start: presaleIso,
     wl_start: wlIso,
-    public_start: publicIso,
+    public_start: resolvedPublicIso,
     royalty_percent: values.royalty_percent.trim() ? Number(values.royalty_percent) : undefined,
     royalty_splits: 'error' in royaltySplits ? values.royalty_splits : royaltySplits,
     mint_fund_splits: 'error' in mintFundSplits ? values.mint_fund_splits : mintFundSplits,
@@ -421,7 +513,7 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
       'error' in mintFundSplits ? undefined : primaryWalletFromSplits(mintFundSplits),
     mint_standard: values.mint_standard,
     freeze_enabled: values.freeze_enabled,
-    unfreeze_date: values.freeze_enabled ? values.unfreeze_date : '',
+    unfreeze_date: values.freeze_enabled ? formDateToPayload(values.unfreeze_date) ?? '' : '',
   }
 }
 
@@ -455,9 +547,9 @@ export function defaultMintDetailsFormValues(partial?: Partial<MintDetailsFormVa
   }
 }
 
-/** Primary “mint opens” timestamp for cards — PUBLIC schedule, else kickoff. */
+/** Primary “mint opens” timestamp for cards — Mint opens field, else PUBLIC. */
 export function resolveMintOpensAt(
   launch: Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule'>
 ): string | null {
-  return launch.phase_schedule?.PUBLIC ?? launch.launch_deadline_at ?? null
+  return launch.launch_deadline_at ?? launch.phase_schedule?.PUBLIC ?? null
 }

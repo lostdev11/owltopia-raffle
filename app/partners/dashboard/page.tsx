@@ -29,6 +29,7 @@ import { isMobileDevice } from '@/lib/utils'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { PartnerNestingRequestCard } from '@/components/partners/PartnerNestingRequestCard'
 import { PartnerPresaleManagerCard } from '@/components/partners/PartnerPresaleManagerCard'
+import { PartnerDiscordWlCampaignsCard } from '@/components/partners/PartnerDiscordWlCampaignsCard'
 
 const MOBILE_401_RETRY_DELAY_MS = 800
 
@@ -967,6 +968,8 @@ export default function PartnerHostDashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      <PartnerDiscordWlCampaignsCard />
 
       <Card className={CARD_SURFACE}>
         <CardHeader className="border-b border-border/50 pb-4">
