@@ -1,6 +1,6 @@
 import { parseStandardFreezeConfig } from '@/lib/owl-center/freeze-config'
 import { isLaunchSupplyConfigLocked } from '@/lib/owl-center/launch-edit-locks'
-import { parseMintDetailsConfig } from '@/lib/owl-center/launch-mint-config'
+import { parseMintDetailsConfig, resolvePublicStartForSave } from '@/lib/owl-center/launch-mint-config'
 import { isLaunchRoyaltyLocked, launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import { parseWalletSplitsFromBody, walletSplitsEqual } from '@/lib/owl-center/wallet-splits'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -130,6 +130,20 @@ export function buildMintDetailsPatchFromBody(
     }
   }
 
+  const hasQueuedPhases =
+    parsed.creator_presale_enabled ||
+    parsed.creator_wl_enabled ||
+    (parsed.partner_allowlist_phases?.length ?? 0) > 0
+  const publicIso = resolvePublicStartForSave({
+    kickoff: parsed.launch_deadline_at,
+    requestedPublic: parsed.phase_schedule.PUBLIC ?? null,
+    previousPublic: launch.phase_schedule?.PUBLIC ?? null,
+    hasQueuedPhases,
+  })
+  const phase_schedule = { ...parsed.phase_schedule }
+  if (publicIso) phase_schedule.PUBLIC = publicIso
+  else delete phase_schedule.PUBLIC
+
   const patch: Parameters<typeof updateOwlCenterLaunchByIdAdmin>[1] = {
     total_supply: parsed.total_supply,
     presale_supply: parsed.presale_supply,
@@ -141,7 +155,7 @@ export function buildMintDetailsPatchFromBody(
     public_price_usdc: parsed.public_price_usdc,
     wallet_mint_limit: parsed.wallet_mint_limit,
     launch_deadline_at: parsed.launch_deadline_at,
-    phase_schedule: parsed.phase_schedule,
+    phase_schedule,
     creator_presale_enabled: parsed.creator_presale_enabled,
     creator_wl_enabled: parsed.creator_wl_enabled,
     creator_mint_price: parsed.creator_mint_price,

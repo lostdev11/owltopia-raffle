@@ -106,6 +106,48 @@ function formDateToPayload(local: string): string | null {
   return datetimeLocalToIso(trimmed) ?? trimmed
 }
 
+function scheduleMs(raw: string | null | undefined): number | null {
+  if (!raw?.trim()) return null
+  const iso = datetimeLocalToIso(raw.trim()) ?? raw.trim()
+  const ms = Date.parse(iso)
+  return Number.isFinite(ms) ? ms : null
+}
+
+/** True when two schedule strings are the same instant (ISO or datetime-local). */
+export function scheduleInstantsEqual(a: string | null | undefined, b: string | null | undefined): boolean {
+  const am = scheduleMs(a)
+  const bm = scheduleMs(b)
+  if (am == null && bm == null) return !a?.trim() && !b?.trim()
+  return am != null && am === bm
+}
+
+/**
+ * PUBLIC start to persist with a mint-details save.
+ *
+ * Straight public mint: Mint opens is the live date.
+ * Allowlist/presale: keep an independent public start only when the request actually
+ * changed it. If Public start was left at the previous leftover time, copy Mint opens
+ * so moving the date back is visible after reload.
+ */
+export function resolvePublicStartForSave(opts: {
+  kickoff: string | null
+  requestedPublic: string | null
+  previousPublic?: string | null
+  hasQueuedPhases: boolean
+}): string | null {
+  const { kickoff, requestedPublic, previousPublic, hasQueuedPhases } = opts
+  if (!hasQueuedPhases) return kickoff ?? requestedPublic
+  if (!kickoff) return requestedPublic
+  if (!requestedPublic || scheduleInstantsEqual(requestedPublic, kickoff)) return kickoff
+  if (previousPublic !== undefined && scheduleInstantsEqual(requestedPublic, previousPublic)) return kickoff
+  return requestedPublic
+}
+
+/** Changing Mint opens also moves Public start; the public field can still be edited after. */
+export function applyMintOpensDate(values: MintDetailsFormValues, launch_date: string): MintDetailsFormValues {
+  return { ...values, launch_date, public_start: launch_date }
+}
+
 function requireScheduleEntry(
   raw: unknown,
   label: string
@@ -238,14 +280,14 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
     phase_schedule.WHITELIST = wl_start
   }
 
-  // Straight public mint: Mint opens is the date. Always copy it to PUBLIC so moving
-  // kickoff earlier actually moves the live mint time (a leftover later PUBLIC would
-  // otherwise win). Presale/WL still need an explicit public start.
-  if (!presale_enabled && !wl_enabled && launch_deadline_at) {
-    phase_schedule.PUBLIC = launch_deadline_at
-  } else if (public_start) {
-    phase_schedule.PUBLIC = public_start
-  }
+  const hasQueuedPhases = presale_enabled || wl_enabled || partner_allowlist_phases.length > 0
+  const publicIso = resolvePublicStartForSave({
+    kickoff: launch_deadline_at,
+    requestedPublic: public_start ?? phase_schedule.PUBLIC ?? null,
+    hasQueuedPhases,
+  })
+  if (publicIso) phase_schedule.PUBLIC = publicIso
+  else delete phase_schedule.PUBLIC
 
   if (launch_deadline_at && !phase_schedule.AIRDROP) phase_schedule.AIRDROP = launch_deadline_at
 
@@ -388,10 +430,11 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
     start: formDateToPayload(row.start) ?? '',
   }))
   const wlEnabled = allowlist_phases.length > 0 || values.wl_enabled
-  // Straight public mint: Mint opens is the live date (so moving it back overwrites
-  // a leftover later Public start). Allowlist/presale keep an independent public start.
-  const resolvedPublicIso =
-    !wlEnabled && !values.presale_enabled ? (launchIso ?? publicIso) : publicIso
+  const resolvedPublicIso = resolvePublicStartForSave({
+    kickoff: launchIso,
+    requestedPublic: publicIso,
+    hasQueuedPhases: wlEnabled || values.presale_enabled,
+  })
   const first = allowlist_phases[0]
   const wlIso = first?.start.trim()
     ? formDateToPayload(first.start)
@@ -479,9 +522,9 @@ export function defaultMintDetailsFormValues(partial?: Partial<MintDetailsFormVa
   }
 }
 
-/** Primary “mint opens” timestamp for cards — PUBLIC schedule, else kickoff. */
+/** Primary “mint opens” timestamp for cards — Mint opens field, else PUBLIC. */
 export function resolveMintOpensAt(
   launch: Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule'>
 ): string | null {
-  return launch.phase_schedule?.PUBLIC ?? launch.launch_deadline_at ?? null
+  return launch.launch_deadline_at ?? launch.phase_schedule?.PUBLIC ?? null
 }

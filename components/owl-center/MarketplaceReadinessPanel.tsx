@@ -9,6 +9,7 @@ import { MagicEdenHashListPanel } from '@/components/owl-center/MagicEdenHashLis
 import { OrbisListingPanel } from '@/components/owl-center/OrbisListingPanel'
 import { CreatorMarketplaceLockedSection } from '@/components/owl-center/CreatorMarketplaceLockedSection'
 import { MarketplaceStatusBadge } from '@/components/owl-center/MarketplaceStatusBadge'
+import { OwlCenterSaveNotice } from '@/components/owl-center/OwlCenterSaveNotice'
 import { ReadinessChecklist, type ReadinessChecklistItem } from '@/components/owl-center/ReadinessChecklist'
 import {
   creatorHashListApiPath,
@@ -27,7 +28,7 @@ type Props = {
   creatorMode?: boolean
   marketplaceApiPath?: string
   hashListApiPath?: string
-  onSaved?: () => void
+  onSaved?: (launch?: OwlCenterLaunchPublic) => void
   /** Render as a section inside a parent CommandCard instead of its own card. */
   embedded?: boolean
 }
@@ -165,13 +166,13 @@ export function MarketplaceReadinessPanel({
       }
       if (!res.ok) throw new Error(j.error || 'save_failed')
       if (j.marketplaceReadiness) applyRow(j.marketplaceReadiness)
-      if (j.go_live?.ok && !j.go_live.already_live) {
-        setMsg('Saved — launch auto-approved and is live on the public mint console.')
-      } else if (j.go_live?.ok && j.go_live.already_live) {
-        setMsg('Saved — launch was already live.')
-      } else {
-        setMsg('Saved')
-      }
+      setMsg(
+        j.go_live?.ok && !j.go_live.already_live
+          ? 'Saved. Launch auto-approved and is live on the public mint console.'
+          : j.go_live?.ok && j.go_live.already_live
+            ? 'Saved. Launch was already live.'
+            : 'Saved. Marketplace details updated.'
+      )
       onSaved?.()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'save_failed')
@@ -523,8 +524,10 @@ export function MarketplaceReadinessPanel({
         </p>
       ) : null}
 
-      {err ? <p className="mt-3 font-mono text-xs text-[#FF9C9C]">{err}</p> : null}
-      {msg ? <p className="mt-3 font-mono text-xs text-[#00FF9C]">{msg}</p> : null}
+      <div className="mt-3 space-y-2">
+        <OwlCenterSaveNotice tone="error" message={err} />
+        <OwlCenterSaveNotice message={msg} />
+      </div>
     </MarketplaceShell>
   )
 }

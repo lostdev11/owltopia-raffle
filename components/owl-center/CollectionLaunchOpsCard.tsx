@@ -28,7 +28,7 @@ type Props = {
   launch: OwlCenterLaunchPublic
   /** Card header; defaults to status · phase. */
   label?: string
-  onSaved?: () => void
+  onSaved?: (launch?: OwlCenterLaunchPublic) => void
   /** Creator mint-config PATCH path; omit for admin default. */
   saveApiPath?: string
   /** Creator metadata refresh GET/POST path; omit for admin default. */

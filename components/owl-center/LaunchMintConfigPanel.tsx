@@ -9,20 +9,23 @@ import { LaunchCoverImageFields } from '@/components/owl-center/LaunchCoverImage
 import {
   MintDetailsConfigFields,
 } from '@/components/owl-center/MintDetailsConfigFields'
+import { OwlCenterSaveNotice } from '@/components/owl-center/OwlCenterSaveNotice'
 import { isLaunchSupplyConfigLocked } from '@/lib/owl-center/launch-edit-locks'
 import { OWL_CENTER_MAX_LAUNCH_SUPPLY } from '@/lib/owl-center/launch-limits'
 import {
   mintDetailsFormFromLaunch,
   mintDetailsPayloadFromForm,
+  resolveMintOpensAt,
   type MintDetailsFormValues,
 } from '@/lib/owl-center/launch-mint-config'
+import { formatMintDate } from '@/lib/owl-center/phase-schedule'
 import { isLaunchRoyaltyLocked } from '@/lib/owl-center/royalty'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 type Props = {
   launchId: string
   launch: OwlCenterLaunchPublic
-  onSaved?: () => void
+  onSaved?: (launch?: OwlCenterLaunchPublic) => void
   /** Defaults to admin PATCH; creators use `/api/owl-center/launches/{id}/mint-config`. */
   saveApiPath?: string
   /** Render as sections inside a parent CommandCard instead of separate cards. */
@@ -68,23 +71,33 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      const j = (await res.json()) as {
+      const responseText = await res.text()
+      let j: {
         error?: string
         launch?: OwlCenterLaunchPublic
         guard_sync?: { ok?: boolean; status?: string; error?: string; reason?: string }
+        warnings?: string[]
+      }
+      try {
+        j = responseText ? (JSON.parse(responseText) as typeof j) : {}
+      } catch {
+        throw new Error(`Save failed (${res.status})`)
       }
       if (!res.ok) throw new Error(j.error || 'save_failed')
+      const saved = j.launch
+      if (saved) setValues(mintDetailsFormFromLaunch(saved))
+      const opensLabel = formatMintDate(saved ? resolveMintOpensAt(saved) : payload.launch_date as string)
+      const warningSuffix = j.warnings?.length ? ` ${j.warnings.join(' ')}` : ''
       if (j.guard_sync && j.guard_sync.ok === false) {
         setMsg(
-          `Mint details saved, but on-chain Candy Guard was not updated (${j.guard_sync.error ?? 'unknown'}). Public mint dates and the per-wallet cap may still be site-only until guards are synced.`
+          `Saved. Mint opens ${opensLabel}. On-chain Candy Guard was not updated (${j.guard_sync.error ?? 'unknown'}). Dates may still be site-only until guards are synced.${warningSuffix}`
         )
       } else if (j.guard_sync?.status === 'updated') {
-        setMsg('Mint details saved — on-chain start date and per-wallet cap updated.')
+        setMsg(`Saved. Mint opens ${opensLabel}. On-chain start date and per-wallet cap updated.${warningSuffix}`)
       } else {
-        setMsg('Mint details saved — collection cards will reflect on next load.')
+        setMsg(`Saved. Mint opens ${opensLabel}.${warningSuffix}`)
       }
-      if (j.launch) setValues(mintDetailsFormFromLaunch(j.launch))
-      onSaved?.()
+      onSaved?.(saved)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'save_failed')
     } finally {
@@ -92,8 +105,22 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
     }
   }
 
+  const notices =
+    err || msg ? (
+      <div className="mb-4 space-y-2">
+        <OwlCenterSaveNotice tone="error" message={err} />
+        <OwlCenterSaveNotice message={msg} />
+      </div>
+    ) : null
+
   const mintDetailsSection = (
-    <>
+    <form
+      onSubmit={(e) => {
+        e.preventDefault()
+        void save()
+      }}
+    >
+      {notices}
       <p className="mb-4 text-sm leading-relaxed text-[#9BA8B4]">
         Edit supply, Metaplex Core vs legacy, mint price, schedule, per-wallet limit, and fund wallets.
         {supplyLocked
@@ -109,21 +136,23 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
         supplyConfigLocked={supplyLocked}
       />
       <div className="mt-6 flex flex-wrap gap-2 border-t border-[#1A222B] pt-4">
-        <DeployButton type="button" disabled={saving} onClick={() => void save()}>
+        <DeployButton type="submit" disabled={saving}>
           {saving ? 'Saving…' : 'Save mint details'}
         </DeployButton>
         <DeployButton
           type="button"
           variant="ghost"
           disabled={saving}
-          onClick={() => setValues(mintDetailsFormFromLaunch(launch))}
+          onClick={() => {
+            setValues(mintDetailsFormFromLaunch(launch))
+            setMsg(null)
+            setErr(null)
+          }}
         >
           Reset
         </DeployButton>
       </div>
-      {err ? <p className="mt-3 font-mono text-xs text-[#FF9C9C]">{err}</p> : null}
-      {msg ? <p className="mt-3 font-mono text-xs text-[#00FF9C]">{msg}</p> : null}
-    </>
+    </form>
   )
 
   const coverSection = (

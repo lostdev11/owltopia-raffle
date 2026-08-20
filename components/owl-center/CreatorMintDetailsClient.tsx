@@ -26,9 +26,11 @@ export function CreatorMintDetailsClient({ launchId }: Props) {
   const [err, setErr] = useState<string | null>(null)
   const [launch, setLaunch] = useState<OwlCenterLaunchPublic | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setErr(null)
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) {
+      setLoading(true)
+      setErr(null)
+    }
     try {
       const res = await fetch(`/api/owl-center/launches/${launchId}/mint-config`, {
         credentials: 'include',
@@ -38,10 +40,12 @@ export function CreatorMintDetailsClient({ launchId }: Props) {
       if (!res.ok) throw new Error(j.error || 'load_failed')
       setLaunch(j.launch ?? null)
     } catch (e) {
-      setLaunch(null)
-      setErr(e instanceof Error ? e.message : 'load_failed')
+      if (!opts?.silent) {
+        setLaunch(null)
+        setErr(e instanceof Error ? e.message : 'load_failed')
+      }
     } finally {
-      setLoading(false)
+      if (!opts?.silent) setLoading(false)
     }
   }, [launchId])
 
@@ -88,7 +92,10 @@ export function CreatorMintDetailsClient({ launchId }: Props) {
       ) : launch ? (
         <CollectionLaunchOpsCard
           {...creatorLaunchOpsCardProps(launchId, launch)}
-          onSaved={() => void load()}
+          onSaved={(saved) => {
+            if (saved) setLaunch(saved)
+            else void load({ silent: true })
+          }}
           deletable={deletable}
           redirectAfterDelete="/owl-center/my-launches"
           className="max-w-2xl"

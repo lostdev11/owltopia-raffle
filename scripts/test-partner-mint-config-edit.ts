@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import { buildMintDetailsPatchFromBody } from '@/lib/owl-center/launch-mint-config-patch'
 import {
+  applyMintOpensDate,
   defaultMintDetailsFormValues,
   mintDetailsFormFromLaunch,
   mintDetailsPayloadFromForm,
   parseMintDetailsConfig,
+  resolveMintOpensAt,
 } from '@/lib/owl-center/launch-mint-config'
 import { datetimeLocalToIso, isoToDatetimeLocal } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -214,6 +216,74 @@ assert.ok(!('error' in wlPatch))
 assert.equal(wlPatch.launch_deadline_at, localIso)
 assert.equal(wlPatch.phase_schedule?.PUBLIC, publicStartIso)
 assert.equal(wlPatch.partner_allowlist_phases?.[0]?.starts_at, wlStartIso)
+
+const leftoverPublicIso = datetimeLocalToIso(leftoverPublic)
+const wlLeftoverForm = applyMintOpensDate(
+  dateForm({
+    total_supply: '100',
+    public_price: '1',
+    launch_date: leftoverPublic,
+    public_start: leftoverPublic,
+    wl_enabled: true,
+    allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: wlStart, supply: '20', price: '10' }],
+  }),
+  localKickoff
+)
+assert.equal(wlLeftoverForm.launch_date, localKickoff)
+assert.equal(wlLeftoverForm.public_start, localKickoff, 'changing Mint opens also moves Public start')
+
+const wlSyncedPayload = mintDetailsPayloadFromForm(wlLeftoverForm)
+assert.equal(wlSyncedPayload.launch_date, localIso)
+assert.equal(wlSyncedPayload.public_start, localIso)
+
+const wlSyncedPatch = buildMintDetailsPatchFromBody(
+  wlSyncedPayload,
+  baseLaunch({
+    launch_deadline_at: leftoverPublicIso,
+    phase_schedule: { PUBLIC: leftoverPublicIso! },
+    creator_wl_enabled: true,
+    wl_supply: 20,
+  })
+)
+assert.ok(!('error' in wlSyncedPatch))
+assert.equal(wlSyncedPatch.launch_deadline_at, localIso)
+assert.equal(wlSyncedPatch.phase_schedule?.PUBLIC, localIso, 'allowlist: Mint opens copy must persist PUBLIC')
+
+const wlUnchangedPublicPayload = mintDetailsPayloadFromForm(
+  dateForm({
+    total_supply: '100',
+    public_price: '1',
+    launch_date: localKickoff,
+    public_start: leftoverPublic,
+    wl_enabled: true,
+    allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: wlStart, supply: '20', price: '10' }],
+  })
+)
+const wlUnchangedPublicPatch = buildMintDetailsPatchFromBody(
+  wlUnchangedPublicPayload,
+  baseLaunch({
+    launch_deadline_at: leftoverPublicIso,
+    phase_schedule: { PUBLIC: leftoverPublicIso! },
+    creator_wl_enabled: true,
+    wl_supply: 20,
+  })
+)
+assert.ok(!('error' in wlUnchangedPublicPatch))
+assert.equal(wlUnchangedPublicPatch.launch_deadline_at, localIso)
+assert.equal(
+  wlUnchangedPublicPatch.phase_schedule?.PUBLIC,
+  localIso,
+  'allowlist: leftover Public start matching previous PUBLIC follows Mint opens'
+)
+
+assert.equal(
+  resolveMintOpensAt({
+    launch_deadline_at: localIso,
+    phase_schedule: { PUBLIC: leftoverPublicIso! },
+  }),
+  localIso,
+  'cards show Mint opens, not a leftover later PUBLIC'
+)
 
 const reloaded = mintDetailsFormFromLaunch(
   baseLaunch({
