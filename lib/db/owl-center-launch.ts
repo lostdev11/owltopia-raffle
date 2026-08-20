@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
-import { parseActivePhases, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
+import { datetimeLocalToIso, parseActivePhases, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
 import { parsePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
 import { parseWalletSplitsFromDb } from '@/lib/owl-center/wallet-splits'
 import { isOpaqueOwlCenterLaunchSlug } from '@/lib/owl-center/launch-slug'
@@ -32,8 +32,10 @@ import type {
  */
 function normalizeTimestamp(raw: unknown): string | null {
   if (raw == null) return null
-  const ms = new Date(String(raw)).getTime()
-  return Number.isFinite(ms) ? new Date(ms).toISOString() : null
+  if (raw instanceof Date) {
+    return Number.isFinite(raw.getTime()) ? raw.toISOString() : null
+  }
+  return datetimeLocalToIso(String(raw))
 }
 
 function parseRevealMode(raw: unknown): OwlCenterRevealMode | null {

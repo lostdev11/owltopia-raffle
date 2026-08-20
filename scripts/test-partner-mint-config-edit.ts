@@ -173,6 +173,33 @@ assert.ok(!('error' in movedBackPatch))
 assert.equal(movedBackPatch.launch_deadline_at, localIso)
 assert.equal(movedBackPatch.phase_schedule?.PUBLIC, localIso)
 
+const publicEditedOnly = '2026-09-24T08:44'
+const publicEditedIso = datetimeLocalToIso(publicEditedOnly)
+const publicEditedPayload = mintDetailsPayloadFromForm(
+  dateForm({
+    total_supply: '100',
+    public_price: '1',
+    launch_date: leftoverPublic,
+    public_start: publicEditedOnly,
+  })
+)
+const publicEditedPatch = buildMintDetailsPatchFromBody(
+  {
+    ...publicEditedPayload,
+    launch_date: datetimeLocalToIso(leftoverPublic),
+    public_start: publicEditedIso,
+  },
+  baseLaunch({
+    launch_deadline_at: datetimeLocalToIso(leftoverPublic),
+    phase_schedule: { PUBLIC: datetimeLocalToIso(leftoverPublic)! },
+  })
+)
+assert.ok(!('error' in publicEditedPatch))
+assert.equal(publicEditedPatch.launch_deadline_at, publicEditedIso, 'editing only Public start still moves mint opens')
+assert.equal(publicEditedPatch.phase_schedule?.PUBLIC, publicEditedIso)
+
+assert.equal(datetimeLocalToIso('2026-08-24 15:44:00+00'), '2026-08-24T15:44:00.000Z')
+
 const publicOnly = '2026-08-22T16:30'
 const publicIso = datetimeLocalToIso(publicOnly)
 const publicPayload = mintDetailsPayloadFromForm(

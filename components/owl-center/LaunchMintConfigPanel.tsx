@@ -16,6 +16,7 @@ import {
   mintDetailsFormFromLaunch,
   mintDetailsPayloadFromForm,
   resolveMintOpensAt,
+  scheduleInstantsEqual,
   type MintDetailsFormValues,
 } from '@/lib/owl-center/launch-mint-config'
 import { formatMintDate } from '@/lib/owl-center/phase-schedule'
@@ -36,16 +37,24 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
   const [values, setValues] = useState<MintDetailsFormValues>(() =>
     mintDetailsFormFromLaunch(launch)
   )
+  const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
   const supplyLocked = isLaunchSupplyConfigLocked(launch)
   const royaltiesLocked = isLaunchRoyaltyLocked(launch)
+  const launchStamp = `${launch.id}:${launch.updated_at}:${launch.launch_deadline_at}:${launch.phase_schedule?.PUBLIC ?? ''}`
 
   useEffect(() => {
+    if (dirty) return
     setValues(mintDetailsFormFromLaunch(launch))
-  }, [launch])
+  }, [launchStamp, dirty, launch])
+
+  function updateValues(next: MintDetailsFormValues) {
+    setDirty(true)
+    setValues(next)
+  }
 
   async function save() {
     const priceStr = values.public_price.trim()
@@ -85,19 +94,29 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
       }
       if (!res.ok) throw new Error(j.error || 'save_failed')
       const saved = j.launch
-      if (saved) setValues(mintDetailsFormFromLaunch(saved))
-      const opensLabel = formatMintDate(saved ? resolveMintOpensAt(saved) : payload.launch_date as string)
-      const warningSuffix = j.warnings?.length ? ` ${j.warnings.join(' ')}` : ''
-      if (j.guard_sync && j.guard_sync.ok === false) {
-        setMsg(
-          `Saved. Mint opens ${opensLabel}. On-chain Candy Guard was not updated (${j.guard_sync.error ?? 'unknown'}). Dates may still be site-only until guards are synced.${warningSuffix}`
+      const requestedIso = typeof payload.launch_date === 'string' ? payload.launch_date : null
+      const savedIso = saved ? resolveMintOpensAt(saved) : requestedIso
+      if (requestedIso && savedIso && !scheduleInstantsEqual(requestedIso, savedIso)) {
+        setErr(
+          `Date did not save. You entered ${formatMintDate(requestedIso)}, but the collection still has ${formatMintDate(savedIso)}.`
         )
-      } else if (j.guard_sync?.status === 'updated') {
-        setMsg(`Saved. Mint opens ${opensLabel}. On-chain start date and per-wallet cap updated.${warningSuffix}`)
+        setDirty(true)
       } else {
-        setMsg(`Saved. Mint opens ${opensLabel}.${warningSuffix}`)
+        if (saved) setValues(mintDetailsFormFromLaunch(saved))
+        setDirty(false)
+        const opensLabel = formatMintDate(savedIso ?? requestedIso)
+        const warningSuffix = j.warnings?.length ? ` ${j.warnings.join(' ')}` : ''
+        if (j.guard_sync && j.guard_sync.ok === false) {
+          setMsg(
+            `Saved. Mint opens ${opensLabel}. On-chain Candy Guard was not updated (${j.guard_sync.error ?? 'unknown'}). Dates may still be site-only until guards are synced.${warningSuffix}`
+          )
+        } else if (j.guard_sync?.status === 'updated') {
+          setMsg(`Saved. Mint opens ${opensLabel}. On-chain start date and per-wallet cap updated.${warningSuffix}`)
+        } else {
+          setMsg(`Saved. Mint opens ${opensLabel}.${warningSuffix}`)
+        }
+        onSaved?.(saved)
       }
-      onSaved?.(saved)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'save_failed')
     } finally {
@@ -129,7 +148,7 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
       </p>
       <MintDetailsConfigFields
         values={values}
-        onChange={setValues}
+        onChange={updateValues}
         defaultWallet={launch.creator_wallet?.trim() ?? ''}
         royaltiesLocked={royaltiesLocked}
         showSupplyField
@@ -145,6 +164,7 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
           disabled={saving}
           onClick={() => {
             setValues(mintDetailsFormFromLaunch(launch))
+            setDirty(false)
             setMsg(null)
             setErr(null)
           }}
