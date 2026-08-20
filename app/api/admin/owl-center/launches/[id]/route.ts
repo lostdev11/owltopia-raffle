@@ -101,12 +101,14 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   const updated = await updateOwlCenterLaunchByIdAdmin(id, patch)
   if (!updated) return jsonError('Update failed', 500)
 
+  const launchAfterSave = (await getOwlCenterLaunchByIdAdmin(id)) ?? updated
+
   let guard_sync: Awaited<ReturnType<typeof syncPublicSimpleCandyGuards>> | null = null
-  if (bodyHasMintConfigFields(body) && updated.mint_mode === 'public_simple') {
-    guard_sync = await syncPublicSimpleCandyGuards(updated)
+  if (bodyHasMintConfigFields(body) && launchAfterSave.mint_mode === 'public_simple') {
+    guard_sync = await syncPublicSimpleCandyGuards(launchAfterSave)
   }
 
-  return NextResponse.json({ ok: true, launch: updated, guard_sync })
+  return NextResponse.json({ ok: true, launch: launchAfterSave, guard_sync })
 }
 
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {

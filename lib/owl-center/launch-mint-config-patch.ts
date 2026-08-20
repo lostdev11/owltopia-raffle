@@ -1,6 +1,10 @@
 import { parseStandardFreezeConfig } from '@/lib/owl-center/freeze-config'
 import { isLaunchSupplyConfigLocked } from '@/lib/owl-center/launch-edit-locks'
-import { parseMintDetailsConfig, resolvePublicStartForSave, scheduleInstantsEqual } from '@/lib/owl-center/launch-mint-config'
+import {
+  parseMintDetailsConfig,
+  resolveMintOpensIsoForPatch,
+  resolvePublicStartForSave,
+} from '@/lib/owl-center/launch-mint-config'
 import { isLaunchRoyaltyLocked, launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import { parseWalletSplitsFromBody, walletSplitsEqual } from '@/lib/owl-center/wallet-splits'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -134,17 +138,14 @@ export function buildMintDetailsPatchFromBody(
     parsed.creator_presale_enabled ||
     parsed.creator_wl_enabled ||
     (parsed.partner_allowlist_phases?.length ?? 0) > 0
-  const kickoffChanged = Boolean(
-    parsed.launch_deadline_at && !scheduleInstantsEqual(parsed.launch_deadline_at, launch.launch_deadline_at)
-  )
   const requestedPublic = parsed.phase_schedule.PUBLIC ?? null
-  const publicChanged = Boolean(
-    requestedPublic && !scheduleInstantsEqual(requestedPublic, launch.phase_schedule?.PUBLIC)
-  )
-  const mintOpensIso =
-    !hasQueuedPhases && publicChanged && !kickoffChanged
-      ? requestedPublic
-      : parsed.launch_deadline_at
+  const mintOpensIso = resolveMintOpensIsoForPatch({
+    kickoff: parsed.launch_deadline_at,
+    requestedPublic,
+    previousKickoff: launch.launch_deadline_at,
+    previousPublic: launch.phase_schedule?.PUBLIC ?? null,
+    hasQueuedPhases,
+  })
   const publicIso = resolvePublicStartForSave({
     kickoff: mintOpensIso,
     requestedPublic,
@@ -154,7 +155,7 @@ export function buildMintDetailsPatchFromBody(
   const phase_schedule = { ...parsed.phase_schedule }
   if (publicIso) phase_schedule.PUBLIC = publicIso
   else delete phase_schedule.PUBLIC
-  if (mintOpensIso && !phase_schedule.AIRDROP) phase_schedule.AIRDROP = mintOpensIso
+  if (mintOpensIso) phase_schedule.AIRDROP = mintOpensIso
 
   const patch: Parameters<typeof updateOwlCenterLaunchByIdAdmin>[1] = {
     total_supply: parsed.total_supply,

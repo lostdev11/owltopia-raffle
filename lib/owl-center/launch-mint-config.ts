@@ -157,6 +157,24 @@ export function resolveSimpleMintDate(kickoff: string | null, publicStart: strin
   return kickoff ?? publicStart
 }
 
+/** Canonical Mint opens ISO to write on save — prefer whichever date field the user actually changed. */
+export function resolveMintOpensIsoForPatch(opts: {
+  kickoff: string | null
+  requestedPublic: string | null
+  previousKickoff?: string | null
+  previousPublic?: string | null
+  hasQueuedPhases: boolean
+}): string | null {
+  const { kickoff, requestedPublic, previousKickoff, previousPublic, hasQueuedPhases } = opts
+  const kickoffChanged = Boolean(kickoff && !scheduleInstantsEqual(kickoff, previousKickoff))
+  const publicChanged = Boolean(requestedPublic && !scheduleInstantsEqual(requestedPublic, previousPublic))
+
+  if (kickoffChanged) return kickoff
+  if (publicChanged) return requestedPublic
+  if (!hasQueuedPhases) return resolveSimpleMintDate(kickoff, requestedPublic)
+  return kickoff ?? requestedPublic
+}
+
 function requireScheduleEntry(
   raw: unknown,
   label: string

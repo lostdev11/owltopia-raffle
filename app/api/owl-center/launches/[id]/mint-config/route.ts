@@ -96,7 +96,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     const patch = buildMintDetailsPatchFromBody(body, launch)
     if ('error' in patch) return jsonError(patch.error, 400)
     hasMintFields = true
-    updated = (await updateOwlCenterLaunchByIdAdmin(id, patch)) ?? launch
+    const savedRow = await updateOwlCenterLaunchByIdAdmin(id, patch)
+    if (!savedRow) return jsonError('Update failed', 500)
+    updated = (await getOwlCenterLaunchByIdAdmin(id)) ?? savedRow
   }
 
   if (coverRaw !== undefined) {

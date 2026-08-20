@@ -16,6 +16,7 @@ import {
   mintDetailsFormFromLaunch,
   mintDetailsPayloadFromForm,
   resolveMintOpensAt,
+  resolveSimpleMintDate,
   scheduleInstantsEqual,
   type MintDetailsFormValues,
 } from '@/lib/owl-center/launch-mint-config'
@@ -94,7 +95,10 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
       }
       if (!res.ok) throw new Error(j.error || 'save_failed')
       const saved = j.launch
-      const requestedIso = typeof payload.launch_date === 'string' ? payload.launch_date : null
+      const requestedIso = resolveSimpleMintDate(
+        typeof payload.launch_date === 'string' ? payload.launch_date : null,
+        typeof payload.public_start === 'string' ? payload.public_start : null
+      )
       const savedIso = saved ? resolveMintOpensAt(saved) : requestedIso
       if (requestedIso && savedIso && !scheduleInstantsEqual(requestedIso, savedIso)) {
         setErr(
