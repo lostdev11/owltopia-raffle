@@ -68,6 +68,8 @@ import { getMilestonesByRaffleId, insertRaffleMilestones } from '@/lib/db/raffle
 import { BAMBOO_TICKET_CURRENCY, canWalletUseBambooTicketCurrency } from '@/lib/raffles/bamboo-ticket-currency'
 import { GOATS_TICKET_CURRENCY, canWalletUseGoatsTicketCurrency } from '@/lib/raffles/goats-ticket-currency'
 import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
+import { recordPlatformProjectFromCreatedRaffleSafe } from '@/lib/platform-projects/record-from-raffle'
+import { sanitizeLaunchMintPubkey } from '@/lib/solana/validate-pubkey'
 
 /** Same as /api/me/dashboard — client sends the adapter’s pubkey so we can reject stale SIWS sessions after wallet switches. */
 const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
@@ -580,6 +582,7 @@ export async function handleCreateRafflePost(
         prize_currency: prizeCurrency,
         nft_mint_address: null,
         nft_collection_name: null,
+        nft_collection_mint: null,
         nft_token_id: null,
         nft_metadata_uri: null,
         ticket_price: ticketPriceNum,
@@ -650,6 +653,9 @@ export async function handleCreateRafflePost(
         typeof body.nft_token_id === 'string' && body.nft_token_id.trim() ? body.nft_token_id.trim() : null
       if (nftMintAddress) nftMintAddress = normalizePrizeAssetIdForRaffle(nftMintAddress) ?? nftMintAddress
       if (nftTokenId) nftTokenId = normalizePrizeAssetIdForRaffle(nftTokenId) ?? nftTokenId
+      const nftCollectionMintRaw =
+        typeof body.nft_collection_mint === 'string' ? body.nft_collection_mint : ''
+      const nftCollectionMint = sanitizeLaunchMintPubkey(nftCollectionMintRaw)
 
       if (!nftMintAddress && !nftTokenId) {
         return NextResponse.json(
@@ -815,6 +821,7 @@ export async function handleCreateRafflePost(
         prize_currency: prizeCurrency,
         nft_mint_address: prizeType === 'nft' ? nftMintAddress : null,
         nft_collection_name: prizeType === 'nft' ? (body.nft_collection_name || null) : null,
+        nft_collection_mint: prizeType === 'nft' ? nftCollectionMint : null,
         nft_token_id: prizeType === 'nft' ? nftTokenId : null,
         nft_metadata_uri: prizeType === 'nft' ? (body.nft_metadata_uri || null) : null,
         ticket_price: ticketPriceNum,
@@ -958,6 +965,8 @@ export async function handleCreateRafflePost(
     try {
       const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')
 
+      recordPlatformProjectFromCreatedRaffleSafe(raffle)
+
       if (milestoneValidation.milestones.length > 0) {
         await insertRaffleMilestones(raffle.id, milestoneValidation.milestones)
       }
@@ -1036,6 +1045,28 @@ export async function handleCreateRafflePost(
         {
           error:
             'This accent color needs a quick database update on the server. Try Prime, Midnight, or Dawn for now, or ask an admin to apply migration 093_extend_theme_accent_more.sql.',
+          step,
+        },
+        { status: 503 }
+      )
+    }
+    // Legacy DECIMAL(10,6) ticket_price / amount_paid overflow (max 9999.999999). Migration 216 widens to NUMERIC(38,18).
+    if (/numeric field overflow/i.test(raw) || raw.includes('22003')) {
+      return NextResponse.json(
+        {
+          error:
+            'This ticket price is too large for the current database column. Ask an admin to apply migration 216_widen_ticket_price_amount_paid_precision.sql, then try again.',
+          step,
+        },
+        { status: 503 }
+      )
+    }
+    // App allowlists GOATS/BAMBOO tickets; raffles_currency_check must match (migration 225 / 212).
+    if (/raffles_currency_check/i.test(raw) || /entries_currency_check/i.test(raw)) {
+      return NextResponse.json(
+        {
+          error:
+            'This ticket currency is not enabled in the database yet. Ask an admin to apply migration 225_allow_goats_raffle_currency.sql, then try again.',
           step,
         },
         { status: 503 }

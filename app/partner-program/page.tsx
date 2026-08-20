@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import type { ReactNode } from 'react'
+import { Suspense, type ReactNode } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft,
@@ -24,6 +24,7 @@ import {
 } from '@/lib/site-config'
 import { PARTNER_COMMUNITY_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
 import { PARTNER_PRO_SETUP_USD } from '@/lib/config/partner-program-pricing'
+import { PARTNER_PRO_APPLY_HREF, WHITE_LABEL_APPLY_HREF } from '@/lib/partner-program-apply'
 import { getStakingPlatformFeeSol } from '@/lib/nesting/staking-platform-fee'
 
 const SITE_URL = getSiteBaseUrl()
@@ -124,6 +125,8 @@ const tiers = [
       'Apply for Nesting at no extra partner cost after approval.',
     ],
     notIncluded: 'Not white-label and not a separate branded standalone app.',
+    applyHref: null as string | null,
+    applyLabel: null as string | null,
   },
   {
     name: 'Partner Pro',
@@ -136,6 +139,8 @@ const tiers = [
       'No monthly Partner Pro subscription — one-time setup only.',
     ],
     notIncluded: 'Not full white-label; still runs on Owltopia core infrastructure.',
+    applyHref: PARTNER_PRO_APPLY_HREF,
+    applyLabel: 'Apply for Partner Pro',
   },
   {
     name: 'White-label',
@@ -146,6 +151,8 @@ const tiers = [
       'Quoted only after technical discovery.',
     ],
     notIncluded: 'Not part of standard partner setup.',
+    applyHref: WHITE_LABEL_APPLY_HREF,
+    applyLabel: 'Apply for white-label',
   },
 ]
 
@@ -214,6 +221,16 @@ export default function PartnerProgramPage() {
                   ))}
                 </ul>
                 <p className="mt-3 text-xs text-muted-foreground">Not included: {tier.notIncluded}</p>
+                {tier.applyHref && tier.applyLabel ? (
+                  <div className="mt-4 space-y-2">
+                    <Button asChild className="min-h-[44px] w-full touch-manipulation">
+                      <Link href={tier.applyHref}>{tier.applyLabel}</Link>
+                    </Button>
+                    <p className="break-all font-mono text-[11px] leading-relaxed text-muted-foreground">
+                      {tier.applyHref}
+                    </p>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -300,11 +317,20 @@ export default function PartnerProgramPage() {
         >
           <h2 className="mt-0 text-xl font-semibold sm:text-2xl">Apply or ask a question</h2>
           <p className="text-muted-foreground mb-4 text-sm sm:text-base">
-            Tell us about your project and audience. We review fit, tier, wallet setup, and Discord flow. You can submit
-            here or message us directly.
+            Tell us about your project and audience. We review fit, tier, wallet setup, and Discord flow. Partner Pro and
+            white-label cards above include shareable apply links that preselect the tier. Those applications can also
+            include a Discord invite or project site. You can submit here or message us directly.
           </p>
           <div className="mb-4">
-            <PartnerProgramApplyForm />
+            <Suspense
+              fallback={
+                <div className="min-h-[280px] rounded-lg border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
+                  Loading application form…
+                </div>
+              }
+            >
+              <PartnerProgramApplyForm />
+            </Suspense>
           </div>
           <Button asChild className="min-h-[44px] w-full touch-manipulation sm:w-auto" size="lg">
             <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2">

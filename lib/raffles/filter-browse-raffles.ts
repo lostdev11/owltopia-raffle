@@ -18,12 +18,17 @@ export type RaffleBrowsePrizeFilter = 'SOL' | 'USDC' | null
  */
 export type RaffleBrowseHostFilter = string | null
 
+/** Collection-mint filter (`?collection=<mint>`). Display names are UX only. */
+export type RaffleBrowseCollectionFilter = string | null
+
 export interface RaffleBrowseFilters {
   query: string
   ticketCurrency: RaffleBrowseTicketCurrencyFilter
   prize: RaffleBrowsePrizeFilter
   /** Canonical creator wallet when set. */
   hostWallet?: RaffleBrowseHostFilter
+  /** Canonical collection mint when set. */
+  collectionMint?: RaffleBrowseCollectionFilter
 }
 
 /** Parse `?currency=OWL` (ticket payment filter). */
@@ -53,6 +58,15 @@ export function hostWalletFilterFromSearchParam(
   return normalizeSolanaWalletAddress(t) ?? t
 }
 
+/** Parse `?collection=<mint>` — invalid / empty → null. */
+export function collectionMintFilterFromSearchParam(
+  raw: string | null | undefined
+): RaffleBrowseCollectionFilter {
+  const t = (raw ?? '').trim()
+  if (!t) return null
+  return normalizeSolanaWalletAddress(t) ?? t
+}
+
 export function isCryptoPrizeRaffle(raffle: Raffle): boolean {
   return raffle.prize_type === 'crypto' || raffle.prize_type == null
 }
@@ -64,6 +78,7 @@ function searchableFields(raffle: Raffle): string[] {
     raffle.slug,
     raffle.description,
     raffle.nft_collection_name,
+    raffle.nft_collection_mint,
     raffle.nft_token_id,
     raffle.nft_mint_address,
     raffle.prize_currency,
@@ -119,12 +134,24 @@ export function raffleMatchesHostFilter(
   return walletsEqualSolana(creator, hostWallet)
 }
 
+/** Collection-mint equality filter (`nft_collection_mint`). */
+export function raffleMatchesCollectionFilter(
+  raffle: Raffle,
+  collectionMint: RaffleBrowseCollectionFilter | undefined
+): boolean {
+  if (!collectionMint?.trim()) return true
+  const mint = raffle.nft_collection_mint?.trim()
+  if (!mint) return false
+  return walletsEqualSolana(mint, collectionMint)
+}
+
 export function raffleMatchesBrowseFilters(raffle: Raffle, filters: RaffleBrowseFilters): boolean {
   return (
     raffleMatchesBrowseSearch(raffle, filters.query) &&
     raffleMatchesTicketCurrencyFilter(raffle, filters.ticketCurrency) &&
     raffleMatchesPrizeFilter(raffle, filters.prize) &&
-    raffleMatchesHostFilter(raffle, filters.hostWallet)
+    raffleMatchesHostFilter(raffle, filters.hostWallet) &&
+    raffleMatchesCollectionFilter(raffle, filters.collectionMint)
   )
 }
 
@@ -136,7 +163,8 @@ export function filterRafflesBrowseList<T extends { raffle: Raffle }>(
     !filters.query.trim() &&
     !filters.ticketCurrency &&
     !filters.prize &&
-    !filters.hostWallet?.trim()
+    !filters.hostWallet?.trim() &&
+    !filters.collectionMint?.trim()
   ) {
     return items
   }
@@ -148,7 +176,8 @@ export function hasActiveBrowseFilters(filters: RaffleBrowseFilters): boolean {
     filters.query.trim() ||
       filters.ticketCurrency ||
       filters.prize ||
-      filters.hostWallet?.trim()
+      filters.hostWallet?.trim() ||
+      filters.collectionMint?.trim()
   )
 }
 

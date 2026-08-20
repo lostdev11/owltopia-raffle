@@ -72,6 +72,7 @@ import {
 } from '@/lib/solana/wallet-tokens'
 import { walletNftCollectionDisplayLabel, walletNftMintMatches } from '@/lib/raffles/wallet-nft-picker'
 import { WalletNftPicker } from '@/components/WalletNftPicker'
+import { NftMarketFloorHint } from '@/components/NftMarketFloorHint'
 import {
   NFT_DEFAULT_SUGGEST_TICKET_COUNT,
   suggestTicketPriceFromFloor,
@@ -1131,6 +1132,8 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       data.nft_token_id = prizeNft!.mint
       data.nft_metadata_uri = prizeNft!.metadataUri ?? undefined
       data.nft_collection_name = prizeNft!.collectionName ?? undefined
+      const collectionMint = prizeNft!.collectionMint?.trim()
+      if (collectionMint) data.nft_collection_mint = collectionMint
       const inferredStandard = prizeStandardFromWalletNft(prizeNft!)
       if (inferredStandard) data.prize_standard = inferredStandard
     }
@@ -2404,6 +2407,19 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
                   placeholder="e.g., 0.25 or 5.5 (same as currency above)"
                   required
                 />
+                {prizeMode === 'nft' ? (
+                  <NftMarketFloorHint
+                    mint={prizeNft?.mint ?? (nftMintInput.trim() || null)}
+                    collectionMint={prizeNft?.collectionMint}
+                    currency={raffleCurrency}
+                    floorValue={floorPrice}
+                    autoApply
+                    onApplyFloor={(v) => {
+                      setFloorPrice(v)
+                      applyFloorToTicketAutofill(v)
+                    }}
+                  />
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="ticket_price">Ticket price *</Label>

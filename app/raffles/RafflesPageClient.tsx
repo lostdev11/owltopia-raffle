@@ -62,9 +62,11 @@ import {
   filterRafflesBrowseList,
   hasActiveBrowseFilters,
   hostWalletFilterFromSearchParam,
+  collectionMintFilterFromSearchParam,
   prizeFilterFromSearchParam,
   ticketCurrencyFilterFromSearchParam,
   type RaffleBrowseHostFilter,
+  type RaffleBrowseCollectionFilter,
   type RaffleBrowsePrizeFilter,
   type RaffleBrowseTicketCurrencyFilter,
 } from '@/lib/raffles/filter-browse-raffles'
@@ -72,6 +74,10 @@ import {
   collectHostCandidates,
   truncateWalletLabel,
 } from '@/lib/raffles/resolve-host-filter'
+import {
+  collectCollectionCandidates,
+  truncateMintLabel,
+} from '@/lib/raffles/resolve-collection-filter'
 import { getRaffleHostWallet } from '@/lib/raffles/host-wallet-copy'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 
@@ -358,6 +364,10 @@ export function RafflesPageClient({
     hostWalletFilterFromSearchParam(searchParams.get('host'))
   )
   const [browseHostLabel, setBrowseHostLabel] = useState<string | null>(null)
+  const [browseCollectionMint, setBrowseCollectionMint] = useState<RaffleBrowseCollectionFilter>(() =>
+    collectionMintFilterFromSearchParam(searchParams.get('collection'))
+  )
+  const [browseCollectionLabel, setBrowseCollectionLabel] = useState<string | null>(null)
   const [creatorDisplayNames, setCreatorDisplayNames] = useState<Record<string, string>>({})
 
   const browseFilters = useMemo(
@@ -366,8 +376,9 @@ export function RafflesPageClient({
       ticketCurrency: browseTicketCurrency,
       prize: browsePrize,
       hostWallet: browseHostWallet,
+      collectionMint: browseCollectionMint,
     }),
-    [browseQuery, browseTicketCurrency, browsePrize, browseHostWallet]
+    [browseQuery, browseTicketCurrency, browsePrize, browseHostWallet, browseCollectionMint]
   )
 
   const replaceBrowseFiltersInUrl = useCallback(
@@ -376,6 +387,7 @@ export function RafflesPageClient({
       ticketCurrency: RaffleBrowseTicketCurrencyFilter
       prize: RaffleBrowsePrizeFilter
       hostWallet: RaffleBrowseHostFilter
+      collectionMint: RaffleBrowseCollectionFilter
     }) => {
       const params = new URLSearchParams(searchParams.toString())
       const q = next.query.trim()
@@ -387,6 +399,8 @@ export function RafflesPageClient({
       else params.delete('prize')
       if (next.hostWallet?.trim()) params.set('host', next.hostWallet.trim())
       else params.delete('host')
+      if (next.collectionMint?.trim()) params.set('collection', next.collectionMint.trim())
+      else params.delete('collection')
       const qs = params.toString()
       router.replace(qs ? `/raffles?${qs}` : '/raffles', { scroll: false })
     },
@@ -398,11 +412,13 @@ export function RafflesPageClient({
     const urlCur = ticketCurrencyFilterFromSearchParam(searchParams.get('currency'))
     const urlPrize = prizeFilterFromSearchParam(searchParams.get('prize'))
     const urlHost = hostWalletFilterFromSearchParam(searchParams.get('host'))
+    const urlCollection = collectionMintFilterFromSearchParam(searchParams.get('collection'))
     if (
       browseQuery.trim() === urlQ &&
       browseTicketCurrency === urlCur &&
       browsePrize === urlPrize &&
-      (browseHostWallet || '') === (urlHost || '')
+      (browseHostWallet || '') === (urlHost || '') &&
+      (browseCollectionMint || '') === (urlCollection || '')
     ) {
       return
     }
@@ -412,6 +428,7 @@ export function RafflesPageClient({
         ticketCurrency: browseTicketCurrency,
         prize: browsePrize,
         hostWallet: browseHostWallet,
+        collectionMint: browseCollectionMint,
       })
     }, 350)
     return () => clearTimeout(t)
@@ -420,6 +437,7 @@ export function RafflesPageClient({
     browseTicketCurrency,
     browsePrize,
     browseHostWallet,
+    browseCollectionMint,
     searchParams,
     replaceBrowseFiltersInUrl,
   ])
@@ -428,6 +446,8 @@ export function RafflesPageClient({
   useEffect(() => {
     const urlHost = hostWalletFilterFromSearchParam(searchParams.get('host'))
     setBrowseHostWallet((prev) => ((prev || '') === (urlHost || '') ? prev : urlHost))
+    const urlCollection = collectionMintFilterFromSearchParam(searchParams.get('collection'))
+    setBrowseCollectionMint((prev) => ((prev || '') === (urlCollection || '') ? prev : urlCollection))
   }, [searchParams])
 
   const handleBrowseTicketCurrencyChange = useCallback(
@@ -438,9 +458,10 @@ export function RafflesPageClient({
         ticketCurrency: value,
         prize: browsePrize,
         hostWallet: browseHostWallet,
+        collectionMint: browseCollectionMint,
       })
     },
-    [browseQuery, browsePrize, browseHostWallet, replaceBrowseFiltersInUrl]
+    [browseQuery, browsePrize, browseHostWallet, browseCollectionMint, replaceBrowseFiltersInUrl]
   )
 
   const handleBrowsePrizeChange = useCallback(
@@ -451,9 +472,10 @@ export function RafflesPageClient({
         ticketCurrency: browseTicketCurrency,
         prize: value,
         hostWallet: browseHostWallet,
+        collectionMint: browseCollectionMint,
       })
     },
-    [browseQuery, browseTicketCurrency, browseHostWallet, replaceBrowseFiltersInUrl]
+    [browseQuery, browseTicketCurrency, browseHostWallet, browseCollectionMint, replaceBrowseFiltersInUrl]
   )
 
   const handleBrowseHostChange = useCallback(
@@ -466,9 +488,26 @@ export function RafflesPageClient({
         ticketCurrency: browseTicketCurrency,
         prize: browsePrize,
         hostWallet: next,
+        collectionMint: browseCollectionMint,
       })
     },
-    [browseQuery, browseTicketCurrency, browsePrize, replaceBrowseFiltersInUrl]
+    [browseQuery, browseTicketCurrency, browsePrize, browseCollectionMint, replaceBrowseFiltersInUrl]
+  )
+
+  const handleBrowseCollectionChange = useCallback(
+    (mint: string | null, label?: string | null) => {
+      const next = mint?.trim() ? mint.trim() : null
+      setBrowseCollectionMint(next)
+      setBrowseCollectionLabel(next ? (label?.trim() || truncateMintLabel(next)) : null)
+      replaceBrowseFiltersInUrl({
+        query: browseQuery,
+        ticketCurrency: browseTicketCurrency,
+        prize: browsePrize,
+        hostWallet: browseHostWallet,
+        collectionMint: next,
+      })
+    },
+    [browseQuery, browseTicketCurrency, browsePrize, browseHostWallet, replaceBrowseFiltersInUrl]
   )
 
   const clearBrowseFilters = useCallback(() => {
@@ -477,11 +516,14 @@ export function RafflesPageClient({
     setBrowsePrize(null)
     setBrowseHostWallet(null)
     setBrowseHostLabel(null)
+    setBrowseCollectionMint(null)
+    setBrowseCollectionLabel(null)
     replaceBrowseFiltersInUrl({
       query: '',
       ticketCurrency: null,
       prize: null,
       hostWallet: null,
+      collectionMint: null,
     })
   }, [replaceBrowseFiltersInUrl])
 
@@ -567,6 +609,7 @@ export function RafflesPageClient({
           prize_type: (r.prize_type ?? 'crypto') as 'crypto' | 'nft',
           nft_mint_address: r.nft_mint_address ?? null,
           nft_collection_name: r.nft_collection_name ?? null,
+          nft_collection_mint: r.nft_collection_mint ?? null,
           nft_token_id: r.nft_token_id ?? null,
           nft_metadata_uri: r.nft_metadata_uri ?? null,
           sol_domains_hub: r.sol_domains_hub === true,
@@ -759,6 +802,7 @@ export function RafflesPageClient({
             prize_type: (r.prize_type ?? 'crypto') as 'crypto' | 'nft',
             nft_mint_address: r.nft_mint_address ?? null,
             nft_collection_name: r.nft_collection_name ?? null,
+            nft_collection_mint: r.nft_collection_mint ?? null,
             nft_token_id: r.nft_token_id ?? null,
             nft_metadata_uri: r.nft_metadata_uri ?? null,
             sol_domains_hub: r.sol_domains_hub === true,
@@ -967,6 +1011,17 @@ export function RafflesPageClient({
     [activeView, pausedPendingView, futureView, pastView]
   )
 
+  const collectionCandidates = useMemo(
+    () =>
+      collectCollectionCandidates([
+        ...activeView.map((i) => i.raffle),
+        ...pausedPendingView.map((i) => i.raffle),
+        ...futureView.map((i) => i.raffle),
+        ...pastView.map((i) => i.raffle),
+      ]),
+    [activeView, pausedPendingView, futureView, pastView]
+  )
+
   // Resolve chip label for deep-linked `?host=` once candidates / profiles load.
   useEffect(() => {
     if (!browseHostWallet) {
@@ -987,6 +1042,21 @@ export function RafflesPageClient({
     }
     setBrowseHostLabel((prev) => prev || truncateWalletLabel(browseHostWallet))
   }, [browseHostWallet, hostCandidates, creatorDisplayNames])
+
+  useEffect(() => {
+    if (!browseCollectionMint) {
+      setBrowseCollectionLabel(null)
+      return
+    }
+    const fromCandidates = collectionCandidates.find((c) =>
+      walletsEqualSolana(c.mint, browseCollectionMint)
+    )
+    if (fromCandidates) {
+      setBrowseCollectionLabel(fromCandidates.label)
+      return
+    }
+    setBrowseCollectionLabel((prev) => prev || truncateMintLabel(browseCollectionMint))
+  }, [browseCollectionMint, collectionCandidates])
 
   const partnerFeaturedBrowse = useMemo(
     () =>
@@ -1314,6 +1384,10 @@ export function RafflesPageClient({
             hostLabel={browseHostLabel}
             onHostChange={handleBrowseHostChange}
             hostCandidates={hostCandidates}
+            collectionMint={browseCollectionMint}
+            collectionLabel={browseCollectionLabel}
+            onCollectionChange={handleBrowseCollectionChange}
+            collectionCandidates={collectionCandidates}
             resultCount={browseTabResultCount}
             totalCount={browseTabTotalCount}
           />
@@ -1777,7 +1851,7 @@ export function RafflesPageClient({
               <div className="mb-8 sm:mb-12 w-full min-w-0 text-center py-12 px-2">
                 <p className="text-xl text-muted-foreground mb-2">No raffles match your search</p>
                 <p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
-                  Try a different name or clear the ticket or prize filters. Search matches title, slug, collection,
+                  Try a different name or clear the ticket, prize, host, or project filters. Search matches title, slug, collection,
                   and promo handle.
                 </p>
                 <button

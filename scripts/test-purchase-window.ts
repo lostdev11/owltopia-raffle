@@ -57,6 +57,7 @@ function baseRaffle(overrides: Partial<Raffle> = {}): Raffle {
     image_fallback_url: null,
     nft_mint_address: null,
     nft_collection_name: null,
+    nft_collection_mint: null,
     nft_token_id: null,
     prize_type: 'crypto',
     prize_amount: 1,

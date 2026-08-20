@@ -21,6 +21,7 @@ type PartnerApplication = {
   interested_tier: string
   details: string | null
   logo_url: string | null
+  community_url: string | null
   status: string
   approved_at: string | null
   approved_creator_wallet: string | null
@@ -162,7 +163,8 @@ export default function AdminPartnerApplicationsPage() {
         Partner applications
       </h1>
       <p className="mb-6 text-sm text-muted-foreground">
-        Approve to allowlist the wallet as a partner (tier + logo from their answers). Link Discord later in{' '}
+        Approve to allowlist the wallet as a partner (tier + logo from their answers). Pro and white-label apps may
+        include a Discord or project link. Link the Discord tenant later in{' '}
         <Link href="/admin/partner-creators" className="text-primary underline-offset-4 hover:underline">
           Partner program creators
         </Link>
@@ -228,6 +230,19 @@ export default function AdminPartnerApplicationsPage() {
                   </p>
                   <p className="break-all font-mono text-xs text-muted-foreground">{row.wallet_address}</p>
                   <p className="text-sm">Tier: {row.interested_tier}</p>
+                  {row.community_url ? (
+                    <p className="text-sm">
+                      Link:{' '}
+                      <a
+                        href={row.community_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="break-all text-primary underline-offset-4 hover:underline"
+                      >
+                        {row.community_url}
+                      </a>
+                    </p>
+                  ) : null}
                   <div className="flex flex-wrap gap-2">
                     <Button
                       type="button"
