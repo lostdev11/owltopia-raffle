@@ -7,6 +7,7 @@ import { useWalletModal } from '@solana/wallet-adapter-react-ui'
 import { ArrowLeft, CheckCircle2, Copy, Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CoinArtUpgradeAuthorizeClient } from '@/components/coin-upgrade/CoinArtUpgradeAuthorizeClient'
+import { CoinArtUpgradeArtUploadPanel } from '@/components/coin-upgrade/CoinArtUpgradeArtUploadPanel'
 
 type Stats = {
   enabled: boolean
@@ -141,7 +142,8 @@ export function AdminCoinArtUpgradeClient() {
         </h1>
         <p className="text-sm text-muted-foreground leading-relaxed">
           Create the server hot key here, fund it with a little SOL, then send Gembird the authorize
-          link. He only taps Approve in Phantom — no CLI, no secrets.
+          link. When art is ready, upload the numbered ZIP below (same flow as Owl Center Phase B) —
+          no local CLI required.
         </p>
       </div>
 
@@ -254,6 +256,10 @@ export function AdminCoinArtUpgradeClient() {
               <p className="text-xs text-muted-foreground">SOL collected</p>
               <p className="font-medium">{stats.sol_collected.toFixed(2)}</p>
             </div>
+            <div className="rounded-xl border border-border/60 p-3 col-span-2 sm:col-span-4">
+              <p className="text-xs text-muted-foreground">Upgrade catalog</p>
+              <p className="font-medium">{stats.catalog_size} / 1000 coins seeded</p>
+            </div>
           </div>
         </>
       )}
@@ -262,6 +268,8 @@ export function AdminCoinArtUpgradeClient() {
         <h2 className="text-lg font-semibold">2. Gembird authorize (or test yourself)</h2>
         <CoinArtUpgradeAuthorizeClient embedded />
       </section>
+
+      {connected && !error ? <CoinArtUpgradeArtUploadPanel /> : null}
     </main>
   )
 }
