@@ -1719,7 +1719,7 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     </p>
                     <p>
                       <span className="text-foreground font-medium">Max tickets:</span>{' '}
-                      {raffle.max_tickets != null ? raffle.max_tickets : 'Unlimited'}
+                      {raffle.max_tickets != null ? raffle.max_tickets : 'Unlimited (legacy)'}
                     </p>
                     <p>
                       <span className="text-foreground font-medium">Max per person:</span>{' '}
