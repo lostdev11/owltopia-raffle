@@ -24,6 +24,11 @@ const QUICK_LINKS = [
   { href: '/owl-center/launch', label: 'Review queue', hint: 'Creator submissions' },
   { href: '/admin/owl-center/partners', label: 'Partners', hint: 'Approve launchpad wallets' },
   { href: '/admin/owl-center/marketplaces', label: 'Marketplaces', hint: 'ME / Tensor readiness' },
+  {
+    href: '/admin/coin-upgrade',
+    label: 'Coin art upgrade',
+    hint: 'ZIP → Irys → catalog (Owltopia Coins)',
+  },
 ] as const
 
 export function LaunchpadHubClient() {

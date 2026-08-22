@@ -3658,8 +3658,8 @@ export default function AdminDashboardPage() {
                       Coin art upgrade
                     </CardTitle>
                     <CardDescription>
-                      Optional paid Owltopia Coin art upgrade: sales stats, and the one-tap Phantom authorize for
-                      Gembird (/coin-upgrade/authorize).
+                      Optional paid Owltopia Coin art upgrade: hot key + Gembird authorize, ZIP art upload to
+                      Arweave, catalog seed, and sales stats.
                     </CardDescription>
                   </CardHeader>
                 </Link>
