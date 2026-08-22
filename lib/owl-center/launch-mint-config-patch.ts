@@ -2,9 +2,11 @@ import { parseStandardFreezeConfig } from '@/lib/owl-center/freeze-config'
 import { isLaunchSupplyConfigLocked } from '@/lib/owl-center/launch-edit-locks'
 import {
   parseMintDetailsConfig,
+  resolveAllowlistPhasesForSave,
   resolveMintOpensIsoForPatch,
   resolvePublicStartForSave,
 } from '@/lib/owl-center/launch-mint-config'
+import { partnerAllowlistEarliestStart } from '@/lib/owl-center/partner-allowlist-phases'
 import { isLaunchRoyaltyLocked, launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import { parseWalletSplitsFromBody, walletSplitsEqual } from '@/lib/owl-center/wallet-splits'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -157,6 +159,19 @@ export function buildMintDetailsPatchFromBody(
   else delete phase_schedule.PUBLIC
   if (mintOpensIso) phase_schedule.AIRDROP = mintOpensIso
 
+  const partner_allowlist_phases = resolveAllowlistPhasesForSave({
+    phases: parsed.partner_allowlist_phases ?? [],
+    kickoff: mintOpensIso,
+    previousKickoff: launch.launch_deadline_at,
+    previousPublic: launch.phase_schedule?.PUBLIC ?? null,
+  })
+  const earliestAllowlist = partnerAllowlistEarliestStart(partner_allowlist_phases)
+  if (partner_allowlist_phases.length > 0 && earliestAllowlist) {
+    phase_schedule.WHITELIST = earliestAllowlist
+  } else if (!parsed.creator_wl_enabled) {
+    delete phase_schedule.WHITELIST
+  }
+
   const patch: Parameters<typeof updateOwlCenterLaunchByIdAdmin>[1] = {
     total_supply: parsed.total_supply,
     presale_supply: parsed.presale_supply,
@@ -175,7 +190,7 @@ export function buildMintDetailsPatchFromBody(
     creator_mint_currency: parsed.creator_mint_currency,
     creator_launch_date: mintOpensIso,
     seller_fee_basis_points: parsed.seller_fee_basis_points,
-    partner_allowlist_phases: parsed.partner_allowlist_phases,
+    partner_allowlist_phases,
   }
 
   if (body.royalty_splits !== undefined) {

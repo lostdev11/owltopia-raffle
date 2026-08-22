@@ -392,5 +392,44 @@ const jsonRoundTrip = parseMintDetailsConfig(JSON.parse(JSON.stringify(simplePay
 assert.ok(!('error' in jsonRoundTrip))
 assert.equal(jsonRoundTrip.launch_deadline_at, localIso)
 
+const syncedAllowlistForm = applyMintOpensDate(
+  dateForm({
+    total_supply: '100',
+    public_price: '1',
+    launch_date: localKickoff,
+    public_start: localKickoff,
+    wl_enabled: true,
+    allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: localKickoff, supply: '20', price: '10' }],
+  }),
+  sepLocal
+)
+assert.equal(syncedAllowlistForm.allowlist_phases[0]?.start, sepLocal, 'allowlist start tied to mint opens follows kickoff')
+
+const staleWlIso = datetimeLocalToIso('2026-08-24T11:48')
+const staleWlPatch = buildMintDetailsPatchFromBody(
+  mintDetailsPayloadFromForm(
+    dateForm({
+      total_supply: '100',
+      public_price: '1',
+      launch_date: sepLocal,
+      public_start: sepLocal,
+      wl_enabled: true,
+      allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: '2026-08-24T11:48', supply: '20', price: '10' }],
+    })
+  ),
+  baseLaunch({
+    launch_deadline_at: staleWlIso,
+    phase_schedule: { PUBLIC: staleWlIso!, WHITELIST: staleWlIso! },
+    creator_wl_enabled: true,
+    wl_supply: 20,
+    partner_allowlist_phases: [
+      { key: 'wl', label: 'Whitelist', starts_at: staleWlIso!, supply: 20, price_usdc: 10 },
+    ],
+  })
+)
+assert.ok(!('error' in staleWlPatch))
+assert.equal(staleWlPatch.launch_deadline_at, sepIso, 'stale WL save moves mint opens')
+assert.equal(staleWlPatch.partner_allowlist_phases?.[0]?.starts_at, sepIso, 'stale WL before kickoff clamps to mint opens')
+
 console.log('ok: partner mint-config date save round-trip')
 
