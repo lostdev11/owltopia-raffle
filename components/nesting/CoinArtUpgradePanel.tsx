@@ -9,6 +9,9 @@ import { sendCoinArtUpgradeFeeTransaction } from '@/lib/coin-upgrade/client/upgr
 
 type PanelConfig = {
   enabled: boolean
+  catalog_ready: boolean
+  preview: boolean
+  sellable: boolean
   fee_sol: number
   fee_lamports: number
   treasury: string | null
@@ -62,7 +65,9 @@ function formatSol(sol: number): string {
  * Optional Owltopia Coin art upgrade (community vote): pay the per-coin fee,
  * the server repoints the Core URI to the new art in place — nested coins
  * included, no unlock needed — and the coin earns boosted OWL while nested.
- * Renders nothing until COIN_ART_UPGRADE_ENABLED is on and the wallet holds coins.
+ *
+ * Before go-live (`!sellable`): shows a Coming soon teaser with fee + reward
+ * copy and no pay CTA. Live mode requires sellable config + wallet coins.
  */
 export function CoinArtUpgradePanel() {
   const { connection } = useConnection()
@@ -92,7 +97,7 @@ export function CoinArtUpgradePanel() {
       }
       setConfig(json.config)
       setCoins(json.coins ?? [])
-      setHidden(!json.config.enabled)
+      setHidden(false)
       return json
     } catch {
       setHidden(true)
@@ -131,7 +136,7 @@ export function CoinArtUpgradePanel() {
   useEffect(() => {
     if (!connected) return
     void load().then((json) => {
-      if (!json?.config?.enabled) return
+      if (!json?.config?.sellable) return
       // Recover a paid fee whose POST response was lost: any stored coin still
       // showing as un-upgraded means the payment was never linked server-side.
       const pending = readPendingPayment()
@@ -164,7 +169,7 @@ export function CoinArtUpgradePanel() {
 
   const toggleSelect = useCallback(
     (mint: string) => {
-      if (!config) return
+      if (!config?.sellable) return
       setSelected((prev) => {
         const next = new Set(prev)
         if (next.has(mint)) next.delete(mint)
@@ -176,7 +181,7 @@ export function CoinArtUpgradePanel() {
   )
 
   const handleUpgradeSelected = useCallback(async () => {
-    if (!config || !publicKey || selected.size === 0 || busy) return
+    if (!config?.sellable || !publicKey || selected.size === 0 || busy) return
     if (!config.treasury) {
       setNotice({ tone: 'error', text: 'Upgrade fee treasury is not configured yet. Try again later.' })
       return
@@ -225,7 +230,7 @@ export function CoinArtUpgradePanel() {
   }, [busy, config, connection, load, publicKey, selected, sendTransaction, submitUpgrade])
 
   const handleRetryProcessing = useCallback(async () => {
-    if (busy || processing.length === 0 || !config) return
+    if (busy || processing.length === 0 || !config?.sellable) return
     setBusy(true)
     setNotice(null)
     try {
@@ -246,9 +251,16 @@ export function CoinArtUpgradePanel() {
     }
   }, [busy, config, load, processing, submitUpgrade])
 
-  if (!connected || hidden || !loaded || !config?.enabled || coins.length === 0) return null
+  if (!connected || hidden || !loaded || !config) return null
+
+  const sellable = config.sellable === true
+  // Live mode still needs coins in-wallet; Coming soon shows without a coin scan.
+  if (sellable && coins.length === 0) return null
 
   const totalSol = formatSol(config.fee_sol * selected.size)
+  const comingSoonStatus = !config.catalog_ready
+    ? 'New art is being prepared — upgrades open once the catalog is live.'
+    : 'Upgrades are almost ready — check back soon to unlock the new art.'
 
   return (
     <section
@@ -269,6 +281,12 @@ export function CoinArtUpgradePanel() {
         </div>
       </div>
 
+      {!sellable ? (
+        <p className="text-xs rounded-lg border border-border/60 px-3 py-2 leading-relaxed text-muted-foreground">
+          Coming soon — {comingSoonStatus}
+        </p>
+      ) : null}
+
       {notice ? (
         <p
           className={cn(
@@ -282,7 +300,7 @@ export function CoinArtUpgradePanel() {
         </p>
       ) : null}
 
-      {processing.length > 0 ? (
+      {sellable && processing.length > 0 ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2">
           <p className="text-xs text-muted-foreground">
             {processing.length} paid upgrade{processing.length === 1 ? '' : 's'} finishing on-chain —
@@ -302,81 +320,83 @@ export function CoinArtUpgradePanel() {
         </div>
       ) : null}
 
-      <ul className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-        {coins.map((coin) => {
-          const isSelected = selected.has(coin.mint)
-          const selectable = coin.upgrade_status === 'none' && !busy
-          const displayImage =
-            coin.upgrade_status === 'upgraded' ? coin.new_image ?? coin.image : coin.image
-          return (
-            <li key={coin.mint}>
-              <button
-                type="button"
-                disabled={!selectable}
-                onClick={() => toggleSelect(coin.mint)}
-                aria-pressed={isSelected}
-                className={cn(
-                  'w-full text-left rounded-xl border p-2 space-y-2 touch-manipulation transition-colors',
-                  isSelected
-                    ? 'border-theme-prime ring-1 ring-theme-prime'
-                    : 'border-border/60 hover:border-border',
-                  !selectable && 'opacity-90 cursor-default'
-                )}
-              >
-                <div className="relative aspect-square overflow-hidden rounded-lg bg-muted">
-                  {displayImage ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={displayImage}
-                      alt={coin.name ?? coin.mint}
-                      className="h-full w-full object-cover"
-                      loading="lazy"
-                    />
-                  ) : null}
-                  {coin.upgrade_status === 'none' && coin.new_image ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={coin.new_image}
-                      alt="New art preview"
-                      className="absolute bottom-1 right-1 h-1/3 w-1/3 rounded-md border border-border/80 object-cover shadow"
-                      loading="lazy"
-                    />
-                  ) : null}
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs font-medium truncate">{coin.name ?? coin.mint}</p>
-                  <div className="flex flex-wrap gap-1">
-                    {coin.nested ? (
-                      <span className="rounded-full border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        Nested
-                      </span>
+      {sellable ? (
+        <ul className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+          {coins.map((coin) => {
+            const isSelected = selected.has(coin.mint)
+            const selectable = coin.upgrade_status === 'none' && !busy
+            const displayImage =
+              coin.upgrade_status === 'upgraded' ? coin.new_image ?? coin.image : coin.image
+            return (
+              <li key={coin.mint}>
+                <button
+                  type="button"
+                  disabled={!selectable}
+                  onClick={() => toggleSelect(coin.mint)}
+                  aria-pressed={isSelected}
+                  className={cn(
+                    'w-full text-left rounded-xl border p-2 space-y-2 touch-manipulation transition-colors',
+                    isSelected
+                      ? 'border-theme-prime ring-1 ring-theme-prime'
+                      : 'border-border/60 hover:border-border',
+                    !selectable && 'opacity-90 cursor-default'
+                  )}
+                >
+                  <div className="relative aspect-square overflow-hidden rounded-lg bg-muted">
+                    {displayImage ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={displayImage}
+                        alt={coin.name ?? coin.mint}
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                      />
                     ) : null}
-                    {coin.upgrade_status === 'upgraded' ? (
-                      <span className="rounded-full border border-emerald-500/50 px-1.5 py-0.5 text-[10px] text-emerald-500">
-                        Upgraded · {config.reward_multiplier}×
-                      </span>
-                    ) : coin.upgrade_status === 'processing' ? (
-                      <span className="rounded-full border border-amber-500/50 px-1.5 py-0.5 text-[10px] text-amber-500">
-                        Finishing…
-                      </span>
-                    ) : coin.upgrade_status === 'art_unavailable' ? (
-                      <span className="rounded-full border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        Art coming soon
-                      </span>
-                    ) : (
-                      <span className="rounded-full border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        Original
-                      </span>
-                    )}
+                    {coin.upgrade_status === 'none' && coin.new_image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={coin.new_image}
+                        alt="New art preview"
+                        className="absolute bottom-1 right-1 h-1/3 w-1/3 rounded-md border border-border/80 object-cover shadow"
+                        loading="lazy"
+                      />
+                    ) : null}
                   </div>
-                </div>
-              </button>
-            </li>
-          )
-        })}
-      </ul>
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium truncate">{coin.name ?? coin.mint}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {coin.nested ? (
+                        <span className="rounded-full border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          Nested
+                        </span>
+                      ) : null}
+                      {coin.upgrade_status === 'upgraded' ? (
+                        <span className="rounded-full border border-emerald-500/50 px-1.5 py-0.5 text-[10px] text-emerald-500">
+                          Upgraded · {config.reward_multiplier}×
+                        </span>
+                      ) : coin.upgrade_status === 'processing' ? (
+                        <span className="rounded-full border border-amber-500/50 px-1.5 py-0.5 text-[10px] text-amber-500">
+                          Finishing…
+                        </span>
+                      ) : coin.upgrade_status === 'art_unavailable' ? (
+                        <span className="rounded-full border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          Art coming soon
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          Original
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      ) : null}
 
-      {upgradable.length > 0 ? (
+      {sellable && upgradable.length > 0 ? (
         <div className="space-y-2">
           <Button
             type="button"
@@ -394,7 +414,7 @@ export function CoinArtUpgradePanel() {
             never unlock. Up to {config.max_per_request} coins per batch.
           </p>
         </div>
-      ) : upgradedCount === coins.length && coins.length > 0 ? (
+      ) : sellable && upgradedCount === coins.length && coins.length > 0 ? (
         <p className="text-xs text-muted-foreground text-center">
           All your coins are upgraded. Enjoy the {config.reward_multiplier}× nested rewards!
         </p>

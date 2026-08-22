@@ -24,6 +24,7 @@ import {
   listCoinArtUpgradesByAssetIds,
   listCoinArtUpgradesNeedingRepair,
   patchCoinArtUpgradeRow,
+  countCoinArtUpgradeCatalogEntries,
   type CoinArtUpgradeRow,
 } from '@/lib/db/coin-art-upgrades'
 
@@ -131,6 +132,14 @@ export async function executeCoinArtUpgrade(params: {
 }): Promise<CoinArtUpgradeExecutionResult> {
   if (!isCoinArtUpgradeEnabled()) {
     throw new StakingUserError('Coin art upgrades are not open yet.', 403)
+  }
+
+  const catalogSize = await countCoinArtUpgradeCatalogEntries()
+  if (catalogSize < 1) {
+    throw new StakingUserError(
+      'New coin art is still being prepared. Upgrades open once the catalog is live.',
+      403
+    )
   }
 
   const wallet = params.wallet.trim()
