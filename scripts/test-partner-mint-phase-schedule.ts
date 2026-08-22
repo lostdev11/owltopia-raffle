@@ -31,6 +31,7 @@ function launch(
       | 'wl_supply'
       | 'wl_price_usdc'
       | 'phase_schedule'
+      | 'launch_deadline_at'
       | 'public_supply'
       | 'public_price_usdc'
       | 'wallet_mint_limit'
