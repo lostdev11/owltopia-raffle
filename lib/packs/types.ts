@@ -78,6 +78,15 @@ export type PackInventoryRow = {
   updated_at: string
 }
 
+export type PackOpenVrfStatus = 'pending' | 'failed' | 'fulfilled'
+
+export type PackNftPoolSnapshotRow = {
+  id: string
+  mint: string
+  fair_value_sol: number
+  weight: number
+}
+
 export type PackOpenRow = {
   id: string
   product_id: string
@@ -99,6 +108,13 @@ export type PackOpenRow = {
   error_message: string | null
   created_at: string
   completed_at: string | null
+  open_vrf_provider?: string | null
+  open_vrf_status?: PackOpenVrfStatus | null
+  open_vrf_account?: string | null
+  open_vrf_request_tx?: string | null
+  open_vrf_fulfill_tx?: string | null
+  open_vrf_error?: string | null
+  nft_pool_snapshot?: PackNftPoolSnapshotRow[] | null
 }
 
 export type PackTicketCreditRow = {

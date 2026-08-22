@@ -1,5 +1,4 @@
 import {
-  PACK_OPEN_ALGO,
   PACK_OWL_TO_TICKET_RATIO,
   PACK_PRICE_SOL,
   solToLamports,
@@ -12,9 +11,10 @@ import {
   getPackOpenByPaymentSignature,
   getPackVaultConfig,
   grantPackTicketCredits,
+  listAvailableNftsForOpen,
   markNftPaid,
   releaseNftReservation,
-  reserveNftInBand,
+  reserveNftById,
   updatePackOpen,
   updatePackVaultConfig,
 } from '@/lib/packs/db'
@@ -22,9 +22,16 @@ import {
   generatePackOpenSeed,
   hashPackOpenCommit,
   pickCategory,
+  pickNftFromAvailableInventory,
   pickTier,
 } from '@/lib/packs/rng'
-import type { PackInventoryPrizeStandard, PackOpenResult, PackOpenRow } from '@/lib/packs/types'
+import { nftPoolSnapshotForStorage } from '@/lib/packs/nft-weights'
+import type {
+  PackInventoryPrizeStandard,
+  PackNftPoolSnapshotRow,
+  PackOpenResult,
+  PackOpenRow,
+} from '@/lib/packs/types'
 import { verifyPackPayment } from '@/lib/packs/verify-payment'
 import {
   getPacksVaultPublicKey,
@@ -32,8 +39,13 @@ import {
   payoutOwlFromPacksVault,
   payoutSolFromPacksVault,
 } from '@/lib/packs/vault'
+import { isPackVrfEnabled, resolvePackOpenAlgo } from '@/lib/packs/vrf-config'
+import { runPackOpenVrf } from '@/lib/packs/vrf-open-flow'
 
-function rowToResult(row: PackOpenRow, extra?: { nftName?: string | null; nftImageUrl?: string | null }): PackOpenResult {
+function rowToResult(
+  row: PackOpenRow,
+  extra?: { nftName?: string | null; nftImageUrl?: string | null }
+): PackOpenResult {
   return {
     openId: row.id,
     category: row.category!,
@@ -110,6 +122,7 @@ export async function startPackOpen(buyerWallet: string): Promise<{
 /**
  * Verify payment signature and run roll → reserve → payout → receipt.
  * Idempotent on payment_signature / completed opens.
+ * Seed source: Switchboard VRF when PACK_VRF_ENABLED, else local commit–reveal.
  */
 export async function confirmAndOpenPack(input: {
   openId: string
@@ -160,18 +173,35 @@ export async function confirmAndOpenPack(input: {
   }
 
   const config = await getPackVaultConfig()
-  const seed = generatePackOpenSeed()
-  const commit = hashPackOpenCommit(seed)
+  const algo = resolvePackOpenAlgo()
 
+  let seed: string
+  if (isPackVrfEnabled()) {
+    open = await updatePackOpen(open.id, { status: 'rolling', open_algo: algo })
+    const vrf = await runPackOpenVrf(open.id)
+    if (!vrf.ok) {
+      await updatePackOpen(open.id, {
+        status: 'refund_needed',
+        error_message: `VRF failed: ${vrf.error}`,
+      })
+      throw new Error(
+        `Pack randomness (VRF) failed. Pack marked for refund — contact support. (${vrf.error})`
+      )
+    }
+    seed = vrf.openSeed
+  } else {
+    seed = generatePackOpenSeed()
+  }
+
+  const commit = hashPackOpenCommit(seed)
   open = await updatePackOpen(open.id, {
     status: 'rolling',
-    open_algo: PACK_OPEN_ALGO,
+    open_algo: algo,
     open_seed: seed,
     open_commit_hash: commit,
   })
 
   const category = pickCategory(seed)
-  const pick = pickTier(seed, category, config.owl_sol_price)
 
   let prizeLabel = ''
   let owlAmount: number | null = null
@@ -183,22 +213,53 @@ export async function confirmAndOpenPack(input: {
   let nftImageUrl: string | null = null
   let nftPrizeStandard: PackInventoryPrizeStandard | null = null
   let freeTickets = 0
+  let nftPoolSnapshot: PackNftPoolSnapshotRow[] | null = null
 
-  if (pick.category === 'owl') {
+  if (category === 'owl') {
+    const pick = pickTier(seed, 'owl', config.owl_sol_price)
+    if (pick.category !== 'owl') throw new Error('Invalid OWL pick')
     owlAmount = pick.amount
     fairValueSol = pick.fairValueSol
     prizeLabel = `${pick.amount} $OWL`
     freeTickets = Math.floor(pick.amount * PACK_OWL_TO_TICKET_RATIO)
-  } else if (pick.category === 'sol') {
+  } else if (category === 'sol') {
+    const pick = pickTier(seed, 'sol', config.owl_sol_price)
+    if (pick.category !== 'sol') throw new Error('Invalid SOL pick')
     solAmount = pick.amountSol
     fairValueSol = pick.fairValueSol
     prizeLabel = `${pick.amountSol} SOL`
   } else {
-    const reserved = await reserveNftInBand(open.id, pick.minFairValueSol, pick.maxFairValueSol)
+    const available = await listAvailableNftsForOpen()
+    if (available.length === 0) {
+      await updatePackVaultConfig({
+        paused: true,
+        pause_reason: 'NFT inventory empty during open — paused',
+      })
+      open = await updatePackOpen(open.id, {
+        status: 'refund_needed',
+        category: 'nft',
+        error_message: 'No NFT inventory available for payout',
+      })
+      throw new Error('No NFT inventory available. Packs paused — contact support for refund.')
+    }
+
+    const { pick, pool } = pickNftFromAvailableInventory(
+      seed,
+      available.map((r) => ({
+        id: r.id,
+        mint_address: r.mint_address,
+        fair_value_sol: Number(r.fair_value_sol),
+        name: r.name,
+        image_url: r.image_url,
+      }))
+    )
+    nftPoolSnapshot = nftPoolSnapshotForStorage(pool)
+
+    const reserved = await reserveNftById(open.id, pick.id)
     if (!reserved) {
-      // Try any available NFT in full 0.05–0.5 range as soft fallback within NFT category
-      const fallback = await reserveNftInBand(open.id, 0.05, 0.5)
-      if (!fallback) {
+      // Race: mint taken between list and reserve — soft retry once with refreshed pool
+      const available2 = await listAvailableNftsForOpen()
+      if (available2.length === 0) {
         await updatePackVaultConfig({
           paused: true,
           pause_reason: 'NFT inventory empty during open — paused',
@@ -207,16 +268,38 @@ export async function confirmAndOpenPack(input: {
           status: 'refund_needed',
           category: 'nft',
           error_message: 'No NFT inventory available for payout',
+          nft_pool_snapshot: nftPoolSnapshot,
         })
         throw new Error('No NFT inventory available. Packs paused — contact support for refund.')
       }
-      nftInventoryId = fallback.id
-      nftMint = fallback.mint_address
-      nftName = fallback.name
-      nftImageUrl = fallback.image_url
-      nftPrizeStandard = fallback.prize_standard ?? 'spl'
-      fairValueSol = Number(fallback.fair_value_sol)
-      prizeLabel = fallback.name || `NFT ${fallback.mint_address.slice(0, 8)}…`
+      const second = pickNftFromAvailableInventory(
+        seed,
+        available2.map((r) => ({
+          id: r.id,
+          mint_address: r.mint_address,
+          fair_value_sol: Number(r.fair_value_sol),
+          name: r.name,
+          image_url: r.image_url,
+        }))
+      )
+      nftPoolSnapshot = nftPoolSnapshotForStorage(second.pool)
+      const reserved2 = await reserveNftById(open.id, second.pick.id)
+      if (!reserved2) {
+        open = await updatePackOpen(open.id, {
+          status: 'refund_needed',
+          category: 'nft',
+          error_message: 'Could not reserve NFT (concurrent opens)',
+          nft_pool_snapshot: nftPoolSnapshot,
+        })
+        throw new Error('Could not reserve NFT prize. Contact support for refund.')
+      }
+      nftInventoryId = reserved2.id
+      nftMint = reserved2.mint_address
+      nftName = reserved2.name
+      nftImageUrl = reserved2.image_url
+      nftPrizeStandard = reserved2.prize_standard ?? 'spl'
+      fairValueSol = Number(reserved2.fair_value_sol)
+      prizeLabel = reserved2.name || `NFT ${reserved2.mint_address.slice(0, 8)}…`
     } else {
       nftInventoryId = reserved.id
       nftMint = reserved.mint_address
@@ -238,6 +321,7 @@ export async function confirmAndOpenPack(input: {
     nft_mint_address: nftMint,
     fair_value_sol: fairValueSol,
     free_ticket_credits: freeTickets,
+    nft_pool_snapshot: nftPoolSnapshot,
   })
 
   open = await updatePackOpen(open.id, { status: 'paying_out' })
@@ -295,7 +379,6 @@ export async function confirmAndOpenPack(input: {
     error_message: null,
   })
 
-  // Soft solvency check after open
   await ensurePacksSolvencyOrPause()
 
   return rowToResult(open, { nftName, nftImageUrl })

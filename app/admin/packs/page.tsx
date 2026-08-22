@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { AdminPacksInventoryForm } from '@/components/admin/AdminPacksInventoryForm'
 import { PacksOpeningPreviewPanel } from '@/components/admin/PacksOpeningPreviewPanel'
+import { PacksLaunchChecklist } from '@/components/admin/PacksLaunchChecklist'
 import { PacksAdminExtraDetails } from '@/components/admin/PacksAdminExtraDetails'
 import { getCachedAdmin, setCachedAdmin, getCachedAdminRole } from '@/lib/admin-check-cache'
 import { packPauseReasonLabel, packRtpPercentLabel } from '@/lib/packs/admin-copy'
@@ -25,6 +26,10 @@ type AdminPacksData = {
     owlSolPrice: number | null
     solBalance: number | null
     availableNfts: number
+  }
+  fairness?: {
+    openAlgo: string
+    vrfEnabled: boolean
   }
   ev: {
     estimatedEvSol: number
@@ -179,6 +184,17 @@ export default function AdminPacksPage() {
 
       {data && (
         <div className="mt-6 space-y-6">
+          <PacksLaunchChecklist
+            vaultConfigured={Boolean(data.vault.configuredAddress)}
+            solBalance={data.vault.solBalance}
+            owlSolPrice={data.vault.owlSolPrice}
+            availableNfts={data.vault.availableNfts}
+            estimatedEvSol={data.ev.estimatedEvSol}
+            estimatedRtpBps={data.ev.estimatedRtpBps}
+            paused={data.vault.paused}
+            vrfEnabled={Boolean(data.fairness?.vrfEnabled)}
+          />
+
           <div className="rounded-lg border p-4 text-sm">
             <p>
               Vault:{' '}

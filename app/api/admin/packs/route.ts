@@ -12,6 +12,7 @@ import {
 import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
 import { isPackInventoryPrizeStandard } from '@/lib/packs/types'
 import { getPacksVaultPublicKey, getPacksVaultSolBalance } from '@/lib/packs/vault'
+import { isPackVrfEnabled, resolvePackOpenAlgo } from '@/lib/packs/vrf-config'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,6 +42,10 @@ export async function GET(request: NextRequest) {
         owlSolPrice: config.owl_sol_price,
         solBalance: solBal,
         availableNfts: nftCount,
+      },
+      fairness: {
+        openAlgo: resolvePackOpenAlgo(),
+        vrfEnabled: isPackVrfEnabled(),
       },
       ev,
       inventory,

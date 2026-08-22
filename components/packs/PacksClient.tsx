@@ -40,10 +40,32 @@ type PacksConfig = {
     categoryWeightsBps: { owl: number; sol: number; nft: number }
   }
   odds: {
-    owlTiers: { amount: number; weight: number }[]
-    solTiers: { amountSol: number; weight: number }[]
+    owlTiers: {
+      amount: number
+      weight: number
+      percentOfCategory?: number
+      percentOverall?: number
+    }[]
+    solTiers: {
+      amountSol: number
+      weight: number
+      percentOfCategory?: number
+      percentOverall?: number
+    }[]
+    nftInventory?: {
+      mint: string
+      name: string | null
+      fairValueSol: number
+      weight: number
+      percentOfCategory: number
+      percentOverall: number
+    }[]
     nftBands: { min: number; max: number; weight: number }[]
     owlToTicketRatio: number
+  }
+  fairness?: {
+    openAlgo: string
+    vrfEnabled: boolean
   }
   vault: {
     address: string | null
@@ -609,41 +631,74 @@ export function PacksClient({
 
       <section id="prize-tiers" className="mx-auto max-w-3xl scroll-mt-24 px-4 pb-16 sm:px-6">
         <div className="border-t border-white/10 pt-10">
-          <h2 className="font-display text-3xl tracking-[0.12em] text-[#EAFBF4]">Prize tiers</h2>
+          <h2 className="font-display text-3xl tracking-[0.12em] text-[#EAFBF4]">Prize odds</h2>
           <p className="mt-2 text-sm text-[#A9CBB9]">
-            Common prizes show up more often. Typical prize is about{' '}
+            Percentages are ME-style odds. Higher-value prizes are rarer. Typical prize ≈{' '}
             {config?.ev.targetEvSol ?? 0.08} SOL per open.
             {config ? ` Prize NFTs ready: ${config.vault.availableNfts}.` : null}
+            {config?.fairness?.vrfEnabled
+              ? ' Randomness: Switchboard on-chain VRF.'
+              : ' Randomness: commit–reveal (verify after open).'}
           </p>
           <div className="mt-6 grid gap-8 sm:grid-cols-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00FF9C]/85">$OWL</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00FF9C]/85">
+                $OWL ({bpsToPercent(weights.owl)})
+              </p>
               <ul className="mt-2 space-y-1 text-sm text-[#A9CBB9]">
                 {(config?.odds.owlTiers ?? []).map((t) => (
-                  <li key={t.amount}>
-                    {t.amount} OWL <span className="text-white/30">w{t.weight}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00FF9C]/85">SOL</p>
-              <ul className="mt-2 space-y-1 text-sm text-[#A9CBB9]">
-                {(config?.odds.solTiers ?? []).map((t) => (
-                  <li key={t.amountSol}>
-                    {t.amountSol} SOL <span className="text-white/30">w{t.weight}</span>
+                  <li key={t.amount} className="flex justify-between gap-2">
+                    <span>{t.amount} OWL</span>
+                    <span className="tabular-nums text-[#00FF9C]/80">
+                      {t.percentOverall != null
+                        ? `${t.percentOverall}%`
+                        : t.percentOfCategory != null
+                          ? `${t.percentOfCategory}% of OWL`
+                          : `w${t.weight}`}
+                    </span>
                   </li>
                 ))}
               </ul>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00FF9C]/85">
-                NFT bands
+                SOL ({bpsToPercent(weights.sol)})
               </p>
               <ul className="mt-2 space-y-1 text-sm text-[#A9CBB9]">
-                {(config?.odds.nftBands ?? []).map((b) => (
-                  <li key={`${b.min}-${b.max}`}>
-                    {b.min}–{b.max} SOL <span className="text-white/30">w{b.weight}</span>
+                {(config?.odds.solTiers ?? []).map((t) => (
+                  <li key={t.amountSol} className="flex justify-between gap-2">
+                    <span>{t.amountSol} SOL</span>
+                    <span className="tabular-nums text-[#00FF9C]/80">
+                      {t.percentOverall != null
+                        ? `${t.percentOverall}%`
+                        : t.percentOfCategory != null
+                          ? `${t.percentOfCategory}% of SOL`
+                          : `w${t.weight}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00FF9C]/85">
+                NFT ({bpsToPercent(weights.nft)})
+              </p>
+              <p className="mt-1 text-[11px] text-white/40">
+                Higher floor = rarer. Showing live inventory odds.
+              </p>
+              <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto text-sm text-[#A9CBB9]">
+                {(config?.odds.nftInventory ?? []).length === 0 && (
+                  <li className="text-white/40">No NFTs in vault yet</li>
+                )}
+                {(config?.odds.nftInventory ?? []).map((n) => (
+                  <li key={n.mint} className="flex justify-between gap-2">
+                    <span className="min-w-0 truncate">
+                      {n.name || `${n.mint.slice(0, 4)}…`}{' '}
+                      <span className="text-white/30">({n.fairValueSol} SOL)</span>
+                    </span>
+                    <span className="shrink-0 tabular-nums text-[#00FF9C]/80">
+                      {n.percentOverall}%
+                    </span>
                   </li>
                 ))}
               </ul>
