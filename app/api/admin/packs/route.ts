@@ -11,7 +11,7 @@ import {
 } from '@/lib/packs/db'
 import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
 import { isPackInventoryPrizeStandard } from '@/lib/packs/types'
-import { getPacksVaultPublicKey, getPacksVaultSolBalance } from '@/lib/packs/vault'
+import { getPacksVaultPublicKey, getPacksVaultSolBalance, getPacksVaultOwlBalanceUi } from '@/lib/packs/vault'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
     const inventory = await listPackInventory()
     const nftCount = await countAvailableNfts()
     const solBal = await getPacksVaultSolBalance()
+    const owlBal = await getPacksVaultOwlBalanceUi()
     const ev = simulatePackEvFromInventory({
       owlSolPrice: config.owl_sol_price,
       inventory,
@@ -40,6 +41,7 @@ export async function GET(request: NextRequest) {
         minNftCount: config.min_nft_count,
         owlSolPrice: config.owl_sol_price,
         solBalance: solBal,
+        owlBalance: owlBal,
         availableNfts: nftCount,
       },
       ev,

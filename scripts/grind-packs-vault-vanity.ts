@@ -143,17 +143,19 @@ if (!isMainThread) {
 
             mkdirSync(outDir, { recursive: true })
             const jsonPath = join(outDir, 'packs-vault-keypair.json')
+            const metaPath = join(outDir, 'packs-vault-keypair.meta.json')
             const txtPath = join(outDir, 'packs-vault-keypair.txt')
-            if (existsSync(jsonPath) || existsSync(txtPath)) {
+            if (existsSync(jsonPath) || existsSync(metaPath) || existsSync(txtPath)) {
               console.warn(`Warning: overwriting existing files in ${outDir}`)
             }
 
+            // Standard Solana CLI keypair: single-line JSON array of 64 bytes.
+            writeFileSync(jsonPath, JSON.stringify(secretArray), { mode: 0o600 })
             writeFileSync(
-              jsonPath,
+              metaPath,
               JSON.stringify(
                 {
                   publicKey: address,
-                  secretKey: secretArray,
                   secretKeyBase58: secretB58,
                   prefix,
                   attempts: totalAttempts,
@@ -180,11 +182,12 @@ if (!isMainThread) {
 
             console.log(`\nFound after ${totalAttempts.toLocaleString()} attempts in ${elapsedSec}s`)
             console.log(`Public key:  ${address}`)
-            console.log(`Wrote:       ${jsonPath}`)
+            console.log(`Wrote:       ${jsonPath} (standard [64] keypair)`)
+            console.log(`Wrote:       ${metaPath}`)
             console.log(`Wrote:       ${txtPath}`)
-            console.log(`\nSet in Vercel / .env.local:`)
-            console.log(`  NEXT_PUBLIC_PACKS_VAULT_WALLET=${address}`)
-            console.log(`  PACKS_VAULT_SECRET_KEY=<JSON array from .local/packs-vault-keypair.txt>`)
+            console.log(`\nSet in Vercel / .env.local (do not paste secret in chat):`)
+            console.log(`  npm run packs:install-vault-env`)
+            console.log(`  Public address: ${address}`)
             console.log(`\nAll pack purchase SOL goes to this wallet; prizes pay out from it.`)
             console.log(`Fund with SOL + $OWL + NFTs, then unpause in Admin → Packs.`)
 

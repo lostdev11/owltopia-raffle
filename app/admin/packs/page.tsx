@@ -8,10 +8,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { AdminPacksInventoryForm } from '@/components/admin/AdminPacksInventoryForm'
+import { AdminPacksVaultFundingForm } from '@/components/admin/AdminPacksVaultFundingForm'
 import { PacksOpeningPreviewPanel } from '@/components/admin/PacksOpeningPreviewPanel'
 import { PacksAdminExtraDetails } from '@/components/admin/PacksAdminExtraDetails'
 import { getCachedAdmin, setCachedAdmin, getCachedAdminRole } from '@/lib/admin-check-cache'
 import { packPauseReasonLabel, packRtpPercentLabel } from '@/lib/packs/admin-copy'
+import { OWL_TICKER } from '@/lib/council/owl-ticker'
 import { packNftBandLabel } from '@/lib/packs/ev-simulator'
 import { packInventoryPrizeStandardLabel } from '@/lib/packs/types'
 import { ArrowLeft, Loader2 } from 'lucide-react'
@@ -24,6 +26,7 @@ type AdminPacksData = {
     minNftCount: number
     owlSolPrice: number | null
     solBalance: number | null
+    owlBalance: number | null
     availableNfts: number
   }
   ev: {
@@ -192,8 +195,12 @@ export default function AdminPacksPage() {
               {pauseLabel ? ` — ${pauseLabel}` : ''}
             </p>
             <p className="mt-1">
-              SOL in vault: {data.vault.solBalance ?? '—'} · Prize NFTs ready:{' '}
-              {data.vault.availableNfts} (need at least {data.vault.minNftCount})
+              SOL in vault: {data.vault.solBalance ?? '—'} · {OWL_TICKER} in vault:{' '}
+              {data.vault.owlBalance != null
+                ? data.vault.owlBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                : '—'}{' '}
+              · Prize NFTs ready: {data.vault.availableNfts} (need at least{' '}
+              {data.vault.minNftCount})
             </p>
             <p className="mt-1">
               Typical prize: about {data.ev.estimatedEvSol.toFixed(4)} SOL (aiming for{' '}
@@ -257,6 +264,15 @@ export default function AdminPacksPage() {
           </div>
 
           <PacksOpeningPreviewPanel />
+
+          <div className="rounded-lg border p-4">
+            <AdminPacksVaultFundingForm
+              vaultAddress={data.vault.configuredAddress}
+              vaultSolBalance={data.vault.solBalance}
+              vaultOwlBalance={data.vault.owlBalance}
+              onDeposited={load}
+            />
+          </div>
 
           <div className="rounded-lg border p-4">
             <AdminPacksInventoryForm
