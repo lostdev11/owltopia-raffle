@@ -59,6 +59,53 @@ export async function countCoinArtUpgradeCatalogEntries(): Promise<number> {
   return count ?? 0
 }
 
+export type CoinArtUpgradePreviewSample = {
+  coin_number: number | null
+  name: string | null
+  image: string
+}
+
+/**
+ * Sample new-art images for Nesting Coming soon (no Helius). Spreads across
+ * coin numbers so the teaser isn't just #1–#8.
+ */
+export async function listCoinArtUpgradeCatalogPreviewSamples(
+  limit = 8
+): Promise<CoinArtUpgradePreviewSample[]> {
+  const capped = Math.max(1, Math.min(24, Math.floor(limit)))
+  const { data, error } = await getSupabaseAdmin()
+    .from('coin_art_upgrade_catalog')
+    .select('coin_number, name, new_image_uri')
+    .not('new_image_uri', 'is', null)
+    .order('coin_number', { ascending: true, nullsFirst: false })
+    .limit(240)
+  if (error) throw new Error(error.message)
+  const rows = (data || []).filter(
+    (r): r is { coin_number: number | null; name: string | null; new_image_uri: string } =>
+      typeof (r as { new_image_uri?: unknown }).new_image_uri === 'string' &&
+      Boolean(String((r as { new_image_uri: string }).new_image_uri).trim())
+  )
+  if (rows.length === 0) return []
+  if (rows.length <= capped) {
+    return rows.map((r) => ({
+      coin_number: r.coin_number,
+      name: r.name,
+      image: r.new_image_uri.trim(),
+    }))
+  }
+  const out: CoinArtUpgradePreviewSample[] = []
+  for (let i = 0; i < capped; i += 1) {
+    const idx = Math.floor((i * (rows.length - 1)) / (capped - 1))
+    const r = rows[idx]!
+    out.push({
+      coin_number: r.coin_number,
+      name: r.name,
+      image: r.new_image_uri.trim(),
+    })
+  }
+  return out
+}
+
 export async function listCoinArtUpgradesByAssetIds(assetIds: string[]): Promise<CoinArtUpgradeRow[]> {
   const ids = [...new Set(assetIds.map((id) => id.trim()).filter(Boolean))]
   if (ids.length === 0) return []
