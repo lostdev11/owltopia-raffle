@@ -263,7 +263,7 @@ export default function AdminPacksPage() {
             </div>
           </div>
 
-          <PacksOpeningPreviewPanel />
+          <PacksOpeningPreviewPanel inventory={data.inventory} />
 
           <div className="rounded-lg border p-4">
             <AdminPacksVaultFundingForm
