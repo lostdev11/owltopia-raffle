@@ -38,6 +38,7 @@ import {
   parseMaxTicketsPerWalletInput,
   validateMaxTicketsPerWallet,
 } from '@/lib/raffles/max-tickets-per-wallet'
+import { parseRequiredMaxTickets } from '@/lib/raffles/max-tickets'
 import { buildDuplicateNftPrizeConflictBody } from '@/lib/raffles/duplicate-nft-prize-conflict'
 import {
   buildDuplicatePartnerCryptoPrizeConflictBody,
@@ -394,15 +395,11 @@ export async function handleCreateRafflePost(
       )
     }
 
-    let maxTickets: number | null = null
-    if (body.max_tickets != null && body.max_tickets !== '') {
-      const parsed =
-        typeof body.max_tickets === 'number' ? body.max_tickets : parseInt(String(body.max_tickets), 10)
-      if (isNaN(parsed) || parsed <= 0) {
-        return NextResponse.json({ error: 'max_tickets must be a positive integer when set.' }, { status: 400 })
-      }
-      maxTickets = parsed
+    const parsedMax = parseRequiredMaxTickets(body.max_tickets)
+    if (!parsedMax.ok) {
+      return NextResponse.json({ error: parsedMax.error }, { status: 400 })
     }
+    const maxTickets = parsedMax.value
 
     let maxTicketsPerWallet: number | null = null
     if (body.max_tickets_per_wallet !== undefined) {

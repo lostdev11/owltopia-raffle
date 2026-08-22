@@ -28,6 +28,7 @@ import {
   parseMaxTicketsPerWalletInput,
   validateMaxTicketsPerWallet,
 } from '@/lib/raffles/max-tickets-per-wallet'
+import { parseMaxTicketsUpdateInput } from '@/lib/raffles/max-tickets'
 import { isOwlEnabled } from '@/lib/tokens'
 import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
 import { getSolanaReadConnection } from '@/lib/solana/connection'
@@ -560,18 +561,12 @@ export async function PATCH(
 
     // Parse max_tickets safely
     let maxTickets: number | null = null
-    if (body.max_tickets != null && body.max_tickets !== '') {
-      const parsed = typeof body.max_tickets === 'number' 
-        ? body.max_tickets 
-        : parseInt(String(body.max_tickets), 10)
-      if (!isNaN(parsed) && parsed > 0) {
-        maxTickets = parsed
-      } else if (body.max_tickets !== null && body.max_tickets !== '') {
-        return NextResponse.json(
-          { error: 'max_tickets must be a positive number' },
-          { status: 400 }
-        )
+    if (body.max_tickets !== undefined) {
+      const parsedMax = parseMaxTicketsUpdateInput(body.max_tickets)
+      if (!parsedMax.ok) {
+        return NextResponse.json({ error: parsedMax.error }, { status: 400 })
       }
+      maxTickets = parsedMax.value
     }
 
     let maxTicketsPerWallet: number | null | undefined = undefined
@@ -875,21 +870,11 @@ export async function PATCH(
 
           let nextMaxTickets: number | null = existingRaffle.max_tickets
           if (body.max_tickets !== undefined) {
-            if (body.max_tickets === null || body.max_tickets === '') {
-              nextMaxTickets = null
-            } else {
-              const parsed =
-                typeof body.max_tickets === 'number'
-                  ? body.max_tickets
-                  : parseInt(String(body.max_tickets), 10)
-              if (isNaN(parsed) || parsed <= 0) {
-                return NextResponse.json(
-                  { error: 'max_tickets must be a positive integer when set' },
-                  { status: 400 }
-                )
-              }
-              nextMaxTickets = parsed
+            const parsedMax = parseMaxTicketsUpdateInput(body.max_tickets)
+            if (!parsedMax.ok) {
+              return NextResponse.json({ error: parsedMax.error }, { status: 400 })
             }
+            nextMaxTickets = parsedMax.value
           }
 
           let nextMaxTicketsPerWallet: number | null = existingRaffle.max_tickets_per_wallet
