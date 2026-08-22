@@ -16,6 +16,7 @@ import {
 } from '@/lib/coin-upgrade/config'
 import { coinUpgradeCollectionCandidates, executeCoinArtUpgrade } from '@/lib/coin-upgrade/service'
 import {
+  countCoinArtUpgradeCatalogEntries,
   listCoinArtUpgradeCatalogEntries,
   listCoinArtUpgradesByAssetIds,
 } from '@/lib/db/coin-art-upgrades'
@@ -35,10 +36,43 @@ export type CoinArtUpgradeWalletCoin = {
   upgrade_status: 'none' | 'processing' | 'upgraded' | 'art_unavailable'
 }
 
+export type CoinArtUpgradePublicConfig = {
+  enabled: boolean
+  catalog_ready: boolean
+  /** True when upgrades are not sellable yet (flag off and/or catalog empty). */
+  preview: boolean
+  /** True when holders can select coins and pay. */
+  sellable: boolean
+  fee_sol: number
+  fee_lamports: number
+  treasury: string | null
+  reward_multiplier: number
+  max_per_request: number
+}
+
+async function buildCoinArtUpgradePublicConfig(): Promise<CoinArtUpgradePublicConfig> {
+  const enabled = isCoinArtUpgradeEnabled()
+  const catalogSize = await countCoinArtUpgradeCatalogEntries()
+  const catalogReady = catalogSize > 0
+  const sellable = enabled && catalogReady
+  return {
+    enabled,
+    catalog_ready: catalogReady,
+    preview: !sellable,
+    sellable,
+    fee_sol: getCoinArtUpgradeFeeSol(),
+    fee_lamports: getCoinArtUpgradeFeeLamports(),
+    treasury: getPlatformFeeTreasuryWalletAddress() || null,
+    reward_multiplier: getCoinArtUpgradeRewardMultiplier(),
+    max_per_request: MAX_COIN_ART_UPGRADES_PER_REQUEST,
+  }
+}
+
 /**
  * GET /api/me/coin-upgrade
  * Art upgrade config + the signed-in wallet's Owltopia coins with per-coin
  * upgrade status (works for nested coins — the freeze lock is non-custodial).
+ * When not sellable yet, returns Coming soon config without a Helius coin scan.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -53,16 +87,9 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const config = {
-      enabled: isCoinArtUpgradeEnabled(),
-      fee_sol: getCoinArtUpgradeFeeSol(),
-      fee_lamports: getCoinArtUpgradeFeeLamports(),
-      treasury: getPlatformFeeTreasuryWalletAddress() || null,
-      reward_multiplier: getCoinArtUpgradeRewardMultiplier(),
-      max_per_request: MAX_COIN_ART_UPGRADES_PER_REQUEST,
-    }
+    const config = await buildCoinArtUpgradePublicConfig()
 
-    if (!config.enabled) {
+    if (!config.sellable) {
       return NextResponse.json({ config, coins: [] as CoinArtUpgradeWalletCoin[] })
     }
 
