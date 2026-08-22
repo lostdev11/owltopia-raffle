@@ -465,10 +465,9 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
         minTicketsValue && minTicketsValue.trim()
           ? parseInt(minTicketsValue.trim(), 10)
           : raffle.min_tickets
-      const maxParsed = parseRequiredMaxForEdit(
-        maxTicketsValue,
-        Number.isFinite(minForMax) && minForMax > 0 ? minForMax : null
-      )
+      const drawGoalForMax =
+        minForMax != null && Number.isFinite(minForMax) && minForMax > 0 ? minForMax : null
+      const maxParsed = parseRequiredMaxForEdit(maxTicketsValue, drawGoalForMax)
       if (maxParsed === false) {
         setLoading(false)
         return
