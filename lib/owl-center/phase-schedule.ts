@@ -1,4 +1,9 @@
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
+import {
+  partnerAllowlistEarliestStart,
+  resolveEffectiveAllowlistStartsAt,
+  resolveEffectivePartnerAllowlistPhases,
+} from '@/lib/owl-center/partner-allowlist-phases'
 import type { OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 
 /** Phases that can appear on a mint schedule (excludes SOLD_OUT). */
@@ -92,20 +97,31 @@ export function parsePhaseSchedule(raw: unknown): OwlCenterPhaseSchedule {
   return out
 }
 
+export type PhaseStartsAtLaunch = Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule'> &
+  Partial<
+    Pick<
+      OwlCenterLaunchPublic,
+      'partner_allowlist_phases' | 'creator_wl_enabled' | 'wl_supply' | 'wl_price_usdc'
+    >
+  >
+
 /** When a phase opens: explicit schedule entry, else mint kickoff for AIRDROP only. */
-export function getPhaseStartsAt(
-  launch: Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule'>,
-  phase: OwlCenterPhase
-): string | null {
+export function getPhaseStartsAt(launch: PhaseStartsAtLaunch, phase: OwlCenterPhase): string | null {
+  if (phase === 'WHITELIST') {
+    const earliest = partnerAllowlistEarliestStart(resolveEffectivePartnerAllowlistPhases(launch))
+    if (earliest) return earliest
+  }
   const scheduled = launch.phase_schedule?.[phase]
-  if (scheduled) return scheduled
+  if (scheduled) {
+    if (phase === 'WHITELIST') return resolveEffectiveAllowlistStartsAt(scheduled, launch)
+    return scheduled
+  }
   if (phase === 'AIRDROP' && launch.launch_deadline_at) return launch.launch_deadline_at
   return null
 }
 
 export function isPhaseOpenBySchedule(
-  launch: Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule'> &
-    Partial<Pick<OwlCenterLaunchPublic, 'active_phases'>>,
+  launch: PhaseStartsAtLaunch & Partial<Pick<OwlCenterLaunchPublic, 'active_phases'>>,
   phase: OwlCenterPhase,
   nowMs: number = Date.now()
 ): boolean {

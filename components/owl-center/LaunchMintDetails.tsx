@@ -9,7 +9,7 @@ import {
   buildPartnerMintPhaseSchedule,
   publicSimpleSettlementLabel,
 } from '@/lib/owl-center/partner-mint-phase-schedule'
-import { resolvePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
+import { resolveEffectivePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
 import { formatRoyaltyPercentLabel, launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import { formatMintDate, formatPhaseStartShort, getMintCountdownInfo } from '@/lib/owl-center/phase-schedule'
 
@@ -35,7 +35,7 @@ function phaseRows(launch: OwlCenterLaunchPublic): PhaseRow[] {
     })
   }
 
-  const allowlists = resolvePartnerAllowlistPhases(launch)
+  const allowlists = resolveEffectivePartnerAllowlistPhases(launch)
   if (allowlists.length > 0) {
     for (const phase of allowlists) {
       const start = formatPhaseStartShort(phase.starts_at)

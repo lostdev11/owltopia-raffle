@@ -3,6 +3,7 @@ import {
   isPartnerAllowlistWaiting,
   isPartnerAllowlistWindowOpen,
   partnerAllowlistEarliestStart,
+  resolveEffectivePartnerAllowlistPhases,
   resolvePartnerAllowlistPhases,
   type PartnerAllowlistPhase,
 } from '@/lib/owl-center/partner-allowlist-phases'
@@ -43,7 +44,7 @@ export function isScheduledPhaseStartReached(
     if (startMs == null) return false
     return nowMs >= startMs
   }
-  const phases = resolvePartnerAllowlistPhases(
+  const phases = resolveEffectivePartnerAllowlistPhases(
     launch as Pick<
       OwlCenterLaunchPublic,
       | 'partner_allowlist_phases'
@@ -51,6 +52,7 @@ export function isScheduledPhaseStartReached(
       | 'wl_supply'
       | 'wl_price_usdc'
       | 'phase_schedule'
+      | 'launch_deadline_at'
     >
   )
   const earliest = partnerAllowlistEarliestStart(phases)
@@ -122,7 +124,7 @@ export function formatAllowlistOpensReason(
     | 'phase_schedule'
   >
 ): string {
-  const phases = resolvePartnerAllowlistPhases(launch)
+  const phases = resolveEffectivePartnerAllowlistPhases(launch)
   const earliest = partnerAllowlistEarliestStart(phases)
   if (earliest) {
     const first = phases.find((p) => p.starts_at === earliest)

@@ -7,6 +7,7 @@ import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-s
 import { launchHasPresaleProgram } from '@/lib/owl-center/launch-presale'
 import {
   getActivePartnerAllowlistPhase,
+  resolveEffectivePartnerAllowlistPhases,
   resolvePartnerAllowlistPhases,
   type PartnerAllowlistPhase,
 } from '@/lib/owl-center/partner-allowlist-phases'
@@ -159,7 +160,7 @@ export function buildPartnerMintPhaseSchedule(
     })
   }
 
-  const allowlists = resolvePartnerAllowlistPhases(launch)
+  const allowlists = resolveEffectivePartnerAllowlistPhases(launch)
   const publicStarts = launch.phase_schedule?.PUBLIC ?? null
   const activeAllowlist = getActivePartnerAllowlistPhase(launch, nowMs)
 

@@ -7,6 +7,7 @@ import {
   partnerAllowlistPhasesFromFormRows,
   partnerAllowlistPrimaryPriceUsdc,
   partnerAllowlistTotalSupply,
+  resolveEffectiveAllowlistStartsAt,
   resolvePartnerAllowlistPhases,
   type PartnerAllowlistPhase,
   type PartnerAllowlistPhaseFormRow,
@@ -143,9 +144,49 @@ export function resolvePublicStartForSave(opts: {
   return requestedPublic
 }
 
+/** Sync leftover allowlist starts when mint kickoff moves; clamp below kickoff. */
+export function resolveAllowlistPhasesForSave(opts: {
+  phases: PartnerAllowlistPhase[]
+  kickoff: string | null
+  previousKickoff?: string | null
+  previousPublic?: string | null
+}): PartnerAllowlistPhase[] {
+  const { phases, kickoff, previousKickoff, previousPublic } = opts
+  return phases.map((phase) => {
+    let starts_at = phase.starts_at
+    if (starts_at && kickoff) {
+      if (previousKickoff && scheduleInstantsEqual(starts_at, previousKickoff)) {
+        starts_at = kickoff
+      } else if (previousPublic && scheduleInstantsEqual(starts_at, previousPublic)) {
+        starts_at = kickoff
+      }
+      starts_at = resolveEffectiveAllowlistStartsAt(starts_at, { launch_deadline_at: kickoff, phase_schedule: {} })
+    }
+    return starts_at === phase.starts_at ? phase : { ...phase, starts_at }
+  })
+}
+
 /** Changing Mint opens also moves Public start; the public field can still be edited after. */
 export function applyMintOpensDate(values: MintDetailsFormValues, launch_date: string): MintDetailsFormValues {
-  return { ...values, launch_date, public_start: launch_date }
+  const previousKickoff = values.launch_date
+  const previousPublic = values.public_start
+  const allowlist_phases = values.allowlist_phases.map((phase) => {
+    if (!phase.start.trim()) return phase
+    if (previousKickoff && scheduleInstantsEqual(phase.start, previousKickoff)) {
+      return { ...phase, start: launch_date }
+    }
+    if (previousPublic && scheduleInstantsEqual(phase.start, previousPublic)) {
+      return { ...phase, start: launch_date }
+    }
+    return phase
+  })
+  const wl_start =
+    values.wl_start.trim() &&
+    (scheduleInstantsEqual(values.wl_start, previousKickoff) ||
+      scheduleInstantsEqual(values.wl_start, previousPublic))
+      ? launch_date
+      : values.wl_start
+  return { ...values, launch_date, public_start: launch_date, allowlist_phases, wl_start }
 }
 
 /**

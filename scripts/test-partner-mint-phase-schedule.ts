@@ -31,6 +31,7 @@ function launch(
       | 'wl_supply'
       | 'wl_price_usdc'
       | 'phase_schedule'
+      | 'launch_deadline_at'
       | 'public_supply'
       | 'public_price_usdc'
       | 'wallet_mint_limit'
@@ -182,5 +183,21 @@ const publicOnly = buildPartnerMintPhaseSchedule(
 assert.equal(publicOnly.length, 1)
 assert.equal(publicOnly[0]!.key, 'public')
 assert.equal(publicOnly[0]!.is_active, true)
+
+const kickoff = '2026-09-05T12:44:00.000Z'
+const staleWl = '2026-08-24T11:48:00.000Z'
+const clamped = buildPartnerMintPhaseSchedule(
+  launch({
+    launch_deadline_at: kickoff,
+    partner_allowlist_phases: [
+      { key: 'wl', label: 'Whitelist', starts_at: staleWl, supply: 20, price_usdc: 9 },
+    ],
+    phase_schedule: { PUBLIC: '2026-09-05T13:44:00.000Z', WHITELIST: staleWl },
+    creator_wl_enabled: true,
+    wl_supply: 20,
+  }),
+  Date.parse('2026-09-01T12:00:00.000Z')
+)
+assert.equal(clamped[0]!.starts_at, kickoff, 'WL display clamps stale start to mint kickoff')
 
 console.log('ok — partner mint phase schedule')
