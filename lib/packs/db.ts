@@ -141,7 +141,40 @@ export async function removePackInventoryNft(id: string): Promise<void> {
   if (error) throw error
 }
 
-/** Reserve a random available NFT in [min,max] fair value. Returns null if none. */
+/** Available NFTs eligible for packs open (0.05–0.5 SOL fair value). */
+export async function listAvailableNftsForOpen(): Promise<PackInventoryRow[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('pack_inventory')
+    .select('*')
+    .eq('status', 'available')
+    .gte('fair_value_sol', 0.05)
+    .lte('fair_value_sol', 0.5)
+    .order('mint_address', { ascending: true })
+  if (error) throw error
+  return (data as PackInventoryRow[]) ?? []
+}
+
+/** Atomically reserve a specific inventory row by id. Returns null if already taken. */
+export async function reserveNftById(
+  openId: string,
+  inventoryId: string
+): Promise<PackInventoryRow | null> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('pack_inventory')
+    .update({
+      status: 'reserved',
+      reserved_open_id: openId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', inventoryId)
+    .eq('status', 'available')
+    .select('*')
+    .maybeSingle()
+  if (error) throw error
+  return (data as PackInventoryRow | null) ?? null
+}
+
+/** @deprecated Prefer listAvailableNftsForOpen + reserveNftById (per-NFT FP weighting). */
 export async function reserveNftInBand(
   openId: string,
   minFair: number,
@@ -160,19 +193,8 @@ export async function reserveNftInBand(
   if (list.length === 0) return null
 
   for (const row of list) {
-    const { data, error: upErr } = await getSupabaseAdmin()
-      .from('pack_inventory')
-      .update({
-        status: 'reserved',
-        reserved_open_id: openId,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', row.id)
-      .eq('status', 'available')
-      .select('*')
-      .maybeSingle()
-    if (upErr) throw upErr
-    if (data) return data as PackInventoryRow
+    const reserved = await reserveNftById(openId, row.id)
+    if (reserved) return reserved
   }
   return null
 }

@@ -4,9 +4,11 @@
  * - Pack price: 0.1 SOL
  * - Every open wins
  * - Categories: 60% OWL / 20% SOL / 20% NFT
- * - Scales: OWL 5–100, SOL 0.05–0.5, NFT fair value 0.05–0.5 SOL
+ * - Scales: OWL 5–50, SOL 0.05–0.5, NFT fair value 0.05–0.5 SOL
  * - Target RTP: 80% (EV ≈ 0.08 SOL per open)
  * - OWL wins credit free raffle tickets (default 1 OWL → 1 ticket)
+ * - NFT picks: inverse floor-price weights (higher FP = rarer)
+ * - Randomness: Switchboard VRF when PACK_VRF_ENABLED (else local commit–reveal)
  */
 
 export const PACKS_PRODUCT_SLUG = 'owl-pack-v1' as const
@@ -55,16 +57,15 @@ export type PackNftValueBand = {
 }
 
 /**
- * Bottom-heavy OWL ladder (5 → 100). Fair values assume a placeholder OWL/SOL rate
+ * Bottom-heavy OWL ladder (5 → 50). Fair values assume a placeholder OWL/SOL rate
  * overwritten at runtime by `estimateOwlFairValueSol` when a price is provided.
  * Default assumes ~0.002 SOL per OWL so mid tiers stay near EV target.
  */
 export const PACK_OWL_TIERS: PackOwlTier[] = [
-  { category: 'owl', amount: 5, weight: 400, fairValueSol: 0.01 },
-  { category: 'owl', amount: 10, weight: 280, fairValueSol: 0.02 },
-  { category: 'owl', amount: 25, weight: 180, fairValueSol: 0.05 },
+  { category: 'owl', amount: 5, weight: 420, fairValueSol: 0.01 },
+  { category: 'owl', amount: 10, weight: 290, fairValueSol: 0.02 },
+  { category: 'owl', amount: 25, weight: 190, fairValueSol: 0.05 },
   { category: 'owl', amount: 50, weight: 100, fairValueSol: 0.1 },
-  { category: 'owl', amount: 100, weight: 40, fairValueSol: 0.2 },
 ]
 
 export const PACK_SOL_TIERS: PackSolTier[] = [
@@ -74,16 +75,34 @@ export const PACK_SOL_TIERS: PackSolTier[] = [
   { category: 'sol', amountSol: 0.5, weight: 70 },
 ]
 
+/** Legacy band labels (public odds UI still groups inventory by band for display). */
 export const PACK_NFT_VALUE_BANDS: PackNftValueBand[] = [
   { category: 'nft', minFairValueSol: 0.05, maxFairValueSol: 0.1, weight: 450 },
   { category: 'nft', minFairValueSol: 0.1, maxFairValueSol: 0.25, weight: 350 },
   { category: 'nft', minFairValueSol: 0.25, maxFairValueSol: 0.5, weight: 200 },
 ]
 
+/** Min / max NFT fair value for packs inventory + FP weighting. */
+export const PACK_NFT_MIN_FAIR_SOL = 0.05
+export const PACK_NFT_MAX_FAIR_SOL = 0.5
+
+/**
+ * Steepness of inverse-FP NFT weights: weight ∝ (maxFp / fairValue)^alpha.
+ * 1.0 = linear inverse; higher = steeper rarity for expensive NFTs.
+ */
+export const PACK_NFT_FP_WEIGHT_ALPHA = 1.0
+
 /** Default free raffle ticket credits per OWL won (Gembird: 10 OWL → 10 tickets) */
 export const PACK_OWL_TO_TICKET_RATIO = 1
 
-export const PACK_OPEN_ALGO = 'owltopia-pack-open-v1' as const
+/** Local commit–reveal (server seed). Used when VRF is off or as documented fallback. */
+export const PACK_OPEN_ALGO_V1 = 'owltopia-pack-open-v1' as const
+
+/** Switchboard on-chain VRF seed source. */
+export const PACK_OPEN_ALGO_V2_VRF = 'owltopia-pack-open-v2-vrf' as const
+
+/** @deprecated Prefer PACK_OPEN_ALGO_V1 / resolvePackOpenAlgo() */
+export const PACK_OPEN_ALGO = PACK_OPEN_ALGO_V1
 
 export function packPriceLamports(): bigint {
   return BigInt(Math.round(PACK_PRICE_SOL * 1_000_000_000))

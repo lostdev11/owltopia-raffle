@@ -8,6 +8,7 @@ import {
   owlTiersWithPrice,
   type PackPrizeCategory,
 } from '@/lib/packs/config'
+import { nftFpWeight } from '@/lib/packs/nft-weights'
 
 export type EvSimulatorResult = {
   packPriceSol: number
@@ -155,13 +156,78 @@ export function simulatePackEvFromInventory(options: {
   inventory: InventoryFairValueRow[]
   draftFloors?: number[]
 }): EvSimulatorResult {
-  const { averages, notes: bandNotes } = nftBandAveragesFromInventory(
-    options.inventory,
-    options.draftFloors
+  const draftFloors = options.draftFloors ?? []
+  const available = options.inventory
+    .filter((r) => (r.status ?? 'available') === 'available')
+    .map((r) => Number(r.fair_value_sol))
+    .filter((v) => packNftFairValueInRange(v))
+  const values = [...available, ...draftFloors.filter((v) => packNftFairValueInRange(v))]
+
+  const notes: string[] = []
+  if (values.length === 0) {
+    notes.push('No prize NFTs in inventory yet — NFT EV uses band midpoints until you deposit.')
+    const { averages, notes: bandNotes } = nftBandAveragesFromInventory(options.inventory, draftFloors)
+    const ev = simulatePackEv({
+      owlSolPrice: options.owlSolPrice,
+      nftBandAvgFairValues: averages,
+    })
+    return { ...ev, notes: [...ev.notes, ...notes, ...bandNotes] }
+  }
+
+  // Per-NFT inverse-FP weights: EV = Σ (w_i / Σw) * fair_i
+  const weights = values.map((v) => nftFpWeight(v))
+  const nftEv = weightedAverage(weights, values)
+  notes.push(
+    `NFT EV uses per-mint floor weights (${values.length} NFT${values.length === 1 ? '' : 's'}; higher FP = rarer).`
   )
-  const ev = simulatePackEv({
-    owlSolPrice: options.owlSolPrice,
-    nftBandAvgFairValues: averages,
-  })
-  return { ...ev, notes: [...ev.notes, ...bandNotes] }
+
+  const owlSolPrice = options.owlSolPrice ?? null
+  const owlTiers = owlTiersWithPrice(owlSolPrice)
+  const owlEv = weightedAverage(
+    owlTiers.map((t) => t.weight),
+    owlTiers.map((t) => t.fairValueSol)
+  )
+  const solEv = weightedAverage(
+    PACK_SOL_TIERS.map((t) => t.weight),
+    PACK_SOL_TIERS.map((t) => t.amountSol)
+  )
+
+  const catTotal =
+    PACK_CATEGORY_WEIGHTS_BPS.owl +
+    PACK_CATEGORY_WEIGHTS_BPS.sol +
+    PACK_CATEGORY_WEIGHTS_BPS.nft
+
+  const categoryEv: Record<PackPrizeCategory, number> = {
+    owl: (PACK_CATEGORY_WEIGHTS_BPS.owl / catTotal) * owlEv,
+    sol: (PACK_CATEGORY_WEIGHTS_BPS.sol / catTotal) * solEv,
+    nft: (PACK_CATEGORY_WEIGHTS_BPS.nft / catTotal) * nftEv,
+  }
+
+  const estimatedEvSol = categoryEv.owl + categoryEv.sol + categoryEv.nft
+  const estimatedRtpBps = Math.round((estimatedEvSol / PACK_PRICE_SOL) * 10_000)
+
+  if (!owlSolPrice) {
+    notes.push(
+      'OWL prize value is using a saved estimate. Set the OWL price in SOL on this page for a live calculation.'
+    )
+  }
+  const drift = Math.abs(estimatedEvSol - PACK_TARGET_EV_SOL)
+  if (drift > 0.01) {
+    notes.push(
+      `Typical prize value (${estimatedEvSol.toFixed(4)} SOL) is more than 0.01 SOL off the ${PACK_TARGET_EV_SOL} SOL target. Adjust prize weights.`
+    )
+  } else {
+    notes.push('Typical prize value is close to the 80% target (within 0.01 SOL).')
+  }
+
+  return {
+    packPriceSol: PACK_PRICE_SOL,
+    targetEvSol: PACK_TARGET_EV_SOL,
+    targetRtpBps: PACK_RTP_BPS,
+    estimatedEvSol,
+    estimatedRtpBps,
+    categoryEv,
+    owlSolPrice,
+    notes,
+  }
 }

@@ -18,11 +18,27 @@ type VerifyPayload = {
   prizeLabel: string | null
   freeTicketCredits: number
   completedAt: string | null
+  vrf: {
+    provider: string
+    status: string | null
+    account: string | null
+    requestTx: string | null
+    fulfillTx: string | null
+    error: string | null
+  } | null
   verify: {
     commitMatches: boolean | null
     recomputedCategory: string | null
+    recomputedNftMint: string | null
+    nftSnapshotMatches: boolean | null
     expectedCommitHash: string
+    randomnessSource: string
   } | null
+}
+
+function solscanTx(sig: string | null | undefined): string | null {
+  if (!sig) return null
+  return `https://solscan.io/tx/${encodeURIComponent(sig)}`
 }
 
 export default function PackVerifyPage() {
@@ -67,6 +83,44 @@ export default function PackVerifyPage() {
           <Row label="Seed" value={data.openSeed || '(hidden until complete)'} mono />
           <Row label="Payment tx" value={data.paymentSignature || '—'} mono />
           <Row label="Payout tx" value={data.payoutSignature || '—'} mono />
+          {data.vrf && (
+            <div className="space-y-2 rounded-lg border border-white/10 bg-black/40 p-3">
+              <p className="text-xs uppercase tracking-wide text-emerald-100/40">
+                Switchboard VRF
+              </p>
+              <Row label="Status" value={data.vrf.status || '—'} />
+              <Row label="Account" value={data.vrf.account || '—'} mono />
+              {data.vrf.requestTx ? (
+                <p className="text-xs">
+                  Commit:{' '}
+                  <a
+                    className="text-emerald-400 underline"
+                    href={solscanTx(data.vrf.requestTx) ?? '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {data.vrf.requestTx.slice(0, 12)}…
+                  </a>
+                </p>
+              ) : null}
+              {data.vrf.fulfillTx ? (
+                <p className="text-xs">
+                  Reveal:{' '}
+                  <a
+                    className="text-emerald-400 underline"
+                    href={solscanTx(data.vrf.fulfillTx) ?? '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {data.vrf.fulfillTx.slice(0, 12)}…
+                  </a>
+                </p>
+              ) : null}
+              {data.vrf.error ? (
+                <p className="text-xs text-red-300">{data.vrf.error}</p>
+              ) : null}
+            </div>
+          )}
           {data.verify && (
             <div className="mt-4 flex items-start gap-2 rounded-lg border border-white/10 bg-black/40 p-3">
               {data.verify.commitMatches ? (
@@ -79,8 +133,21 @@ export default function PackVerifyPage() {
                   Commit {data.verify.commitMatches ? 'matches' : 'mismatch'}
                 </p>
                 <p className="mt-1 text-xs text-emerald-100/50">
+                  Randomness: {data.verify.randomnessSource}
+                </p>
+                <p className="mt-1 text-xs text-emerald-100/50">
                   Recomputed category: {data.verify.recomputedCategory ?? '—'}
                 </p>
+                {data.verify.recomputedNftMint ? (
+                  <p className="mt-1 text-xs text-emerald-100/50">
+                    Recomputed NFT mint: {data.verify.recomputedNftMint}
+                    {data.verify.nftSnapshotMatches == null
+                      ? ''
+                      : data.verify.nftSnapshotMatches
+                        ? ' (matches)'
+                        : ' (mismatch)'}
+                  </p>
+                ) : null}
               </div>
             </div>
           )}
