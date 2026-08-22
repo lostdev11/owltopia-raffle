@@ -848,10 +848,16 @@ export function AdminRaffleActions({
     if (nftMaxInput.trim() !== '') {
       const m = parseInt(nftMaxInput.trim(), 10)
       if (!Number.isFinite(m) || m <= 0) {
-        setMessage({ type: 'error', text: 'Max tickets must be a positive whole number or left empty.' })
+        setMessage({ type: 'error', text: 'Max tickets must be a positive whole number.' })
         return
       }
       payload.max_tickets = m
+    } else if (raffle.max_tickets == null) {
+      setMessage({
+        type: 'error',
+        text: 'Max tickets is required so buyers can see worst-case odds. Set a cap before saving economics.',
+      })
+      return
     }
     if (nftMaxPerWalletInput.trim() !== '') {
       const m = parseInt(nftMaxPerWalletInput.trim(), 10)
@@ -1400,7 +1406,7 @@ export function AdminRaffleActions({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="admin-nft-max">Max tickets (optional)</Label>
+                  <Label htmlFor="admin-nft-max">Max tickets (required if unset)</Label>
                   <Input
                     id="admin-nft-max"
                     inputMode="numeric"

@@ -35,6 +35,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { raffleSoldOutButtonLabel, raffleSoldOutDetailMessage } from '@/lib/raffles/sold-out-copy'
 import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer, RaffleCurrency, RaffleMilestone } from '@/lib/types'
 import { RaffleMilestonesPanel } from '@/components/RaffleMilestonesPanel'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
@@ -825,6 +826,8 @@ export function RaffleDetailClient({
   const availableTickets = raffle.max_tickets 
     ? raffle.max_tickets - totalTicketsSold 
     : null
+  const soldOutLabel = raffleSoldOutButtonLabel(raffle, availableTickets)
+  const soldOutDetailMessage = raffleSoldOutDetailMessage(raffle, availableTickets)
 
   // Calculate user's tickets (from confirmed entries only)
   const userTickets = connected && publicKey
@@ -4548,7 +4551,7 @@ export function RaffleDetailClient({
                     : isCreator
                     ? 'Your Raffle'
                     : availableTickets !== null && availableTickets <= 0
-                    ? 'Sold Out'
+                    ? soldOutLabel
                     : atWalletTicketLimit
                     ? 'Wallet Limit Reached'
                     : isProcessing
@@ -4913,9 +4916,9 @@ export function RaffleDetailClient({
                       : `${raffle.max_tickets} / ${raffle.max_tickets}`}
                   </span>
                 </div>
-                {availableTickets !== null && availableTickets <= 0 && (
+                {availableTickets !== null && availableTickets <= 0 && soldOutDetailMessage && (
                   <p className="text-xs text-destructive mt-1">
-                    All tickets have been sold
+                    {soldOutDetailMessage}
                   </p>
                 )}
               </div>
@@ -5084,7 +5087,7 @@ export function RaffleDetailClient({
                 : isProcessing
                 ? 'Processing...'
                 : availableTickets !== null && availableTickets <= 0
-                ? 'Sold Out'
+                ? soldOutLabel
                 : atWalletTicketLimit
                 ? 'Wallet Limit Reached'
                 : 'Buy Tickets'}
