@@ -67,13 +67,29 @@ function formatSol(sol: number): string {
   return sol >= 0.01 ? sol.toFixed(2).replace(/\.?0+$/, '') : sol.toFixed(4)
 }
 
+/** Client fallback when the wallet is connected but not SIWS-signed yet. */
+const COMING_SOON_FALLBACK_CONFIG: PanelConfig = {
+  enabled: false,
+  catalog_ready: false,
+  preview: true,
+  sellable: false,
+  fee_sol: 0.1,
+  fee_lamports: 100_000_000,
+  treasury: null,
+  reward_multiplier: 2,
+  max_per_request: 10,
+}
+
+const PREVIEW_PLACEHOLDER_COUNT = 8
+
 /**
  * Optional Owltopia Coin art upgrade (community vote): pay the per-coin fee,
  * the server repoints the Core URI to the new art in place — nested coins
  * included, no unlock needed — and the coin earns boosted OWL while nested.
  *
- * Before go-live (`!sellable`): shows a Coming soon teaser with fee + reward
- * copy and no pay CTA. Live mode requires sellable config + wallet coins.
+ * Before go-live (`!sellable`): always shows a Coming soon section (with empty
+ * placeholder tiles until the catalog is seeded). Live mode requires sellable
+ * config + wallet coins.
  */
 export function CoinArtUpgradePanel() {
   const { connection } = useConnection()
@@ -92,14 +108,21 @@ export function CoinArtUpgradePanel() {
     try {
       const res = await fetch('/api/me/coin-upgrade', { credentials: 'include', cache: 'no-store' })
       if (res.status === 401) {
-        setHidden(true)
+        // Connected but not signed in — still show Coming soon so holders see the section.
+        setConfig(COMING_SOON_FALLBACK_CONFIG)
+        setCoins([])
+        setPreviewArt([])
+        setHidden(false)
         return null
       }
       const json = (await res.json().catch(() => null)) as
         | { config?: PanelConfig; coins?: PanelCoin[]; preview_art?: PreviewArt[]; error?: string }
         | null
       if (!res.ok || !json?.config) {
-        setHidden(true)
+        setConfig(COMING_SOON_FALLBACK_CONFIG)
+        setCoins([])
+        setPreviewArt([])
+        setHidden(false)
         return null
       }
       setConfig(json.config)
@@ -108,7 +131,10 @@ export function CoinArtUpgradePanel() {
       setHidden(false)
       return json
     } catch {
-      setHidden(true)
+      setConfig(COMING_SOON_FALLBACK_CONFIG)
+      setCoins([])
+      setPreviewArt([])
+      setHidden(false)
       return null
     } finally {
       setLoaded(true)
@@ -142,7 +168,14 @@ export function CoinArtUpgradePanel() {
   )
 
   useEffect(() => {
-    if (!connected) return
+    if (!connected) {
+      setConfig(COMING_SOON_FALLBACK_CONFIG)
+      setCoins([])
+      setPreviewArt([])
+      setHidden(false)
+      setLoaded(true)
+      return
+    }
     void load().then((json) => {
       if (!json?.config?.sellable) return
       // Recover a paid fee whose POST response was lost: any stored coin still
@@ -259,15 +292,15 @@ export function CoinArtUpgradePanel() {
     }
   }, [busy, config, load, processing, submitUpgrade])
 
-  if (!connected || hidden || !loaded || !config) return null
+  if (hidden || !loaded || !config) return null
 
   const sellable = config.sellable === true
-  // Live mode still needs coins in-wallet; Coming soon shows without a coin scan.
-  if (sellable && coins.length === 0) return null
+  // Live mode still needs a connected wallet with coins; Coming soon always shows.
+  if (sellable && (!connected || coins.length === 0)) return null
 
   const totalSol = formatSol(config.fee_sol * selected.size)
   const comingSoonStatus = !config.catalog_ready
-    ? 'New art is being prepared — upgrades open once the catalog is live.'
+    ? 'New art is being prepared — previews appear here after the drop, then upgrades open.'
     : previewArt.length > 0
       ? 'Here’s a look at the new art — upgrades open soon.'
       : 'Upgrades are almost ready — check back soon to unlock the new art.'
@@ -296,24 +329,34 @@ export function CoinArtUpgradePanel() {
           <p className="text-xs rounded-lg border border-border/60 px-3 py-2 leading-relaxed text-muted-foreground">
             Coming soon — {comingSoonStatus}
           </p>
-          {previewArt.length > 0 ? (
-            <ul className="grid grid-cols-4 sm:grid-cols-8 gap-2" aria-label="New coin art preview">
-              {previewArt.map((sample, idx) => (
-                <li
-                  key={`${sample.coin_number ?? 'x'}-${idx}`}
-                  className="overflow-hidden rounded-lg border border-border/60 bg-muted aspect-square"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={sample.image}
-                    alt={sample.name ?? (sample.coin_number != null ? `Coin #${sample.coin_number}` : 'New coin art')}
-                    className="h-full w-full object-cover"
-                    loading="lazy"
-                  />
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          <ul className="grid grid-cols-4 sm:grid-cols-8 gap-2" aria-label="New coin art preview">
+            {previewArt.length > 0
+              ? previewArt.map((sample, idx) => (
+                  <li
+                    key={`${sample.coin_number ?? 'x'}-${idx}`}
+                    className="overflow-hidden rounded-lg border border-border/60 bg-muted aspect-square"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={sample.image}
+                      alt={
+                        sample.name ??
+                        (sample.coin_number != null ? `Coin #${sample.coin_number}` : 'New coin art')
+                      }
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                    />
+                  </li>
+                ))
+              : Array.from({ length: PREVIEW_PLACEHOLDER_COUNT }, (_, idx) => (
+                  <li
+                    key={`placeholder-${idx}`}
+                    className="flex aspect-square items-center justify-center rounded-lg border border-dashed border-border/60 bg-muted/40"
+                  >
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Soon</span>
+                  </li>
+                ))}
+          </ul>
         </div>
       ) : null}
 
