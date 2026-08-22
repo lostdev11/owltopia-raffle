@@ -1031,22 +1031,25 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
     }
     const maxTicketsRaw = ((formData.get('max_tickets') as string) ?? '').trim()
     let maxTicketsParsed: number | null = null
-    if (maxTicketsRaw) {
-      maxTicketsParsed = parseInt(maxTicketsRaw, 10)
-      if (!Number.isFinite(maxTicketsParsed) || maxTicketsParsed <= 0) {
-        alert('Max tickets must be a positive whole number, or leave the field empty for unlimited.')
-        focusFormField('max_tickets')
-        return
-      }
-      if (maxTicketsParsed < drawGoalTickets) {
-        alert(
-          isPartner
-            ? `Max tickets must be at least ${drawGoalTickets} (your draw goal), or leave empty for unlimited.`
-            : `Max tickets must be at least ${drawGoalTickets} (draw goal from floor ÷ ticket price), or leave empty for unlimited.`
-        )
-        focusFormField('max_tickets')
-        return
-      }
+    if (!maxTicketsRaw) {
+      alert('Max tickets is required so buyers can see worst-case odds before entering.')
+      focusFormField('max_tickets')
+      return
+    }
+    maxTicketsParsed = parseInt(maxTicketsRaw, 10)
+    if (!Number.isFinite(maxTicketsParsed) || maxTicketsParsed <= 0) {
+      alert('Max tickets must be a positive whole number.')
+      focusFormField('max_tickets')
+      return
+    }
+    if (maxTicketsParsed < drawGoalTickets) {
+      alert(
+        isPartner
+          ? `Max tickets must be at least ${drawGoalTickets} (your draw goal).`
+          : `Max tickets must be at least ${drawGoalTickets} (draw goal from floor ÷ ticket price).`
+      )
+      focusFormField('max_tickets')
+      return
     }
     const maxCheck = validateNftMaxTickets(maxTicketsParsed, drawGoalTickets)
     if (!maxCheck.ok) {
@@ -2482,15 +2485,30 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="max_tickets">Max Tickets (optional)</Label>
+            <Label htmlFor="max_tickets">Max tickets (required)</Label>
             <Input
               id="max_tickets"
               name="max_tickets"
               type="number"
+              required
               min={prizeMode === 'token' ? (partnerMinTicketsParsed ?? 1) : (derivedDrawGoal ?? 1)}
-              placeholder="Leave empty for unlimited tickets"
+              defaultValue={
+                prizeMode === 'token'
+                  ? partnerMinTicketsParsed != null
+                    ? String(partnerMinTicketsParsed)
+                    : undefined
+                  : derivedDrawGoal != null
+                    ? String(derivedDrawGoal)
+                    : undefined
+              }
+              key={`max-tickets-${prizeMode}-${derivedDrawGoal ?? ''}-${partnerMinTicketsParsed ?? ''}`}
+              placeholder="e.g. 200"
               className="min-h-[44px] touch-manipulation"
             />
+            <p className="text-xs text-muted-foreground">
+              Required. Buyers see worst-case odds as 1 ÷ max (e.g. max 200 → at worst 1/200). When all
+              tickets sell, the draw runs without waiting for the scheduled end time.
+            </p>
           </div>
 
           <div className="space-y-2">

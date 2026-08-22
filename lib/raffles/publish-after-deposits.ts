@@ -29,6 +29,8 @@ export async function maybePublishRaffleAfterDeposits(raffleId: string): Promise
   const milestones = await getMilestonesByRaffleId(raffleId)
   if (milestones.length > 0 && !(await allMilestonesDeposited(raffleId))) return false
 
+  if (raffle.max_tickets == null || raffle.max_tickets <= 0) return false
+
   if (raffleRequiresModerationListingFee(raffle)) return false
   if (
     raffle.creator_restricted_listing &&

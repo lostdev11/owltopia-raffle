@@ -342,6 +342,27 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
     const maxTicketsPerWalletValue = formData.get('max_tickets_per_wallet') as string
     const rankValue = formData.get('rank') as string
 
+    const parseRequiredMaxForEdit = (
+      raw: string,
+      drawGoal: number | null
+    ): number | null | false => {
+      const trimmed = (raw ?? '').trim()
+      if (!trimmed) {
+        alert('Max tickets is required so buyers can see worst-case odds before entering.')
+        return false
+      }
+      const parsed = parseInt(trimmed, 10)
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        alert('Max tickets must be a positive whole number.')
+        return false
+      }
+      if (drawGoal != null && parsed < drawGoal) {
+        alert(`Max tickets must be at least ${drawGoal} (the draw goal).`)
+        return false
+      }
+      return parsed
+    }
+
     const data: Record<string, unknown> = {
       title: formData.get('title') as string,
       description: formData.get('description') as string,
@@ -368,7 +389,12 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       }
       data.ticket_price = tp.value
       data.currency = formData.get('currency') as string
-      data.max_tickets = maxTicketsValue ? parseInt(maxTicketsValue, 10) : null
+      const maxParsed = parseRequiredMaxForEdit(maxTicketsValue, nftComputedMin)
+      if (maxParsed === false) {
+        setLoading(false)
+        return
+      }
+      data.max_tickets = maxParsed
       data.max_tickets_per_wallet = maxTicketsPerWalletValue?.trim()
         ? parseInt(maxTicketsPerWalletValue.trim(), 10)
         : null
@@ -405,11 +431,18 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
         if (maxTicketsValue?.trim()) {
           const parsed = parseInt(maxTicketsValue.trim(), 10)
           if (!Number.isFinite(parsed) || parsed <= 0) {
-            alert('Max tickets must be a positive whole number, or leave empty to keep the current cap.')
+            alert('Max tickets must be a positive whole number.')
+            setLoading(false)
+            return
+          }
+          if (nftComputedMin != null && parsed < nftComputedMin) {
+            alert(`Max tickets must be at least ${nftComputedMin} (the draw goal).`)
             setLoading(false)
             return
           }
           data.max_tickets = parsed
+        } else if (raffle.max_tickets != null) {
+          // Omit field to keep current cap; cannot clear via empty input.
         }
         if (maxTicketsPerWalletValue?.trim()) {
           const parsed = parseInt(maxTicketsPerWalletValue.trim(), 10)
@@ -428,7 +461,18 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       const floorPriceValue = formData.get('floor_price') as string
       data.ticket_price = parseFloat(formData.get('ticket_price') as string)
       data.currency = formData.get('currency') as string
-      data.max_tickets = maxTicketsValue ? parseInt(maxTicketsValue, 10) : null
+      const minForMax =
+        minTicketsValue && minTicketsValue.trim()
+          ? parseInt(minTicketsValue.trim(), 10)
+          : raffle.min_tickets
+      const drawGoalForMax =
+        minForMax != null && Number.isFinite(minForMax) && minForMax > 0 ? minForMax : null
+      const maxParsed = parseRequiredMaxForEdit(maxTicketsValue, drawGoalForMax)
+      if (maxParsed === false) {
+        setLoading(false)
+        return
+      }
+      data.max_tickets = maxParsed
       data.max_tickets_per_wallet = maxTicketsPerWalletValue?.trim()
         ? parseInt(maxTicketsPerWalletValue.trim(), 10)
         : null
@@ -1605,20 +1649,20 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="max_tickets_nft_live">Max tickets (optional)</Label>
+                      <Label htmlFor="max_tickets_nft_live">Max tickets (required to set cap)</Label>
                       <Input
                         id="max_tickets_nft_live"
                         name="max_tickets"
                         type="number"
                         min={nftComputedMin ?? 1}
                         defaultValue={raffle.max_tickets ?? undefined}
-                        placeholder="Leave empty to keep current (or unlimited)"
+                        placeholder={raffle.max_tickets == null ? 'Required for new listings' : 'Leave empty to keep current cap'}
                         className="min-h-[44px] touch-manipulation"
                         key={raffle.id + String(raffle.max_tickets ?? '')}
                       />
                       <p className="text-xs text-muted-foreground">
-                        If set, must be at least the new draw goal ({nftComputedMin ?? '—'}). Empty leaves the current
-                        cap unchanged.
+                        Cannot be cleared once set. Must be at least the draw goal ({nftComputedMin ?? '—'}). Legacy
+                        unlimited listings may leave empty to keep unlimited.
                       </p>
                     </div>
                     <div className="space-y-2">
@@ -1771,18 +1815,19 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     </label>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="max_tickets">Max tickets (optional)</Label>
+                    <Label htmlFor="max_tickets">Max tickets (required)</Label>
                     <Input
                       id="max_tickets"
                       name="max_tickets"
                       type="number"
+                      required
                       min={nftComputedMin ?? 1}
-                      defaultValue={raffle.max_tickets || ''}
-                      placeholder="Leave empty for unlimited"
+                      defaultValue={raffle.max_tickets || nftComputedMin || ''}
+                      placeholder="e.g. 200"
                       className="min-h-[44px] touch-manipulation"
                     />
                     <p className="text-xs text-muted-foreground">
-                      If set, must be at least the draw goal ({nftComputedMin ?? '—'}), or leave empty for unlimited.
+                      Required before publish. Worst-case odds are 1 ÷ max. Sell-out triggers the draw early.
                     </p>
                   </div>
                   <div className="space-y-2">
@@ -1857,18 +1902,19 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="max_tickets">Max Tickets (optional)</Label>
+                    <Label htmlFor="max_tickets">Max tickets (required)</Label>
                     <Input
                       id="max_tickets"
                       name="max_tickets"
                       type="number"
+                      required
                       min="1"
-                      defaultValue={raffle.max_tickets || ''}
-                      placeholder="Leave empty for unlimited tickets"
+                      defaultValue={raffle.max_tickets || raffle.min_tickets || ''}
+                      placeholder="e.g. 200"
                       className="min-h-[44px] touch-manipulation"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Set a limit on the total number of tickets that can be purchased. Leave empty for unlimited.
+                      Required before publish. Worst-case odds are 1 ÷ max. Sell-out triggers the draw early.
                     </p>
                   </div>
 
