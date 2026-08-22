@@ -6,16 +6,14 @@ import {
   owlCenterAssetUploadTimeBudgetMs,
 } from '@/lib/owl-center/asset-staging-limits'
 import { downloadStagedSugarZip } from '@/lib/owl-center/asset-staging-storage'
-import {
-  loadZipFromBuffer,
-  rewriteMetadataJson,
-} from '@/lib/owl-center/asset-upload-zip'
+import { loadZipFromBuffer } from '@/lib/owl-center/asset-upload-zip'
 import {
   createIrysUploader,
   ensureIrysFundedForUpload,
   isIrysUploadConfigured,
   uploadBufferWithUploader,
 } from '@/lib/owl-center/irys-uploader'
+import { rewriteMetadataJson } from '@/lib/owl-center/metadata-royalty'
 import {
   getCoinArtUpgradeUploadJobById,
   listCoinArtUpgradeUploadJobsForWorker,
