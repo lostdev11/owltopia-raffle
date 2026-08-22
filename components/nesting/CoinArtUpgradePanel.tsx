@@ -28,6 +28,12 @@ type PanelCoin = {
   upgrade_status: 'none' | 'processing' | 'upgraded' | 'art_unavailable'
 }
 
+type PreviewArt = {
+  coin_number: number | null
+  name: string | null
+  image: string
+}
+
 type PendingUpgradePayment = {
   signature: string
   asset_ids: string[]
@@ -75,6 +81,7 @@ export function CoinArtUpgradePanel() {
 
   const [config, setConfig] = useState<PanelConfig | null>(null)
   const [coins, setCoins] = useState<PanelCoin[]>([])
+  const [previewArt, setPreviewArt] = useState<PreviewArt[]>([])
   const [loaded, setLoaded] = useState(false)
   const [hidden, setHidden] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -89,7 +96,7 @@ export function CoinArtUpgradePanel() {
         return null
       }
       const json = (await res.json().catch(() => null)) as
-        | { config?: PanelConfig; coins?: PanelCoin[]; error?: string }
+        | { config?: PanelConfig; coins?: PanelCoin[]; preview_art?: PreviewArt[]; error?: string }
         | null
       if (!res.ok || !json?.config) {
         setHidden(true)
@@ -97,6 +104,7 @@ export function CoinArtUpgradePanel() {
       }
       setConfig(json.config)
       setCoins(json.coins ?? [])
+      setPreviewArt(Array.isArray(json.preview_art) ? json.preview_art : [])
       setHidden(false)
       return json
     } catch {
@@ -260,7 +268,9 @@ export function CoinArtUpgradePanel() {
   const totalSol = formatSol(config.fee_sol * selected.size)
   const comingSoonStatus = !config.catalog_ready
     ? 'New art is being prepared — upgrades open once the catalog is live.'
-    : 'Upgrades are almost ready — check back soon to unlock the new art.'
+    : previewArt.length > 0
+      ? 'Here’s a look at the new art — upgrades open soon.'
+      : 'Upgrades are almost ready — check back soon to unlock the new art.'
 
   return (
     <section
@@ -282,9 +292,29 @@ export function CoinArtUpgradePanel() {
       </div>
 
       {!sellable ? (
-        <p className="text-xs rounded-lg border border-border/60 px-3 py-2 leading-relaxed text-muted-foreground">
-          Coming soon — {comingSoonStatus}
-        </p>
+        <div className="space-y-3">
+          <p className="text-xs rounded-lg border border-border/60 px-3 py-2 leading-relaxed text-muted-foreground">
+            Coming soon — {comingSoonStatus}
+          </p>
+          {previewArt.length > 0 ? (
+            <ul className="grid grid-cols-4 sm:grid-cols-8 gap-2" aria-label="New coin art preview">
+              {previewArt.map((sample, idx) => (
+                <li
+                  key={`${sample.coin_number ?? 'x'}-${idx}`}
+                  className="overflow-hidden rounded-lg border border-border/60 bg-muted aspect-square"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={sample.image}
+                    alt={sample.name ?? (sample.coin_number != null ? `Coin #${sample.coin_number}` : 'New coin art')}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
 
       {notice ? (

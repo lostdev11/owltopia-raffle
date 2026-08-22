@@ -18,7 +18,9 @@ import { coinUpgradeCollectionCandidates, executeCoinArtUpgrade } from '@/lib/co
 import {
   countCoinArtUpgradeCatalogEntries,
   listCoinArtUpgradeCatalogEntries,
+  listCoinArtUpgradeCatalogPreviewSamples,
   listCoinArtUpgradesByAssetIds,
+  type CoinArtUpgradePreviewSample,
 } from '@/lib/db/coin-art-upgrades'
 import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
 
@@ -90,7 +92,14 @@ export async function GET(request: NextRequest) {
     const config = await buildCoinArtUpgradePublicConfig()
 
     if (!config.sellable) {
-      return NextResponse.json({ config, coins: [] as CoinArtUpgradeWalletCoin[] })
+      const previewArt: CoinArtUpgradePreviewSample[] = config.catalog_ready
+        ? await listCoinArtUpgradeCatalogPreviewSamples(8)
+        : []
+      return NextResponse.json({
+        config,
+        coins: [] as CoinArtUpgradeWalletCoin[],
+        preview_art: previewArt,
+      })
     }
 
     const heliusRpcUrl = getHeliusMainnetRpcUrl()
@@ -159,7 +168,7 @@ export async function GET(request: NextRequest) {
 
     coins.sort((a, b) => (a.name || a.mint).localeCompare(b.name || b.mint))
 
-    return NextResponse.json({ config, coins })
+    return NextResponse.json({ config, coins, preview_art: [] as CoinArtUpgradePreviewSample[] })
   } catch (e) {
     console.error('[me/coin-upgrade GET]', e)
     return NextResponse.json({ error: safeErrorMessage(e) }, { status: 500 })
