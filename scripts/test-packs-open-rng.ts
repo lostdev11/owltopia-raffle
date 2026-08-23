@@ -6,6 +6,7 @@ import {
   generatePackOpenSeed,
   hashPackOpenCommit,
   pickCategory,
+  pickJackpotWin,
   pickNftFromAvailableInventory,
   pickNftFromSnapshot,
   pickTier,
@@ -105,6 +106,16 @@ for (let i = 0; i < 1000; i++) {
   if (p.id === 'grail') grailWins++
 }
 assert.ok(grailWins < 200, `grail should be rare (${grailWins}/1000)`)
+
+// Jackpot roll is independent of category (checked first on open)
+assert.equal(pickJackpotWin('a'.repeat(64), 0), false)
+assert.equal(pickJackpotWin('b'.repeat(64), 10_000), true)
+let jackpotHits = 0
+for (let i = 0; i < 5000; i++) {
+  const s = generatePackOpenSeed()
+  if (pickJackpotWin(s, 20)) jackpotHits++
+}
+assert.ok(jackpotHits > 0 && jackpotHits < 500, `jackpot hits ${jackpotHits}/5000`)
 
 const odds = computePackOddsPercentages({
   nftInventory: [

@@ -7,7 +7,7 @@ import {
   PACK_OWL_TIERS,
   PACK_SOL_TIERS,
   owlTiersWithPrice,
-  type PackPrizeCategory,
+  type PackRegularCategory,
 } from '@/lib/packs/config'
 import { buildWeightedNftPool, type NftPoolEntry } from '@/lib/packs/nft-weights'
 
@@ -21,7 +21,7 @@ function pct(part: number, whole: number): number {
 }
 
 export type PackOddsPercentages = {
-  categories: { category: PackPrizeCategory; weightBps: number; percent: number }[]
+  categories: { category: PackRegularCategory; weightBps: number; percent: number }[]
   owlTiers: { amount: number; weight: number; percentOfCategory: number; percentOverall: number }[]
   solTiers: {
     amountSol: number
@@ -49,7 +49,7 @@ export function computePackOddsPercentages(options?: {
     PACK_CATEGORY_WEIGHTS_BPS.nft
 
   const categories: PackOddsPercentages['categories'] = (
-    ['owl', 'sol', 'nft'] as PackPrizeCategory[]
+    ['owl', 'sol', 'nft'] as PackRegularCategory[]
   ).map((category) => ({
     category,
     weightBps: PACK_CATEGORY_WEIGHTS_BPS[category],

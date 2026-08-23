@@ -17,6 +17,9 @@ type VerifyPayload = {
   category: string | null
   prizeLabel: string | null
   freeTicketCredits: number
+  isJackpotWin?: boolean
+  jackpotAmountSol?: number | null
+  jackpotContributionSol?: number | null
   completedAt: string | null
   vrf: {
     provider: string
@@ -30,6 +33,7 @@ type VerifyPayload = {
     commitMatches: boolean | null
     recomputedCategory: string | null
     recomputedNftMint: string | null
+    recomputedJackpotWin: boolean | null
     nftSnapshotMatches: boolean | null
     expectedCommitHash: string
     randomnessSource: string
@@ -77,6 +81,14 @@ export default function PackVerifyPage() {
           <Row label="Status" value={data.status} />
           <Row label="Prize" value={data.prizeLabel || '—'} />
           <Row label="Category" value={data.category || '—'} />
+          {data.isJackpotWin ? (
+            <Row
+              label="Jackpot"
+              value={`${data.jackpotAmountSol ?? '—'} SOL (contributed ${data.jackpotContributionSol ?? '—'} SOL)`}
+            />
+          ) : data.jackpotContributionSol != null ? (
+            <Row label="Jackpot contribution" value={`${data.jackpotContributionSol} SOL`} />
+          ) : null}
           <Row label="Buyer" value={data.buyerWallet} mono />
           <Row label="Algo" value={data.openAlgo} />
           <Row label="Commit" value={data.openCommitHash || '—'} mono />
@@ -138,6 +150,16 @@ export default function PackVerifyPage() {
                 <p className="mt-1 text-xs text-emerald-100/50">
                   Recomputed category: {data.verify.recomputedCategory ?? '—'}
                 </p>
+                {data.verify.recomputedJackpotWin != null ? (
+                  <p className="mt-1 text-xs text-emerald-100/50">
+                    Recomputed jackpot win: {data.verify.recomputedJackpotWin ? 'yes' : 'no'}
+                    {data.isJackpotWin != null
+                      ? data.verify.recomputedJackpotWin === data.isJackpotWin
+                        ? ' (matches)'
+                        : ' (mismatch)'
+                      : ''}
+                  </p>
+                ) : null}
                 {data.verify.recomputedNftMint ? (
                   <p className="mt-1 text-xs text-emerald-100/50">
                     Recomputed NFT mint: {data.verify.recomputedNftMint}

@@ -5,6 +5,7 @@ import {
   PACK_SOL_TIERS,
   owlTiersWithPrice,
   type PackPrizeCategory,
+  type PackRegularCategory,
 } from '@/lib/packs/config'
 import type { WeightedTierPick } from '@/lib/packs/types'
 import {
@@ -42,8 +43,13 @@ export function pickWeightedIndex(seed: string, domain: string, weights: number[
   return weights.length - 1
 }
 
-export function pickCategory(seed: string): PackPrizeCategory {
-  const entries: PackPrizeCategory[] = ['owl', 'sol', 'nft']
+export function pickJackpotWin(seed: string, oddsBps: number): boolean {
+  if (!(oddsBps > 0)) return false
+  return hashMod(seed, 'jackpot', 10_000) < oddsBps
+}
+
+export function pickCategory(seed: string): PackRegularCategory {
+  const entries: PackRegularCategory[] = ['owl', 'sol', 'nft']
   const weights = entries.map((c) => PACK_CATEGORY_WEIGHTS_BPS[c])
   const idx = pickWeightedIndex(seed, 'category', weights)
   return entries[idx]!
@@ -54,7 +60,7 @@ export function pickCategory(seed: string): PackPrizeCategory {
  */
 export function pickTier(
   seed: string,
-  category: PackPrizeCategory,
+  category: PackRegularCategory,
   owlSolPrice?: number | null
 ): WeightedTierPick {
   if (category === 'owl') {
@@ -139,7 +145,7 @@ export function pickNftFromSnapshot(
 export function recomputeOpenFromSeed(
   seed: string,
   owlSolPrice?: number | null
-): { category: PackPrizeCategory; pick: WeightedTierPick } {
+): { category: PackRegularCategory; pick: WeightedTierPick } {
   const category = pickCategory(seed)
   if (category === 'nft') {
     // NFT mint is recomputed via snapshot when present; return placeholder band pick.

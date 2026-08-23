@@ -22,10 +22,12 @@ export const PACK_RTP_BPS = 8000
 /** Expected prize value in SOL at target RTP */
 export const PACK_TARGET_EV_SOL = (PACK_PRICE_SOL * PACK_RTP_BPS) / 10_000
 
-export type PackPrizeCategory = 'owl' | 'sol' | 'nft'
+export type PackRegularCategory = 'owl' | 'sol' | 'nft'
 
-/** Category weights in basis points (must sum to 10_000) */
-export const PACK_CATEGORY_WEIGHTS_BPS: Record<PackPrizeCategory, number> = {
+export type PackPrizeCategory = PackRegularCategory | 'jackpot'
+
+/** Category weights in basis points (must sum to 10_000; jackpot is a separate pre-roll) */
+export const PACK_CATEGORY_WEIGHTS_BPS: Record<PackRegularCategory, number> = {
   owl: 6000,
   sol: 2000,
   nft: 2000,

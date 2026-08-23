@@ -26,6 +26,11 @@ type AdminPacksData = {
     owlSolPrice: number | null
     solBalance: number | null
     availableNfts: number
+    jackpotPoolSol: number
+    jackpotContributionSol: number
+    jackpotWinOddsBps: number
+    jackpotPoolLabel: string
+    jackpotWinPercentLabel: string
   }
   fairness?: {
     openAlgo: string
@@ -210,6 +215,11 @@ export default function AdminPacksPage() {
             <p className="mt-1">
               SOL in vault: {data.vault.solBalance ?? '—'} · Prize NFTs ready:{' '}
               {data.vault.availableNfts} (need at least {data.vault.minNftCount})
+            </p>
+            <p className="mt-1">
+              Jackpot pool: {data.vault.jackpotPoolLabel} SOL · +{' '}
+              {data.vault.jackpotContributionSol} SOL per pack · ≈{' '}
+              {data.vault.jackpotWinPercentLabel} win chance
             </p>
             <p className="mt-1">
               Typical prize: about {data.ev.estimatedEvSol.toFixed(4)} SOL (aiming for{' '}

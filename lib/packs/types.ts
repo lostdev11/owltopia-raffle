@@ -35,6 +35,9 @@ export type PackVaultConfigRow = {
   min_sol_balance: number
   min_nft_count: number
   owl_sol_price: number | null
+  jackpot_pool_sol: number
+  jackpot_contribution_sol: number
+  jackpot_win_odds_bps: number
   updated_at: string
 }
 
@@ -105,6 +108,9 @@ export type PackOpenRow = {
   fair_value_sol: number | null
   free_ticket_credits: number
   payout_signature: string | null
+  is_jackpot_win: boolean
+  jackpot_contribution_sol: number | null
+  jackpot_amount_sol: number | null
   error_message: string | null
   created_at: string
   completed_at: string | null
@@ -141,6 +147,9 @@ export type PackOpenResult = {
   openSeed: string
   openCommitHash: string
   openAlgo: string
+  isJackpotWin: boolean
+  jackpotAmountSol: number | null
+  jackpotPoolSol: number | null
 }
 
 export type WeightedTierPick =

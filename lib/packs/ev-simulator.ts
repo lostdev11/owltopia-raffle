@@ -10,8 +10,9 @@ import {
   isPackNftFairValueSol,
   owlTiersWithPrice,
   resolveOwlSolPrice,
-  type PackPrizeCategory,
+  type PackRegularCategory,
 } from '@/lib/packs/config'
+import { PACK_JACKPOT_CONTRIBUTION_SOL } from '@/lib/packs/jackpot'
 import { buildWeightedNftPool } from '@/lib/packs/nft-weights'
 
 export type EvSimulatorResult = {
@@ -20,7 +21,8 @@ export type EvSimulatorResult = {
   targetRtpBps: number
   estimatedEvSol: number
   estimatedRtpBps: number
-  categoryEv: Record<PackPrizeCategory, number>
+  categoryEv: Record<PackRegularCategory, number>
+  jackpotEvSol: number
   owlSolPrice: number | null
   notes: string[]
 }
@@ -67,16 +69,21 @@ export function simulatePackEv(options?: {
     PACK_CATEGORY_WEIGHTS_BPS.sol +
     PACK_CATEGORY_WEIGHTS_BPS.nft
 
-  const categoryEv: Record<PackPrizeCategory, number> = {
+  const categoryEv: Record<PackRegularCategory, number> = {
     owl: (PACK_CATEGORY_WEIGHTS_BPS.owl / catTotal) * owlEv,
     sol: (PACK_CATEGORY_WEIGHTS_BPS.sol / catTotal) * solEv,
     nft: (PACK_CATEGORY_WEIGHTS_BPS.nft / catTotal) * nftEv,
   }
 
-  const estimatedEvSol = categoryEv.owl + categoryEv.sol + categoryEv.nft
+  const jackpotEvSol = PACK_JACKPOT_CONTRIBUTION_SOL
+  const estimatedEvSol =
+    categoryEv.owl + categoryEv.sol + categoryEv.nft + jackpotEvSol
   const estimatedRtpBps = Math.round((estimatedEvSol / PACK_PRICE_SOL) * 10_000)
 
   const notes: string[] = []
+  notes.push(
+    `Jackpot slice (${jackpotEvSol} SOL/open) included in EV at steady-state pool equilibrium.`
+  )
   if (!options?.owlSolPrice) {
     notes.push(
       `OWL prize value uses default rate (${PACK_DEFAULT_OWL_SOL_PRICE} SOL per OWL; 10 OWL = 0.1 SOL). Override in Admin → Packs if needed.`
@@ -98,6 +105,7 @@ export function simulatePackEv(options?: {
     estimatedEvSol,
     estimatedRtpBps,
     categoryEv,
+    jackpotEvSol,
     owlSolPrice,
     notes,
   }
@@ -214,13 +222,15 @@ export function simulatePackEvFromInventory(options: {
     PACK_CATEGORY_WEIGHTS_BPS.sol +
     PACK_CATEGORY_WEIGHTS_BPS.nft
 
-  const categoryEv: Record<PackPrizeCategory, number> = {
+  const categoryEv: Record<PackRegularCategory, number> = {
     owl: (PACK_CATEGORY_WEIGHTS_BPS.owl / catTotal) * owlEv,
     sol: (PACK_CATEGORY_WEIGHTS_BPS.sol / catTotal) * solEv,
     nft: (PACK_CATEGORY_WEIGHTS_BPS.nft / catTotal) * nftEv,
   }
 
-  const estimatedEvSol = categoryEv.owl + categoryEv.sol + categoryEv.nft
+  const jackpotEvSol = PACK_JACKPOT_CONTRIBUTION_SOL
+  const estimatedEvSol =
+    categoryEv.owl + categoryEv.sol + categoryEv.nft + jackpotEvSol
   const estimatedRtpBps = Math.round((estimatedEvSol / PACK_PRICE_SOL) * 10_000)
 
   if (!options.owlSolPrice) {
@@ -228,6 +238,10 @@ export function simulatePackEvFromInventory(options: {
       `OWL prize value uses default rate (${PACK_DEFAULT_OWL_SOL_PRICE} SOL per OWL; 10 OWL = 0.1 SOL). Override in Admin → Packs if needed.`
     )
   }
+  notes.push(
+    `Jackpot slice (${jackpotEvSol} SOL/open) included in EV at steady-state pool equilibrium.`
+  )
+
   const drift = Math.abs(estimatedEvSol - PACK_TARGET_EV_SOL)
   if (drift > 0.01) {
     notes.push(
@@ -244,6 +258,7 @@ export function simulatePackEvFromInventory(options: {
     estimatedEvSol,
     estimatedRtpBps,
     categoryEv,
+    jackpotEvSol,
     owlSolPrice,
     notes,
   }

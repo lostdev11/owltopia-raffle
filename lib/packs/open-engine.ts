@@ -4,6 +4,10 @@ import {
   solToLamports,
 } from '@/lib/packs/config'
 import {
+  packJackpotContributionForPrice,
+  PACK_JACKPOT_MIN_PAYOUT_SOL,
+} from '@/lib/packs/jackpot'
+import {
   countAvailableNfts,
   createPendingPackOpen,
   getActivePackProduct,
@@ -15,6 +19,7 @@ import {
   markNftPaid,
   releaseNftReservation,
   reserveNftById,
+  resolvePackJackpotForOpen,
   updatePackOpen,
   updatePackVaultConfig,
 } from '@/lib/packs/db'
@@ -22,6 +27,7 @@ import {
   generatePackOpenSeed,
   hashPackOpenCommit,
   pickCategory,
+  pickJackpotWin,
   pickNftFromAvailableInventory,
   pickTier,
 } from '@/lib/packs/rng'
@@ -44,7 +50,11 @@ import { runPackOpenVrf } from '@/lib/packs/vrf-open-flow'
 
 function rowToResult(
   row: PackOpenRow,
-  extra?: { nftName?: string | null; nftImageUrl?: string | null }
+  extra?: {
+    nftName?: string | null
+    nftImageUrl?: string | null
+    jackpotPoolSol?: number | null
+  }
 ): PackOpenResult {
   return {
     openId: row.id,
@@ -61,6 +71,9 @@ function rowToResult(
     openSeed: row.open_seed!,
     openCommitHash: row.open_commit_hash!,
     openAlgo: row.open_algo,
+    isJackpotWin: row.is_jackpot_win === true,
+    jackpotAmountSol: row.jackpot_amount_sol,
+    jackpotPoolSol: extra?.jackpotPoolSol ?? null,
   }
 }
 
@@ -201,6 +214,67 @@ export async function confirmAndOpenPack(input: {
     open_commit_hash: commit,
   })
 
+  const jackpotContribution =
+    Number(config.jackpot_contribution_sol) > 0
+      ? Number(config.jackpot_contribution_sol)
+      : packJackpotContributionForPrice(priceSol)
+  const jackpotOddsBps = Number(config.jackpot_win_odds_bps) || 20
+  const poolBeforeJackpot = Number(config.jackpot_pool_sol ?? 0)
+  const poolAfterContribution =
+    Math.round((poolBeforeJackpot + jackpotContribution) * 1_000_000_000) / 1_000_000_000
+  const jackpotRollWins =
+    pickJackpotWin(seed, jackpotOddsBps) &&
+    poolAfterContribution >= PACK_JACKPOT_MIN_PAYOUT_SOL
+
+  const jackpotResolution = await resolvePackJackpotForOpen({
+    contributionSol: jackpotContribution,
+    won: jackpotRollWins,
+  })
+
+  if (jackpotRollWins && jackpotResolution.jackpotPayoutSol != null) {
+    const jackpotAmount = jackpotResolution.jackpotPayoutSol
+    open = await updatePackOpen(open.id, {
+      status: 'reserved',
+      category: 'jackpot',
+      prize_label: `${jackpotAmount} SOL Jackpot`,
+      owl_amount: null,
+      sol_amount: jackpotAmount,
+      nft_inventory_id: null,
+      nft_mint_address: null,
+      fair_value_sol: jackpotAmount,
+      free_ticket_credits: 0,
+      is_jackpot_win: true,
+      jackpot_contribution_sol: jackpotContribution,
+      jackpot_amount_sol: jackpotAmount,
+      nft_pool_snapshot: null,
+    })
+
+    open = await updatePackOpen(open.id, { status: 'paying_out' })
+
+    const paid = await payoutSolFromPacksVault(
+      input.buyerWallet,
+      solToLamports(jackpotAmount)
+    )
+    if (!paid.ok || !paid.signature) {
+      await updatePackOpen(open.id, {
+        status: 'refund_needed',
+        error_message: paid.error || 'Jackpot SOL payout failed',
+      })
+      throw new Error(paid.error || 'Jackpot payout failed')
+    }
+
+    open = await updatePackOpen(open.id, {
+      status: 'completed',
+      payout_signature: paid.signature,
+      completed_at: new Date().toISOString(),
+      error_message: null,
+    })
+
+    await ensurePacksSolvencyOrPause()
+
+    return rowToResult(open, { jackpotPoolSol: jackpotResolution.poolAfterSol })
+  }
+
   const category = pickCategory(seed)
 
   let prizeLabel = ''
@@ -321,6 +395,9 @@ export async function confirmAndOpenPack(input: {
     nft_mint_address: nftMint,
     fair_value_sol: fairValueSol,
     free_ticket_credits: freeTickets,
+    is_jackpot_win: false,
+    jackpot_contribution_sol: jackpotContribution,
+    jackpot_amount_sol: null,
     nft_pool_snapshot: nftPoolSnapshot,
   })
 
@@ -381,5 +458,9 @@ export async function confirmAndOpenPack(input: {
 
   await ensurePacksSolvencyOrPause()
 
-  return rowToResult(open, { nftName, nftImageUrl })
+  return rowToResult(open, {
+    nftName,
+    nftImageUrl,
+    jackpotPoolSol: jackpotResolution.poolAfterSol,
+  })
 }

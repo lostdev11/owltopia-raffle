@@ -47,6 +47,12 @@ The `/packs` page is a single-composition hero (OWL PACKS brand, pack visual, on
 | Odds UI | ME-style **percentages** (category + tier + per-NFT) |
 | Randomness | Switchboard VRF when `PACK_VRF_ENABLED=true` (`owltopia-pack-open-v2-vrf`); else local commit–reveal (`v1`) |
 
+## Jackpot
+
+Each **0.1 SOL** pack contributes **0.02 SOL** to a visible accumulating jackpot pool (~**0.2%** win chance per open by default). On a jackpot hit, the buyer receives the **full pool** in SOL and the pool resets to zero. Regular OWL/SOL/NFT prizes apply when the jackpot roll misses.
+
+Apply migration **229** (`packs_jackpot`) alongside prior pack migrations.
+
 ## House edge
 
 Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payout ≈ 80% of pack price. Jackpots (SOL / OWL / premium NFTs) are funded by common low-tier wins.

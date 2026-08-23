@@ -27,6 +27,7 @@ import {
   ShoppingBag,
   ShieldCheck,
   Ticket,
+  Trophy,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -74,12 +75,20 @@ type PacksConfig = {
     availableNfts: number
   }
   ev: { targetEvSol: number; estimatedEvSol: number; estimatedRtpBps: number }
+  jackpot: {
+    poolSol: number
+    contributionSol: number
+    winOddsBps: number
+    winPercentLabel: string
+    poolLabel: string
+  }
   recentOpens: {
     id: string
     wallet: string
     category: string | null
     prizeLabel: string | null
     freeTicketCredits: number
+    isJackpotWin?: boolean
     completedAt: string | null
   }[]
 }
@@ -535,6 +544,19 @@ export function PacksClient({
             className="order-3 w-full max-w-sm justify-self-center animate-hero-rise lg:max-w-none lg:justify-self-stretch"
             style={{ animationDelay: '140ms' }}
           >
+            <div className="mb-4 rounded-2xl border border-amber-400/35 bg-gradient-to-br from-amber-500/15 via-amber-500/5 to-transparent p-4 shadow-[0_0_40px_-20px_rgba(251,191,36,0.35)]">
+              <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-amber-200/90">
+                <Trophy className="h-4 w-4" aria-hidden />
+                SOL Jackpot
+              </p>
+              <p className="mt-2 font-display text-3xl tracking-wide text-amber-100 sm:text-4xl">
+                {config?.jackpot?.poolLabel ?? '0.0000'} SOL
+              </p>
+              <p className="mt-2 text-xs leading-relaxed text-white/55">
+                +{config?.jackpot?.contributionSol ?? 0.02} SOL per pack · ≈{' '}
+                {config?.jackpot?.winPercentLabel ?? '0.2%'} win chance
+              </p>
+            </div>
             <div className="rounded-2xl border border-[#00FF9C]/20 bg-black/45 p-4 shadow-[0_0_40px_-20px_rgba(0,255,156,0.35)] backdrop-blur-sm sm:p-5">
               <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#00FF9C]">
                 Possible prizes
@@ -610,7 +632,13 @@ export function PacksClient({
                 <div className="min-w-0">
                   <span className="text-[#A9CBB9]/70">{shortWallet(o.wallet)}</span>
                   <span className="mx-2 text-white/20">·</span>
-                  <span className="text-[#EAFBF4]">{o.prizeLabel}</span>
+                  <span className="text-[#EAFBF4]">
+                    {o.isJackpotWin ? (
+                      <span className="text-amber-200">🏆 {o.prizeLabel}</span>
+                    ) : (
+                      o.prizeLabel
+                    )}
+                  </span>
                   {o.freeTicketCredits > 0 ? (
                     <span className="ml-2 inline-flex items-center gap-1 text-[11px] text-[#00FF9C]/80">
                       <Ticket className="h-3 w-3" aria-hidden />+{o.freeTicketCredits}
@@ -634,13 +662,24 @@ export function PacksClient({
           <h2 className="font-display text-3xl tracking-[0.12em] text-[#EAFBF4]">Prize odds</h2>
           <p className="mt-2 text-sm text-[#A9CBB9]">
             Percentages are ME-style odds. Higher-value prizes are rarer. Typical prize ≈{' '}
-            {config?.ev.targetEvSol ?? 0.08} SOL per open.
+            {config?.ev.targetEvSol ?? 0.08} SOL per open (includes{' '}
+            {config?.jackpot?.contributionSol ?? 0.02} SOL jackpot slice).
             {config ? ` Prize NFTs ready: ${config.vault.availableNfts}.` : null}
             {config?.fairness?.vrfEnabled
               ? ' Randomness: Switchboard on-chain VRF.'
               : ' Randomness: commit–reveal (verify after open).'}
           </p>
-          <div className="mt-6 grid gap-8 sm:grid-cols-3">
+          <div className="mt-6 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="sm:col-span-2 lg:col-span-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200/90">
+                Jackpot (separate roll)
+              </p>
+              <p className="mt-2 text-sm text-[#A9CBB9]">
+                ~{config?.jackpot?.winPercentLabel ?? '0.2%'} chance to win the full pool (
+                {config?.jackpot?.poolLabel ?? '0'} SOL now). Regular prize odds below apply when
+                jackpot does not hit.
+              </p>
+            </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00FF9C]/85">
                 $OWL ({bpsToPercent(weights.owl)})

@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getPackOpenById, getPackVaultConfig } from '@/lib/packs/db'
-import {
-  hashPackOpenCommit,
-  pickCategory,
-  pickNftFromSnapshot,
-  recomputeOpenFromSeed,
-  verifyCommitHash,
-} from '@/lib/packs/rng'
+import { pickCategory, pickJackpotWin, pickNftFromSnapshot, hashPackOpenCommit, recomputeOpenFromSeed, verifyCommitHash } from '@/lib/packs/rng'
+import { PACK_JACKPOT_MIN_PAYOUT_SOL } from '@/lib/packs/jackpot'
 import { PACK_OPEN_ALGO_V2_VRF } from '@/lib/packs/config'
 import type { PackNftPoolSnapshotRow } from '@/lib/packs/types'
 
@@ -28,12 +23,32 @@ export async function GET(_request: NextRequest, context: Ctx) {
     let recomputedNftMint: string | null = null
     let nftSnapshotMatches: boolean | null = null
 
+    let recomputedJackpotWin: boolean | null = null
+
     if (open.open_seed && open.status === 'completed') {
       recomputed = recomputeOpenFromSeed(open.open_seed, config?.owl_sol_price ?? null)
       commitOk = open.open_commit_hash
         ? verifyCommitHash(open.open_seed, open.open_commit_hash)
         : null
 
+      const oddsBps = Number(config?.jackpot_win_odds_bps ?? 20)
+      const contribution = Number(open.jackpot_contribution_sol ?? 0.02)
+      const poolBefore = open.is_jackpot_win
+        ? Math.max(0, Number(open.jackpot_amount_sol ?? 0) - contribution)
+        : null
+      const poolAfterContrib =
+        poolBefore != null
+          ? poolBefore + contribution
+          : Number(config?.jackpot_pool_sol ?? 0)
+      recomputedJackpotWin =
+        pickJackpotWin(open.open_seed, oddsBps) &&
+        (open.is_jackpot_win
+          ? Number(open.jackpot_amount_sol ?? 0) >= PACK_JACKPOT_MIN_PAYOUT_SOL
+          : poolAfterContrib >= PACK_JACKPOT_MIN_PAYOUT_SOL)
+
+      if (open.is_jackpot_win) {
+        // Jackpot replaces category roll — skip NFT recompute
+      } else {
       const category = pickCategory(open.open_seed)
       if (category === 'nft' && open.nft_pool_snapshot && Array.isArray(open.nft_pool_snapshot)) {
         try {
@@ -49,6 +64,7 @@ export async function GET(_request: NextRequest, context: Ctx) {
         } catch {
           nftSnapshotMatches = false
         }
+      }
       }
     }
 
@@ -70,6 +86,9 @@ export async function GET(_request: NextRequest, context: Ctx) {
       nftMint: open.nft_mint_address,
       fairValueSol: open.fair_value_sol,
       freeTicketCredits: open.free_ticket_credits,
+      isJackpotWin: open.is_jackpot_win === true,
+      jackpotAmountSol: open.jackpot_amount_sol,
+      jackpotContributionSol: open.jackpot_contribution_sol,
       completedAt: open.completed_at,
       vrf: isVrf
         ? {
@@ -89,6 +108,7 @@ export async function GET(_request: NextRequest, context: Ctx) {
               recomputedPick: recomputed?.pick ?? null,
               recomputedNftMint,
               nftSnapshotMatches,
+              recomputedJackpotWin,
               expectedCommitHash: hashPackOpenCommit(open.open_seed),
               randomnessSource: isVrf
                 ? 'Switchboard on-chain VRF'

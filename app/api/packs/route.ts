@@ -19,6 +19,12 @@ import {
 } from '@/lib/packs/db'
 import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
 import { computePackOddsPercentages } from '@/lib/packs/odds'
+import {
+  PACK_JACKPOT_CONTRIBUTION_SOL,
+  PACK_JACKPOT_WIN_ODDS_BPS,
+  formatJackpotPoolSol,
+  jackpotWinPercentLabel,
+} from '@/lib/packs/jackpot'
 import { getPacksVaultPublicKey } from '@/lib/packs/vault'
 import { isPackVrfEnabled, resolvePackOpenAlgo } from '@/lib/packs/vrf-config'
 
@@ -96,6 +102,17 @@ export async function GET() {
         openAlgo: resolvePackOpenAlgo(),
         vrfEnabled: isPackVrfEnabled(),
       },
+      jackpot: {
+        poolSol: Number(vaultConfig?.jackpot_pool_sol ?? 0),
+        contributionSol: Number(
+          vaultConfig?.jackpot_contribution_sol ?? PACK_JACKPOT_CONTRIBUTION_SOL
+        ),
+        winOddsBps: Number(vaultConfig?.jackpot_win_odds_bps ?? PACK_JACKPOT_WIN_ODDS_BPS),
+        winPercentLabel: jackpotWinPercentLabel(
+          Number(vaultConfig?.jackpot_win_odds_bps ?? PACK_JACKPOT_WIN_ODDS_BPS)
+        ),
+        poolLabel: formatJackpotPoolSol(Number(vaultConfig?.jackpot_pool_sol ?? 0)),
+      },
       vault: {
         address: vault,
         paused,
@@ -113,6 +130,7 @@ export async function GET() {
         category: o.category,
         prizeLabel: o.prize_label,
         freeTicketCredits: o.free_ticket_credits,
+        isJackpotWin: o.is_jackpot_win === true,
         completedAt: o.completed_at,
       })),
     })
