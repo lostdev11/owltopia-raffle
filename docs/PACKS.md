@@ -60,8 +60,10 @@ Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payo
 ## Ops
 
 1. Grind an Owl-branded vault wallet (Solana base58 cannot use `O`/`l`, so vanity uses `owL…`):
-   `npm run packs:grind-vault` → writes `.local/packs-vault-keypair.txt` (gitignored).
-2. Set `PACKS_VAULT_SECRET_KEY` (server) and `NEXT_PUBLIC_PACKS_VAULT_WALLET` from that file (Vercel + `.env.local`).
+   `npm run packs:grind-vault` → writes `.local/packs-vault-keypair.json` (gitignored).
+2. Install env vars **on your machine only** (never paste the secret in chat):
+   `npm run packs:install-vault-env` → merges into `.env.local` without printing the secret.
+   For Vercel Production, add `PACKS_VAULT_SECRET_KEY` and `NEXT_PUBLIC_PACKS_VAULT_WALLET` in the dashboard (or `vercel env add` interactively).
 3. Fund the vault with SOL, OWL, and NFTs. **All pack purchase SOL goes to this wallet**; prize payouts leave from it (house edge stays as residual balance).
 4. Admin → Packs: load wallet NFTs, set floors (0.05+ SOL; grails above 0.5 are allowed), **Deposit & add**. SPL, Metaplex Core, and compressed NFTs are supported; pNFT and frozen/nested assets are not. Aim for ~30 NFTs at launch.
 5. Apply migration **227** (`packs_vrf_and_nft_snapshot`).

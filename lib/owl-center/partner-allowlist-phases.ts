@@ -120,6 +120,52 @@ export function partnerAllowlistEarliestStart(phases: PartnerAllowlistPhase[]): 
   return null
 }
 
+type AllowlistKickoffLaunch = Pick<
+  { launch_deadline_at?: string | null; phase_schedule?: Partial<Record<string, string>> },
+  'launch_deadline_at' | 'phase_schedule'
+>
+
+/** Mint kickoff — allowlist phases cannot open before this instant. */
+export function resolveAllowlistKickoffMs(launch: AllowlistKickoffLaunch): number | null {
+  return parseIsoMs(launch.launch_deadline_at) ?? parseIsoMs(launch.phase_schedule?.PUBLIC)
+}
+
+/**
+ * Clamp stale allowlist starts that predate mint kickoff on a different calendar day
+ * (e.g. leftover WL after Mint opens moved from Aug 24 → Sep 5).
+ */
+export function resolveEffectiveAllowlistStartsAt(
+  phaseStart: string | null | undefined,
+  launch: AllowlistKickoffLaunch
+): string | null {
+  if (!phaseStart?.trim()) return null
+  const phaseMs = parseIsoMs(phaseStart)
+  if (phaseMs == null) return null
+  const kickoffMs = resolveAllowlistKickoffMs(launch)
+  if (kickoffMs != null && phaseMs < kickoffMs) {
+    const phaseDay = new Date(phaseMs).toISOString().slice(0, 10)
+    const kickoffDay = new Date(kickoffMs).toISOString().slice(0, 10)
+    if (phaseDay !== kickoffDay) {
+      return new Date(kickoffMs).toISOString()
+    }
+  }
+  return new Date(phaseMs).toISOString()
+}
+
+export function resolveEffectivePartnerAllowlistPhases(launch: {
+  partner_allowlist_phases?: PartnerAllowlistPhase[] | null
+  creator_wl_enabled?: boolean
+  wl_supply?: number
+  wl_price_usdc?: number | null
+  phase_schedule?: Partial<Record<string, string>>
+  launch_deadline_at?: string | null
+}): PartnerAllowlistPhase[] {
+  return resolvePartnerAllowlistPhases(launch).map((phase) => ({
+    ...phase,
+    starts_at: resolveEffectiveAllowlistStartsAt(phase.starts_at, launch),
+  }))
+}
+
 export function partnerAllowlistTotalSupply(phases: PartnerAllowlistPhase[]): number {
   return phases.reduce((s, p) => s + Math.max(0, p.supply), 0)
 }
@@ -145,7 +191,7 @@ export function getActivePartnerAllowlistPhase(
   nowMs: number = Date.now()
 ): PartnerAllowlistPhase | null {
   if (launch.is_paused) return null
-  const phases = resolvePartnerAllowlistPhases(launch).filter((p) => p.starts_at)
+  const phases = resolveEffectivePartnerAllowlistPhases(launch).filter((p) => p.starts_at)
   if (phases.length < 1) return null
 
   const publicMs = parseIsoMs(launch.phase_schedule?.PUBLIC)
@@ -172,7 +218,7 @@ export function isPartnerAllowlistWaiting(
   nowMs: number = Date.now()
 ): boolean {
   if (launch.is_paused) return false
-  const phases = resolvePartnerAllowlistPhases(launch)
+  const phases = resolveEffectivePartnerAllowlistPhases(launch)
   const earliest = partnerAllowlistEarliestStart(phases)
   const earliestMs = parseIsoMs(earliest)
   if (earliestMs == null) return false

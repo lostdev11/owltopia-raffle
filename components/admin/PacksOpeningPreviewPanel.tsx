@@ -9,16 +9,50 @@ import { PackHoverVideo } from '@/components/packs/PackHoverVideo'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { preloadPackAnimationVideos } from '@/lib/packs/animations'
-import { mockPackOpenReward } from '@/lib/packs/preview-reward'
+import {
+  packOpenRewardFromInventory,
+  type PackPreviewInventoryItem,
+} from '@/lib/packs/preview-reward'
 
 type PreviewMode = 'hovering' | 'opening' | 'full' | 'reveal'
 
-export function PacksOpeningPreviewPanel() {
+function inventoryOptionLabel(item: PackPreviewInventoryItem): string {
+  const name = item.name || `NFT ${item.mint_address.slice(0, 8)}…`
+  return `${name} · ${item.fair_value_sol} SOL · ${item.status}`
+}
+
+export function PacksOpeningPreviewPanel({
+  inventory = [],
+}: {
+  inventory?: PackPreviewInventoryItem[]
+}) {
   const [category, setCategory] = useState<'owl' | 'sol' | 'nft'>('nft')
+  const [inventoryId, setInventoryId] = useState('')
   const [mode, setMode] = useState<PreviewMode | null>(null)
   const [runKey, setRunKey] = useState(0)
 
-  const reward = useMemo(() => mockPackOpenReward(category), [category])
+  const selectedInventoryItem = useMemo(
+    () => inventory.find((item) => item.id === inventoryId) ?? null,
+    [inventory, inventoryId]
+  )
+
+  useEffect(() => {
+    if (category !== 'nft') return
+    if (inventory.length === 0) {
+      setInventoryId('')
+      return
+    }
+    if (!inventory.some((item) => item.id === inventoryId)) {
+      const preferred =
+        inventory.find((item) => item.status === 'available') ?? inventory[0]
+      setInventoryId(preferred.id)
+    }
+  }, [category, inventory, inventoryId])
+
+  const reward = useMemo(
+    () => packOpenRewardFromInventory(category, selectedInventoryItem),
+    [category, selectedInventoryItem]
+  )
 
   useEffect(() => {
     preloadPackAnimationVideos({ opening: true })
@@ -65,11 +99,12 @@ export function PacksOpeningPreviewPanel() {
         <h2 className="font-medium">Preview pack opening</h2>
         <p className="mt-1 text-xs text-muted-foreground">
           See the buyer experience after purchase — hover loop, rip animation, and prize reveal.
-          Uses mock prizes only; no SOL is spent.
+          NFT previews use vault inventory below; SOL and $OWL still use sample amounts. No SOL is
+          spent.
         </p>
 
         <div className="mt-4">
-          <Label htmlFor="packs-preview-category">Mock prize type</Label>
+          <Label htmlFor="packs-preview-category">Prize type</Label>
           <select
             id="packs-preview-category"
             className="mt-1 flex min-h-[44px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
@@ -77,10 +112,34 @@ export function PacksOpeningPreviewPanel() {
             onChange={(e) => setCategory(e.target.value as 'owl' | 'sol' | 'nft')}
           >
             <option value="nft">NFT win</option>
-            <option value="sol">SOL win</option>
-            <option value="owl">$OWL win</option>
+            <option value="sol">SOL win (sample)</option>
+            <option value="owl">$OWL win (sample)</option>
           </select>
         </div>
+
+        {category === 'nft' ? (
+          <div className="mt-4">
+            <Label htmlFor="packs-preview-inventory">Vault NFT</Label>
+            {inventory.length === 0 ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                No vault inventory yet — add NFTs below to preview a real prize reveal.
+              </p>
+            ) : (
+              <select
+                id="packs-preview-inventory"
+                className="mt-1 flex min-h-[44px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={inventoryId}
+                onChange={(e) => setInventoryId(e.target.value)}
+              >
+                {inventory.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {inventoryOptionLabel(item)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        ) : null}
 
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           <Button

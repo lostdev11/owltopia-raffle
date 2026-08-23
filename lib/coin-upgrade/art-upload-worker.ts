@@ -24,6 +24,12 @@ import {
   type CoinArtUpgradeValidationScan,
 } from '@/lib/db/coin-art-upgrade-upload-jobs'
 import { seedCoinArtUpgradeCatalogFromManifest } from '@/lib/coin-upgrade/seed-catalog-from-manifest'
+import type { SeedCatalogResult } from '@/lib/coin-upgrade/seed-catalog-from-manifest'
+import { countCoinArtUpgradeCatalogEntries } from '@/lib/db/coin-art-upgrades'
+import {
+  bumpMetadataJsonTokenNumber,
+  isZeroBasedContiguousIndices,
+} from '@/lib/coin-upgrade/zero-based-remap'
 
 const TOKEN_FILE_RE = /^(\d+)\.(png|json)$/i
 
@@ -91,6 +97,20 @@ export type CoinArtUpgradeWorkerResult = {
   error?: string
   remaining_files?: number
   catalog_upserted?: number
+  catalog_size?: number
+  manifest_key_count?: number
+  catalog_gap_numbers?: number[]
+  seed_problems?: SeedCatalogResult['problems']
+}
+
+/** Pass through raw manifest keys — seed picks +1 remap vs direct 0…N from on-chain numbering. */
+function prepareCatalogManifestFromJob(
+  job: CoinArtUpgradeUploadJob
+): { manifest: Record<string, { image: string; metadata: string }>; remapped: boolean } {
+  const fromList = buildManifestFromFileList(job.upload_progress.file_list ?? [])
+  const raw =
+    Object.keys(fromList).length > 0 ? fromList : (job.upload_progress.manifest ?? {})
+  return { manifest: raw, remapped: false }
 }
 
 export async function validateCoinArtUpgradeUploadJob(
@@ -112,8 +132,8 @@ export async function validateCoinArtUpgradeUploadJob(
     }
 
     const zip = await loadZipFromBuffer(buf)
-    const fileList = buildFileList(zip.paths)
-    const scan = validatePairs(fileList)
+    let fileList = buildFileList(zip.paths)
+    let scan = validatePairs(fileList)
 
     if (!scan.ok) {
       await updateCoinArtUpgradeUploadJob(jobId, {
@@ -130,12 +150,26 @@ export async function validateCoinArtUpgradeUploadJob(
       return { ok: false, error: scan.error, status: 'failed' }
     }
 
+    const pairIndices = fileList
+      .filter((f) => f.kind === 'image' && f.index != null)
+      .map((f) => f.index as number)
+    const remappedFromZero = isZeroBasedContiguousIndices(pairIndices)
+    if (remappedFromZero) {
+      fileList = fileList.map((f) =>
+        f.index != null && (f.kind === 'image' || f.kind === 'metadata')
+          ? { ...f, index: f.index + 1 }
+          : f
+      )
+      scan = { ...scan, remapped_from_zero: true }
+    }
+
     await updateCoinArtUpgradeUploadJob(jobId, {
       status: 'validated',
       validation_scan: scan,
       error_message: null,
       upload_progress: {
         ...job.upload_progress,
+        remapped_from_zero: remappedFromZero || undefined,
         total_files: fileList.filter((f) => f.kind !== 'other').length,
         uploaded_files: 0,
         file_list: fileList,
@@ -247,7 +281,20 @@ async function processIrysBatch(
             if (!imageUri) {
               throw new Error(`Image URI missing for coin #${entry.index} before JSON upload.`)
             }
-            const rewritten = rewriteMetadataJson(raw, imageUri, basename(entry.path))
+            let rewritten = rewriteMetadataJson(raw, imageUri, basename(entry.path))
+            // ZIP basename is still 0.png / 0.json; file_list.index may already be remapped +1.
+            const zipIndex = (() => {
+              const m = TOKEN_FILE_RE.exec(basename(entry.path))
+              return m ? Number.parseInt(m[1]!, 10) : null
+            })()
+            if (
+              progress.remapped_from_zero &&
+              zipIndex != null &&
+              entry.index != null &&
+              entry.index === zipIndex + 1
+            ) {
+              rewritten = bumpMetadataJsonTokenNumber(rewritten, zipIndex, entry.index)
+            }
             const uploaded = await uploadBufferWithUploader(
               handle,
               Buffer.from(rewritten, 'utf8'),
@@ -295,13 +342,15 @@ async function processIrysBatch(
 async function seedCatalogForJob(jobId: string): Promise<CoinArtUpgradeWorkerResult> {
   const job = await getCoinArtUpgradeUploadJobById(jobId)
   if (!job) return { ok: false, error: 'Job not found.' }
-  const manifest = job.upload_progress.manifest
+
+  const { manifest, remapped } = prepareCatalogManifestFromJob(job)
   if (!manifest || Object.keys(manifest).length === 0) {
-    return { ok: false, error: 'Manifest empty — Irys upload incomplete.' }
+    return { ok: false, error: 'Manifest empty — rebuild from file_list failed; Push to Arweave first.' }
   }
 
   try {
     const result = await seedCoinArtUpgradeCatalogFromManifest(manifest)
+    const catalogSize = await countCoinArtUpgradeCatalogEntries()
     await updateCoinArtUpgradeUploadJob(jobId, {
       status: 'completed',
       error_message: null,
@@ -310,10 +359,14 @@ async function seedCatalogForJob(jobId: string): Promise<CoinArtUpgradeWorkerRes
         ...job.upload_progress,
         catalog_upserted: result.upserted,
         catalog_skipped: result.skipped,
+        remapped_from_zero: remapped || job.upload_progress.remapped_from_zero || undefined,
         manifest,
       },
+      validation_scan: job.validation_scan
+        ? { ...job.validation_scan, remapped_from_zero: remapped || job.validation_scan.remapped_from_zero }
+        : job.validation_scan,
     })
-    return { ok: true, status: 'completed', catalog_upserted: result.upserted }
+    return workerResultFromSeed(result, catalogSize)
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Catalog seed failed.'
     await updateCoinArtUpgradeUploadJob(jobId, {
@@ -322,6 +375,47 @@ async function seedCatalogForJob(jobId: string): Promise<CoinArtUpgradeWorkerRes
     })
     return { ok: false, error: message }
   }
+}
+
+function workerResultFromSeed(result: SeedCatalogResult, catalogSize: number): CoinArtUpgradeWorkerResult {
+  const gaps = result.catalog_gap_numbers
+  const schemeLabel =
+    result.numbering_scheme === 'zero-based' ? 'on-chain #0…#999' : 'on-chain #1…#1000'
+  return {
+    ok: true,
+    status: 'completed',
+    catalog_upserted: result.upserted,
+    catalog_size: catalogSize,
+    manifest_key_count: result.manifest_key_count,
+    catalog_gap_numbers: gaps.length > 0 ? gaps.slice(0, 20) : undefined,
+    seed_problems: result.problems,
+    error:
+      catalogSize < 1000
+        ? gaps.length > 0
+          ? `Catalog is ${catalogSize}/1000 (${schemeLabel}) — still missing rows for coin #${gaps.slice(0, 8).join(', #')}${gaps.length > 8 ? '…' : ''}.`
+          : `Catalog is ${catalogSize}/1000 (${schemeLabel}; ${result.problems.noNumber} unnumbered on-chain, ${result.problems.duplicateNumber} duplicate #s).`
+        : undefined,
+  }
+}
+
+/** Re-run catalog seed from file_list Arweave URIs (fixes 0-based → #1..N). */
+export async function reseedCoinArtUpgradeCatalogFromJob(
+  jobId: string
+): Promise<CoinArtUpgradeWorkerResult> {
+  const job = await getCoinArtUpgradeUploadJobById(jobId)
+  if (!job) return { ok: false, error: 'Job not found.' }
+
+  const { manifest } = prepareCatalogManifestFromJob(job)
+  if (Object.keys(manifest).length === 0) {
+    return { ok: false, error: 'No Irys URIs on this job — Push to Arweave first.' }
+  }
+
+  await updateCoinArtUpgradeUploadJob(jobId, {
+    status: 'seeding',
+    error_message: null,
+    upload_progress: { ...job.upload_progress, manifest },
+  })
+  return seedCatalogForJob(jobId)
 }
 
 export async function startCoinArtUpgradeArweaveUpload(

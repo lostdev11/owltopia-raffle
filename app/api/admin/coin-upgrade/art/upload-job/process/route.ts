@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
 import {
   continueCoinArtUpgradeArweaveUpload,
+  reseedCoinArtUpgradeCatalogFromJob,
   startCoinArtUpgradeArweaveUpload,
   validateCoinArtUpgradeUploadJob,
 } from '@/lib/coin-upgrade/art-upload-worker'
 import { getCoinArtUpgradeUploadJobById } from '@/lib/db/coin-art-upgrade-upload-jobs'
+import { countCoinArtUpgradeCatalogEntries } from '@/lib/db/coin-art-upgrades'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -13,7 +15,7 @@ export const maxDuration = 300
 
 /**
  * POST /api/admin/coin-upgrade/art/upload-job/process
- * Body: { job_id, action: 'validate' | 'start_arweave' | 'process_all' }
+ * Body: { job_id, action: 'validate' | 'start_arweave' | 'process_all' | 'reseed_catalog' }
  */
 export async function POST(request: NextRequest) {
   const session = await requireFullAdminSession(request)
@@ -33,9 +35,11 @@ export async function POST(request: NextRequest) {
       result = await startCoinArtUpgradeArweaveUpload(jobId)
     } else if (action === 'process_all') {
       result = await continueCoinArtUpgradeArweaveUpload(jobId, 'full')
+    } else if (action === 'reseed_catalog') {
+      result = await reseedCoinArtUpgradeCatalogFromJob(jobId)
     } else {
       return NextResponse.json(
-        { error: 'action must be validate | start_arweave | process_all.' },
+        { error: 'action must be validate | start_arweave | process_all | reseed_catalog.' },
         { status: 400 }
       )
     }
@@ -44,9 +48,11 @@ export async function POST(request: NextRequest) {
     const progress = job?.upload_progress
     const total = progress?.total_files ?? 0
     const uploaded = progress?.uploaded_files ?? 0
+    const catalogSize = await countCoinArtUpgradeCatalogEntries()
     return NextResponse.json({
       result,
       job,
+      catalog_size: catalogSize,
       progress:
         total > 0
           ? {

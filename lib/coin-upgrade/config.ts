@@ -8,6 +8,8 @@ import { LAMPORTS_PER_SOL } from '@solana/web3.js'
  */
 
 const DEFAULT_FEE_SOL = 0.1
+/** ~$0.50 USD platform fee per coin (paid in SOL to the platform treasury). */
+const DEFAULT_PLATFORM_FEE_USD = 0.5
 const DEFAULT_REWARD_MULTIPLIER = 2
 
 function readBoolean(raw: string | undefined): boolean {
@@ -30,6 +32,25 @@ export function getCoinArtUpgradeFeeSol(): number {
 
 export function getCoinArtUpgradeFeeLamports(): number {
   return Math.round(getCoinArtUpgradeFeeSol() * LAMPORTS_PER_SOL)
+}
+
+/**
+ * USD notional for the platform fee charged per upgraded coin (collected as SOL).
+ * Set `COIN_ART_UPGRADE_PLATFORM_FEE_USDC=0` to disable.
+ */
+export function getCoinArtUpgradePlatformFeeUsd(): number {
+  const raw = process.env.COIN_ART_UPGRADE_PLATFORM_FEE_USDC?.trim()
+  if (!raw) return DEFAULT_PLATFORM_FEE_USD
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_PLATFORM_FEE_USD
+}
+
+export function formatCoinArtUpgradePlatformFeeLabel(usd = getCoinArtUpgradePlatformFeeUsd()): string {
+  if (usd <= 0) return ''
+  const cents = Math.round(usd * 100)
+  if (cents === 50) return '50¢ platform fee'
+  if (usd % 1 === 0) return `$${usd.toFixed(0)} platform fee`
+  return `~$${usd.toFixed(2)} platform fee`
 }
 
 /** Upgraded coins earn `pool rate × multiplier` while nested (vote: 1 → 2 OWL/day). */

@@ -12,7 +12,11 @@ import {
 import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
 import { isPackInventoryPrizeStandard } from '@/lib/packs/types'
 import { isPackNftFairValueSol, PACK_NFT_MAX_FAIR_SOL, PACK_NFT_MIN_FAIR_SOL } from '@/lib/packs/config'
-import { getPacksVaultPublicKey, getPacksVaultSolBalance } from '@/lib/packs/vault'
+import {
+  getPacksVaultPublicKey,
+  getPacksVaultSolBalance,
+  getPacksVaultOwlBalanceUi,
+} from '@/lib/packs/vault'
 import { isPackVrfEnabled, resolvePackOpenAlgo } from '@/lib/packs/vrf-config'
 import {
   formatJackpotPoolSol,
@@ -32,6 +36,7 @@ export async function GET(request: NextRequest) {
     const inventory = await listPackInventory()
     const nftCount = await countAvailableNfts()
     const solBal = await getPacksVaultSolBalance()
+    const owlBal = await getPacksVaultOwlBalanceUi()
     const ev = simulatePackEvFromInventory({
       owlSolPrice: config.owl_sol_price,
       inventory,
@@ -48,6 +53,7 @@ export async function GET(request: NextRequest) {
         minNftCount: config.min_nft_count,
         owlSolPrice: config.owl_sol_price,
         solBalance: solBal,
+        owlBalance: owlBal,
         availableNfts: nftCount,
         jackpotPoolSol: Number(config.jackpot_pool_sol ?? 0),
         jackpotContributionSol: Number(

@@ -12,11 +12,13 @@ type Props = {
     OwlCenterLaunchPublic,
     | 'launch_deadline_at'
     | 'phase_schedule'
+    | 'partner_allowlist_phases'
     | 'airdrop_supply'
     | 'creator_presale_enabled'
     | 'presale_supply'
     | 'presale_overage_supply'
     | 'wl_supply'
+    | 'wl_price_usdc'
     | 'public_supply'
     | 'mint_mode'
     | 'creator_wl_enabled'

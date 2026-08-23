@@ -61,9 +61,18 @@ export function getPacksVaultKeypair(): Keypair | null {
 
 export function getPacksVaultPublicKey(): string | null {
   const fromEnv = process.env.NEXT_PUBLIC_PACKS_VAULT_WALLET?.trim()
-  if (fromEnv) return fromEnv
   const kp = getPacksVaultKeypair()
-  return kp ? kp.publicKey.toBase58() : null
+  const derived = kp ? kp.publicKey.toBase58() : null
+
+  if (fromEnv && derived && fromEnv !== derived) {
+    console.error(
+      '[packs/vault] NEXT_PUBLIC_PACKS_VAULT_WALLET does not match PACKS_VAULT_SECRET_KEY — fix env before using packs'
+    )
+    return null
+  }
+
+  if (fromEnv) return fromEnv
+  return derived
 }
 
 async function resolveTokenProgramForMint(
@@ -316,6 +325,39 @@ export async function getPacksVaultSolBalance(): Promise<number | null> {
   try {
     const bal = await getSolanaReadConnection().getBalance(new PublicKey(pubkey), 'confirmed')
     return bal / LAMPORTS_PER_SOL
+  } catch {
+    return null
+  }
+}
+
+/** Human-readable OWL balance in the packs vault (0 if no ATA). */
+export async function getPacksVaultOwlBalanceUi(): Promise<number | null> {
+  const pubkey = getPacksVaultPublicKey()
+  if (!pubkey) return null
+  const owl = getTokenInfo('OWL')
+  if (!owl.mintAddress) return null
+
+  try {
+    const connection = getSolanaReadConnection()
+    const owner = new PublicKey(pubkey)
+    const mint = new PublicKey(owl.mintAddress)
+
+    for (const program of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
+      try {
+        const ata = await getAssociatedTokenAddress(
+          mint,
+          owner,
+          false,
+          program,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+        const acc = await getAccount(connection, ata, 'confirmed', program)
+        return Number(acc.amount) / 10 ** owl.decimals
+      } catch {
+        // try next program or no ATA
+      }
+    }
+    return 0
   } catch {
     return null
   }

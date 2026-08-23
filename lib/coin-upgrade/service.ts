@@ -6,12 +6,12 @@ import {
   LEGACY_OWL_NEST_COLLECTION_ADDRESS,
   resolveWalletOwlNestCollectionAddress,
 } from '@/lib/nesting/owl-nest-collection'
-import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
 import {
   getCoinArtUpgradeFeeSol,
   isCoinArtUpgradeEnabled,
   MAX_COIN_ART_UPGRADES_PER_REQUEST,
 } from '@/lib/coin-upgrade/config'
+import { getCoinArtUpgradeFeeSplitConfig } from '@/lib/coin-upgrade/fee-split'
 import { verifyCoinArtUpgradeFeeTransaction } from '@/lib/coin-upgrade/verify-payment'
 import { updateCoinAssetUriOnChain } from '@/lib/coin-upgrade/core-update'
 import { applyCoinArtUpgradeRewardBoost } from '@/lib/coin-upgrade/reward-boost'
@@ -191,9 +191,9 @@ export async function executeCoinArtUpgrade(params: {
   }
 
   if (needPayment.length > 0) {
-    const treasury = getPlatformFeeTreasuryWalletAddress()
-    if (!treasury) {
-      throw new StakingUserError('Platform fee treasury is not configured.', 503)
+    const split = getCoinArtUpgradeFeeSplitConfig()
+    if (!split) {
+      throw new StakingUserError('Coin art upgrade fee split is not configured.', 503)
     }
 
     const signature = typeof params.paymentSignature === 'string' ? params.paymentSignature.trim() : ''
@@ -224,7 +224,7 @@ export async function executeCoinArtUpgrade(params: {
       const verified = await verifyCoinArtUpgradeFeeTransaction({
         signature,
         fromWallet: wallet,
-        treasuryWallet: treasury,
+        split,
         minUnits: needPayment.length,
       })
       if (!verified.ok) {

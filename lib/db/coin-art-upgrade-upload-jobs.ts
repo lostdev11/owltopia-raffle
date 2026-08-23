@@ -26,6 +26,8 @@ export type CoinArtUpgradeUploadProgress = {
   manifest?: Record<string, { image: string; metadata: string }>
   catalog_upserted?: number
   catalog_skipped?: number
+  /** Persisted when Sugar/Generator 0-based indices were shifted to 1..N. */
+  remapped_from_zero?: boolean
 }
 
 export type CoinArtUpgradeValidationScan = {
@@ -35,6 +37,8 @@ export type CoinArtUpgradeValidationScan = {
   missing_json: number[]
   other_files: number
   error?: string
+  /** True when ZIP indices were 0..N-1 (Sugar/Generator) and remapped to coin #1..N. */
+  remapped_from_zero?: boolean
 }
 
 export type CoinArtUpgradeUploadJob = {
@@ -106,7 +110,7 @@ export async function insertCoinArtUpgradeUploadJob(input: {
   original_filename: string | null
   created_by: string | null
   staged_zip_bytes?: number
-}): Promise<CoinArtUpgradeUploadJob | null> {
+}): Promise<{ job: CoinArtUpgradeUploadJob | null; error: string | null }> {
   const { data, error } = await getSupabaseAdmin()
     .from('coin_art_upgrade_upload_jobs')
     .insert({
@@ -123,9 +127,18 @@ export async function insertCoinArtUpgradeUploadJob(input: {
     .single()
   if (error || !data) {
     console.error('insertCoinArtUpgradeUploadJob', error)
-    return null
+    const msg = error?.message?.trim() || 'Insert returned no row.'
+    const missingTable =
+      /relation .*coin_art_upgrade_upload_jobs.* does not exist/i.test(msg) ||
+      /Could not find the table/i.test(msg)
+    return {
+      job: null,
+      error: missingTable
+        ? 'Missing table coin_art_upgrade_upload_jobs — apply migration 220 (or 227) in Supabase.'
+        : `Could not create upload job: ${msg}`,
+    }
   }
-  return mapRow(data as Record<string, unknown>)
+  return { job: mapRow(data as Record<string, unknown>), error: null }
 }
 
 export async function updateCoinArtUpgradeUploadJob(

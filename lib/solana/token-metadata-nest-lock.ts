@@ -218,14 +218,15 @@ export async function freezeTokenMetadataNestAccount(params: {
 }
 
 /**
- * Thaw a FreezeDelegatedAccount nest lock. Delegate may remain until the holder revokes;
- * thawed NFTs are transferable either way.
+ * Thaw a FreezeDelegatedAccount nest lock.
+ * Metaplex thaw often leaves the nesting wallet as SPL delegate — the holder should Revoke
+ * in a follow-up wallet tx so wallets stop warning that “a site can spend tokens.”
  */
 export async function thawTokenMetadataNestAccount(params: {
   mint: string
   ownerWallet: string
   connection?: Connection
-}): Promise<{ signature: string | null; tokenAccount: string }> {
+}): Promise<{ signature: string | null; tokenAccount: string; needsOwnerRevoke: boolean }> {
   const authority = nestingKeypairOrThrow()
   const connection =
     params.connection ?? new Connection(resolveServerSolanaRpcUrl(), { commitment: 'confirmed' })
@@ -236,7 +237,11 @@ export async function thawTokenMetadataNestAccount(params: {
   })
 
   if (!state.isFrozen) {
-    return { signature: null, tokenAccount: state.tokenAccount }
+    return {
+      signature: null,
+      tokenAccount: state.tokenAccount,
+      needsOwnerRevoke: state.nestingIsTokenDelegate,
+    }
   }
 
   if (!state.heldByNestingLock) {
@@ -268,5 +273,15 @@ export async function thawTokenMetadataNestAccount(params: {
     edition,
   }).sendAndConfirm(umi)
 
-  return { signature: signatureToString(result), tokenAccount: state.tokenAccount }
+  const after = await readSplTokenNestAccountState({
+    mint: params.mint,
+    ownerWallet: params.ownerWallet,
+    connection,
+  })
+
+  return {
+    signature: signatureToString(result),
+    tokenAccount: state.tokenAccount,
+    needsOwnerRevoke: after.nestingIsTokenDelegate,
+  }
 }

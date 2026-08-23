@@ -52,7 +52,7 @@ async function tokenProgramHoldingMint(
  * Deposit `amountUi` OWL from `publicKey` to marketplace escrow.
  * Creates escrow ATA if missing. Returns on-chain signature.
  */
-export async function depositOwlToMarketplaceEscrowFromWallet(params: {
+export async function depositOwlToWalletFromWallet(params: {
   connection: Connection
   publicKey: PublicKey
   sendTransaction: SendTxFn
@@ -155,3 +155,6 @@ export async function depositOwlToMarketplaceEscrowFromWallet(params: {
     return { ok: false, error: msg || 'OWL deposit transaction failed.' }
   }
 }
+
+/** Discord marketplace alias — same as depositOwlToWalletFromWallet. */
+export const depositOwlToMarketplaceEscrowFromWallet = depositOwlToWalletFromWallet

@@ -143,6 +143,7 @@ import {
 } from '@/lib/solana/mpl-core-freeze'
 import {
   approveTokenMetadataNestDelegatesInWallet,
+  revokeTokenMetadataNestDelegatesInWallet,
 } from '@/lib/solana/token-metadata-nest-approve'
 import { isNestingStakeFlowError, NestingStakeFlowError } from '@/lib/nesting/errors'
 import {
@@ -1858,6 +1859,22 @@ export function DashboardNestingClient() {
     [connection, publicKey, wallet, sendTransaction]
   )
 
+  const sendTokenMetadataNestRevoke = useCallback(
+    async (mintIds: string[]): Promise<string | null> => {
+      const adapter = wallet?.adapter
+      if (!adapter || !publicKey) {
+        throw new Error('Connect your wallet first.')
+      }
+      return revokeTokenMetadataNestDelegatesInWallet({
+        connection,
+        wallet: adapter,
+        mintIds,
+        sendTransaction,
+      })
+    },
+    [connection, publicKey, wallet, sendTransaction]
+  )
+
   const chunkNestPlatformFee = useCallback(
     (nestCount: number): { treasury: string; lamports: number } | null => {
       if (!platformFeeActive || !platformFeeTxConfig || nestCount <= 0) return null
@@ -2736,7 +2753,10 @@ export function DashboardNestingClient() {
               ...(platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}),
             }),
           })
-          const json = (await res.json().catch(() => ({}))) as { error?: string }
+          const json = (await res.json().catch(() => ({}))) as {
+            error?: string
+            execution?: { nest_delegate_revoke?: { mint?: string } | null }
+          }
           if (!res.ok) {
             const err =
               res.status === 501
@@ -2748,6 +2768,25 @@ export function DashboardNestingClient() {
                   : 'Unstake failed'
             setActionError(err)
             throw new Error('unstake')
+          }
+
+          const revokeMint = json.execution?.nest_delegate_revoke?.mint?.trim()
+          if (revokeMint) {
+            try {
+              setPosSubPhase(positionId, 'unstake', 'awaiting_wallet_signature')
+              await sendTokenMetadataNestRevoke([revokeMint])
+            } catch (revokeErr) {
+              // Nest is already closed on Owltopia; leftover Approve is optional cleanup.
+              console.warn('[nesting] nest delegate revoke after unstake', revokeErr)
+              setSuccessNotice({
+                placement: 'modal',
+                tone: 'info',
+                title: 'Nest closed',
+                message:
+                  'Your nest is closed. Your wallet may still show a leftover nest Approve on that owl.',
+                hint: 'Approve Revoke if your wallet asks, or it will clear the next time you nest and leave that owl.',
+              })
+            }
           }
         },
         afterSuccess: async () => {
