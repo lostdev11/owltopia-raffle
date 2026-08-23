@@ -19,10 +19,12 @@ type JobRow = {
     ok?: boolean
     pair_count?: number
     error?: string
+    remapped_from_zero?: boolean
   } | null
   upload_progress?: {
     catalog_upserted?: number
     catalog_skipped?: number
+    remapped_from_zero?: boolean
   }
 }
 
@@ -121,7 +123,9 @@ export function CoinArtUpgradeArtUploadPanel() {
     }
   }
 
-  async function runAction(action: 'validate' | 'start_arweave' | 'process_all') {
+  async function runAction(
+    action: 'validate' | 'start_arweave' | 'process_all' | 'reseed_catalog',
+  ) {
     const jobId = jobState?.job?.id
     if (!jobId) return null
     const res = await fetch('/api/admin/coin-upgrade/art/upload-job/process', {
@@ -137,12 +141,40 @@ export function CoinArtUpgradeArtUploadPanel() {
     }
     const j = await readApiJsonResponse<{
       error?: string
-      result?: { ok?: boolean; error?: string; status?: string; remaining_files?: number }
+      result?: {
+        ok?: boolean
+        error?: string
+        status?: string
+        remaining_files?: number
+        catalog_upserted?: number
+      }
       job?: JobRow
       progress?: { total_files: number; uploaded_files: number; percent: number }
     }>(res)
     if (!res.ok) throw new Error(j.error || j.result?.error || 'Process failed.')
     return j
+  }
+
+  async function reseedCatalog() {
+    setBusy(true)
+    setErr(null)
+    setMsg(null)
+    try {
+      const j = await runAction('reseed_catalog')
+      if (!j) throw new Error('Re-seed failed.')
+      if (j.result?.ok === false) {
+        throw new Error(j.result.error || 'Re-seed failed.')
+      }
+      setMsg(
+        `Catalog re-seeded (${j.result?.catalog_upserted ?? j.job?.upload_progress?.catalog_upserted ?? '—'} coins). Generator 0-based ZIPs map to on-chain #1…#N.`,
+      )
+      await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Re-seed failed.')
+      await load()
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function runValidate() {
@@ -206,9 +238,10 @@ export function CoinArtUpgradeArtUploadPanel() {
       <div>
         <h2 className="text-lg font-semibold">3. Upload new coin art</h2>
         <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-          Zip <span className="font-mono">1.png</span> + <span className="font-mono">1.json</span>,{' '}
-          <span className="font-mono">2.png</span> + <span className="font-mono">2.json</span>, … matching
-          on-chain coin numbers. Stage → validate → push to Arweave. Catalog fills automatically.
+          Zip numbered pairs (<span className="font-mono">1.png</span> +{' '}
+          <span className="font-mono">1.json</span>, …) matching on-chain coin #s. Owl Center Generator
+          ZIPs that start at <span className="font-mono">0</span> are remapped to #1…#N automatically.
+          Stage → validate → push to Arweave. Catalog fills automatically.
         </p>
       </div>
 
@@ -269,6 +302,20 @@ export function CoinArtUpgradeArtUploadPanel() {
             Retry push
           </Button>
         ) : null}
+
+        {job &&
+        (job.status === 'completed' || job.status === 'failed') &&
+        ((jobState?.catalog_size ?? 0) < 1000 || job.status === 'failed') ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            title="Rebuild catalog from this job’s Arweave URLs. Fixes 0-based Generator ZIPs so #1–#N match on-chain coins — no re-upload."
+            onClick={() => void reseedCatalog()}
+          >
+            Re-seed catalog (fix # numbering)
+          </Button>
+        ) : null}
       </div>
 
       {uploadProgress ? (
@@ -310,6 +357,15 @@ export function CoinArtUpgradeArtUploadPanel() {
             <div>
               <dt className="text-muted-foreground">Pairs found</dt>
               <dd>{job.validation_scan.pair_count}</dd>
+            </div>
+          ) : null}
+          {job.validation_scan?.remapped_from_zero ||
+          job.upload_progress?.remapped_from_zero ? (
+            <div className="sm:col-span-2">
+              <dt className="text-muted-foreground">Numbering</dt>
+              <dd className="text-sky-600 dark:text-sky-300">
+                Remapped 0-based Generator ZIP → on-chain #1… numbering for catalog matches.
+              </dd>
             </div>
           ) : null}
           {progress && progress.total_files > 0 ? (

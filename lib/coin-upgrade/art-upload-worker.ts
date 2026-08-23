@@ -24,6 +24,11 @@ import {
   type CoinArtUpgradeValidationScan,
 } from '@/lib/db/coin-art-upgrade-upload-jobs'
 import { seedCoinArtUpgradeCatalogFromManifest } from '@/lib/coin-upgrade/seed-catalog-from-manifest'
+import {
+  bumpMetadataJsonTokenNumber,
+  isZeroBasedContiguousIndices,
+  remapZeroBasedManifestKeys,
+} from '@/lib/coin-upgrade/zero-based-remap'
 
 const TOKEN_FILE_RE = /^(\d+)\.(png|json)$/i
 
@@ -112,8 +117,8 @@ export async function validateCoinArtUpgradeUploadJob(
     }
 
     const zip = await loadZipFromBuffer(buf)
-    const fileList = buildFileList(zip.paths)
-    const scan = validatePairs(fileList)
+    let fileList = buildFileList(zip.paths)
+    let scan = validatePairs(fileList)
 
     if (!scan.ok) {
       await updateCoinArtUpgradeUploadJob(jobId, {
@@ -130,12 +135,26 @@ export async function validateCoinArtUpgradeUploadJob(
       return { ok: false, error: scan.error, status: 'failed' }
     }
 
+    const pairIndices = fileList
+      .filter((f) => f.kind === 'image' && f.index != null)
+      .map((f) => f.index as number)
+    const remappedFromZero = isZeroBasedContiguousIndices(pairIndices)
+    if (remappedFromZero) {
+      fileList = fileList.map((f) =>
+        f.index != null && (f.kind === 'image' || f.kind === 'metadata')
+          ? { ...f, index: f.index + 1 }
+          : f
+      )
+      scan = { ...scan, remapped_from_zero: true }
+    }
+
     await updateCoinArtUpgradeUploadJob(jobId, {
       status: 'validated',
       validation_scan: scan,
       error_message: null,
       upload_progress: {
         ...job.upload_progress,
+        remapped_from_zero: remappedFromZero || undefined,
         total_files: fileList.filter((f) => f.kind !== 'other').length,
         uploaded_files: 0,
         file_list: fileList,
@@ -247,7 +266,20 @@ async function processIrysBatch(
             if (!imageUri) {
               throw new Error(`Image URI missing for coin #${entry.index} before JSON upload.`)
             }
-            const rewritten = rewriteMetadataJson(raw, imageUri, basename(entry.path))
+            let rewritten = rewriteMetadataJson(raw, imageUri, basename(entry.path))
+            // ZIP basename is still 0.png / 0.json; file_list.index may already be remapped +1.
+            const zipIndex = (() => {
+              const m = TOKEN_FILE_RE.exec(basename(entry.path))
+              return m ? Number.parseInt(m[1]!, 10) : null
+            })()
+            if (
+              progress.remapped_from_zero &&
+              zipIndex != null &&
+              entry.index != null &&
+              entry.index === zipIndex + 1
+            ) {
+              rewritten = bumpMetadataJsonTokenNumber(rewritten, zipIndex, entry.index)
+            }
             const uploaded = await uploadBufferWithUploader(
               handle,
               Buffer.from(rewritten, 'utf8'),
@@ -295,12 +327,13 @@ async function processIrysBatch(
 async function seedCatalogForJob(jobId: string): Promise<CoinArtUpgradeWorkerResult> {
   const job = await getCoinArtUpgradeUploadJobById(jobId)
   if (!job) return { ok: false, error: 'Job not found.' }
-  const manifest = job.upload_progress.manifest
-  if (!manifest || Object.keys(manifest).length === 0) {
+  const rawManifest = job.upload_progress.manifest
+  if (!rawManifest || Object.keys(rawManifest).length === 0) {
     return { ok: false, error: 'Manifest empty — Irys upload incomplete.' }
   }
 
   try {
+    const { manifest, remapped } = remapZeroBasedManifestKeys(rawManifest)
     const result = await seedCoinArtUpgradeCatalogFromManifest(manifest)
     await updateCoinArtUpgradeUploadJob(jobId, {
       status: 'completed',
@@ -310,8 +343,12 @@ async function seedCatalogForJob(jobId: string): Promise<CoinArtUpgradeWorkerRes
         ...job.upload_progress,
         catalog_upserted: result.upserted,
         catalog_skipped: result.skipped,
+        remapped_from_zero: remapped || job.upload_progress.remapped_from_zero || undefined,
         manifest,
       },
+      validation_scan: job.validation_scan
+        ? { ...job.validation_scan, remapped_from_zero: remapped || job.validation_scan.remapped_from_zero }
+        : job.validation_scan,
     })
     return { ok: true, status: 'completed', catalog_upserted: result.upserted }
   } catch (e) {
@@ -322,6 +359,29 @@ async function seedCatalogForJob(jobId: string): Promise<CoinArtUpgradeWorkerRes
     })
     return { ok: false, error: message }
   }
+}
+
+/** Re-run catalog seed from an existing Irys manifest (e.g. fix 0-based → #1..N). */
+export async function reseedCoinArtUpgradeCatalogFromJob(
+  jobId: string
+): Promise<CoinArtUpgradeWorkerResult> {
+  const job = await getCoinArtUpgradeUploadJobById(jobId)
+  if (!job) return { ok: false, error: 'Job not found.' }
+  if (!job.upload_progress.manifest || Object.keys(job.upload_progress.manifest).length === 0) {
+    // Rebuild from file_list URIs if manifest was never stored.
+    const fromList = buildManifestFromFileList(job.upload_progress.file_list ?? [])
+    if (Object.keys(fromList).length === 0) {
+      return { ok: false, error: 'No Irys manifest on this job — Push to Arweave first.' }
+    }
+    await updateCoinArtUpgradeUploadJob(jobId, {
+      status: 'seeding',
+      error_message: null,
+      upload_progress: { ...job.upload_progress, manifest: fromList },
+    })
+  } else {
+    await updateCoinArtUpgradeUploadJob(jobId, { status: 'seeding', error_message: null })
+  }
+  return seedCatalogForJob(jobId)
 }
 
 export async function startCoinArtUpgradeArweaveUpload(
