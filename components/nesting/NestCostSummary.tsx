@@ -53,7 +53,8 @@ export function NestCostSummary({
 
       <p className="px-3 pt-2 text-[11px] leading-snug text-muted-foreground/90">
         Balance changes are estimated. Each row is a nest freeze on that owl — they stay in your wallet.
-        Phantom may still label the same step &ldquo;Approve to transfer&rdquo;; that wording is theirs, not a send.
+        Jupiter may say a wallet &ldquo;can spend tokens&rdquo;; Phantom may say &ldquo;Approve to transfer.&rdquo;
+        Both are their labels for the freeze step on that owl, not a send and not access to your other tokens.
       </p>
 
       <ul className="mt-2 max-h-[min(40vh,16rem)] space-y-0.5 overflow-y-auto overscroll-contain px-1.5 pb-1">

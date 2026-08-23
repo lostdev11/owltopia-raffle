@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => null)
     const position_id = typeof body?.position_id === 'string' ? body.position_id.trim() : ''
 
-    const { position } = await executeUnstake({
+    const { position, nest_delegate_revoke } = await executeUnstake({
       wallet: session.wallet,
       position_id,
       platform_fee_signature: body?.platform_fee_signature,
@@ -37,6 +37,9 @@ export async function POST(request: NextRequest) {
       position,
       execution: {
         path: position.unstake_signature ? ('onchain_token_transfer' as const) : ('database_mock' as const),
+        ...(nest_delegate_revoke?.mint
+          ? { nest_delegate_revoke: { mint: nest_delegate_revoke.mint } }
+          : {}),
       },
     })
   } catch (e) {

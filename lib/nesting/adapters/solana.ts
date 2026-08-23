@@ -129,7 +129,11 @@ export const solanaStakingAdapterStub: StakingMutationAdapter = {
       last_transaction_error: null,
       external_reference: `nft_thaw_confirmed:${thawed.tokenAccount}`,
     })
-    return { position }
+    const nest_delegate_revoke =
+      thawed.needsOwnerRevoke && thawed.revokeMint
+        ? { mint: thawed.revokeMint }
+        : null
+    return { position, nest_delegate_revoke }
   },
   async claimPositionRewards(input) {
     const row = await getStakingPositionForWallet(input.positionId, input.wallet)
