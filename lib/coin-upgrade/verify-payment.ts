@@ -1,12 +1,26 @@
-import { PublicKey } from '@solana/web3.js'
+import { PublicKey, type ParsedTransactionWithMeta } from '@solana/web3.js'
 
-import { getCoinArtUpgradeFeeLamports, getCoinArtUpgradeFeeSol } from '@/lib/coin-upgrade/config'
+import {
+  getCoinArtUpgradeFeeLamports,
+  getCoinArtUpgradeFeeSol,
+  getCoinArtUpgradePlatformFeeUsd,
+} from '@/lib/coin-upgrade/config'
 import {
   computeCoinArtUpgradeFeeBreakdown,
   type CoinArtUpgradeFeeSplitConfig,
 } from '@/lib/coin-upgrade/fee-split'
-import { feePayerMatchesBuyer } from '@/lib/gen2-presale/verify-payment'
+import {
+  coinArtUpgradePlatformFeeVerifyBand,
+  coinArtUpgradePlatformFeeVerifyFallbackBand,
+  isCoinArtUpgradePlatformFeeEnabled,
+  quoteCoinArtUpgradePlatformFeeLamports,
+} from '@/lib/coin-upgrade/platform-fee'
+import {
+  collectParsedTransactionAccountKeys,
+  feePayerMatchesBuyer,
+} from '@/lib/gen2-presale/verify-payment'
 import { fetchConfirmedParsedTransaction } from '@/lib/nesting/verify-staking-platform-fee'
+import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 import {
   sumOwlCenterPresaleSplitFromBuyer,
   verifyOwlCenterPresaleSplitPayment,
@@ -25,8 +39,23 @@ function inferUnitsFromTotalLamports(totalLamports: bigint): number | null {
   return Number.isFinite(units) && units > 0 ? units : null
 }
 
+function treasurySolIncrease(parsed: ParsedTransactionWithMeta, treasuryB58: string): bigint | null {
+  const meta = parsed.meta
+  if (!meta?.preBalances?.length || !meta.postBalances?.length) return null
+  const flat = collectParsedTransactionAccountKeys(parsed)
+  let treasuryPk: PublicKey
+  try {
+    treasuryPk = new PublicKey(treasuryB58)
+  } catch {
+    return null
+  }
+  const idx = flat.findIndex((k) => k.equals(treasuryPk))
+  if (idx < 0) return null
+  return BigInt(meta.postBalances[idx] ?? 0) - BigInt(meta.preBalances[idx] ?? 0)
+}
+
 function verifySplitAmounts(params: {
-  parsed: import('@solana/web3.js').ParsedTransactionWithMeta
+  parsed: ParsedTransactionWithMeta
   fromWallet: string
   split: CoinArtUpgradeFeeSplitConfig
   units: number
@@ -57,8 +86,41 @@ function verifySplitAmounts(params: {
   return { ok: true }
 }
 
+async function verifyPlatformFeePortion(params: {
+  parsed: ParsedTransactionWithMeta
+  units: number
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!isCoinArtUpgradePlatformFeeEnabled()) return { ok: true }
+
+  const treasury = getOwlCenterPlatformTreasuryWallet()
+  if (!treasury) {
+    return { ok: false, error: 'Platform fee treasury is not configured.' }
+  }
+
+  const increase = treasurySolIncrease(params.parsed, treasury)
+  if (increase == null || increase <= 0n) {
+    return { ok: false, error: 'Platform fee was not paid to the Owltopia treasury in this transaction.' }
+  }
+
+  const quote = await quoteCoinArtUpgradePlatformFeeLamports()
+  const band = quote
+    ? coinArtUpgradePlatformFeeVerifyBand(BigInt(quote.lamports), params.units)
+    : coinArtUpgradePlatformFeeVerifyFallbackBand(params.units)
+
+  if (increase < band.minLamports || increase > band.maxLamports) {
+    const usd = getCoinArtUpgradePlatformFeeUsd()
+    return {
+      ok: false,
+      error: `Platform fee mismatch: expected ~$${usd.toFixed(2)} per coin (in SOL) to the treasury.`,
+    }
+  }
+
+  return { ok: true }
+}
+
 /**
- * Verifies the holder sent `minUnits` × per-coin upgrade fee, split 50/50 (default) across founder wallets.
+ * Verifies the holder sent `minUnits` × per-coin upgrade fee, split 50/50 (default) across founder
+ * wallets, plus the ~$0.50 platform fee (when enabled) to the platform treasury.
  */
 export async function verifyCoinArtUpgradeFeeTransaction(params: {
   signature: string
@@ -121,6 +183,9 @@ export async function verifyCoinArtUpgradeFeeTransaction(params: {
     units,
   })
   if (!splitOk.ok) return splitOk
+
+  const platformOk = await verifyPlatformFeePortion({ parsed, units })
+  if (!platformOk.ok) return platformOk
 
   return { ok: true, lamports: Number(got.total), units }
 }

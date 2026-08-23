@@ -18,10 +18,14 @@ export type CoinArtUpgradeFeeTxConfig = {
   percent_a: number
   percent_b: number
   unit_lamports: number
+  /** Optional ~$0.50 platform fee per coin (SOL lamports), paid to `platform_fee_treasury`. */
+  platform_fee_unit_lamports?: number
+  platform_fee_treasury?: string | null
 }
 
 /**
- * Sends the coin art upgrade fee 50/50 to the two founder wallets.
+ * Sends the coin art upgrade fee 50/50 to the two founder wallets, plus the
+ * optional ~$0.50 platform fee to the Owltopia treasury.
  * Config comes from `GET /api/me/coin-upgrade` so no NEXT_PUBLIC_* env is needed.
  */
 export async function sendCoinArtUpgradeFeeTransaction(params: {
@@ -47,6 +51,11 @@ export async function sendCoinArtUpgradeFeeTransaction(params: {
   const walletALamports = (totalLamports * BigInt(params.feeConfig.percent_a)) / 100n
   const walletBLamports = totalLamports - walletALamports
 
+  const platformUnit = Math.max(0, Math.floor(params.feeConfig.platform_fee_unit_lamports ?? 0))
+  const platformTreasury = params.feeConfig.platform_fee_treasury?.trim() || ''
+  const platformTotal =
+    platformUnit > 0 && platformTreasury ? BigInt(units) * BigInt(platformUnit) : 0n
+
   const tx = new Transaction()
   if (walletALamports > 0n) {
     tx.add(
@@ -63,6 +72,15 @@ export async function sendCoinArtUpgradeFeeTransaction(params: {
         fromPubkey: params.publicKey,
         toPubkey: new PublicKey(walletB),
         lamports: Number(walletBLamports),
+      })
+    )
+  }
+  if (platformTotal > 0n) {
+    tx.add(
+      SystemProgram.transfer({
+        fromPubkey: params.publicKey,
+        toPubkey: new PublicKey(platformTreasury),
+        lamports: Number(platformTotal),
       })
     )
   }

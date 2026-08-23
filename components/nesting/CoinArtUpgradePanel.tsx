@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { Loader2, Sparkles, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { HubCardCoverImage } from '@/components/owl-center/HubCardCoverImage'
 import { cn } from '@/lib/utils'
 import { sendCoinArtUpgradeFeeTransaction } from '@/lib/coin-upgrade/client/upgrade-fee-tx'
 
@@ -20,6 +21,10 @@ type PanelConfig = {
     percent_a: number
     percent_b: number
   } | null
+  platform_fee_usd: number
+  platform_fee_label: string
+  platform_fee_lamports: number | null
+  platform_fee_treasury: string | null
   reward_multiplier: number
   max_per_request: number
 }
@@ -78,9 +83,13 @@ const COMING_SOON_FALLBACK_CONFIG: PanelConfig = {
   catalog_ready: false,
   preview: true,
   sellable: false,
-  fee_sol: 0.5,
-  fee_lamports: 500_000_000,
+  fee_sol: 0.1,
+  fee_lamports: 100_000_000,
   fee_split: null,
+  platform_fee_usd: 0.5,
+  platform_fee_label: '50¢ platform fee',
+  platform_fee_lamports: null,
+  platform_fee_treasury: null,
   reward_multiplier: 2,
   max_per_request: 10,
 }
@@ -232,6 +241,15 @@ export function CoinArtUpgradePanel() {
       setNotice({ tone: 'error', text: 'Upgrade fee split is not configured yet. Try again later.' })
       return
     }
+    if (config.platform_fee_usd > 0) {
+      if (!config.platform_fee_treasury || !config.platform_fee_lamports || config.platform_fee_lamports <= 0) {
+        setNotice({
+          tone: 'error',
+          text: 'Platform fee quote unavailable — refresh and try again in a moment.',
+        })
+        return
+      }
+    }
     const assetIds = [...selected]
     setBusy(true)
     setNotice(null)
@@ -247,6 +265,8 @@ export function CoinArtUpgradePanel() {
           percent_a: config.fee_split.percent_a,
           percent_b: config.fee_split.percent_b,
           unit_lamports: config.fee_lamports,
+          platform_fee_unit_lamports: config.platform_fee_lamports ?? undefined,
+          platform_fee_treasury: config.platform_fee_treasury,
         },
       })
       // Persist before the POST so a lost response never loses the paid fee.
@@ -310,6 +330,10 @@ export function CoinArtUpgradePanel() {
   if (sellable && (!connected || coins.length === 0)) return null
 
   const totalSol = formatSol(config.fee_sol * selected.size)
+  const platformFeeLabel =
+    config.platform_fee_usd > 0
+      ? config.platform_fee_label || '50¢ platform fee'
+      : null
   const comingSoonStatus = !config.catalog_ready
     ? 'New art is being prepared — previews appear here after the drop, then upgrades open.'
     : previewArt.length > 0
@@ -326,9 +350,21 @@ export function CoinArtUpgradePanel() {
         <div className="space-y-1">
           <h2 className="text-lg font-semibold tracking-tight">Coin art upgrade</h2>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            Optional forever-upgrade for your Owltopia coins: {formatSol(config.fee_sol)} SOL per coin
-            for the new art{config.reward_multiplier > 1 ? (
-              <> and <span className="font-medium text-foreground">{config.reward_multiplier}× OWL</span> while nested</>
+            Optional forever-upgrade for your Owltopia coins:{' '}
+            <span className="font-medium text-foreground">{formatSol(config.fee_sol)} SOL</span> per coin
+            {platformFeeLabel ? (
+              <>
+                {' '}
+                plus a <span className="font-medium text-foreground">{platformFeeLabel}</span>
+              </>
+            ) : null}{' '}
+            for the new art
+            {config.reward_multiplier > 1 ? (
+              <>
+                {' '}
+                and <span className="font-medium text-foreground">{config.reward_multiplier}× OWL</span>{' '}
+                while nested
+              </>
             ) : null}
             . Nested coins upgrade in place — no unlock needed. Prefer the original art? Just keep it.
           </p>
@@ -345,17 +381,15 @@ export function CoinArtUpgradePanel() {
               ? previewArt.map((sample, idx) => (
                   <li
                     key={`${sample.coin_number ?? 'x'}-${idx}`}
-                    className="overflow-hidden rounded-lg border border-border/60 bg-muted aspect-square"
+                    className="relative overflow-hidden rounded-lg border border-border/60 bg-muted aspect-square"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={sample.image}
+                    <HubCardCoverImage
+                      imageUrl={sample.image}
                       alt={
                         sample.name ??
                         (sample.coin_number != null ? `Coin #${sample.coin_number}` : 'New coin art')
                       }
-                      className="h-full w-full object-cover"
-                      loading="lazy"
+                      fit="cover"
                     />
                   </li>
                 ))
@@ -428,22 +462,12 @@ export function CoinArtUpgradePanel() {
                 >
                   <div className="relative aspect-square overflow-hidden rounded-lg bg-muted">
                     {displayImage ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={displayImage}
-                        alt={coin.name ?? coin.mint}
-                        className="h-full w-full object-cover"
-                        loading="lazy"
-                      />
+                      <HubCardCoverImage imageUrl={displayImage} alt={coin.name ?? coin.mint} fit="cover" />
                     ) : null}
                     {coin.upgrade_status === 'none' && coin.new_image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={coin.new_image}
-                        alt="New art preview"
-                        className="absolute bottom-1 right-1 h-1/3 w-1/3 rounded-md border border-border/80 object-cover shadow"
-                        loading="lazy"
-                      />
+                      <div className="absolute bottom-1 right-1 h-1/3 w-1/3 overflow-hidden rounded-md border border-border/80 shadow">
+                        <HubCardCoverImage imageUrl={coin.new_image} alt="New art preview" fit="cover" />
+                      </div>
                     ) : null}
                   </div>
                   <div className="space-y-1">
@@ -490,12 +514,13 @@ export function CoinArtUpgradePanel() {
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
             {selected.size === 0
-              ? `Select coins to upgrade (${formatSol(config.fee_sol)} SOL each)`
-              : `Upgrade ${selected.size} coin${selected.size === 1 ? '' : 's'} · ${totalSol} SOL`}
+              ? `Select coins to upgrade (${formatSol(config.fee_sol)} SOL${platformFeeLabel ? ` + ${platformFeeLabel}` : ''} each)`
+              : `Upgrade ${selected.size} coin${selected.size === 1 ? '' : 's'} · ${totalSol} SOL${platformFeeLabel ? ` + ${platformFeeLabel}` : ''}`}
           </Button>
           <p className="text-[11px] text-muted-foreground text-center">
-            One wallet approval for the fee — the art update is signed by Owltopia, so nested coins
-            never unlock. Up to {config.max_per_request} coins per batch.
+            One wallet approval for the fee{platformFeeLabel ? ' and platform fee' : ''} — the art
+            update is signed by Owltopia, so nested coins never unlock. Up to {config.max_per_request}{' '}
+            coins per batch.
           </p>
         </div>
       ) : sellable && upgradedCount === coins.length && coins.length > 0 ? (
