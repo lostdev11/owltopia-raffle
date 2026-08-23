@@ -2,8 +2,8 @@ import 'server-only'
 
 import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
 import { resolveOwltopiaCoinCollectionAddress } from '@/lib/coin-upgrade/collection'
+import { resolveCatalogManifestForOnChainCoins } from '@/lib/coin-upgrade/zero-based-remap'
 import { upsertCoinArtUpgradeCatalogRows } from '@/lib/db/coin-art-upgrade-upload-jobs'
-import { remapZeroBasedManifestKeys } from '@/lib/coin-upgrade/zero-based-remap'
 
 const PAGE_SIZE = 1000
 
@@ -58,7 +58,8 @@ export type SeedCatalogResult = {
   skipped: number
   manifest_key_count: number
   assets_on_chain: number
-  /** On-chain coins #1…N that still have no catalog row after this seed. */
+  numbering_scheme: 'one-based' | 'zero-based'
+  /** Coin numbers in the expected on-chain range that still have no catalog row. */
   catalog_gap_numbers: number[]
   problems: {
     noNumber: number
@@ -68,9 +69,6 @@ export type SeedCatalogResult = {
   }
 }
 
-/** Owltopia coins are numbered #1 … #N on-chain. Generator #0 is not a catalog coin. */
-const MIN_COIN_NUMBER = 1
-
 /**
  * Join Irys upload manifest (coin number → URIs) with on-chain Owltopia coins
  * and upsert `coin_art_upgrade_catalog`. Same logic as scripts/seed-coin-upgrade-catalog.mjs.
@@ -78,9 +76,18 @@ const MIN_COIN_NUMBER = 1
 export async function seedCoinArtUpgradeCatalogFromManifest(
   manifestInput: Record<string, { image?: string; metadata: string }>
 ): Promise<SeedCatalogResult> {
-  const { manifest } = remapZeroBasedManifestKeys(manifestInput)
   const collection = resolveOwltopiaCoinCollectionAddress()
   const assets = await fetchCollectionAssets(collection)
+
+  const onChainNumbers = new Set<number>()
+  for (const asset of assets) {
+    if (asset.burnt === true) continue
+    const n = coinNumberFromName(asset.content?.metadata?.name ?? null)
+    if (n != null) onChainNumbers.add(n)
+  }
+
+  const { manifest, scheme } = resolveCatalogManifestForOnChainCoins(manifestInput, onChainNumbers)
+  const minCoinNumber = scheme === 'zero-based' ? 0 : 1
 
   const rows: Array<{
     asset_id: string
@@ -103,7 +110,7 @@ export async function seedCoinArtUpgradeCatalogFromManifest(
       problems.noNumber += 1
       continue
     }
-    if (n < MIN_COIN_NUMBER) {
+    if (scheme === 'one-based' && n < 1) {
       problems.ignoredZero += 1
       continue
     }
@@ -111,12 +118,12 @@ export async function seedCoinArtUpgradeCatalogFromManifest(
       problems.duplicateNumber += 1
       continue
     }
-    seenNumbers.set(n, assetId)
     const art = manifest[String(n)]
     if (!art?.metadata) {
       problems.noArt += 1
       continue
     }
+    seenNumbers.set(n, assetId)
     rows.push({
       asset_id: assetId,
       coin_number: n,
@@ -130,20 +137,23 @@ export async function seedCoinArtUpgradeCatalogFromManifest(
   const upserted = await upsertCoinArtUpgradeCatalogRows(rows)
   const seededNumbers = new Set(rows.map((r) => r.coin_number))
   const catalogGapNumbers: number[] = []
+  const manifestNumericKeys = Object.keys(manifest)
+    .map((k) => Number.parseInt(k, 10))
+    .filter((n) => Number.isInteger(n) && n >= minCoinNumber)
   const manifestMax = Math.max(
-    1000,
-    ...Object.keys(manifest)
-      .map((k) => Number.parseInt(k, 10))
-      .filter((n) => Number.isInteger(n) && n >= MIN_COIN_NUMBER)
+    scheme === 'zero-based' ? 999 : 1000,
+    ...manifestNumericKeys,
+    ...onChainNumbers
   )
-  for (let n = MIN_COIN_NUMBER; n <= manifestMax; n += 1) {
-    if (!seededNumbers.has(n)) catalogGapNumbers.push(n)
+  for (let n = minCoinNumber; n <= manifestMax; n += 1) {
+    if (onChainNumbers.has(n) && !seededNumbers.has(n)) catalogGapNumbers.push(n)
   }
   return {
     upserted,
     skipped: problems.noNumber + problems.noArt + problems.duplicateNumber + problems.ignoredZero,
     manifest_key_count: Object.keys(manifest).length,
     assets_on_chain: assets.filter((a) => a.burnt !== true && a.id?.trim()).length,
+    numbering_scheme: scheme,
     catalog_gap_numbers: catalogGapNumbers,
     problems,
   }
