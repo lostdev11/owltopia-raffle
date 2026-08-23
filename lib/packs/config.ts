@@ -4,7 +4,7 @@
  * - Pack price: 0.1 SOL
  * - Every open wins
  * - Categories: 60% OWL / 20% SOL / 20% NFT
- * - Scales: OWL 1–10 (10 OWL = 0.1 SOL at default rate), SOL 0.05–0.5, NFT 0.05+ SOL
+ * - Scales: OWL 10–50 (10 OWL = 0.1 SOL at default rate), SOL 0.05–0.5, NFT 0.05+ SOL
  * - Target RTP: 80% (EV ≈ 0.08 SOL per open)
  * - OWL wins credit free raffle tickets (default 1 OWL → 1 ticket)
  * - NFT picks: inverse floor-price weights (higher FP = rarer)
@@ -64,14 +64,12 @@ export type PackNftValueBand = {
 }
 
 /**
- * Bottom-heavy OWL ladder (1 → 10 OWL). At default rate, 10 OWL = 0.1 SOL (pack price).
- * fairValueSol placeholders assume PACK_DEFAULT_OWL_SOL_PRICE; scaled at runtime.
+ * Bottom-heavy OWL ladder (10 → 50 OWL). At default rate, 10 OWL = 0.1 SOL (pack price).
  */
 export const PACK_OWL_TIERS: PackOwlTier[] = [
-  { category: 'owl', amount: 1, weight: 400, fairValueSol: 0.01 },
-  { category: 'owl', amount: 2, weight: 250, fairValueSol: 0.02 },
-  { category: 'owl', amount: 5, weight: 220, fairValueSol: 0.05 },
-  { category: 'owl', amount: 10, weight: 130, fairValueSol: 0.1 },
+  { category: 'owl', amount: 10, weight: 900, fairValueSol: 0.1 },
+  { category: 'owl', amount: 25, weight: 70, fairValueSol: 0.25 },
+  { category: 'owl', amount: 50, weight: 30, fairValueSol: 0.5 },
 ]
 
 export const PACK_SOL_TIERS: PackSolTier[] = [
