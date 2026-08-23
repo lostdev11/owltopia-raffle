@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAdminSession } from '@/lib/auth-server'
 import { getCoinArtUpgradeStats } from '@/lib/db/coin-art-upgrades'
 import {
+  coinArtUpgradeEnvStatus,
   getCoinArtUpgradeFeeSol,
   getCoinArtUpgradeRewardMultiplier,
   isCoinArtUpgradeEnabled,
 } from '@/lib/coin-upgrade/config'
+import { getCoinArtUpgradeSettings } from '@/lib/db/coin-art-upgrade-settings'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -18,9 +20,15 @@ export async function GET(request: NextRequest) {
   const session = await requireAdminSession(request)
   if (session instanceof NextResponse) return session
   try {
-    const stats = await getCoinArtUpgradeStats()
+    const [stats, enabled, settings] = await Promise.all([
+      getCoinArtUpgradeStats(),
+      isCoinArtUpgradeEnabled(),
+      getCoinArtUpgradeSettings(),
+    ])
     return NextResponse.json({
-      enabled: isCoinArtUpgradeEnabled(),
+      enabled,
+      upgrades_enabled: settings.upgrades_enabled,
+      env: coinArtUpgradeEnvStatus(),
       fee_sol: getCoinArtUpgradeFeeSol(),
       reward_multiplier: getCoinArtUpgradeRewardMultiplier(),
       ...stats,

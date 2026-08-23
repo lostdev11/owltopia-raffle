@@ -130,7 +130,7 @@ export async function executeCoinArtUpgrade(params: {
   rawAssetIds: unknown
   paymentSignature: unknown
 }): Promise<CoinArtUpgradeExecutionResult> {
-  if (!isCoinArtUpgradeEnabled()) {
+  if (!(await isCoinArtUpgradeEnabled())) {
     throw new StakingUserError('Coin art upgrades are not open yet.', 403)
   }
 
