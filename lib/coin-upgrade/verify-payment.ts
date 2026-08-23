@@ -1,39 +1,69 @@
-import type { ParsedTransactionWithMeta } from '@solana/web3.js'
 import { PublicKey } from '@solana/web3.js'
 
-import { collectParsedTransactionAccountKeys, feePayerMatchesBuyer } from '@/lib/gen2-presale/verify-payment'
-import { fetchConfirmedParsedTransaction } from '@/lib/nesting/verify-staking-platform-fee'
 import { getCoinArtUpgradeFeeLamports, getCoinArtUpgradeFeeSol } from '@/lib/coin-upgrade/config'
+import {
+  computeCoinArtUpgradeFeeBreakdown,
+  type CoinArtUpgradeFeeSplitConfig,
+} from '@/lib/coin-upgrade/fee-split'
+import { feePayerMatchesBuyer } from '@/lib/gen2-presale/verify-payment'
+import { fetchConfirmedParsedTransaction } from '@/lib/nesting/verify-staking-platform-fee'
+import {
+  sumOwlCenterPresaleSplitFromBuyer,
+  verifyOwlCenterPresaleSplitPayment,
+} from '@/lib/owl-center-presale/verify-payment'
+import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 export type VerifyCoinArtUpgradeFeeResult =
   | { ok: true; lamports: number; units: number }
   | { ok: false; error: string }
 
-function treasurySolIncrease(parsed: ParsedTransactionWithMeta, treasuryB58: string): bigint | null {
-  const meta = parsed.meta
-  if (!meta?.preBalances?.length || !meta.postBalances?.length) return null
+function inferUnitsFromTotalLamports(totalLamports: bigint): number | null {
+  const unitLamports = BigInt(getCoinArtUpgradeFeeLamports())
+  if (unitLamports <= 0n) return null
+  if (totalLamports <= 0n || totalLamports % unitLamports !== 0n) return null
+  const units = Number(totalLamports / unitLamports)
+  return Number.isFinite(units) && units > 0 ? units : null
+}
 
-  let treasuryPk: PublicKey
-  try {
-    treasuryPk = new PublicKey(treasuryB58)
-  } catch {
-    return null
+function verifySplitAmounts(params: {
+  parsed: import('@solana/web3.js').ParsedTransactionWithMeta
+  fromWallet: string
+  split: CoinArtUpgradeFeeSplitConfig
+  units: number
+}): { ok: true } | { ok: false; error: string } {
+  const buyerNorm = normalizeSolanaWalletAddress(params.fromWallet)
+  const walletANorm = normalizeSolanaWalletAddress(params.split.walletA)
+  const walletBNorm = normalizeSolanaWalletAddress(params.split.walletB)
+  if (!buyerNorm || !walletANorm || !walletBNorm) {
+    return { ok: false, error: 'Upgrade fee recipients are not configured.' }
   }
 
-  const flat = collectParsedTransactionAccountKeys(parsed)
-  const idx = flat.findIndex((k) => k.equals(treasuryPk))
-  if (idx < 0) return null
-  return BigInt(meta.postBalances[idx] ?? 0) - BigInt(meta.preBalances[idx] ?? 0)
+  const breakdown = computeCoinArtUpgradeFeeBreakdown(params.units, params.split)
+  const exactOk = verifyOwlCenterPresaleSplitPayment({
+    parsed: params.parsed,
+    buyerWallet: params.fromWallet,
+    partnerWallet: params.split.walletA,
+    platformFeeWallet: params.split.walletB,
+    expectPartnerLamports: breakdown.walletALamports,
+    expectPlatformFeeLamports: breakdown.walletBLamports,
+  })
+  if (!exactOk) {
+    return {
+      ok: false,
+      error: `Upgrade fee must be ${getCoinArtUpgradeFeeSol()} SOL per coin, split ${params.split.percentA}/${params.split.percentB} between the two founder wallets.`,
+    }
+  }
+
+  return { ok: true }
 }
 
 /**
- * Verifies the treasury received `minUnits` × per-coin upgrade fee from the holder wallet
- * (staking platform fee verification pattern, 0.1 SOL units instead of 0.001).
+ * Verifies the holder sent `minUnits` × per-coin upgrade fee, split 50/50 (default) across founder wallets.
  */
 export async function verifyCoinArtUpgradeFeeTransaction(params: {
   signature: string
   fromWallet: string
-  treasuryWallet: string
+  split: CoinArtUpgradeFeeSplitConfig
   minUnits: number
 }): Promise<VerifyCoinArtUpgradeFeeResult> {
   const unitLamports = getCoinArtUpgradeFeeLamports()
@@ -57,13 +87,25 @@ export async function verifyCoinArtUpgradeFeeTransaction(params: {
     return { ok: false, error: 'Upgrade fee transaction was not signed by your connected wallet.' }
   }
 
-  const increase = treasurySolIncrease(parsed, params.treasuryWallet.trim())
-  if (increase == null || increase <= 0n) {
-    return { ok: false, error: 'Platform treasury was not credited in this transaction.' }
+  const buyerNorm = normalizeSolanaWalletAddress(params.fromWallet)
+  const walletANorm = normalizeSolanaWalletAddress(params.split.walletA)
+  const walletBNorm = normalizeSolanaWalletAddress(params.split.walletB)
+  if (!buyerNorm || !walletANorm || !walletBNorm) {
+    return { ok: false, error: 'Upgrade fee recipients are not configured.' }
   }
 
-  const unit = BigInt(unitLamports)
-  const units = Number(increase / unit)
+  const got = sumOwlCenterPresaleSplitFromBuyer(parsed, buyerNorm, walletANorm, walletBNorm)
+  if (got.total <= 0n) {
+    return { ok: false, error: 'Upgrade fee recipients were not credited in this transaction.' }
+  }
+
+  const units = inferUnitsFromTotalLamports(got.total)
+  if (units == null) {
+    return {
+      ok: false,
+      error: `Upgrade fee amount must be a whole multiple of ${getCoinArtUpgradeFeeSol()} SOL per coin.`,
+    }
+  }
   if (units < params.minUnits) {
     const needSol = (params.minUnits * unitLamports) / 1e9
     return {
@@ -72,14 +114,13 @@ export async function verifyCoinArtUpgradeFeeTransaction(params: {
     }
   }
 
-  const remainder = increase % unit
-  const tolerance = BigInt(Math.max(10_000, Math.floor(unitLamports * 0.02)))
-  if (remainder > tolerance) {
-    return {
-      ok: false,
-      error: 'Upgrade fee amount must be a whole multiple of the per-coin fee.',
-    }
-  }
+  const splitOk = verifySplitAmounts({
+    parsed,
+    fromWallet: params.fromWallet,
+    split: params.split,
+    units,
+  })
+  if (!splitOk.ok) return splitOk
 
-  return { ok: true, lamports: Number(increase), units }
+  return { ok: true, lamports: Number(got.total), units }
 }

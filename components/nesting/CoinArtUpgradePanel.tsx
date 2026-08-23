@@ -14,7 +14,12 @@ type PanelConfig = {
   sellable: boolean
   fee_sol: number
   fee_lamports: number
-  treasury: string | null
+  fee_split: {
+    wallet_a: string
+    wallet_b: string
+    percent_a: number
+    percent_b: number
+  } | null
   reward_multiplier: number
   max_per_request: number
 }
@@ -75,7 +80,7 @@ const COMING_SOON_FALLBACK_CONFIG: PanelConfig = {
   sellable: false,
   fee_sol: 0.1,
   fee_lamports: 100_000_000,
-  treasury: null,
+  fee_split: null,
   reward_multiplier: 2,
   max_per_request: 10,
 }
@@ -223,8 +228,8 @@ export function CoinArtUpgradePanel() {
 
   const handleUpgradeSelected = useCallback(async () => {
     if (!config?.sellable || !publicKey || selected.size === 0 || busy) return
-    if (!config.treasury) {
-      setNotice({ tone: 'error', text: 'Upgrade fee treasury is not configured yet. Try again later.' })
+    if (!config.fee_split) {
+      setNotice({ tone: 'error', text: 'Upgrade fee split is not configured yet. Try again later.' })
       return
     }
     const assetIds = [...selected]
@@ -236,7 +241,13 @@ export function CoinArtUpgradePanel() {
         sendTransaction: sendTransaction as Parameters<typeof sendCoinArtUpgradeFeeTransaction>[0]['sendTransaction'],
         publicKey,
         units: assetIds.length,
-        feeConfig: { treasury: config.treasury, unitLamports: config.fee_lamports },
+        feeConfig: {
+          wallet_a: config.fee_split.wallet_a,
+          wallet_b: config.fee_split.wallet_b,
+          percent_a: config.fee_split.percent_a,
+          percent_b: config.fee_split.percent_b,
+          unit_lamports: config.fee_lamports,
+        },
       })
       // Persist before the POST so a lost response never loses the paid fee.
       writePendingPayment({ signature, asset_ids: assetIds })

@@ -22,7 +22,7 @@ import {
   listCoinArtUpgradesByAssetIds,
   type CoinArtUpgradePreviewSample,
 } from '@/lib/db/coin-art-upgrades'
-import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
+import { getCoinArtUpgradeFeeSplitConfig } from '@/lib/coin-upgrade/fee-split'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,6 +38,13 @@ export type CoinArtUpgradeWalletCoin = {
   upgrade_status: 'none' | 'processing' | 'upgraded' | 'art_unavailable'
 }
 
+export type CoinArtUpgradeFeeSplitPublic = {
+  wallet_a: string
+  wallet_b: string
+  percent_a: number
+  percent_b: number
+}
+
 export type CoinArtUpgradePublicConfig = {
   enabled: boolean
   catalog_ready: boolean
@@ -47,7 +54,7 @@ export type CoinArtUpgradePublicConfig = {
   sellable: boolean
   fee_sol: number
   fee_lamports: number
-  treasury: string | null
+  fee_split: CoinArtUpgradeFeeSplitPublic | null
   reward_multiplier: number
   max_per_request: number
 }
@@ -56,7 +63,8 @@ async function buildCoinArtUpgradePublicConfig(): Promise<CoinArtUpgradePublicCo
   const enabled = isCoinArtUpgradeEnabled()
   const catalogSize = await countCoinArtUpgradeCatalogEntries()
   const catalogReady = catalogSize > 0
-  const sellable = enabled && catalogReady
+  const split = getCoinArtUpgradeFeeSplitConfig()
+  const sellable = enabled && catalogReady && split != null
   return {
     enabled,
     catalog_ready: catalogReady,
@@ -64,7 +72,14 @@ async function buildCoinArtUpgradePublicConfig(): Promise<CoinArtUpgradePublicCo
     sellable,
     fee_sol: getCoinArtUpgradeFeeSol(),
     fee_lamports: getCoinArtUpgradeFeeLamports(),
-    treasury: getPlatformFeeTreasuryWalletAddress() || null,
+    fee_split: split
+      ? {
+          wallet_a: split.walletA,
+          wallet_b: split.walletB,
+          percent_a: split.percentA,
+          percent_b: split.percentB,
+        }
+      : null,
     reward_multiplier: getCoinArtUpgradeRewardMultiplier(),
     max_per_request: MAX_COIN_ART_UPGRADES_PER_REQUEST,
   }
@@ -178,7 +193,7 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/me/coin-upgrade
  * Body: { asset_ids: string[], payment_signature?: string }
- * Verifies the 0.1 SOL × N fee transfer, records it consume-once, then
+ * Verifies the 0.1 SOL × N fee transfer (50/50 founder-wallet split), records it consume-once, then
  * repoints each coin's Core URI to the new art and applies the reward boost.
  * Retries for already-paid coins do not need a new payment signature.
  */
