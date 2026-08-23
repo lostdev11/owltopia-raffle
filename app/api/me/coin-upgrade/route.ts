@@ -19,9 +19,7 @@ import { coinUpgradeCollectionCandidates, executeCoinArtUpgrade } from '@/lib/co
 import {
   countCoinArtUpgradeCatalogEntries,
   listCoinArtUpgradeCatalogEntries,
-  listCoinArtUpgradeCatalogPreviewSamples,
   listCoinArtUpgradesByAssetIds,
-  type CoinArtUpgradePreviewSample,
 } from '@/lib/db/coin-art-upgrades'
 import { getCoinArtUpgradeFeeSplitConfig } from '@/lib/coin-upgrade/fee-split'
 import {
@@ -126,13 +124,9 @@ export async function GET(request: NextRequest) {
     const config = await buildCoinArtUpgradePublicConfig()
 
     if (!config.sellable) {
-      const previewArt: CoinArtUpgradePreviewSample[] = config.catalog_ready
-        ? await listCoinArtUpgradeCatalogPreviewSamples(8)
-        : []
       return NextResponse.json({
         config,
         coins: [] as CoinArtUpgradeWalletCoin[],
-        preview_art: previewArt,
       })
     }
 
@@ -188,7 +182,7 @@ export async function GET(request: NextRequest) {
         mint,
         name: content?.metadata?.name ?? catalog?.name ?? null,
         image,
-        new_image: catalog?.new_image_uri ?? null,
+        new_image: upgrade?.status === 'updated' ? catalog?.new_image_uri ?? null : null,
         nested: nestedMints.has(mint),
         upgrade_status: upgrade
           ? upgrade.status === 'updated'
@@ -202,7 +196,7 @@ export async function GET(request: NextRequest) {
 
     coins.sort((a, b) => (a.name || a.mint).localeCompare(b.name || b.mint))
 
-    return NextResponse.json({ config, coins, preview_art: [] as CoinArtUpgradePreviewSample[] })
+    return NextResponse.json({ config, coins })
   } catch (e) {
     console.error('[me/coin-upgrade GET]', e)
     return NextResponse.json({ error: safeErrorMessage(e) }, { status: 500 })

@@ -12,6 +12,7 @@ import {
   getCoinArtUpgradeFeeSplitConfig,
 } from '../lib/coin-upgrade/fee-split'
 import {
+  formatCoinArtUpgradePlatformFeeBatchLabel,
   formatCoinArtUpgradePlatformFeeLabel,
   getCoinArtUpgradeFeeSol,
   getCoinArtUpgradePlatformFeeUsd,
@@ -19,7 +20,8 @@ import {
 
 assert.equal(getCoinArtUpgradeFeeSol(), 0.1)
 assert.equal(getCoinArtUpgradePlatformFeeUsd(), 0.5)
-assert.equal(formatCoinArtUpgradePlatformFeeLabel(0.5), '50¢ platform fee')
+assert.equal(formatCoinArtUpgradePlatformFeeLabel(0.5), '50¢ platform fee per coin')
+assert.equal(formatCoinArtUpgradePlatformFeeBatchLabel(3, 0.5), '$1.50 platform fee (3 × 50¢)')
 
 const split = getCoinArtUpgradeFeeSplitConfig()
 assert.ok(split)

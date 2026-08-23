@@ -540,7 +540,7 @@ export function DashboardNestingClient() {
   useEffect(() => {
     if (typeof window === 'undefined') return
     const hash = window.location.hash.replace(/^#/, '')
-    if (hash !== 'nesting-claims' && hash !== 'nesting-claim-all-banner') return
+    if (hash !== 'nesting-claims' && hash !== 'nesting-claim-all-banner' && hash !== 'coin-art-upgrade') return
     const t = window.setTimeout(() => {
       document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, 120)

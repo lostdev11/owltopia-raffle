@@ -12,6 +12,7 @@ import {
   Send,
   Settings,
   ShoppingCart,
+  Sparkles,
   Ticket,
   Trophy,
 } from 'lucide-react'
@@ -162,6 +163,24 @@ export const NESTING_NAV_ITEM: SiteNavItem = {
   icon: Bird,
 }
 
+/** My nest → coin art upgrade panel (optional paid URI update + boosted rewards). */
+export const COIN_ART_UPGRADE_NAV_ITEM: SiteNavItem = {
+  href: '/dashboard/nesting#coin-art-upgrade',
+  label: 'Coin art upgrade',
+  description: 'Upgrade Owltopia coin art on Nesting',
+  icon: Sparkles,
+}
+
+export const NESTING_NAV_GROUP: SiteNavGroup = {
+  id: 'nesting',
+  label: 'Nesting',
+  menuAriaLabel: 'Nesting and coin art upgrade',
+  mobileSectionLabel: 'Nesting',
+  triggerIcon: Bird,
+  iconAccentClass: 'text-violet-400/90',
+  items: [NESTING_NAV_ITEM, COIN_ART_UPGRADE_NAV_ITEM],
+}
+
 export const DASHBOARD_NAV_ITEM: SiteNavItem = {
   href: '/dashboard',
   label: 'Dashboard',
@@ -212,10 +231,16 @@ export const ADMIN_NAV_GROUP: SiteNavGroup = {
   ],
 }
 
+export function navItemPathname(href: string): string {
+  const base = href.split('#')[0]?.trim()
+  return base || href
+}
+
 export function isPathInNavGroup(pathname: string, group: SiteNavGroup): boolean {
-  return group.items.some(
-    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
-  )
+  return group.items.some((item) => {
+    const base = navItemPathname(item.href)
+    return pathname === base || pathname.startsWith(`${base}/`)
+  })
 }
 
 /** Hide OwlSend / Owl Packs from Community nav during admin-only preview; label by public gate. */
