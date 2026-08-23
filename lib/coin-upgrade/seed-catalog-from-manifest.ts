@@ -56,6 +56,9 @@ async function fetchCollectionAssets(collection: string): Promise<DasAsset[]> {
 export type SeedCatalogResult = {
   upserted: number
   skipped: number
+  manifest_key_count: number
+  assets_on_chain: number
+  missing_art_coin_numbers: number[]
   problems: {
     noNumber: number
     noArt: number
@@ -84,6 +87,7 @@ export async function seedCoinArtUpgradeCatalogFromManifest(
   }> = []
   const problems = { noNumber: 0, noArt: 0, duplicateNumber: 0 }
   const seenNumbers = new Map<number, string>()
+  const missingArtCoinNumbers: number[] = []
 
   for (const asset of assets) {
     if (asset.burnt === true) continue
@@ -103,6 +107,7 @@ export async function seedCoinArtUpgradeCatalogFromManifest(
     const art = manifest[String(n)]
     if (!art?.metadata) {
       problems.noArt += 1
+      missingArtCoinNumbers.push(n)
       continue
     }
     rows.push({
@@ -116,9 +121,13 @@ export async function seedCoinArtUpgradeCatalogFromManifest(
   }
 
   const upserted = await upsertCoinArtUpgradeCatalogRows(rows)
+  missingArtCoinNumbers.sort((a, b) => a - b)
   return {
     upserted,
     skipped: problems.noNumber + problems.noArt + problems.duplicateNumber,
+    manifest_key_count: Object.keys(manifest).length,
+    assets_on_chain: assets.filter((a) => a.burnt !== true && a.id?.trim()).length,
+    missing_art_coin_numbers: missingArtCoinNumbers,
     problems,
   }
 }

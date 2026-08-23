@@ -147,7 +147,11 @@ export function CoinArtUpgradeArtUploadPanel() {
         status?: string
         remaining_files?: number
         catalog_upserted?: number
+        catalog_size?: number
+        manifest_key_count?: number
+        missing_art_coin_numbers?: number[]
       }
+      catalog_size?: number
       job?: JobRow
       progress?: { total_files: number; uploaded_files: number; percent: number }
     }>(res)
@@ -165,9 +169,15 @@ export function CoinArtUpgradeArtUploadPanel() {
       if (j.result?.ok === false) {
         throw new Error(j.result.error || 'Re-seed failed.')
       }
-      setMsg(
-        `Catalog re-seeded (${j.result?.catalog_upserted ?? j.job?.upload_progress?.catalog_upserted ?? '—'} coins). Generator 0-based ZIPs map to on-chain #1…#N.`,
-      )
+      const catalogSize = j.catalog_size ?? j.result?.catalog_size ?? j.job?.upload_progress?.catalog_upserted
+      const manifestKeys = j.result?.manifest_key_count
+      const missing = j.result?.missing_art_coin_numbers
+      let msg = `Catalog ${catalogSize ?? '—'} / 1000`
+      if (manifestKeys != null) msg += ` (manifest ${manifestKeys} keys)`
+      if (j.result?.error) msg += ` — ${j.result.error}`
+      else if (catalogSize === 1000) msg += ' — ready to go live.'
+      else if (missing?.length) msg += ` — still missing #${missing.join(', #')}.`
+      setMsg(msg)
       await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Re-seed failed.')
