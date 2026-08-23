@@ -102,13 +102,16 @@ export async function completeCoinArtUpgradeZipDirectUpload(input: {
     }
   }
 
-  const job = await insertCoinArtUpgradeUploadJob({
+  const inserted = await insertCoinArtUpgradeUploadJob({
     staged_zip_path: input.path,
     original_filename: input.originalFilename || null,
     created_by: input.createdBy,
     staged_zip_bytes: input.byteSize,
   })
-  if (!job) return { ok: false, error: 'Could not create upload job.' }
+  if (!inserted.job) {
+    return { ok: false, error: inserted.error || 'Could not create upload job.' }
+  }
+  const job = inserted.job
 
   // Prefer the prepared job_id path; insert created its own UUID. That's fine —
   // the staging path already contains the prepared id as the folder name.
