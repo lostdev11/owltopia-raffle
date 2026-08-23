@@ -2303,7 +2303,16 @@ export async function selectWinner(
   }
 
   const winnerDiscordId = await discordUserIdForWinnerWallet(winnerWallet)
-  await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId)
+  const entrantWallets = [
+    ...new Set(
+      confirmedEntries
+        .map((e) => e.wallet_address?.trim())
+        .filter((w): w is string => typeof w === 'string' && w.length > 0)
+    ),
+  ]
+  const { applyRaffleWinStreak } = await import('@/lib/db/wallet-streaks')
+  const winStreak = await applyRaffleWinStreak(raffleId, winnerWallet, entrantWallets, now)
+  await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId, winStreak)
 
   try {
     const { settleUnawardedMilestones } = await import('@/lib/raffles/milestones/settlement')

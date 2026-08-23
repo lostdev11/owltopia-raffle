@@ -180,6 +180,11 @@ export async function confirmEntryWithTx(
 
   const result = { success: true as const, entry: row.entry as Entry }
   await runAfterEntryConfirmHooks(raffleId)
+  const confirmed = row.entry as Entry
+  if (confirmed.status === 'confirmed') {
+    const { recordParticipationStreakOnEntry } = await import('@/lib/db/wallet-streaks')
+    await recordParticipationStreakOnEntry(confirmed.wallet_address, confirmed.verified_at)
+  }
   return result
 }
 
@@ -249,6 +254,19 @@ export async function confirmCartBatchWithTx(
   }
 
   await runAfterEntryConfirmHooksForEntryIds(uniqueSorted)
+  const { recordParticipationStreakOnEntry } = await import('@/lib/db/wallet-streaks')
+  const { data: confirmedRows } = await getSupabaseAdmin()
+    .from('entries')
+    .select('wallet_address, verified_at')
+    .in('id', uniqueSorted)
+    .eq('status', 'confirmed')
+  const seenWallets = new Set<string>()
+  for (const row of confirmedRows ?? []) {
+    const wallet = String(row.wallet_address ?? '').trim()
+    if (!wallet || seenWallets.has(wallet)) continue
+    seenWallets.add(wallet)
+    await recordParticipationStreakOnEntry(wallet, row.verified_at as string | null)
+  }
   return { success: true, entryIds: uniqueSorted }
 }
 
@@ -632,7 +650,13 @@ export async function updateEntryStatus(
       return null
     }
 
-    return data as Entry
+    const entry = data as Entry
+    if (status === 'confirmed' && entry?.wallet_address) {
+      const { recordParticipationStreakOnEntry } = await import('@/lib/db/wallet-streaks')
+      await recordParticipationStreakOnEntry(entry.wallet_address, entry.verified_at)
+    }
+
+    return entry
   }, { maxRetries: 2 })
 }
 

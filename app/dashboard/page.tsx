@@ -329,6 +329,14 @@ type DashboardData = {
     eligibleRaffles: Array<{ id: string; slug: string; title: string }>
   } | null
   engagement?: DashboardEngagementPayload
+  streaks?: {
+    winCurrentStreak: number
+    winBestStreak: number
+    winTotalWins: number
+    participationCurrentStreak: number
+    participationBestStreak: number
+    lastParticipationDate: string | null
+  }
   /** Buyout bids placed by this wallet (claim refunds here when expired/superseded). */
   buyoutOffers?: Array<{
     id: string
@@ -1806,6 +1814,10 @@ export default function DashboardPage() {
       hostedRaffles: myRafflesForMemo.length,
       pendingClaims: pendingHostingFundClaims.length,
       prizesToClaim: giveawayReady + communityReady + nftClaimable + cryptoClaimable + milestoneClaimable,
+      winCurrentStreak: data?.streaks?.winCurrentStreak ?? 0,
+      winBestStreak: data?.streaks?.winBestStreak ?? 0,
+      participationCurrentStreak: data?.streaks?.participationCurrentStreak ?? 0,
+      participationBestStreak: data?.streaks?.participationBestStreak ?? 0,
     }
   }, [
     myEntriesForMemo,
