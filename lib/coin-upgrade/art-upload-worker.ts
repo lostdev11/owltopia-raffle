@@ -30,7 +30,6 @@ import {
   bumpMetadataJsonTokenNumber,
   isZeroBasedContiguousIndices,
   remapZeroBasedManifestKeys,
-  shouldRemapZeroBasedKeys,
 } from '@/lib/coin-upgrade/zero-based-remap'
 
 const TOKEN_FILE_RE = /^(\d+)\.(png|json)$/i
@@ -101,35 +100,17 @@ export type CoinArtUpgradeWorkerResult = {
   catalog_upserted?: number
   catalog_size?: number
   manifest_key_count?: number
-  missing_art_coin_numbers?: number[]
+  catalog_gap_numbers?: number[]
   seed_problems?: SeedCatalogResult['problems']
 }
 
-/** Always detect from actual indices — do not trust remapped_from_zero (can be set after a manifest-only remap while file_list is still 0-based). */
-function normalizeFileListIndicesForCatalog(
-  fileList: CoinArtUpgradeUploadFileEntry[]
-): CoinArtUpgradeUploadFileEntry[] {
-  const pairIndices = fileList
-    .filter((f) => f.kind === 'image' && f.index != null)
-    .map((f) => f.index as number)
-  if (!shouldRemapZeroBasedKeys(pairIndices)) return fileList
-  return fileList.map((f) =>
-    f.index != null && (f.kind === 'image' || f.kind === 'metadata')
-      ? { ...f, index: f.index + 1 }
-      : f
-  )
-}
-
-/** Build + normalize manifest from job file_list URIs (source of truth for re-seed). */
+/** Build manifest from file_list URIs; remap 0…N-1 → #1…N once (never shift file_list + remap). */
 function prepareCatalogManifestFromJob(
   job: CoinArtUpgradeUploadJob
 ): { manifest: Record<string, { image: string; metadata: string }>; remapped: boolean } {
-  const fileList = normalizeFileListIndicesForCatalog(job.upload_progress.file_list ?? [])
-  const raw = buildManifestFromFileList(fileList)
-  if (Object.keys(raw).length === 0) {
-    const stored = job.upload_progress.manifest ?? {}
-    return remapZeroBasedManifestKeys(stored)
-  }
+  const fromList = buildManifestFromFileList(job.upload_progress.file_list ?? [])
+  const raw =
+    Object.keys(fromList).length > 0 ? fromList : (job.upload_progress.manifest ?? {})
   return remapZeroBasedManifestKeys(raw)
 }
 
@@ -398,20 +379,20 @@ async function seedCatalogForJob(jobId: string): Promise<CoinArtUpgradeWorkerRes
 }
 
 function workerResultFromSeed(result: SeedCatalogResult, catalogSize: number): CoinArtUpgradeWorkerResult {
-  const missing = result.missing_art_coin_numbers
+  const gaps = result.catalog_gap_numbers
   return {
     ok: true,
     status: 'completed',
     catalog_upserted: result.upserted,
     catalog_size: catalogSize,
     manifest_key_count: result.manifest_key_count,
-    missing_art_coin_numbers: missing.length > 0 ? missing.slice(0, 20) : undefined,
+    catalog_gap_numbers: gaps.length > 0 ? gaps.slice(0, 20) : undefined,
     seed_problems: result.problems,
     error:
       catalogSize < 1000
-        ? missing.length > 0
-          ? `Catalog is ${catalogSize}/1000 — missing art for coin #${missing.slice(0, 8).join(', #')}${missing.length > 8 ? '…' : ''}.`
-          : `Catalog is ${catalogSize}/1000 — manifest has ${result.manifest_key_count} keys (${result.problems.noNumber} unnumbered on-chain, ${result.problems.duplicateNumber} duplicates).`
+        ? gaps.length > 0
+          ? `Catalog is ${catalogSize}/1000 — still missing rows for coin #${gaps.slice(0, 8).join(', #')}${gaps.length > 8 ? '…' : ''}.`
+          : `Catalog is ${catalogSize}/1000 (${result.problems.noNumber} unnumbered on-chain, ${result.problems.duplicateNumber} duplicate #s).`
         : undefined,
   }
 }

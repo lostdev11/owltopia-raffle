@@ -149,7 +149,7 @@ export function CoinArtUpgradeArtUploadPanel() {
         catalog_upserted?: number
         catalog_size?: number
         manifest_key_count?: number
-        missing_art_coin_numbers?: number[]
+        catalog_gap_numbers?: number[]
       }
       catalog_size?: number
       job?: JobRow
@@ -171,7 +171,7 @@ export function CoinArtUpgradeArtUploadPanel() {
       }
       const catalogSize = j.catalog_size ?? j.result?.catalog_size ?? j.job?.upload_progress?.catalog_upserted
       const manifestKeys = j.result?.manifest_key_count
-      const missing = j.result?.missing_art_coin_numbers
+      const missing = j.result?.catalog_gap_numbers
       let msg = `Catalog ${catalogSize ?? '—'} / 1000`
       if (manifestKeys != null) msg += ` (manifest ${manifestKeys} keys)`
       if (j.result?.error) msg += ` — ${j.result.error}`

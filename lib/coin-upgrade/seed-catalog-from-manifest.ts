@@ -58,13 +58,18 @@ export type SeedCatalogResult = {
   skipped: number
   manifest_key_count: number
   assets_on_chain: number
-  missing_art_coin_numbers: number[]
+  /** On-chain coins #1…N that still have no catalog row after this seed. */
+  catalog_gap_numbers: number[]
   problems: {
     noNumber: number
     noArt: number
     duplicateNumber: number
+    ignoredZero: number
   }
 }
+
+/** Owltopia coins are numbered #1 … #N on-chain. Generator #0 is not a catalog coin. */
+const MIN_COIN_NUMBER = 1
 
 /**
  * Join Irys upload manifest (coin number → URIs) with on-chain Owltopia coins
@@ -85,9 +90,8 @@ export async function seedCoinArtUpgradeCatalogFromManifest(
     new_image_uri: string | null
     original_uri: string | null
   }> = []
-  const problems = { noNumber: 0, noArt: 0, duplicateNumber: 0 }
+  const problems = { noNumber: 0, noArt: 0, duplicateNumber: 0, ignoredZero: 0 }
   const seenNumbers = new Map<number, string>()
-  const missingArtCoinNumbers: number[] = []
 
   for (const asset of assets) {
     if (asset.burnt === true) continue
@@ -99,6 +103,10 @@ export async function seedCoinArtUpgradeCatalogFromManifest(
       problems.noNumber += 1
       continue
     }
+    if (n < MIN_COIN_NUMBER) {
+      problems.ignoredZero += 1
+      continue
+    }
     if (seenNumbers.has(n)) {
       problems.duplicateNumber += 1
       continue
@@ -107,7 +115,6 @@ export async function seedCoinArtUpgradeCatalogFromManifest(
     const art = manifest[String(n)]
     if (!art?.metadata) {
       problems.noArt += 1
-      missingArtCoinNumbers.push(n)
       continue
     }
     rows.push({
@@ -121,13 +128,23 @@ export async function seedCoinArtUpgradeCatalogFromManifest(
   }
 
   const upserted = await upsertCoinArtUpgradeCatalogRows(rows)
-  missingArtCoinNumbers.sort((a, b) => a - b)
+  const seededNumbers = new Set(rows.map((r) => r.coin_number))
+  const catalogGapNumbers: number[] = []
+  const manifestMax = Math.max(
+    1000,
+    ...Object.keys(manifest)
+      .map((k) => Number.parseInt(k, 10))
+      .filter((n) => Number.isInteger(n) && n >= MIN_COIN_NUMBER)
+  )
+  for (let n = MIN_COIN_NUMBER; n <= manifestMax; n += 1) {
+    if (!seededNumbers.has(n)) catalogGapNumbers.push(n)
+  }
   return {
     upserted,
-    skipped: problems.noNumber + problems.noArt + problems.duplicateNumber,
+    skipped: problems.noNumber + problems.noArt + problems.duplicateNumber + problems.ignoredZero,
     manifest_key_count: Object.keys(manifest).length,
     assets_on_chain: assets.filter((a) => a.burnt !== true && a.id?.trim()).length,
-    missing_art_coin_numbers: missingArtCoinNumbers,
+    catalog_gap_numbers: catalogGapNumbers,
     problems,
   }
 }
