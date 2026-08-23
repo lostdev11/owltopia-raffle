@@ -3,6 +3,7 @@ import 'server-only'
 import { getHeliusMainnetRpcUrl } from '@/lib/helius-rpc-url'
 import { resolveOwltopiaCoinCollectionAddress } from '@/lib/coin-upgrade/collection'
 import { upsertCoinArtUpgradeCatalogRows } from '@/lib/db/coin-art-upgrade-upload-jobs'
+import { remapZeroBasedManifestKeys } from '@/lib/coin-upgrade/zero-based-remap'
 
 const PAGE_SIZE = 1000
 
@@ -67,8 +68,9 @@ export type SeedCatalogResult = {
  * and upsert `coin_art_upgrade_catalog`. Same logic as scripts/seed-coin-upgrade-catalog.mjs.
  */
 export async function seedCoinArtUpgradeCatalogFromManifest(
-  manifest: Record<string, { image?: string; metadata: string }>
+  manifestInput: Record<string, { image?: string; metadata: string }>
 ): Promise<SeedCatalogResult> {
+  const { manifest } = remapZeroBasedManifestKeys(manifestInput)
   const collection = resolveOwltopiaCoinCollectionAddress()
   const assets = await fetchCollectionAssets(collection)
 

@@ -26,6 +26,8 @@ export type CoinArtUpgradeUploadProgress = {
   manifest?: Record<string, { image: string; metadata: string }>
   catalog_upserted?: number
   catalog_skipped?: number
+  /** Persisted when Sugar/Generator 0-based indices were shifted to 1..N. */
+  remapped_from_zero?: boolean
 }
 
 export type CoinArtUpgradeValidationScan = {
@@ -35,6 +37,8 @@ export type CoinArtUpgradeValidationScan = {
   missing_json: number[]
   other_files: number
   error?: string
+  /** True when ZIP indices were 0..N-1 (Sugar/Generator) and remapped to coin #1..N. */
+  remapped_from_zero?: boolean
 }
 
 export type CoinArtUpgradeUploadJob = {
