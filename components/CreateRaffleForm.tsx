@@ -2492,22 +2492,19 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
               type="number"
               required
               min={prizeMode === 'token' ? (partnerMinTicketsParsed ?? 1) : (derivedDrawGoal ?? 1)}
-              defaultValue={
-                prizeMode === 'token'
-                  ? partnerMinTicketsParsed != null
-                    ? String(partnerMinTicketsParsed)
-                    : undefined
-                  : derivedDrawGoal != null
-                    ? String(derivedDrawGoal)
-                    : undefined
+              placeholder={
+                effectiveDrawGoalTickets != null
+                  ? `e.g. 200 (min ${effectiveDrawGoalTickets} draw goal)`
+                  : 'e.g. 200'
               }
-              key={`max-tickets-${prizeMode}-${derivedDrawGoal ?? ''}-${partnerMinTicketsParsed ?? ''}`}
-              placeholder="e.g. 200"
               className="min-h-[44px] touch-manipulation"
             />
             <p className="text-xs text-muted-foreground">
-              Required. Buyers see worst-case odds as 1 ÷ max (e.g. max 200 → at worst 1/200). When all
+              Required — leave empty until you choose a cap. Buyers see worst-case odds as 1 ÷ max. When all
               tickets sell, the draw runs without waiting for the scheduled end time.
+              {effectiveDrawGoalTickets != null
+                ? ` Must be at least ${effectiveDrawGoalTickets} (draw goal).`
+                : null}
             </p>
           </div>
 
