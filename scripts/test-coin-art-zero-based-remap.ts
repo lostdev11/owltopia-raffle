@@ -3,12 +3,15 @@ import {
   bumpMetadataJsonTokenNumber,
   isZeroBasedContiguousIndices,
   remapZeroBasedManifestKeys,
+  shouldRemapZeroBasedKeys,
 } from '../lib/coin-upgrade/zero-based-remap'
 
 assert.equal(isZeroBasedContiguousIndices([0, 1, 2]), true)
 assert.equal(isZeroBasedContiguousIndices([0, 1, 999]), false)
 assert.equal(isZeroBasedContiguousIndices([1, 2, 3]), false)
 assert.equal(isZeroBasedContiguousIndices([...Array.from({ length: 1000 }, (_, i) => i)]), true)
+assert.equal(shouldRemapZeroBasedKeys([...Array.from({ length: 1000 }, (_, i) => i)]), true)
+assert.equal(shouldRemapZeroBasedKeys([1, 2, 3]), false)
 
 const { manifest, remapped } = remapZeroBasedManifestKeys({
   '0': { image: 'i0', metadata: 'm0' },
@@ -26,6 +29,15 @@ assert.deepEqual(remapped3.manifest, {
   '2': { image: 'i1', metadata: 'm1' },
   '3': { image: 'i2', metadata: 'm2' },
 })
+
+const thousand: Record<string, { image: string; metadata: string }> = {}
+for (let i = 0; i < 1000; i += 1) thousand[String(i)] = { image: `i${i}`, metadata: `m${i}` }
+const remapped1k = remapZeroBasedManifestKeys(thousand)
+assert.equal(remapped1k.remapped, true)
+assert.ok(remapped1k.manifest['1000'])
+assert.equal(remapped1k.manifest['1000']?.metadata, 'm999')
+assert.equal(remapped1k.manifest['1']?.metadata, 'm0')
+assert.equal(remapped1k.manifest['0'], undefined)
 
 const alreadyOneBased = remapZeroBasedManifestKeys({
   '1': { image: 'a', metadata: 'b' },

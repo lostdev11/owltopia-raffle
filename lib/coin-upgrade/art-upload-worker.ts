@@ -24,10 +24,13 @@ import {
   type CoinArtUpgradeValidationScan,
 } from '@/lib/db/coin-art-upgrade-upload-jobs'
 import { seedCoinArtUpgradeCatalogFromManifest } from '@/lib/coin-upgrade/seed-catalog-from-manifest'
+import type { SeedCatalogResult } from '@/lib/coin-upgrade/seed-catalog-from-manifest'
+import { countCoinArtUpgradeCatalogEntries } from '@/lib/db/coin-art-upgrades'
 import {
   bumpMetadataJsonTokenNumber,
   isZeroBasedContiguousIndices,
   remapZeroBasedManifestKeys,
+  shouldRemapZeroBasedKeys,
 } from '@/lib/coin-upgrade/zero-based-remap'
 
 const TOKEN_FILE_RE = /^(\d+)\.(png|json)$/i
@@ -96,6 +99,38 @@ export type CoinArtUpgradeWorkerResult = {
   error?: string
   remaining_files?: number
   catalog_upserted?: number
+  catalog_size?: number
+  manifest_key_count?: number
+  missing_art_coin_numbers?: number[]
+  seed_problems?: SeedCatalogResult['problems']
+}
+
+/** Always detect from actual indices — do not trust remapped_from_zero (can be set after a manifest-only remap while file_list is still 0-based). */
+function normalizeFileListIndicesForCatalog(
+  fileList: CoinArtUpgradeUploadFileEntry[]
+): CoinArtUpgradeUploadFileEntry[] {
+  const pairIndices = fileList
+    .filter((f) => f.kind === 'image' && f.index != null)
+    .map((f) => f.index as number)
+  if (!shouldRemapZeroBasedKeys(pairIndices)) return fileList
+  return fileList.map((f) =>
+    f.index != null && (f.kind === 'image' || f.kind === 'metadata')
+      ? { ...f, index: f.index + 1 }
+      : f
+  )
+}
+
+/** Build + normalize manifest from job file_list URIs (source of truth for re-seed). */
+function prepareCatalogManifestFromJob(
+  job: CoinArtUpgradeUploadJob
+): { manifest: Record<string, { image: string; metadata: string }>; remapped: boolean } {
+  const fileList = normalizeFileListIndicesForCatalog(job.upload_progress.file_list ?? [])
+  const raw = buildManifestFromFileList(fileList)
+  if (Object.keys(raw).length === 0) {
+    const stored = job.upload_progress.manifest ?? {}
+    return remapZeroBasedManifestKeys(stored)
+  }
+  return remapZeroBasedManifestKeys(raw)
 }
 
 export async function validateCoinArtUpgradeUploadJob(
@@ -327,14 +362,15 @@ async function processIrysBatch(
 async function seedCatalogForJob(jobId: string): Promise<CoinArtUpgradeWorkerResult> {
   const job = await getCoinArtUpgradeUploadJobById(jobId)
   if (!job) return { ok: false, error: 'Job not found.' }
-  const rawManifest = job.upload_progress.manifest
-  if (!rawManifest || Object.keys(rawManifest).length === 0) {
-    return { ok: false, error: 'Manifest empty — Irys upload incomplete.' }
+
+  const { manifest, remapped } = prepareCatalogManifestFromJob(job)
+  if (!manifest || Object.keys(manifest).length === 0) {
+    return { ok: false, error: 'Manifest empty — rebuild from file_list failed; Push to Arweave first.' }
   }
 
   try {
-    const { manifest, remapped } = remapZeroBasedManifestKeys(rawManifest)
     const result = await seedCoinArtUpgradeCatalogFromManifest(manifest)
+    const catalogSize = await countCoinArtUpgradeCatalogEntries()
     await updateCoinArtUpgradeUploadJob(jobId, {
       status: 'completed',
       error_message: null,
@@ -350,7 +386,7 @@ async function seedCatalogForJob(jobId: string): Promise<CoinArtUpgradeWorkerRes
         ? { ...job.validation_scan, remapped_from_zero: remapped || job.validation_scan.remapped_from_zero }
         : job.validation_scan,
     })
-    return { ok: true, status: 'completed', catalog_upserted: result.upserted }
+    return workerResultFromSeed(result, catalogSize)
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Catalog seed failed.'
     await updateCoinArtUpgradeUploadJob(jobId, {
@@ -361,26 +397,42 @@ async function seedCatalogForJob(jobId: string): Promise<CoinArtUpgradeWorkerRes
   }
 }
 
-/** Re-run catalog seed from an existing Irys manifest (e.g. fix 0-based → #1..N). */
+function workerResultFromSeed(result: SeedCatalogResult, catalogSize: number): CoinArtUpgradeWorkerResult {
+  const missing = result.missing_art_coin_numbers
+  return {
+    ok: true,
+    status: 'completed',
+    catalog_upserted: result.upserted,
+    catalog_size: catalogSize,
+    manifest_key_count: result.manifest_key_count,
+    missing_art_coin_numbers: missing.length > 0 ? missing.slice(0, 20) : undefined,
+    seed_problems: result.problems,
+    error:
+      catalogSize < 1000
+        ? missing.length > 0
+          ? `Catalog is ${catalogSize}/1000 — missing art for coin #${missing.slice(0, 8).join(', #')}${missing.length > 8 ? '…' : ''}.`
+          : `Catalog is ${catalogSize}/1000 — manifest has ${result.manifest_key_count} keys (${result.problems.noNumber} unnumbered on-chain, ${result.problems.duplicateNumber} duplicates).`
+        : undefined,
+  }
+}
+
+/** Re-run catalog seed from file_list Arweave URIs (fixes 0-based → #1..N). */
 export async function reseedCoinArtUpgradeCatalogFromJob(
   jobId: string
 ): Promise<CoinArtUpgradeWorkerResult> {
   const job = await getCoinArtUpgradeUploadJobById(jobId)
   if (!job) return { ok: false, error: 'Job not found.' }
-  if (!job.upload_progress.manifest || Object.keys(job.upload_progress.manifest).length === 0) {
-    // Rebuild from file_list URIs if manifest was never stored.
-    const fromList = buildManifestFromFileList(job.upload_progress.file_list ?? [])
-    if (Object.keys(fromList).length === 0) {
-      return { ok: false, error: 'No Irys manifest on this job — Push to Arweave first.' }
-    }
-    await updateCoinArtUpgradeUploadJob(jobId, {
-      status: 'seeding',
-      error_message: null,
-      upload_progress: { ...job.upload_progress, manifest: fromList },
-    })
-  } else {
-    await updateCoinArtUpgradeUploadJob(jobId, { status: 'seeding', error_message: null })
+
+  const { manifest } = prepareCatalogManifestFromJob(job)
+  if (Object.keys(manifest).length === 0) {
+    return { ok: false, error: 'No Irys URIs on this job — Push to Arweave first.' }
   }
+
+  await updateCoinArtUpgradeUploadJob(jobId, {
+    status: 'seeding',
+    error_message: null,
+    upload_progress: { ...job.upload_progress, manifest },
+  })
   return seedCatalogForJob(jobId)
 }
 

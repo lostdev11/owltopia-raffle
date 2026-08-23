@@ -7,6 +7,7 @@ import {
   validateCoinArtUpgradeUploadJob,
 } from '@/lib/coin-upgrade/art-upload-worker'
 import { getCoinArtUpgradeUploadJobById } from '@/lib/db/coin-art-upgrade-upload-jobs'
+import { countCoinArtUpgradeCatalogEntries } from '@/lib/db/coin-art-upgrades'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -47,9 +48,11 @@ export async function POST(request: NextRequest) {
     const progress = job?.upload_progress
     const total = progress?.total_files ?? 0
     const uploaded = progress?.uploaded_files ?? 0
+    const catalogSize = await countCoinArtUpgradeCatalogEntries()
     return NextResponse.json({
       result,
       job,
+      catalog_size: catalogSize,
       progress:
         total > 0
           ? {

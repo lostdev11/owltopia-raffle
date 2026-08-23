@@ -12,6 +12,21 @@ export function isZeroBasedContiguousIndices(indices: number[]): boolean {
   return unique[unique.length - 1] === unique.length - 1
 }
 
+/**
+ * True when the set looks like Generator output (has 0, no N) and should shift +1
+ * so on-chain #N gets art. Prefer contiguous 0..N-1; also force when key 0 exists
+ * and the natural last on-chain slot (max+1) is absent.
+ */
+export function shouldRemapZeroBasedKeys(indices: number[]): boolean {
+  const unique = [...new Set(indices.filter((n) => Number.isInteger(n) && n >= 0))].sort(
+    (a, b) => a - b
+  )
+  if (unique.length === 0) return false
+  if (isZeroBasedContiguousIndices(unique)) return true
+  const max = unique[unique.length - 1]!
+  return unique[0] === 0 && !unique.includes(max + 1) && unique.length >= max
+}
+
 /** Shift manifest keys 0..N-1 → 1..N. No-op when not zero-based. */
 export function remapZeroBasedManifestKeys<T extends { image?: string; metadata: string }>(
   manifest: Record<string, T>
@@ -19,7 +34,7 @@ export function remapZeroBasedManifestKeys<T extends { image?: string; metadata:
   const keys = Object.keys(manifest)
     .map((k) => Number.parseInt(k, 10))
     .filter((n) => Number.isInteger(n) && n >= 0)
-  if (!isZeroBasedContiguousIndices(keys)) {
+  if (!shouldRemapZeroBasedKeys(keys)) {
     return { manifest, remapped: false }
   }
   const out: Record<string, T> = {}
