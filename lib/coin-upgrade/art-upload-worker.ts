@@ -30,6 +30,7 @@ import {
   bumpMetadataJsonTokenNumber,
   isZeroBasedContiguousIndices,
   remapZeroBasedManifestKeys,
+  shouldRemapZeroBasedKeys,
 } from '@/lib/coin-upgrade/zero-based-remap'
 
 const TOKEN_FILE_RE = /^(\d+)\.(png|json)$/i
@@ -104,17 +105,14 @@ export type CoinArtUpgradeWorkerResult = {
   seed_problems?: SeedCatalogResult['problems']
 }
 
+/** Always detect from actual indices — do not trust remapped_from_zero (can be set after a manifest-only remap while file_list is still 0-based). */
 function normalizeFileListIndicesForCatalog(
-  fileList: CoinArtUpgradeUploadFileEntry[],
-  job: Pick<CoinArtUpgradeUploadJob, 'validation_scan' | 'upload_progress'>
+  fileList: CoinArtUpgradeUploadFileEntry[]
 ): CoinArtUpgradeUploadFileEntry[] {
-  if (job.validation_scan?.remapped_from_zero || job.upload_progress.remapped_from_zero) {
-    return fileList
-  }
   const pairIndices = fileList
     .filter((f) => f.kind === 'image' && f.index != null)
     .map((f) => f.index as number)
-  if (!isZeroBasedContiguousIndices(pairIndices)) return fileList
+  if (!shouldRemapZeroBasedKeys(pairIndices)) return fileList
   return fileList.map((f) =>
     f.index != null && (f.kind === 'image' || f.kind === 'metadata')
       ? { ...f, index: f.index + 1 }
@@ -126,7 +124,7 @@ function normalizeFileListIndicesForCatalog(
 function prepareCatalogManifestFromJob(
   job: CoinArtUpgradeUploadJob
 ): { manifest: Record<string, { image: string; metadata: string }>; remapped: boolean } {
-  const fileList = normalizeFileListIndicesForCatalog(job.upload_progress.file_list ?? [], job)
+  const fileList = normalizeFileListIndicesForCatalog(job.upload_progress.file_list ?? [])
   const raw = buildManifestFromFileList(fileList)
   if (Object.keys(raw).length === 0) {
     const stored = job.upload_progress.manifest ?? {}
