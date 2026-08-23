@@ -84,9 +84,22 @@ export function getCoinArtUpgradePlatformFeeUsd(): number {
 export function formatCoinArtUpgradePlatformFeeLabel(usd = getCoinArtUpgradePlatformFeeUsd()): string {
   if (usd <= 0) return ''
   const cents = Math.round(usd * 100)
-  if (cents === 50) return '50¢ platform fee'
-  if (usd % 1 === 0) return `$${usd.toFixed(0)} platform fee`
-  return `~$${usd.toFixed(2)} platform fee`
+  const perCoin = cents === 50 ? '50¢' : usd % 1 === 0 ? `$${usd.toFixed(0)}` : `$${usd.toFixed(2)}`
+  return `${perCoin} platform fee per coin`
+}
+
+/** Total platform fee label for a batch (e.g. "$1.50 platform fee (3 × 50¢)"). */
+export function formatCoinArtUpgradePlatformFeeBatchLabel(
+  units: number,
+  usd = getCoinArtUpgradePlatformFeeUsd()
+): string {
+  if (usd <= 0 || units <= 0) return ''
+  const cents = Math.round(usd * 100)
+  const perCoin = cents === 50 ? '50¢' : usd % 1 === 0 ? `$${usd.toFixed(0)}` : `$${usd.toFixed(2)}`
+  if (units === 1) return `${perCoin} platform fee`
+  const total = usd * units
+  const totalLabel = total % 1 === 0 ? `$${total.toFixed(0)}` : `$${total.toFixed(2)}`
+  return `${totalLabel} platform fee (${units} × ${perCoin})`
 }
 
 /** Upgraded coins earn `pool rate × multiplier` while nested (vote: 1 → 2 OWL/day). */

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { HubCardCoverImage } from '@/components/owl-center/HubCardCoverImage'
 import { cn } from '@/lib/utils'
 import { sendCoinArtUpgradeFeeTransaction } from '@/lib/coin-upgrade/client/upgrade-fee-tx'
+import { formatCoinArtUpgradePlatformFeeBatchLabel } from '@/lib/coin-upgrade/config'
 
 type PanelConfig = {
   enabled: boolean
@@ -36,12 +37,6 @@ type PanelCoin = {
   new_image: string | null
   nested: boolean
   upgrade_status: 'none' | 'processing' | 'upgraded' | 'art_unavailable'
-}
-
-type PreviewArt = {
-  coin_number: number | null
-  name: string | null
-  image: string
 }
 
 type PendingUpgradePayment = {
@@ -87,7 +82,7 @@ const COMING_SOON_FALLBACK_CONFIG: PanelConfig = {
   fee_lamports: 100_000_000,
   fee_split: null,
   platform_fee_usd: 0.5,
-  platform_fee_label: '50¢ platform fee',
+  platform_fee_label: '50¢ platform fee per coin',
   platform_fee_lamports: null,
   platform_fee_treasury: null,
   reward_multiplier: 2,
@@ -95,6 +90,11 @@ const COMING_SOON_FALLBACK_CONFIG: PanelConfig = {
 }
 
 const PREVIEW_PLACEHOLDER_COUNT = 8
+
+function platformFeeBatchLabel(usd: number, units: number): string | null {
+  if (usd <= 0 || units <= 0) return null
+  return formatCoinArtUpgradePlatformFeeBatchLabel(units, usd)
+}
 
 /**
  * Optional Owltopia Coin art upgrade (community vote): pay the per-coin fee,
@@ -111,7 +111,6 @@ export function CoinArtUpgradePanel() {
 
   const [config, setConfig] = useState<PanelConfig | null>(null)
   const [coins, setCoins] = useState<PanelCoin[]>([])
-  const [previewArt, setPreviewArt] = useState<PreviewArt[]>([])
   const [loaded, setLoaded] = useState(false)
   const [hidden, setHidden] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -125,29 +124,25 @@ export function CoinArtUpgradePanel() {
         // Connected but not signed in — still show Coming soon so holders see the section.
         setConfig(COMING_SOON_FALLBACK_CONFIG)
         setCoins([])
-        setPreviewArt([])
         setHidden(false)
         return null
       }
       const json = (await res.json().catch(() => null)) as
-        | { config?: PanelConfig; coins?: PanelCoin[]; preview_art?: PreviewArt[]; error?: string }
+        | { config?: PanelConfig; coins?: PanelCoin[]; error?: string }
         | null
       if (!res.ok || !json?.config) {
         setConfig(COMING_SOON_FALLBACK_CONFIG)
         setCoins([])
-        setPreviewArt([])
         setHidden(false)
         return null
       }
       setConfig(json.config)
       setCoins(json.coins ?? [])
-      setPreviewArt(Array.isArray(json.preview_art) ? json.preview_art : [])
       setHidden(false)
       return json
     } catch {
       setConfig(COMING_SOON_FALLBACK_CONFIG)
       setCoins([])
-      setPreviewArt([])
       setHidden(false)
       return null
     } finally {
@@ -185,7 +180,6 @@ export function CoinArtUpgradePanel() {
     if (!connected) {
       setConfig(COMING_SOON_FALLBACK_CONFIG)
       setCoins([])
-      setPreviewArt([])
       setHidden(false)
       setLoaded(true)
       return
@@ -330,15 +324,14 @@ export function CoinArtUpgradePanel() {
   if (sellable && (!connected || coins.length === 0)) return null
 
   const totalSol = formatSol(config.fee_sol * selected.size)
-  const platformFeeLabel =
+  const platformFeePerCoinLabel =
     config.platform_fee_usd > 0
-      ? config.platform_fee_label || '50¢ platform fee'
+      ? config.platform_fee_label || '50¢ platform fee per coin'
       : null
+  const platformFeeSelectedLabel = platformFeeBatchLabel(config.platform_fee_usd, selected.size)
   const comingSoonStatus = !config.catalog_ready
-    ? 'New art is being prepared — previews appear here after the drop, then upgrades open.'
-    : previewArt.length > 0
-      ? 'Here’s a look at the new art — upgrades open soon.'
-      : 'Upgrades are almost ready — check back soon to unlock the new art.'
+    ? 'New art is being prepared — upgrades open once the catalog is live.'
+    : 'Upgrades open soon — new art stays hidden until you upgrade.'
 
   return (
     <section
@@ -352,10 +345,10 @@ export function CoinArtUpgradePanel() {
           <p className="text-sm text-muted-foreground leading-relaxed">
             Optional forever-upgrade for your Owltopia coins:{' '}
             <span className="font-medium text-foreground">{formatSol(config.fee_sol)} SOL</span> per coin
-            {platformFeeLabel ? (
+            {platformFeePerCoinLabel ? (
               <>
                 {' '}
-                plus a <span className="font-medium text-foreground">{platformFeeLabel}</span>
+                plus <span className="font-medium text-foreground">{platformFeePerCoinLabel}</span>
               </>
             ) : null}{' '}
             for the new art
@@ -376,31 +369,15 @@ export function CoinArtUpgradePanel() {
           <p className="text-xs rounded-lg border border-border/60 px-3 py-2 leading-relaxed text-muted-foreground">
             Coming soon — {comingSoonStatus}
           </p>
-          <ul className="grid grid-cols-4 sm:grid-cols-8 gap-2" aria-label="New coin art preview">
-            {previewArt.length > 0
-              ? previewArt.map((sample, idx) => (
-                  <li
-                    key={`${sample.coin_number ?? 'x'}-${idx}`}
-                    className="relative overflow-hidden rounded-lg border border-border/60 bg-muted aspect-square"
-                  >
-                    <HubCardCoverImage
-                      imageUrl={sample.image}
-                      alt={
-                        sample.name ??
-                        (sample.coin_number != null ? `Coin #${sample.coin_number}` : 'New coin art')
-                      }
-                      fit="cover"
-                    />
-                  </li>
-                ))
-              : Array.from({ length: PREVIEW_PLACEHOLDER_COUNT }, (_, idx) => (
-                  <li
-                    key={`placeholder-${idx}`}
-                    className="flex aspect-square items-center justify-center rounded-lg border border-dashed border-border/60 bg-muted/40"
-                  >
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Soon</span>
-                  </li>
-                ))}
+          <ul className="grid grid-cols-4 sm:grid-cols-8 gap-2" aria-label="New coin art coming soon">
+            {Array.from({ length: PREVIEW_PLACEHOLDER_COUNT }, (_, idx) => (
+              <li
+                key={`placeholder-${idx}`}
+                className="flex aspect-square items-center justify-center rounded-lg border border-dashed border-border/60 bg-muted/40"
+              >
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Soon</span>
+              </li>
+            ))}
           </ul>
         </div>
       ) : null}
@@ -464,11 +441,6 @@ export function CoinArtUpgradePanel() {
                     {displayImage ? (
                       <HubCardCoverImage imageUrl={displayImage} alt={coin.name ?? coin.mint} fit="cover" />
                     ) : null}
-                    {coin.upgrade_status === 'none' && coin.new_image ? (
-                      <div className="absolute bottom-1 right-1 h-1/3 w-1/3 overflow-hidden rounded-md border border-border/80 shadow">
-                        <HubCardCoverImage imageUrl={coin.new_image} alt="New art preview" fit="cover" />
-                      </div>
-                    ) : null}
                   </div>
                   <div className="space-y-1">
                     <p className="text-xs font-medium truncate">{coin.name ?? coin.mint}</p>
@@ -514,13 +486,13 @@ export function CoinArtUpgradePanel() {
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
             {selected.size === 0
-              ? `Select coins to upgrade (${formatSol(config.fee_sol)} SOL${platformFeeLabel ? ` + ${platformFeeLabel}` : ''} each)`
-              : `Upgrade ${selected.size} coin${selected.size === 1 ? '' : 's'} · ${totalSol} SOL${platformFeeLabel ? ` + ${platformFeeLabel}` : ''}`}
+              ? `Select coins to upgrade (${formatSol(config.fee_sol)} SOL${platformFeePerCoinLabel ? ` + ${platformFeePerCoinLabel}` : ''} each)`
+              : `Upgrade ${selected.size} coin${selected.size === 1 ? '' : 's'} · ${totalSol} SOL${platformFeeSelectedLabel ? ` + ${platformFeeSelectedLabel}` : ''}`}
           </Button>
           <p className="text-[11px] text-muted-foreground text-center">
-            One wallet approval for the fee{platformFeeLabel ? ' and platform fee' : ''} — the art
-            update is signed by Owltopia, so nested coins never unlock. Up to {config.max_per_request}{' '}
-            coins per batch.
+            One wallet approval for the fee{platformFeePerCoinLabel ? ' and platform fees' : ''} — the art
+            update is signed by Owltopia, so nested coins never unlock. New art is revealed only after
+            upgrade. Up to {config.max_per_request} coins per batch.
           </p>
         </div>
       ) : sellable && upgradedCount === coins.length && coins.length > 0 ? (
