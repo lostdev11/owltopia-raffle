@@ -1,4 +1,5 @@
 import { LAMPORTS_PER_SOL } from '@solana/web3.js'
+import { getCoinArtUpgradeSettings } from '@/lib/db/coin-art-upgrade-settings'
 
 /**
  * Owltopia Coin NFT art upgrade (community vote):
@@ -11,6 +12,9 @@ const DEFAULT_FEE_SOL = 0.1
 /** ~$0.50 USD platform fee per coin (paid in SOL to the platform treasury). */
 const DEFAULT_PLATFORM_FEE_USD = 0.5
 const DEFAULT_REWARD_MULTIPLIER = 2
+const ENABLED_CACHE_MS = 5000
+
+let enabledCache: { at: number; value: boolean } | null = null
 
 function readBoolean(raw: string | undefined): boolean {
   if (!raw) return false
@@ -18,9 +22,41 @@ function readBoolean(raw: string | undefined): boolean {
   return v === 'true' || v === '1' || v === 'yes'
 }
 
-/** Ship dark until the community vote passes; flip `COIN_ART_UPGRADE_ENABLED=true` to launch. */
-export function isCoinArtUpgradeEnabled(): boolean {
-  return readBoolean(process.env.COIN_ART_UPGRADE_ENABLED)
+/** Cleared after admin PATCH so toggles take effect within a few seconds per instance. */
+export function invalidateCoinArtUpgradeEnabledCache(): void {
+  enabledCache = null
+}
+
+/** Deployment-level overrides for `COIN_ART_UPGRADE_ENABLED`. */
+export function coinArtUpgradeEnvStatus(): {
+  killSwitch: boolean
+  forceOn: boolean
+} {
+  const raw = process.env.COIN_ART_UPGRADE_ENABLED?.trim().toLowerCase()
+  return {
+    killSwitch: raw === 'false',
+    forceOn: readBoolean(process.env.COIN_ART_UPGRADE_ENABLED),
+  }
+}
+
+/**
+ * Master gate: env kill switch / legacy force-on, else admin DB toggle.
+ * Default off when unset.
+ */
+export async function isCoinArtUpgradeEnabled(): Promise<boolean> {
+  const env = coinArtUpgradeEnvStatus()
+  if (env.killSwitch) return false
+  if (env.forceOn) return true
+
+  const now = Date.now()
+  if (enabledCache && now - enabledCache.at < ENABLED_CACHE_MS) {
+    return enabledCache.value
+  }
+
+  const settings = await getCoinArtUpgradeSettings()
+  const value = settings.upgrades_enabled === true
+  enabledCache = { at: now, value }
+  return value
 }
 
 export function getCoinArtUpgradeFeeSol(): number {
@@ -61,5 +97,5 @@ export function getCoinArtUpgradeRewardMultiplier(): number {
   return Number.isFinite(n) && n >= 1 ? n : DEFAULT_REWARD_MULTIPLIER
 }
 
-/** Bound per-request work: each coin needs a server-signed Core update transaction. */
+/** Bound per-request work: each coin needs a server-signed Core URI update transaction. */
 export const MAX_COIN_ART_UPGRADES_PER_REQUEST = 10

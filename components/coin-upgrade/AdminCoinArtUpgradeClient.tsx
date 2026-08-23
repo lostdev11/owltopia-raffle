@@ -6,11 +6,14 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import { useWalletModal } from '@solana/wallet-adapter-react-ui'
 import { ArrowLeft, CheckCircle2, Copy, Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { CoinArtUpgradeAuthorizeClient } from '@/components/coin-upgrade/CoinArtUpgradeAuthorizeClient'
 import { CoinArtUpgradeArtUploadPanel } from '@/components/coin-upgrade/CoinArtUpgradeArtUploadPanel'
 
 type Stats = {
   enabled: boolean
+  upgrades_enabled: boolean
+  env?: { killSwitch: boolean; forceOn: boolean }
   fee_sol: number
   reward_multiplier: number
   total: number
@@ -19,6 +22,16 @@ type Stats = {
   failed: number
   sol_collected: number
   catalog_size: number
+}
+
+type UpgradeSettings = {
+  settings: {
+    upgrades_enabled: boolean
+    updated_at: string
+    updated_by_wallet: string | null
+  }
+  enabled: boolean
+  env: { killSwitch: boolean; forceOn: boolean }
 }
 
 type HotKeyStatus = {
@@ -38,24 +51,30 @@ export function AdminCoinArtUpgradeClient() {
   const { connected } = useWallet()
   const { setVisible } = useWalletModal()
   const [stats, setStats] = useState<Stats | null>(null)
+  const [upgradeSettings, setUpgradeSettings] = useState<UpgradeSettings | null>(null)
   const [hotKey, setHotKey] = useState<HotKeyStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [toggleBusy, setToggleBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      const [statsRes, hotRes] = await Promise.all([
+      const [statsRes, hotRes, settingsRes] = await Promise.all([
         fetch('/api/admin/coin-upgrade/stats', { credentials: 'include', cache: 'no-store' }),
         fetch('/api/admin/coin-upgrade/hot-key', { credentials: 'include', cache: 'no-store' }),
+        fetch('/api/admin/coin-upgrade/settings', { credentials: 'include', cache: 'no-store' }),
       ])
-      if (statsRes.status === 401 || hotRes.status === 401) {
+      if (statsRes.status === 401 || hotRes.status === 401 || settingsRes.status === 401) {
         setError('Sign in with an admin wallet to manage coin art upgrades.')
         return
       }
       const statsJson = (await statsRes.json().catch(() => null)) as (Stats & { error?: string }) | null
       const hotJson = (await hotRes.json().catch(() => null)) as HotKeyStatus | null
+      const settingsJson = (await settingsRes.json().catch(() => null)) as (UpgradeSettings & {
+        error?: string
+      }) | null
       if (!statsRes.ok || !statsJson || statsJson.error) {
         setError(statsJson?.error || 'Could not load stats.')
         return
@@ -64,8 +83,13 @@ export function AdminCoinArtUpgradeClient() {
         setError(hotJson?.error || 'Could not load hot key status.')
         return
       }
+      if (!settingsRes.ok || !settingsJson || settingsJson.error) {
+        setError(settingsJson?.error || 'Could not load upgrade settings.')
+        return
+      }
       setStats(statsJson)
       setHotKey(hotJson)
+      setUpgradeSettings(settingsJson)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load admin data.')
@@ -114,6 +138,49 @@ export function AdminCoinArtUpgradeClient() {
     [busy, load]
   )
 
+  const patchUpgradesEnabled = useCallback(
+    async (next: boolean) => {
+      if (toggleBusy) return
+      if (next && (stats?.catalog_size ?? 0) < 1000) {
+        const ok = window.confirm(
+          `Catalog is only ${stats?.catalog_size ?? 0}/1000. Turn on upgrades anyway?`
+        )
+        if (!ok) return
+      }
+      setToggleBusy(true)
+      setNotice(null)
+      try {
+        const res = await fetch('/api/admin/coin-upgrade/settings', {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ upgrades_enabled: next }),
+        })
+        const json = (await res.json().catch(() => null)) as (UpgradeSettings & { error?: string }) | null
+        if (!res.ok) {
+          throw new Error(json?.error || 'Could not update upgrade toggle.')
+        }
+        setUpgradeSettings(json)
+        setStats((prev) =>
+          prev
+            ? {
+                ...prev,
+                enabled: json?.enabled ?? prev.enabled,
+                upgrades_enabled: json?.settings.upgrades_enabled ?? prev.upgrades_enabled,
+                env: json?.env ?? prev.env,
+              }
+            : prev
+        )
+        setNotice(next ? 'Coin art upgrades are live on Nesting.' : 'Coin art upgrades are off (Coming soon).')
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : 'Could not update upgrade toggle.')
+      } finally {
+        setToggleBusy(false)
+      }
+    },
+    [stats?.catalog_size, toggleBusy]
+  )
+
   const copyAuthorizeLink = useCallback(async () => {
     const origin = typeof window !== 'undefined' ? window.location.origin : ''
     const url = `${origin}/coin-upgrade/authorize`
@@ -160,6 +227,68 @@ export function AdminCoinArtUpgradeClient() {
         </div>
       ) : (
         <>
+          <section className="rounded-2xl border border-border/60 bg-card/80 p-5 space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold">Live on Nesting</h2>
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                Turn paid coin art upgrades on or off without redeploying. Env{' '}
+                <span className="font-mono">COIN_ART_UPGRADE_ENABLED=false</span> still forces off;{' '}
+                <span className="font-mono">=true</span> forces on.
+              </p>
+            </div>
+
+            {upgradeSettings?.env.killSwitch ? (
+              <p className="text-xs text-amber-500 rounded-lg border border-amber-500/40 px-3 py-2">
+                <span className="font-medium">Env kill switch is on.</span> Remove or change{' '}
+                <span className="font-mono">COIN_ART_UPGRADE_ENABLED=false</span> on Vercel to use this
+                toggle.
+              </p>
+            ) : upgradeSettings?.env.forceOn ? (
+              <p className="text-xs text-amber-500 rounded-lg border border-amber-500/40 px-3 py-2">
+                <span className="font-medium">Env force-on is active.</span>{' '}
+                <span className="font-mono">COIN_ART_UPGRADE_ENABLED=true</span> keeps upgrades live
+                regardless of this toggle.
+              </p>
+            ) : null}
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <p className="text-sm font-medium">
+                  {stats.enabled
+                    ? 'On — holders can upgrade'
+                    : upgradeSettings?.env.killSwitch
+                      ? 'Off — blocked by env'
+                      : 'Off — Coming soon on Nesting'}
+                </p>
+                {upgradeSettings?.settings.updated_at ? (
+                  <p className="text-xs text-muted-foreground">
+                    Last changed {new Date(upgradeSettings.settings.updated_at).toLocaleString()}
+                    {upgradeSettings.settings.updated_by_wallet
+                      ? ` · ${upgradeSettings.settings.updated_by_wallet.slice(0, 8)}…`
+                      : ''}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-3 min-h-[44px]">
+                {toggleBusy ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
+                ) : null}
+                <Switch
+                  id="coin-art-upgrade-enabled"
+                  ariaLabel="Turn coin art upgrades on or off"
+                  checked={upgradeSettings?.settings.upgrades_enabled === true}
+                  disabled={
+                    toggleBusy ||
+                    upgradeSettings == null ||
+                    upgradeSettings.env.killSwitch ||
+                    upgradeSettings.env.forceOn
+                  }
+                  onCheckedChange={(v) => void patchUpgradesEnabled(v)}
+                />
+              </div>
+            </div>
+          </section>
+
           <section className="rounded-2xl border border-border/60 bg-card/80 p-5 space-y-4">
             <div>
               <h2 className="text-lg font-semibold">1. Create hot key</h2>
@@ -235,10 +364,6 @@ export function AdminCoinArtUpgradeClient() {
           </section>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-            <div className="rounded-xl border border-border/60 p-3">
-              <p className="text-xs text-muted-foreground">Enabled</p>
-              <p className="font-medium">{stats.enabled ? 'Yes' : 'No (dark)'}</p>
-            </div>
             <div className="rounded-xl border border-border/60 p-3">
               <p className="text-xs text-muted-foreground">Fee</p>
               <p className="font-medium">{stats.fee_sol} SOL</p>

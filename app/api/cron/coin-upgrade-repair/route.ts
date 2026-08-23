@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   // Keep repairing even if the flag was turned off later — paid upgrades must complete.
   try {
     const summary = await repairCoinArtUpgrades(10)
-    return NextResponse.json({ ok: true, enabled: isCoinArtUpgradeEnabled(), ...summary })
+    return NextResponse.json({ ok: true, enabled: await isCoinArtUpgradeEnabled(), ...summary })
   } catch (e) {
     console.error('[cron/coin-upgrade-repair]', e)
     return NextResponse.json({ ok: false, error: safeErrorMessage(e) }, { status: 500 })

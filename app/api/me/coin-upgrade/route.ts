@@ -72,7 +72,7 @@ export type CoinArtUpgradePublicConfig = {
 }
 
 async function buildCoinArtUpgradePublicConfig(): Promise<CoinArtUpgradePublicConfig> {
-  const enabled = isCoinArtUpgradeEnabled()
+  const enabled = await isCoinArtUpgradeEnabled()
   const catalogSize = await countCoinArtUpgradeCatalogEntries()
   const catalogReady = catalogSize > 0
   const split = getCoinArtUpgradeFeeSplitConfig()
