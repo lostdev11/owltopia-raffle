@@ -1,6 +1,7 @@
 import {
   PACK_CATEGORY_WEIGHTS_BPS,
   PACK_DEFAULT_OWL_SOL_PRICE,
+  PACK_NFT_EV_DEFAULT_BAND_AVGS,
   PACK_NFT_VALUE_BANDS,
   PACK_PRICE_SOL,
   PACK_RTP_BPS,
@@ -55,7 +56,7 @@ export function simulatePackEv(options?: {
 
   const nftAvgs =
     options?.nftBandAvgFairValues ??
-    PACK_NFT_VALUE_BANDS.map((b) => (b.minFairValueSol + b.maxFairValueSol) / 2)
+    [...PACK_NFT_EV_DEFAULT_BAND_AVGS]
   const nftEv = weightedAverage(
     PACK_NFT_VALUE_BANDS.map((b) => b.weight),
     nftAvgs

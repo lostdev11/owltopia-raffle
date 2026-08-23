@@ -4,7 +4,7 @@
  * - Pack price: 0.1 SOL
  * - Every open wins
  * - Categories: 60% OWL / 20% SOL / 20% NFT
- * - Scales: OWL 10–50 (10 OWL = 0.1 SOL at default rate), SOL 0.05–0.5, NFT 0.05+ SOL
+ * - Scales: OWL 10–50, SOL 0.02–0.08 (at 0.1 SOL pack), NFT 0.05+ SOL
  * - Target RTP: 80% (EV ≈ 0.08 SOL per open)
  * - OWL wins credit free raffle tickets (default 1 OWL → 1 ticket)
  * - NFT picks: inverse floor-price weights (higher FP = rarer)
@@ -64,20 +64,28 @@ export type PackNftValueBand = {
 }
 
 /**
- * Bottom-heavy OWL ladder (10 → 50 OWL). At default rate, 10 OWL = 0.1 SOL (pack price).
+ * Bottom-heavy OWL ladder (10 → 50 OWL). At 0.01 SOL/OWL, 10 OWL = pack price.
+ * ~98% of OWL wins are 10 OWL so 0.1 SOL pack + 60% OWL category can hit 80% RTP.
  */
 export const PACK_OWL_TIERS: PackOwlTier[] = [
-  { category: 'owl', amount: 10, weight: 900, fairValueSol: 0.1 },
-  { category: 'owl', amount: 25, weight: 70, fairValueSol: 0.25 },
-  { category: 'owl', amount: 50, weight: 30, fairValueSol: 0.5 },
+  { category: 'owl', amount: 10, weight: 980, fairValueSol: 0.1 },
+  { category: 'owl', amount: 25, weight: 15, fairValueSol: 0.25 },
+  { category: 'owl', amount: 50, weight: 5, fairValueSol: 0.5 },
 ]
 
+/** Bottom-heavy SOL ladder sized for 0.1 SOL pack + 10–50 OWL prizes. */
 export const PACK_SOL_TIERS: PackSolTier[] = [
-  { category: 'sol', amountSol: 0.05, weight: 450 },
-  { category: 'sol', amountSol: 0.1, weight: 300 },
-  { category: 'sol', amountSol: 0.25, weight: 180 },
-  { category: 'sol', amountSol: 0.5, weight: 70 },
+  { category: 'sol', amountSol: 0.02, weight: 500 },
+  { category: 'sol', amountSol: 0.04, weight: 300 },
+  { category: 'sol', amountSol: 0.06, weight: 150 },
+  { category: 'sol', amountSol: 0.08, weight: 50 },
 ]
+
+/**
+ * NFT band averages used for EV fallback when no live inventory is loaded.
+ * Assumes a launch pool tagged mostly at 0.05–0.12 SOL floors.
+ */
+export const PACK_NFT_EV_DEFAULT_BAND_AVGS = [0.055, 0.085, 0.12] as const
 
 /** Legacy band labels (public odds UI still groups inventory by band for display). */
 export const PACK_NFT_VALUE_BANDS: PackNftValueBand[] = [

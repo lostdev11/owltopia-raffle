@@ -38,7 +38,7 @@ The `/packs` page is a single-composition hero (OWL PACKS brand, pack visual, on
 | Outcome | Every pack wins |
 | Categories | **60% $OWL · 20% SOL · 20% NFT** |
 | OWL scale | **10 → 50** (10 OWL = 0.1 SOL at default rate) |
-| SOL scale | 0.05 → 0.5 SOL |
+| SOL scale | 0.02 → 0.08 SOL (sized for 0.1 SOL pack + 10–50 OWL) |
 | NFT fair value | 0.05+ SOL (admin-tagged, up to 50 SOL); **higher FP = rarer** |
 | RTP target | **80%** (EV ≈ 0.08 SOL / open) |
 | OWL win UX | “You have won N free tickets on raffle site” |
