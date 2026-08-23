@@ -3509,6 +3509,8 @@ export function DashboardNestingClient() {
         </Button>
       </div>
 
+      <CoinArtUpgradePanel />
+
       <NestingClaimsSection
         connected={connected}
         needsSignIn={needsSignIn}
@@ -4643,8 +4645,6 @@ export function DashboardNestingClient() {
           className={cn('mt-6', activeOwlNestCount >= 1 ? 'mb-2 sm:mb-0' : undefined)}
         />
       </section>
-
-      <CoinArtUpgradePanel />
 
       <p className="text-xs text-muted-foreground text-center">
         <Link href="/nesting" className="text-theme-prime underline-offset-4 hover:underline">
