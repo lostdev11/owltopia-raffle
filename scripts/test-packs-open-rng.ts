@@ -36,9 +36,10 @@ for (let i = 0; i < 20; i++) {
   assert.deepEqual(a, b)
 }
 
-// OWL ladder capped at 50
-assert.ok(PACK_OWL_TIERS.every((t) => t.amount <= 50))
-assert.ok(!PACK_OWL_TIERS.some((t) => t.amount === 100))
+// OWL ladder capped at 10 (10 OWL = 0.1 SOL at default rate)
+assert.ok(PACK_OWL_TIERS.every((t) => t.amount <= 10))
+assert.ok(PACK_OWL_TIERS.some((t) => t.amount === 10))
+assert.ok(!PACK_OWL_TIERS.some((t) => t.amount === 50))
 
 // Higher FP → lower weight (baseline pool max 0.5 SOL)
 assert.ok(nftFpWeight(0.05) > nftFpWeight(0.25))

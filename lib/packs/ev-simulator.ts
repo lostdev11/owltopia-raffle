@@ -1,5 +1,6 @@
 import {
   PACK_CATEGORY_WEIGHTS_BPS,
+  PACK_DEFAULT_OWL_SOL_PRICE,
   PACK_NFT_VALUE_BANDS,
   PACK_PRICE_SOL,
   PACK_RTP_BPS,
@@ -7,6 +8,7 @@ import {
   PACK_TARGET_EV_SOL,
   isPackNftFairValueSol,
   owlTiersWithPrice,
+  resolveOwlSolPrice,
   type PackPrizeCategory,
 } from '@/lib/packs/config'
 import { buildWeightedNftPool } from '@/lib/packs/nft-weights'
@@ -40,7 +42,7 @@ export function simulatePackEv(options?: {
   owlSolPrice?: number | null
   nftBandAvgFairValues?: number[]
 }): EvSimulatorResult {
-  const owlSolPrice = options?.owlSolPrice ?? null
+  const owlSolPrice = resolveOwlSolPrice(options?.owlSolPrice)
   const owlTiers = owlTiersWithPrice(owlSolPrice)
   const owlEv = weightedAverage(
     owlTiers.map((t) => t.weight),
@@ -74,9 +76,9 @@ export function simulatePackEv(options?: {
   const estimatedRtpBps = Math.round((estimatedEvSol / PACK_PRICE_SOL) * 10_000)
 
   const notes: string[] = []
-  if (!owlSolPrice) {
+  if (!options?.owlSolPrice) {
     notes.push(
-      'OWL prize value is using a saved estimate. Set the OWL price in SOL on this page for a live calculation.'
+      `OWL prize value uses default rate (${PACK_DEFAULT_OWL_SOL_PRICE} SOL per OWL; 10 OWL = 0.1 SOL). Override in Admin → Packs if needed.`
     )
   }
   const drift = Math.abs(estimatedEvSol - PACK_TARGET_EV_SOL)
@@ -195,7 +197,7 @@ export function simulatePackEvFromInventory(options: {
     `NFT EV uses per-mint floor weights (${values.length} NFT${values.length === 1 ? '' : 's'}; higher FP = rarer${maxFp > PACK_NFT_VALUE_BANDS[2]!.maxFairValueSol ? `; pool max ${maxFp} SOL` : ''}).`
   )
 
-  const owlSolPrice = options.owlSolPrice ?? null
+  const owlSolPrice = resolveOwlSolPrice(options.owlSolPrice)
   const owlTiers = owlTiersWithPrice(owlSolPrice)
   const owlEv = weightedAverage(
     owlTiers.map((t) => t.weight),
@@ -220,9 +222,9 @@ export function simulatePackEvFromInventory(options: {
   const estimatedEvSol = categoryEv.owl + categoryEv.sol + categoryEv.nft
   const estimatedRtpBps = Math.round((estimatedEvSol / PACK_PRICE_SOL) * 10_000)
 
-  if (!owlSolPrice) {
+  if (!options.owlSolPrice) {
     notes.push(
-      'OWL prize value is using a saved estimate. Set the OWL price in SOL on this page for a live calculation.'
+      `OWL prize value uses default rate (${PACK_DEFAULT_OWL_SOL_PRICE} SOL per OWL; 10 OWL = 0.1 SOL). Override in Admin → Packs if needed.`
     )
   }
   const drift = Math.abs(estimatedEvSol - PACK_TARGET_EV_SOL)

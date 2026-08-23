@@ -4,7 +4,7 @@
  * - Pack price: 0.1 SOL
  * - Every open wins
  * - Categories: 60% OWL / 20% SOL / 20% NFT
- * - Scales: OWL 5–50, SOL 0.05–0.5, NFT fair value 0.05+ SOL (no hard 0.5 cap)
+ * - Scales: OWL 1–10 (10 OWL = 0.1 SOL at default rate), SOL 0.05–0.5, NFT 0.05+ SOL
  * - Target RTP: 80% (EV ≈ 0.08 SOL per open)
  * - OWL wins credit free raffle tickets (default 1 OWL → 1 ticket)
  * - NFT picks: inverse floor-price weights (higher FP = rarer)
@@ -29,6 +29,13 @@ export const PACK_CATEGORY_WEIGHTS_BPS: Record<PackPrizeCategory, number> = {
   owl: 6000,
   sol: 2000,
   nft: 2000,
+}
+
+/** Default OWL/SOL rate: 10 OWL = 0.1 SOL (0.01 SOL per OWL). Overridable in admin. */
+export const PACK_DEFAULT_OWL_SOL_PRICE = 0.01
+
+export function resolveOwlSolPrice(owlSolPrice: number | null | undefined): number {
+  return owlSolPrice && owlSolPrice > 0 ? owlSolPrice : PACK_DEFAULT_OWL_SOL_PRICE
 }
 
 export type PackOwlTier = {
@@ -57,15 +64,14 @@ export type PackNftValueBand = {
 }
 
 /**
- * Bottom-heavy OWL ladder (5 → 50). Fair values assume a placeholder OWL/SOL rate
- * overwritten at runtime by `estimateOwlFairValueSol` when a price is provided.
- * Default assumes ~0.002 SOL per OWL so mid tiers stay near EV target.
+ * Bottom-heavy OWL ladder (1 → 10 OWL). At default rate, 10 OWL = 0.1 SOL (pack price).
+ * fairValueSol placeholders assume PACK_DEFAULT_OWL_SOL_PRICE; scaled at runtime.
  */
 export const PACK_OWL_TIERS: PackOwlTier[] = [
-  { category: 'owl', amount: 5, weight: 420, fairValueSol: 0.01 },
-  { category: 'owl', amount: 10, weight: 290, fairValueSol: 0.02 },
-  { category: 'owl', amount: 25, weight: 190, fairValueSol: 0.05 },
-  { category: 'owl', amount: 50, weight: 100, fairValueSol: 0.1 },
+  { category: 'owl', amount: 1, weight: 400, fairValueSol: 0.01 },
+  { category: 'owl', amount: 2, weight: 250, fairValueSol: 0.02 },
+  { category: 'owl', amount: 5, weight: 220, fairValueSol: 0.05 },
+  { category: 'owl', amount: 10, weight: 130, fairValueSol: 0.1 },
 ]
 
 export const PACK_SOL_TIERS: PackSolTier[] = [
@@ -133,9 +139,9 @@ export function solToLamports(sol: number): bigint {
  * `owlSolPrice` = SOL per 1 OWL.
  */
 export function owlTiersWithPrice(owlSolPrice: number | null | undefined): PackOwlTier[] {
-  if (!owlSolPrice || !(owlSolPrice > 0)) return PACK_OWL_TIERS
+  const rate = resolveOwlSolPrice(owlSolPrice)
   return PACK_OWL_TIERS.map((t) => ({
     ...t,
-    fairValueSol: t.amount * owlSolPrice,
+    fairValueSol: t.amount * rate,
   }))
 }

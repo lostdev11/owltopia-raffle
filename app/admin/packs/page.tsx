@@ -255,7 +255,7 @@ export default function AdminPacksPage() {
                 id="owl-price"
                 value={owlPrice}
                 onChange={(e) => setOwlPrice(e.target.value)}
-                placeholder="e.g. 0.002"
+                placeholder="e.g. 0.01"
                 className="min-h-[44px] touch-manipulation"
               />
               <Button
