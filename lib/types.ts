@@ -62,6 +62,14 @@ export interface CommunityGiveawayEntry {
   created_at: string
 }
 
+/** Per-wallet consecutive win stats (raffles + community giveaways). */
+export interface WalletWinStreak {
+  currentStreak: number
+  bestStreak: number
+  totalWins: number
+  lastWinAt: string | null
+}
+
 /** Admin-created giveaway: NFT in prize escrow, one eligible claimant. */
 export interface NftGiveaway {
   id: string

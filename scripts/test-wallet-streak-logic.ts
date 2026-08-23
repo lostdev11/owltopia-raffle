@@ -3,6 +3,7 @@ import {
   applyParticipationEntry,
   applyWinDraw,
   replayParticipationDates,
+  replayWinDrawsForParticipant,
   utcDateKeyFromIso,
   utcNextDateKey,
 } from '../lib/streaks/wallet-streak-logic'
@@ -32,9 +33,25 @@ const states = new Map([
   ['loser', { currentStreak: 2, bestStreak: 2, totalWins: 2 }],
 ])
 const winResult = applyWinDraw(states, 'winner', ['winner', 'loser'])
-assert.equal(winResult.winner.currentStreak, 2)
+assert.equal(winResult.winner.currentStreak, 2, 'win after win increments streak')
 assert.equal(winResult.winner.totalWins, 2)
-assert.equal(winResult.updated.get('loser')?.currentStreak, 0)
+assert.equal(winResult.updated.get('loser')?.currentStreak, 0, 'enter and lose resets streak')
 assert.equal(winResult.updated.get('loser')?.totalWins, 2)
+
+const winReplay = replayWinDrawsForParticipant([
+  { drawnAt: '2026-01-01T00:00:00.000Z', won: true },
+  { drawnAt: '2026-01-02T00:00:00.000Z', won: true },
+  { drawnAt: '2026-01-03T00:00:00.000Z', won: false },
+  { drawnAt: '2026-01-04T00:00:00.000Z', won: true },
+])
+assert.equal(winReplay.currentStreak, 1)
+assert.equal(winReplay.bestStreak, 2)
+assert.equal(winReplay.totalWins, 3)
+
+const consecutiveWins = replayWinDrawsForParticipant([
+  { drawnAt: '2026-02-01T00:00:00.000Z', won: true },
+  { drawnAt: '2026-02-02T00:00:00.000Z', won: true },
+])
+assert.equal(consecutiveWins.currentStreak, 2)
 
 console.log('wallet-streak-logic: all assertions passed')

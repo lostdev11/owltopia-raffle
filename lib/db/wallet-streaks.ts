@@ -7,8 +7,10 @@ import {
   applyWinDraw,
   emptyWalletStreakSnapshot,
   replayParticipationDates,
+  replayWinDrawsForParticipant,
   type WalletStreakSnapshot,
 } from '@/lib/streaks/wallet-streak-logic'
+import type { WalletWinStreak } from '@/lib/types'
 
 type WalletStreakRow = {
   wallet_address: string
@@ -136,6 +138,147 @@ async function getParticipationDatesForWalletCluster(primaryWallet: string): Pro
   return [...dates].sort()
 }
 
+function clusterWonDraw(cluster: readonly string[], winnerWallet: string | null | undefined): boolean {
+  const winner = normalizeSolanaWalletAddress(winnerWallet ?? '')
+  if (!winner) return false
+  return cluster.some((w) => normalizeSolanaWalletAddress(w) === winner)
+}
+
+async function backfillWinStreakFromHistory(primaryWallet: string): Promise<WinStreakState> {
+  const { getWalletClusterAddresses } = await import('@/lib/db/wallet-links')
+  const cluster = await getWalletClusterAddresses(primaryWallet)
+  if (cluster.length === 0) {
+    return { currentStreak: 0, bestStreak: 0, totalWins: 0 }
+  }
+
+  const draws: Array<{ drawnAt: string; won: boolean }> = []
+  const raffleIds = new Set<string>()
+  const giveawayIds = new Set<string>()
+
+  const pageSize = 1000
+  let from = 0
+  while (true) {
+    const { data, error } = await getSupabaseAdmin()
+      .from('entries')
+      .select('raffle_id')
+      .in('wallet_address', cluster)
+      .eq('status', 'confirmed')
+      .is('refunded_at', null)
+      .range(from, from + pageSize - 1)
+
+    if (error) {
+      console.error('[wallet-streaks] win history entry raffle ids:', error.message)
+      break
+    }
+    for (const row of data ?? []) {
+      const id = String(row.raffle_id ?? '').trim()
+      if (id) raffleIds.add(id)
+    }
+    if (!data || data.length < pageSize) break
+    from += pageSize
+  }
+
+  if (raffleIds.size > 0) {
+    const ids = [...raffleIds]
+    for (let i = 0; i < ids.length; i += pageSize) {
+      const chunk = ids.slice(i, i + pageSize)
+      const { data, error } = await getSupabaseAdmin()
+        .from('raffles')
+        .select('id, winner_wallet, winner_selected_at, status')
+        .in('id', chunk)
+        .not('winner_wallet', 'is', null)
+        .not('winner_selected_at', 'is', null)
+
+      if (error) {
+        console.error('[wallet-streaks] win history raffles:', error.message)
+        continue
+      }
+
+      for (const raffle of data ?? []) {
+        const status = String(raffle.status ?? '').toLowerCase()
+        if (status !== 'completed' && status !== 'successful_pending_claims') continue
+        const drawnAt = String(raffle.winner_selected_at ?? '').trim()
+        if (!drawnAt) continue
+        draws.push({
+          drawnAt,
+          won: clusterWonDraw(cluster, raffle.winner_wallet as string | null),
+        })
+      }
+    }
+  }
+
+  from = 0
+  while (true) {
+    const { data, error } = await getSupabaseAdmin()
+      .from('community_giveaway_entries')
+      .select('giveaway_id')
+      .in('wallet_address', cluster)
+      .range(from, from + pageSize - 1)
+
+    if (error) {
+      console.error('[wallet-streaks] win history giveaway entry ids:', error.message)
+      break
+    }
+    for (const row of data ?? []) {
+      const id = String(row.giveaway_id ?? '').trim()
+      if (id) giveawayIds.add(id)
+    }
+    if (!data || data.length < pageSize) break
+    from += pageSize
+  }
+
+  if (giveawayIds.size > 0) {
+    const ids = [...giveawayIds]
+    for (let i = 0; i < ids.length; i += pageSize) {
+      const chunk = ids.slice(i, i + pageSize)
+      const { data, error } = await getSupabaseAdmin()
+        .from('community_giveaways')
+        .select('id, winner_wallet, winner_selected_at, status')
+        .in('id', chunk)
+        .eq('status', 'drawn')
+        .not('winner_wallet', 'is', null)
+
+      if (error) {
+        console.error('[wallet-streaks] win history giveaways:', error.message)
+        continue
+      }
+
+      for (const giveaway of data ?? []) {
+        const drawnAt = String(giveaway.winner_selected_at ?? '').trim()
+        if (!drawnAt) continue
+        draws.push({
+          drawnAt,
+          won: clusterWonDraw(cluster, giveaway.winner_wallet as string | null),
+        })
+      }
+    }
+  }
+
+  return replayWinDrawsForParticipant(draws)
+}
+
+type WinStreakState = {
+  currentStreak: number
+  bestStreak: number
+  totalWins: number
+}
+
+export async function getWinStreakForWallet(wallet: string): Promise<WalletWinStreak> {
+  const streaks = await getWalletStreaks(wallet)
+  const primary = await resolvePrimaryWallet(wallet)
+  let lastWinAt: string | null = null
+  if (primary) {
+    const rows = await loadStreakRows([primary])
+    lastWinAt = rows.get(primary)?.last_win_at ?? null
+  }
+  return {
+    currentStreak: streaks.winCurrentStreak,
+    bestStreak: streaks.winBestStreak,
+    totalWins: streaks.winTotalWins,
+    lastWinAt,
+  }
+}
+
 export async function getWalletStreaks(wallet: string): Promise<WalletStreakSnapshot> {
   const primary = await resolvePrimaryWallet(wallet)
   if (!primary) return emptyWalletStreakSnapshot()
@@ -173,18 +316,45 @@ export async function getWalletStreaks(wallet: string): Promise<WalletStreakSnap
         }
       }
     }
+    if (Number(row.win_total_wins) === 0) {
+      const wins = await backfillWinStreakFromHistory(primary)
+      if (wins.totalWins > 0) {
+        await upsertStreakRow(primary, {
+          win_current_streak: wins.currentStreak,
+          win_best_streak: wins.bestStreak,
+          win_total_wins: wins.totalWins,
+          participation_current_streak: row.participation_current_streak,
+          participation_best_streak: row.participation_best_streak,
+          last_participation_date: row.last_participation_date,
+        })
+        return {
+          ...mapRow(row),
+          winCurrentStreak: wins.currentStreak,
+          winBestStreak: wins.bestStreak,
+          winTotalWins: wins.totalWins,
+        }
+      }
+    }
     return mapRow(row)
   }
 
-  const participation = await backfillParticipationFromHistory(primary)
+  const [participation, wins] = await Promise.all([
+    backfillParticipationFromHistory(primary),
+    backfillWinStreakFromHistory(primary),
+  ])
   await upsertStreakRow(primary, {
+    win_current_streak: wins.currentStreak,
+    win_best_streak: wins.bestStreak,
+    win_total_wins: wins.totalWins,
     participation_current_streak: participation.currentStreak,
     participation_best_streak: participation.bestStreak,
     last_participation_date: participation.lastParticipationDate,
   })
 
   return {
-    ...emptyWalletStreakSnapshot(),
+    winCurrentStreak: wins.currentStreak,
+    winBestStreak: wins.bestStreak,
+    winTotalWins: wins.totalWins,
     participationCurrentStreak: participation.currentStreak,
     participationBestStreak: participation.bestStreak,
     lastParticipationDate: participation.lastParticipationDate,
@@ -371,3 +541,6 @@ export async function applyRaffleWinStreak(
     drawnAt,
   })
 }
+
+/** Plan alias for draw-time win streak updates. */
+export const updateWinStreaksOnDraw = applyWinStreakOnDraw

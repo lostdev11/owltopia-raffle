@@ -1,4 +1,5 @@
 -- Per-wallet win and participation streaks. Writes via API (service role); RLS deny-all for clients.
+-- Historical win streaks are backfilled lazily on first dashboard read (see lib/db/wallet-streaks.ts).
 
 CREATE TABLE IF NOT EXISTS wallet_streaks (
   wallet_address TEXT PRIMARY KEY,

@@ -104,6 +104,28 @@ export function applyWinDraw(
   return { winner: winnerState, updated }
 }
 
+/** Replay chronological draw outcomes for one participant wallet cluster. */
+export function replayWinDrawsForParticipant(
+  draws: ReadonlyArray<{ drawnAt: string; won: boolean }>
+): WinStreakState {
+  const sorted = [...draws].sort((a, b) => a.drawnAt.localeCompare(b.drawnAt))
+  let currentStreak = 0
+  let bestStreak = 0
+  let totalWins = 0
+
+  for (const draw of sorted) {
+    if (draw.won) {
+      currentStreak += 1
+      totalWins += 1
+      bestStreak = Math.max(bestStreak, currentStreak)
+    } else {
+      currentStreak = 0
+    }
+  }
+
+  return { currentStreak, bestStreak, totalWins }
+}
+
 /** Replay sorted UTC participation dates to derive current/best streak as of today. */
 export function replayParticipationDates(sortedUtcDateKeys: readonly string[]): ParticipationStreakState {
   if (sortedUtcDateKeys.length === 0) {
