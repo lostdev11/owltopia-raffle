@@ -141,14 +141,13 @@ export async function removePackInventoryNft(id: string): Promise<void> {
   if (error) throw error
 }
 
-/** Available NFTs eligible for packs open (0.05–0.5 SOL fair value). */
+/** Available NFTs eligible for packs open (min fair value enforced; no 0.5 SOL cap). */
 export async function listAvailableNftsForOpen(): Promise<PackInventoryRow[]> {
   const { data, error } = await getSupabaseAdmin()
     .from('pack_inventory')
     .select('*')
     .eq('status', 'available')
     .gte('fair_value_sol', 0.05)
-    .lte('fair_value_sol', 0.5)
     .order('mint_address', { ascending: true })
   if (error) throw error
   return (data as PackInventoryRow[]) ?? []

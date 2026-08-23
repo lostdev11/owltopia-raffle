@@ -12,7 +12,7 @@ import {
   recomputeOpenFromSeed,
   verifyCommitHash,
 } from '../lib/packs/rng'
-import { buildWeightedNftPool, nftFpWeight } from '../lib/packs/nft-weights'
+import { buildWeightedNftPool, nftFpWeight, resolveNftPoolMaxFairSol } from '../lib/packs/nft-weights'
 import { computePackOddsPercentages } from '../lib/packs/odds'
 import { PACK_OWL_TIERS } from '../lib/packs/config'
 
@@ -40,9 +40,14 @@ for (let i = 0; i < 20; i++) {
 assert.ok(PACK_OWL_TIERS.every((t) => t.amount <= 50))
 assert.ok(!PACK_OWL_TIERS.some((t) => t.amount === 100))
 
-// Higher FP → lower weight
+// Higher FP → lower weight (baseline pool max 0.5 SOL)
 assert.ok(nftFpWeight(0.05) > nftFpWeight(0.25))
 assert.ok(nftFpWeight(0.25) > nftFpWeight(0.5))
+
+// Premium NFT above 0.5 SOL is rarer than 0.5 SOL when pool max rescales
+const premiumMax = resolveNftPoolMaxFairSol([0.05, 0.5, 2])
+assert.equal(premiumMax, 2)
+assert.ok(nftFpWeight(0.5, { maxFp: 2 }) > nftFpWeight(2, { maxFp: 2 }))
 
 const pool = buildWeightedNftPool([
   { id: 'a', mint_address: 'MintCheap1111111111111111111111111111111', fair_value_sol: 0.05 },
@@ -80,6 +85,24 @@ for (let i = 0; i < 500; i++) {
   else expensive++
 }
 assert.ok(cheap > expensive, `expected cheap wins > expensive (${cheap} vs ${expensive})`)
+
+// Grail NFT (>0.5 SOL) included in pool with very low odds
+const grailPool = buildWeightedNftPool([
+  { id: 'cheap', mint_address: 'Cheap11111111111111111111111111111111111', fair_value_sol: 0.1 },
+  { id: 'grail', mint_address: 'Grail22222222222222222222222222222222222', fair_value_sol: 2 },
+])
+assert.equal(grailPool.length, 2)
+assert.ok(grailPool[0]!.weight > grailPool[1]!.weight)
+let grailWins = 0
+for (let i = 0; i < 1000; i++) {
+  const s = generatePackOpenSeed()
+  const { pick: p } = pickNftFromAvailableInventory(s, [
+    { id: 'cheap', mint_address: 'Cheap11111111111111111111111111111111111', fair_value_sol: 0.1 },
+    { id: 'grail', mint_address: 'Grail22222222222222222222222222222222222', fair_value_sol: 2 },
+  ])
+  if (p.id === 'grail') grailWins++
+}
+assert.ok(grailWins < 200, `grail should be rare (${grailWins}/1000)`)
 
 const odds = computePackOddsPercentages({
   nftInventory: [

@@ -11,6 +11,7 @@ import {
 } from '@/lib/packs/db'
 import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
 import { isPackInventoryPrizeStandard } from '@/lib/packs/types'
+import { isPackNftFairValueSol, PACK_NFT_MAX_FAIR_SOL, PACK_NFT_MIN_FAIR_SOL } from '@/lib/packs/config'
 import { getPacksVaultPublicKey, getPacksVaultSolBalance } from '@/lib/packs/vault'
 import { isPackVrfEnabled, resolvePackOpenAlgo } from '@/lib/packs/vrf-config'
 
@@ -122,9 +123,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}))
     const mint = typeof body.mint_address === 'string' ? body.mint_address.trim() : ''
     const fair = Number(body.fair_value_sol)
-    if (!mint || !(fair >= 0.05 && fair <= 0.5)) {
+    if (!mint || !isPackNftFairValueSol(fair)) {
       return NextResponse.json(
-        { error: 'mint_address and fair_value_sol (0.05–0.5) required' },
+        {
+          error: `mint_address and fair_value_sol (${PACK_NFT_MIN_FAIR_SOL}–${PACK_NFT_MAX_FAIR_SOL}) required`,
+        },
         { status: 400 }
       )
     }

@@ -5,10 +5,11 @@ import {
   PACK_RTP_BPS,
   PACK_SOL_TIERS,
   PACK_TARGET_EV_SOL,
+  isPackNftFairValueSol,
   owlTiersWithPrice,
   type PackPrizeCategory,
 } from '@/lib/packs/config'
-import { nftFpWeight } from '@/lib/packs/nft-weights'
+import { buildWeightedNftPool } from '@/lib/packs/nft-weights'
 
 export type EvSimulatorResult = {
   packPriceSol: number
@@ -99,17 +100,20 @@ export function simulatePackEv(options?: {
   }
 }
 
-export type PackNftBandLabel = 'common' | 'mid' | 'high'
+export type PackNftBandLabel = 'common' | 'mid' | 'high' | 'premium'
 
 const BAND_LABELS: PackNftBandLabel[] = ['common', 'mid', 'high']
 
 export function packNftFairValueInRange(value: number): boolean {
-  return Number.isFinite(value) && value >= 0.05 && value <= 0.5
+  return isPackNftFairValueSol(value)
 }
 
-/** First matching band (inclusive). 0.1 lands in common; 0.25 lands in mid. */
+/** First matching band (inclusive). Above 0.5 SOL → premium. */
 export function packNftBandLabel(fairValueSol: number): PackNftBandLabel | null {
   if (!packNftFairValueInRange(fairValueSol)) return null
+  if (fairValueSol > PACK_NFT_VALUE_BANDS[PACK_NFT_VALUE_BANDS.length - 1]!.maxFairValueSol) {
+    return 'premium'
+  }
   const idx = PACK_NFT_VALUE_BANDS.findIndex(
     (b) => fairValueSol >= b.minFairValueSol && fairValueSol <= b.maxFairValueSol
   )
@@ -174,11 +178,21 @@ export function simulatePackEvFromInventory(options: {
     return { ...ev, notes: [...ev.notes, ...notes, ...bandNotes] }
   }
 
-  // Per-NFT inverse-FP weights: EV = Σ (w_i / Σw) * fair_i
-  const weights = values.map((v) => nftFpWeight(v))
-  const nftEv = weightedAverage(weights, values)
+  // Per-NFT inverse-FP weights: EV = Σ (w_i / Σw) * fair_i (pool max FP rescales odds)
+  const weighted = buildWeightedNftPool(
+    values.map((fair_value_sol, i) => ({
+      id: `ev-${i}`,
+      mint_address: `ev-${i}`,
+      fair_value_sol,
+    }))
+  )
+  const nftEv = weightedAverage(
+    weighted.map((row) => row.weight),
+    weighted.map((row) => row.fair_value_sol)
+  )
+  const maxFp = weighted.length > 0 ? Math.max(...weighted.map((row) => row.fair_value_sol)) : 0
   notes.push(
-    `NFT EV uses per-mint floor weights (${values.length} NFT${values.length === 1 ? '' : 's'}; higher FP = rarer).`
+    `NFT EV uses per-mint floor weights (${values.length} NFT${values.length === 1 ? '' : 's'}; higher FP = rarer${maxFp > PACK_NFT_VALUE_BANDS[2]!.maxFairValueSol ? `; pool max ${maxFp} SOL` : ''}).`
   )
 
   const owlSolPrice = options.owlSolPrice ?? null

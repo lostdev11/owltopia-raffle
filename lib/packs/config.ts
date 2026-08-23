@@ -4,7 +4,7 @@
  * - Pack price: 0.1 SOL
  * - Every open wins
  * - Categories: 60% OWL / 20% SOL / 20% NFT
- * - Scales: OWL 5–50, SOL 0.05–0.5, NFT fair value 0.05–0.5 SOL
+ * - Scales: OWL 5–50, SOL 0.05–0.5, NFT fair value 0.05+ SOL (no hard 0.5 cap)
  * - Target RTP: 80% (EV ≈ 0.08 SOL per open)
  * - OWL wins credit free raffle tickets (default 1 OWL → 1 ticket)
  * - NFT picks: inverse floor-price weights (higher FP = rarer)
@@ -82,9 +82,25 @@ export const PACK_NFT_VALUE_BANDS: PackNftValueBand[] = [
   { category: 'nft', minFairValueSol: 0.25, maxFairValueSol: 0.5, weight: 200 },
 ]
 
-/** Min / max NFT fair value for packs inventory + FP weighting. */
+/** Min NFT fair value for packs inventory + FP weighting. */
 export const PACK_NFT_MIN_FAIR_SOL = 0.05
-export const PACK_NFT_MAX_FAIR_SOL = 0.5
+
+/** Sanity cap on admin-tagged NFT floor (deposits above this are rejected). */
+export const PACK_NFT_MAX_FAIR_SOL = 50
+
+/**
+ * Baseline FP reference for inverse weights when the pool max is lower.
+ * Keeps legacy 0.05–0.5 pools on the same scale until a higher-FP NFT is added.
+ */
+export const PACK_NFT_WEIGHT_BASELINE_FAIR_SOL = 0.5
+
+export function isPackNftFairValueSol(value: number): boolean {
+  return (
+    Number.isFinite(value) &&
+    value >= PACK_NFT_MIN_FAIR_SOL &&
+    value <= PACK_NFT_MAX_FAIR_SOL
+  )
+}
 
 /**
  * Steepness of inverse-FP NFT weights: weight ∝ (maxFp / fairValue)^alpha.

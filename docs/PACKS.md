@@ -39,7 +39,7 @@ The `/packs` page is a single-composition hero (OWL PACKS brand, pack visual, on
 | Categories | **60% $OWL · 20% SOL · 20% NFT** |
 | OWL scale | **5 → 50** |
 | SOL scale | 0.05 → 0.5 SOL |
-| NFT fair value | 0.05 → 0.5 SOL (admin-tagged); **higher FP = rarer** |
+| NFT fair value | 0.05+ SOL (admin-tagged, up to 50 SOL); **higher FP = rarer** |
 | RTP target | **80%** (EV ≈ 0.08 SOL / open) |
 | OWL win UX | “You have won N free tickets on raffle site” |
 | Ticket mapping | Default **1 OWL → 1 free raffle ticket credit** |
@@ -49,7 +49,7 @@ The `/packs` page is a single-composition hero (OWL PACKS brand, pack visual, on
 
 ## House edge
 
-Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payout ≈ 80% of pack price. Jackpots (up to 0.5 SOL / 50 OWL) are funded by common low-tier wins.
+Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payout ≈ 80% of pack price. Jackpots (SOL / OWL / premium NFTs) are funded by common low-tier wins.
 
 ## Ops
 
@@ -57,7 +57,7 @@ Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payo
    `npm run packs:grind-vault` → writes `.local/packs-vault-keypair.txt` (gitignored).
 2. Set `PACKS_VAULT_SECRET_KEY` (server) and `NEXT_PUBLIC_PACKS_VAULT_WALLET` from that file (Vercel + `.env.local`).
 3. Fund the vault with SOL, OWL, and NFTs. **All pack purchase SOL goes to this wallet**; prize payouts leave from it (house edge stays as residual balance).
-4. Admin → Packs: load wallet NFTs, set floors (0.05–0.5 SOL), **Deposit & add**. SPL, Metaplex Core, and compressed NFTs are supported; pNFT and frozen/nested assets are not. Aim for ~30 NFTs at launch.
+4. Admin → Packs: load wallet NFTs, set floors (0.05+ SOL; grails above 0.5 are allowed), **Deposit & add**. SPL, Metaplex Core, and compressed NFTs are supported; pNFT and frozen/nested assets are not. Aim for ~30 NFTs at launch.
 5. Apply migration **227** (`packs_vrf_and_nft_snapshot`).
 6. Optional fairness: set `PACK_VRF_ENABLED=true` (needs `FUNDS_ESCROW_SECRET_KEY` or `PRIZE_ESCROW_SECRET_KEY` for Switchboard fees — same as raffle VRF).
 7. Run `npm run packs:ev-simulator` before going live; set `owl_sol_price` until EV ≈ 0.08 SOL. Use Admin → **Launch checklist**.
