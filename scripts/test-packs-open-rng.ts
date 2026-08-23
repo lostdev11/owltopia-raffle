@@ -1,15 +1,21 @@
 /**
- * Unit-style checks for pack open RNG (no DB / chain).
+ * Unit-style checks for pack open RNG + per-NFT FP weighting (no DB / chain).
  */
 import assert from 'node:assert/strict'
 import {
   generatePackOpenSeed,
   hashPackOpenCommit,
   pickCategory,
+  pickJackpotWin,
+  pickNftFromAvailableInventory,
+  pickNftFromSnapshot,
   pickTier,
   recomputeOpenFromSeed,
   verifyCommitHash,
 } from '../lib/packs/rng'
+import { buildWeightedNftPool, nftFpWeight, resolveNftPoolMaxFairSol } from '../lib/packs/nft-weights'
+import { computePackOddsPercentages } from '../lib/packs/odds'
+import { PACK_OWL_TIERS } from '../lib/packs/config'
 
 const seed = generatePackOpenSeed()
 const commit = hashPackOpenCommit(seed)
@@ -19,7 +25,9 @@ assert.equal(verifyCommitHash(seed, '0'.repeat(64)), false)
 
 const { category, pick } = recomputeOpenFromSeed(seed)
 assert.equal(pickCategory(seed), category)
-assert.deepEqual(pickTier(seed, category), pick)
+if (category !== 'nft') {
+  assert.deepEqual(pickTier(seed, category), pick)
+}
 
 // Determinism
 for (let i = 0; i < 20; i++) {
@@ -28,5 +36,94 @@ for (let i = 0; i < 20; i++) {
   const b = recomputeOpenFromSeed(s)
   assert.deepEqual(a, b)
 }
+
+// OWL ladder 10–50 (10 OWL = 0.1 SOL at default rate)
+assert.ok(PACK_OWL_TIERS.every((t) => t.amount >= 10 && t.amount <= 50))
+assert.ok(PACK_OWL_TIERS.some((t) => t.amount === 10))
+assert.ok(PACK_OWL_TIERS.some((t) => t.amount === 50))
+assert.ok(!PACK_OWL_TIERS.some((t) => t.amount < 10))
+
+// Higher FP → lower weight (baseline pool max 0.5 SOL)
+assert.ok(nftFpWeight(0.05) > nftFpWeight(0.25))
+assert.ok(nftFpWeight(0.25) > nftFpWeight(0.5))
+
+// Premium NFT above 0.5 SOL is rarer than 0.5 SOL when pool max rescales
+const premiumMax = resolveNftPoolMaxFairSol([0.05, 0.5, 2])
+assert.equal(premiumMax, 2)
+assert.ok(nftFpWeight(0.5, { maxFp: 2 }) > nftFpWeight(2, { maxFp: 2 }))
+
+const pool = buildWeightedNftPool([
+  { id: 'a', mint_address: 'MintCheap1111111111111111111111111111111', fair_value_sol: 0.05 },
+  { id: 'b', mint_address: 'MintMid222222222222222222222222222222222', fair_value_sol: 0.2 },
+  { id: 'c', mint_address: 'MintHigh33333333333333333333333333333333', fair_value_sol: 0.5 },
+])
+assert.equal(pool.length, 3)
+assert.ok(pool[0]!.weight > pool[2]!.weight)
+
+// Per-NFT pick is deterministic + snapshot round-trip
+const s2 = 'a'.repeat(64)
+const { pick: nftPick, pool: weighted } = pickNftFromAvailableInventory(s2, [
+  { id: 'a', mint_address: 'MintCheap1111111111111111111111111111111', fair_value_sol: 0.05 },
+  { id: 'b', mint_address: 'MintMid222222222222222222222222222222222', fair_value_sol: 0.2 },
+  { id: 'c', mint_address: 'MintHigh33333333333333333333333333333333', fair_value_sol: 0.5 },
+])
+const snap = weighted.map((p) => ({
+  id: p.id,
+  mint: p.mint_address,
+  fair_value_sol: p.fair_value_sol,
+  weight: p.weight,
+}))
+assert.equal(pickNftFromSnapshot(s2, snap).id, nftPick.id)
+
+// Cheap NFT should win more often than expensive across many seeds
+let cheap = 0
+let expensive = 0
+for (let i = 0; i < 500; i++) {
+  const s = generatePackOpenSeed()
+  const { pick: p } = pickNftFromAvailableInventory(s, [
+    { id: 'cheap', mint_address: 'Cheap11111111111111111111111111111111111', fair_value_sol: 0.05 },
+    { id: 'exp', mint_address: 'Expensive2222222222222222222222222222222', fair_value_sol: 0.5 },
+  ])
+  if (p.id === 'cheap') cheap++
+  else expensive++
+}
+assert.ok(cheap > expensive, `expected cheap wins > expensive (${cheap} vs ${expensive})`)
+
+// Grail NFT (>0.5 SOL) included in pool with very low odds
+const grailPool = buildWeightedNftPool([
+  { id: 'cheap', mint_address: 'Cheap11111111111111111111111111111111111', fair_value_sol: 0.1 },
+  { id: 'grail', mint_address: 'Grail22222222222222222222222222222222222', fair_value_sol: 2 },
+])
+assert.equal(grailPool.length, 2)
+assert.ok(grailPool[0]!.weight > grailPool[1]!.weight)
+let grailWins = 0
+for (let i = 0; i < 1000; i++) {
+  const s = generatePackOpenSeed()
+  const { pick: p } = pickNftFromAvailableInventory(s, [
+    { id: 'cheap', mint_address: 'Cheap11111111111111111111111111111111111', fair_value_sol: 0.1 },
+    { id: 'grail', mint_address: 'Grail22222222222222222222222222222222222', fair_value_sol: 2 },
+  ])
+  if (p.id === 'grail') grailWins++
+}
+assert.ok(grailWins < 200, `grail should be rare (${grailWins}/1000)`)
+
+// Jackpot roll is independent of category (checked first on open)
+assert.equal(pickJackpotWin('a'.repeat(64), 0), false)
+assert.equal(pickJackpotWin('b'.repeat(64), 10_000), true)
+let jackpotHits = 0
+for (let i = 0; i < 5000; i++) {
+  const s = generatePackOpenSeed()
+  if (pickJackpotWin(s, 20)) jackpotHits++
+}
+assert.ok(jackpotHits > 0 && jackpotHits < 500, `jackpot hits ${jackpotHits}/5000`)
+
+const odds = computePackOddsPercentages({
+  nftInventory: [
+    { id: 'a', mint_address: 'MintA', fair_value_sol: 0.05, name: 'A' },
+    { id: 'b', mint_address: 'MintB', fair_value_sol: 0.5, name: 'B' },
+  ],
+})
+assert.equal(odds.categories.reduce((s, c) => s + c.percent, 0), 100)
+assert.ok(odds.nftInventory[0]!.percentOfCategory > odds.nftInventory[1]!.percentOfCategory)
 
 console.log('packs-open-rng: ok')

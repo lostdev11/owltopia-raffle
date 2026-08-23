@@ -11,7 +11,19 @@ import {
 } from '@/lib/packs/db'
 import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
 import { isPackInventoryPrizeStandard } from '@/lib/packs/types'
-import { getPacksVaultPublicKey, getPacksVaultSolBalance, getPacksVaultOwlBalanceUi } from '@/lib/packs/vault'
+import { isPackNftFairValueSol, PACK_NFT_MAX_FAIR_SOL, PACK_NFT_MIN_FAIR_SOL } from '@/lib/packs/config'
+import {
+  getPacksVaultPublicKey,
+  getPacksVaultSolBalance,
+  getPacksVaultOwlBalanceUi,
+} from '@/lib/packs/vault'
+import { isPackVrfEnabled, resolvePackOpenAlgo } from '@/lib/packs/vrf-config'
+import {
+  formatJackpotPoolSol,
+  jackpotWinPercentLabel,
+  PACK_JACKPOT_CONTRIBUTION_SOL,
+  PACK_JACKPOT_WIN_ODDS_BPS,
+} from '@/lib/packs/jackpot'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,6 +55,19 @@ export async function GET(request: NextRequest) {
         solBalance: solBal,
         owlBalance: owlBal,
         availableNfts: nftCount,
+        jackpotPoolSol: Number(config.jackpot_pool_sol ?? 0),
+        jackpotContributionSol: Number(
+          config.jackpot_contribution_sol ?? PACK_JACKPOT_CONTRIBUTION_SOL
+        ),
+        jackpotWinOddsBps: Number(config.jackpot_win_odds_bps ?? PACK_JACKPOT_WIN_ODDS_BPS),
+        jackpotPoolLabel: formatJackpotPoolSol(Number(config.jackpot_pool_sol ?? 0)),
+        jackpotWinPercentLabel: jackpotWinPercentLabel(
+          Number(config.jackpot_win_odds_bps ?? PACK_JACKPOT_WIN_ODDS_BPS)
+        ),
+      },
+      fairness: {
+        openAlgo: resolvePackOpenAlgo(),
+        vrfEnabled: isPackVrfEnabled(),
       },
       ev,
       inventory,
@@ -119,9 +144,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}))
     const mint = typeof body.mint_address === 'string' ? body.mint_address.trim() : ''
     const fair = Number(body.fair_value_sol)
-    if (!mint || !(fair >= 0.05 && fair <= 0.5)) {
+    if (!mint || !isPackNftFairValueSol(fair)) {
       return NextResponse.json(
-        { error: 'mint_address and fair_value_sol (0.05–0.5) required' },
+        {
+          error: `mint_address and fair_value_sol (${PACK_NFT_MIN_FAIR_SOL}–${PACK_NFT_MAX_FAIR_SOL}) required`,
+        },
         { status: 400 }
       )
     }

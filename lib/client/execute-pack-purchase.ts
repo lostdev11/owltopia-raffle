@@ -25,6 +25,9 @@ export type PackOpenClientResult = {
   openSeed: string
   openCommitHash: string
   revealMessage: string
+  isJackpotWin?: boolean
+  jackpotAmountSol?: number | null
+  jackpotPoolSol?: number | null
 }
 
 export type ExecutePackPurchaseOptions = {

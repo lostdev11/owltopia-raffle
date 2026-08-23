@@ -1,3 +1,5 @@
+import { PACK_NFT_MAX_FAIR_SOL, PACK_NFT_MIN_FAIR_SOL } from '@/lib/packs/config'
+
 export type PackDepositRequirement = {
   id: 'vault' | 'wallet' | 'selection' | 'floors' | 'busy'
   label: string
@@ -29,7 +31,7 @@ export function packDepositRequirements(input: {
     },
     {
       id: 'floors',
-      label: 'Each selected NFT has a floor between 0.05 and 0.5 SOL',
+      label: `Each selected NFT has a floor between ${PACK_NFT_MIN_FAIR_SOL} and ${PACK_NFT_MAX_FAIR_SOL} SOL`,
       met: input.pendingCount === 0 || input.allFloorsValid,
     },
     {
@@ -60,7 +62,7 @@ export function packDepositDisabledReason(input: {
     return 'Load your wallet NFTs, select at least one, then deposit.'
   }
   if (unmet.id === 'floors') {
-    return 'Set a valid floor (0.05–0.5 SOL) on every selected NFT before depositing.'
+    return `Set a valid floor (${PACK_NFT_MIN_FAIR_SOL}–${PACK_NFT_MAX_FAIR_SOL} SOL) on every selected NFT before depositing.`
   }
   if (unmet.id === 'busy') {
     return 'Wait for the current deposit to finish.'

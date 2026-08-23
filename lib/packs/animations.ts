@@ -71,11 +71,22 @@ export const PACK_CATEGORY_REVEAL = {
     entranceScale: 1.1,
     pulseStrength: 1.15,
   },
+  jackpot: {
+    glowOpacity: 0.42,
+    ringOpacity: 0.85,
+    entranceScale: 1.14,
+    pulseStrength: 1.35,
+  },
 } as const
 
 export function getPackCategoryReveal(category: PackRevealCategory) {
-  if (category === 'owl' || category === 'sol' || category === 'nft') {
-    return PACK_CATEGORY_REVEAL[category]
+  if (
+    category === 'owl' ||
+    category === 'sol' ||
+    category === 'nft' ||
+    category === 'jackpot'
+  ) {
+    return PACK_CATEGORY_REVEAL[category === 'jackpot' ? 'jackpot' : category]
   }
   return PACK_CATEGORY_REVEAL.owl
 }

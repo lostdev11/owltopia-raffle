@@ -10,6 +10,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { packRtpPercentLabel } from '@/lib/packs/admin-copy'
+import {
+  PACK_NFT_MAX_FAIR_SOL,
+  PACK_NFT_MIN_FAIR_SOL,
+} from '@/lib/packs/config'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import {
   packNftBandLabel,
@@ -275,7 +279,10 @@ export function AdminPacksInventoryForm({
         const row = queue[i]!
         const floor = parseFloor(row.floor)
         if (floor == null) {
-          patch(row.nft.mint, { status: 'failed', registerError: 'Floor must be 0.05–0.5 SOL' })
+          patch(row.nft.mint, {
+            status: 'failed',
+            registerError: `Floor must be ${PACK_NFT_MIN_FAIR_SOL}–${PACK_NFT_MAX_FAIR_SOL} SOL`,
+          })
           continue
         }
 
@@ -345,9 +352,9 @@ export function AdminPacksInventoryForm({
       <div>
         <h2 className="font-medium">Add NFTs to inventory</h2>
         <p className="text-xs text-muted-foreground">
-          Load this wallet, pick NFTs, set a floor price (0.05–0.5 SOL), then send them to the
-          packs vault. Floor is how we value the NFT for prize odds. Some NFT types (pNFT,
-          frozen, nested) can’t be paid out yet.
+          Load this wallet, pick NFTs, set a floor price ({PACK_NFT_MIN_FAIR_SOL}–{PACK_NFT_MAX_FAIR_SOL}{' '}
+          SOL; higher floors = rarer odds), then send them to the packs vault. Floor is how we value
+          the NFT for prize odds. Some NFT types (pNFT, frozen, nested) can’t be paid out yet.
         </p>
       </div>
 

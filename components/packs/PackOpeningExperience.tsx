@@ -40,6 +40,7 @@ export type PackOpeningExperienceProps = {
 }
 
 function categoryLabel(category: string) {
+  if (category === 'jackpot') return 'Jackpot'
   if (category === 'sol') return 'SOL'
   if (category === 'nft') return 'NFT'
   return '$OWL'
@@ -74,7 +75,7 @@ function PrizeArt({ reward }: { reward: PackOpenClientResult }) {
       />
     )
   }
-  if (reward.category === 'sol') {
+  if (reward.category === 'sol' || reward.category === 'jackpot') {
     return <Coins className="h-20 w-20 text-[#00FF9C]" aria-hidden />
   }
   if (reward.category === 'owl') {
