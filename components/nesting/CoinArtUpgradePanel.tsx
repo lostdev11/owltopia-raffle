@@ -5,6 +5,7 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { Loader2, Sparkles, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { HubCardCoverImage } from '@/components/owl-center/HubCardCoverImage'
+import { NestingClaimSuccessDialog } from '@/components/nesting/NestingClaimSuccessDialog'
 import { cn } from '@/lib/utils'
 import { sendCoinArtUpgradeFeeTransaction } from '@/lib/coin-upgrade/client/upgrade-fee-tx'
 import { formatCoinArtUpgradePlatformFeeBatchLabel } from '@/lib/coin-upgrade/config'
@@ -42,6 +43,13 @@ type PanelCoin = {
 type PendingUpgradePayment = {
   signature: string
   asset_ids: string[]
+}
+
+type UpgradeResultDialog = {
+  title?: string
+  message: string
+  hint?: string
+  tone: 'success' | 'info'
 }
 
 /** Survives a lost POST response (mobile blip) so a paid fee is always re-linked, never re-paid. */
@@ -115,7 +123,8 @@ export function CoinArtUpgradePanel() {
   const [hidden, setHidden] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
-  const [notice, setNotice] = useState<{ tone: 'success' | 'info' | 'error'; text: string } | null>(null)
+  const [notice, setNotice] = useState<{ tone: 'error'; text: string } | null>(null)
+  const [resultDialog, setResultDialog] = useState<UpgradeResultDialog | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -200,7 +209,12 @@ export function CoinArtUpgradePanel() {
       void submitUpgrade(pending.asset_ids, pending.signature)
         .then(() => {
           writePendingPayment(null)
-          setNotice({ tone: 'success', text: 'Recovered your earlier upgrade payment — art update completed.' })
+          setResultDialog({
+            title: 'Upgrade successful',
+            message: 'Recovered your earlier upgrade payment — your coin art is updated.',
+            hint: 'Wallets and marketplaces may take a few minutes to show the new art.',
+            tone: 'success',
+          })
           void load()
         })
         .catch(() => {
@@ -270,14 +284,21 @@ export function CoinArtUpgradePanel() {
       writePendingPayment(null)
       setSelected(new Set())
       if (result.pending.length === 0) {
-        setNotice({
+        setResultDialog({
+          title: 'Upgrade successful',
+          message: `Upgraded ${result.upgraded.length} coin${result.upgraded.length === 1 ? '' : 's'}! Your new art is on-chain.`,
+          hint:
+            config.reward_multiplier > 1
+              ? `Enjoy ${config.reward_multiplier}× OWL while nested. Wallets and marketplaces refresh within a few minutes.`
+              : 'Wallets and marketplaces refresh within a few minutes.',
           tone: 'success',
-          text: `Upgraded ${result.upgraded.length} coin${result.upgraded.length === 1 ? '' : 's'}! New art is on-chain — wallets and marketplaces refresh within a few minutes.`,
         })
       } else {
-        setNotice({
+        setResultDialog({
+          title: 'Upgrade in progress',
+          message: `Payment received. ${result.upgraded.length} coin${result.upgraded.length === 1 ? '' : 's'} updated now; ${result.pending.length} will finish automatically in the next few minutes.`,
+          hint: 'No further action needed — you can close this page.',
           tone: 'info',
-          text: `Payment received. ${result.upgraded.length} coin(s) updated now; ${result.pending.length} will finish automatically in the next few minutes — no further action needed.`,
         })
       }
       await load()
@@ -304,11 +325,21 @@ export function CoinArtUpgradePanel() {
         processing.slice(0, config.max_per_request).map((c) => c.mint),
         null
       )
-      setNotice(
-        result.pending.length === 0
-          ? { tone: 'success', text: 'All pending art updates completed.' }
-          : { tone: 'info', text: 'Still finishing some updates — they retry automatically, check back soon.' }
-      )
+      if (result.pending.length === 0) {
+        setResultDialog({
+          title: 'Upgrade successful',
+          message: 'All pending art updates completed.',
+          hint: 'Your coins now show the upgraded art on-chain.',
+          tone: 'success',
+        })
+      } else {
+        setResultDialog({
+          title: 'Upgrade in progress',
+          message: 'Still finishing some updates — they retry automatically.',
+          hint: 'Check back in a few minutes.',
+          tone: 'info',
+        })
+      }
       await load()
     } catch (e) {
       setNotice({ tone: 'error', text: e instanceof Error ? e.message : 'Retry failed.' })
@@ -383,14 +414,7 @@ export function CoinArtUpgradePanel() {
       ) : null}
 
       {notice ? (
-        <p
-          className={cn(
-            'text-xs rounded-lg border px-3 py-2 leading-relaxed',
-            notice.tone === 'success' && 'border-emerald-500/40 text-emerald-500',
-            notice.tone === 'info' && 'border-border/60 text-muted-foreground',
-            notice.tone === 'error' && 'border-destructive/50 text-destructive'
-          )}
-        >
+        <p className="text-xs rounded-lg border border-destructive/50 text-destructive px-3 py-2 leading-relaxed">
           {notice.text}
         </p>
       ) : null}
@@ -500,6 +524,18 @@ export function CoinArtUpgradePanel() {
           All your coins are upgraded. Enjoy the {config.reward_multiplier}× nested rewards!
         </p>
       ) : null}
+
+      <NestingClaimSuccessDialog
+        open={resultDialog !== null}
+        onOpenChange={(open) => {
+          if (!open) setResultDialog(null)
+        }}
+        title={resultDialog?.title}
+        message={resultDialog?.message ?? ''}
+        hint={resultDialog?.hint}
+        tone={resultDialog?.tone ?? 'success'}
+        actionLabel="Done"
+      />
     </section>
   )
 }
