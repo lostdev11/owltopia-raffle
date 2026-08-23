@@ -1822,12 +1822,17 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       type="number"
                       required
                       min={nftComputedMin ?? 1}
-                      defaultValue={raffle.max_tickets || nftComputedMin || ''}
-                      placeholder="e.g. 200"
+                      defaultValue={raffle.max_tickets ?? ''}
+                      placeholder={
+                        nftComputedMin != null
+                          ? `e.g. 200 (min ${nftComputedMin} draw goal)`
+                          : 'e.g. 200'
+                      }
                       className="min-h-[44px] touch-manipulation"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Required before publish. Worst-case odds are 1 ÷ max. Sell-out triggers the draw early.
+                      Required before publish — enter a cap (not pre-filled). Worst-case odds are 1 ÷ max.
+                      {nftComputedMin != null ? ` Must be at least ${nftComputedMin} (draw goal).` : null}
                     </p>
                   </div>
                   <div className="space-y-2">
@@ -1909,12 +1914,17 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       type="number"
                       required
                       min="1"
-                      defaultValue={raffle.max_tickets || raffle.min_tickets || ''}
-                      placeholder="e.g. 200"
+                      defaultValue={raffle.max_tickets ?? ''}
+                      placeholder={
+                        raffle.min_tickets != null
+                          ? `e.g. 200 (min ${raffle.min_tickets} draw goal)`
+                          : 'e.g. 200'
+                      }
                       className="min-h-[44px] touch-manipulation"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Required before publish. Worst-case odds are 1 ÷ max. Sell-out triggers the draw early.
+                      Required before publish — enter a cap (not pre-filled). Worst-case odds are 1 ÷ max.
+                      {raffle.min_tickets != null ? ` Must be at least ${raffle.min_tickets} (draw goal).` : null}
                     </p>
                   </div>
 
