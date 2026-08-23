@@ -29,7 +29,6 @@ import { countCoinArtUpgradeCatalogEntries } from '@/lib/db/coin-art-upgrades'
 import {
   bumpMetadataJsonTokenNumber,
   isZeroBasedContiguousIndices,
-  remapZeroBasedManifestKeys,
 } from '@/lib/coin-upgrade/zero-based-remap'
 
 const TOKEN_FILE_RE = /^(\d+)\.(png|json)$/i
@@ -104,14 +103,14 @@ export type CoinArtUpgradeWorkerResult = {
   seed_problems?: SeedCatalogResult['problems']
 }
 
-/** Build manifest from file_list URIs; remap 0…N-1 → #1…N once (never shift file_list + remap). */
+/** Pass through raw manifest keys — seed picks +1 remap vs direct 0…N from on-chain numbering. */
 function prepareCatalogManifestFromJob(
   job: CoinArtUpgradeUploadJob
 ): { manifest: Record<string, { image: string; metadata: string }>; remapped: boolean } {
   const fromList = buildManifestFromFileList(job.upload_progress.file_list ?? [])
   const raw =
     Object.keys(fromList).length > 0 ? fromList : (job.upload_progress.manifest ?? {})
-  return remapZeroBasedManifestKeys(raw)
+  return { manifest: raw, remapped: false }
 }
 
 export async function validateCoinArtUpgradeUploadJob(
@@ -380,6 +379,8 @@ async function seedCatalogForJob(jobId: string): Promise<CoinArtUpgradeWorkerRes
 
 function workerResultFromSeed(result: SeedCatalogResult, catalogSize: number): CoinArtUpgradeWorkerResult {
   const gaps = result.catalog_gap_numbers
+  const schemeLabel =
+    result.numbering_scheme === 'zero-based' ? 'on-chain #0…#999' : 'on-chain #1…#1000'
   return {
     ok: true,
     status: 'completed',
@@ -391,8 +392,8 @@ function workerResultFromSeed(result: SeedCatalogResult, catalogSize: number): C
     error:
       catalogSize < 1000
         ? gaps.length > 0
-          ? `Catalog is ${catalogSize}/1000 — still missing rows for coin #${gaps.slice(0, 8).join(', #')}${gaps.length > 8 ? '…' : ''}.`
-          : `Catalog is ${catalogSize}/1000 (${result.problems.noNumber} unnumbered on-chain, ${result.problems.duplicateNumber} duplicate #s).`
+          ? `Catalog is ${catalogSize}/1000 (${schemeLabel}) — still missing rows for coin #${gaps.slice(0, 8).join(', #')}${gaps.length > 8 ? '…' : ''}.`
+          : `Catalog is ${catalogSize}/1000 (${schemeLabel}; ${result.problems.noNumber} unnumbered on-chain, ${result.problems.duplicateNumber} duplicate #s).`
         : undefined,
   }
 }
