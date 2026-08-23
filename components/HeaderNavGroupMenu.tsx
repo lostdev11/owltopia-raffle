@@ -5,7 +5,11 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { isPathInNavGroup, type SiteNavGroup } from '@/lib/site-nav'
+import {
+  navItemPathname,
+  isPathInNavGroup,
+  type SiteNavGroup,
+} from '@/lib/site-nav'
 import { cn } from '@/lib/utils'
 
 const desktopTriggerClass =
@@ -78,7 +82,8 @@ export function HeaderNavGroupMenuDesktop({ group, buttonClassName }: DesktopPro
         >
           {group.items.map((item) => {
             const Icon = item.icon
-            const active = pathname === item.href || pathname.startsWith(`${item.href}/`)
+            const base = navItemPathname(item.href)
+            const active = pathname === base || pathname.startsWith(`${base}/`)
             return (
               <Link
                 key={item.href}
@@ -138,7 +143,8 @@ export function HeaderNavGroupMenuMobile({ group, onNavigate, showBorder = true 
       </p>
       {group.items.map((item) => {
         const Icon = item.icon
-        const active = pathname === item.href || pathname.startsWith(`${item.href}/`)
+        const base = navItemPathname(item.href)
+        const active = pathname === base || pathname.startsWith(`${base}/`)
         return (
           <Link
             key={item.href}
