@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { NestingHero } from '@/components/nesting/NestingHero'
+import { CoinArtUpgradeGlobalProgress } from '@/components/coin-upgrade/CoinArtUpgradeGlobalProgress'
 import { NestingGlobalOwlNestProgress } from '@/components/nesting/NestingGlobalOwlNestProgress'
 import { NestingGlobalGenOwlNestProgress } from '@/components/nesting/NestingGlobalGenOwlNestProgress'
 import type { OwlNest365PublicStats } from '@/lib/nesting/owl-nest-365-stats'
@@ -211,6 +212,8 @@ export function NestingLandingClient({
       ) : null}
 
       <NestingHero />
+
+      <CoinArtUpgradeGlobalProgress />
 
       <section id="perches" className="scroll-mt-24">
         <SectionHeader
