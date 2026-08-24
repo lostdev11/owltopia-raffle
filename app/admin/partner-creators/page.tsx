@@ -35,6 +35,29 @@ const TIER_OPTIONS = [
   { value: 'white_label', label: 'White-label (custom)' },
 ] as const
 
+const SELECT_ALL = 'all'
+
+function truncateWallet(wallet: string): string {
+  if (wallet.length <= 8) return wallet
+  return `${wallet.slice(0, 4)}…${wallet.slice(-4)}`
+}
+
+function shortTierLabel(tier: string): string {
+  if (tier === '$0_partner') return '$0 Partner'
+  if (tier === 'partner_pro') return 'Partner Pro'
+  if (tier === 'white_label') return 'White-label'
+  return tier
+}
+
+/** Dropdown option: friendly name · tier · truncated pubkey */
+function partnerSelectLabel(r: PartnerCreatorAdminRow): string {
+  const truncated = truncateWallet(r.creator_wallet)
+  const name = r.display_label?.trim() || r.profile_display_name?.trim() || truncated
+  const tier = shortTierLabel(r.partner_tier)
+  if (name === truncated) return `${name} · ${tier}`
+  return `${name} · ${tier} · ${truncated}`
+}
+
 export default function AdminPartnerCreatorsPage() {
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
@@ -56,6 +79,7 @@ export default function AdminPartnerCreatorsPage() {
   const [savingWallet, setSavingWallet] = useState<string | null>(null)
   const [savedWallet, setSavedWallet] = useState<string | null>(null)
   const [tenantEdits, setTenantEdits] = useState<Record<string, string>>({})
+  const [selectedWallet, setSelectedWallet] = useState<string>(SELECT_ALL)
 
   const [form, setForm] = useState({
     creator_wallet: '',
@@ -114,6 +138,10 @@ export default function AdminPartnerCreatorsPage() {
             creators.map((c) => [c.creator_wallet, c.discord_partner_tenant_id ?? ''])
           )
         )
+        setSelectedWallet((prev) => {
+          if (prev === SELECT_ALL) return prev
+          return creators.some((c) => c.creator_wallet === prev) ? prev : SELECT_ALL
+        })
       } else {
         setListError(typeof data.error === 'string' ? data.error : 'Could not load partner creators')
       }
@@ -153,6 +181,7 @@ export default function AdminPartnerCreatorsPage() {
         setCreateError(typeof data.error === 'string' ? data.error : 'Could not add partner wallet')
         return
       }
+      const addedWallet = form.creator_wallet.trim()
       setForm({
         creator_wallet: '',
         display_label: '',
@@ -161,6 +190,7 @@ export default function AdminPartnerCreatorsPage() {
         is_active: true,
         discord_partner_tenant_id: '',
       })
+      setSelectedWallet(addedWallet)
       await fetchList()
     } finally {
       setCreating(false)
@@ -201,6 +231,9 @@ export default function AdminPartnerCreatorsPage() {
         typeof data?.creator?.creator_wallet === 'string'
           ? data.creator.creator_wallet
           : creator_wallet
+      if (isRename) {
+        setSelectedWallet((prev) => (prev === creator_wallet ? nextWallet : prev))
+      }
       setSavedWallet(nextWallet)
       setTimeout(() => {
         setSavedWallet((current) => (current === nextWallet ? null : current))
@@ -227,6 +260,7 @@ export default function AdminPartnerCreatorsPage() {
       })
       if (res.ok) {
         setDeleteConfirmWallet(null)
+        setSelectedWallet((prev) => (prev === creator_wallet ? SELECT_ALL : prev))
         await fetchList()
       }
     } finally {
@@ -261,6 +295,11 @@ export default function AdminPartnerCreatorsPage() {
       </div>
     )
   }
+
+  const visibleRows =
+    selectedWallet === SELECT_ALL
+      ? rows
+      : rows.filter((r) => r.creator_wallet === selectedWallet)
 
   return (
     <div className="container mx-auto max-w-4xl py-8 px-4">
@@ -407,8 +446,30 @@ export default function AdminPartnerCreatorsPage() {
           ) : rows.length === 0 ? (
             <p className="text-muted-foreground text-sm">No rows yet. Add a wallet above.</p>
           ) : (
-            <ul className="space-y-6 divide-y divide-border/60">
-              {rows.map((r) => (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="partner-wallet-filter">Jump to wallet</Label>
+                <select
+                  id="partner-wallet-filter"
+                  value={selectedWallet}
+                  onChange={(e) => setSelectedWallet(e.target.value)}
+                  className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm touch-manipulation"
+                >
+                  <option value={SELECT_ALL}>All wallets</option>
+                  {rows.map((r) => (
+                    <option key={r.creator_wallet} value={r.creator_wallet}>
+                      {partnerSelectLabel(r)}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  {selectedWallet === SELECT_ALL
+                    ? `Showing all ${rows.length}`
+                    : `Showing ${visibleRows.length} of ${rows.length}`}
+                </p>
+              </div>
+              <ul className="space-y-6 divide-y divide-border/60">
+                {visibleRows.map((r) => (
                 <li key={r.creator_wallet} className="pt-6 first:pt-0 space-y-3">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                     <p className="font-mono text-xs sm:text-sm break-all min-w-0">{r.creator_wallet}</p>
@@ -441,13 +502,7 @@ export default function AdminPartnerCreatorsPage() {
                   <p className="text-sm text-muted-foreground">
                     Partner tier:{' '}
                     <span className="font-medium text-foreground">
-                      {r.partner_tier === '$0_partner'
-                        ? '$0 Partner'
-                        : r.partner_tier === 'partner_pro'
-                          ? 'Partner Pro'
-                          : r.partner_tier === 'white_label'
-                            ? 'White-label'
-                            : r.partner_tier}
+                      {shortTierLabel(r.partner_tier)}
                     </span>
                   </p>
                   <p className="text-sm text-muted-foreground">
@@ -597,7 +652,8 @@ export default function AdminPartnerCreatorsPage() {
                   </div>
                 </li>
               ))}
-            </ul>
+              </ul>
+            </div>
           )}
         </CardContent>
       </Card>
