@@ -24,7 +24,11 @@ import {
 } from '@/lib/site-config'
 import { PARTNER_COMMUNITY_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
 import { PARTNER_PRO_SETUP_USD } from '@/lib/config/partner-program-pricing'
-import { PARTNER_PRO_APPLY_HREF, WHITE_LABEL_APPLY_HREF } from '@/lib/partner-program-apply'
+import {
+  PARTNER_PRO_APPLY_HREF,
+  WHITE_LABEL_APPLY_HREF,
+  ZERO_PARTNER_APPLY_HREF,
+} from '@/lib/partner-program-apply'
 import { getStakingPlatformFeeSol } from '@/lib/nesting/staking-platform-fee'
 
 const SITE_URL = getSiteBaseUrl()
@@ -125,8 +129,8 @@ const tiers = [
       'Apply for Nesting at no extra partner cost after approval.',
     ],
     notIncluded: 'Not white-label and not a separate branded standalone app.',
-    applyHref: null as string | null,
-    applyLabel: null as string | null,
+    applyHref: ZERO_PARTNER_APPLY_HREF,
+    applyLabel: 'Apply for $0 Partner',
   },
   {
     name: 'Partner Pro',
