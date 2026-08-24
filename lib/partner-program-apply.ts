@@ -1,6 +1,8 @@
 export const PARTNER_APPLY_TIERS = ['$0_partner', 'partner_pro', 'white_label'] as const
 export type PartnerApplyTier = (typeof PARTNER_APPLY_TIERS)[number]
 
+/** Shareable $0 Partner apply link (preselects the form). */
+export const ZERO_PARTNER_APPLY_HREF = '/partner-program?tier=0#partner-apply'
 /** Shareable Partner Pro apply link (preselects the form). */
 export const PARTNER_PRO_APPLY_HREF = '/partner-program?tier=pro#partner-apply'
 /** Shareable white-label apply link (preselects the form). */
