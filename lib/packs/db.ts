@@ -32,7 +32,15 @@ export async function getPackVaultConfig(): Promise<PackVaultConfigRow> {
     .eq('id', 1)
     .maybeSingle()
   if (error) throw error
-  if (data) return data as PackVaultConfigRow
+  if (data) {
+    const row = data as PackVaultConfigRow
+    return {
+      ...row,
+      jackpot_pool_sol: Number(row.jackpot_pool_sol ?? 0),
+      jackpot_contribution_sol: Number(row.jackpot_contribution_sol ?? 0.02),
+      jackpot_win_odds_bps: Number(row.jackpot_win_odds_bps ?? 20),
+    }
+  }
   const vault = getPacksVaultPublicKey()
   return {
     id: 1,
@@ -43,6 +51,9 @@ export async function getPackVaultConfig(): Promise<PackVaultConfigRow> {
     min_sol_balance: 1,
     min_nft_count: 1,
     owl_sol_price: null,
+    jackpot_pool_sol: 0,
+    jackpot_contribution_sol: 0.02,
+    jackpot_win_odds_bps: 20,
     updated_at: new Date().toISOString(),
   }
 }
@@ -58,6 +69,9 @@ export async function updatePackVaultConfig(
       | 'min_sol_balance'
       | 'min_nft_count'
       | 'owl_sol_price'
+      | 'jackpot_pool_sol'
+      | 'jackpot_contribution_sol'
+      | 'jackpot_win_odds_bps'
     >
   >
 ): Promise<PackVaultConfigRow> {
@@ -75,6 +89,41 @@ export async function updatePackVaultConfig(
     .single()
   if (error) throw error
   return data as PackVaultConfigRow
+}
+
+/**
+ * Add contribution to jackpot pool; optionally drain full pool on a win.
+ * Returns pool state after this open's contribution is applied.
+ */
+export async function resolvePackJackpotForOpen(input: {
+  contributionSol: number
+  won: boolean
+}): Promise<{
+  poolBeforeSol: number
+  poolAfterSol: number
+  jackpotPayoutSol: number | null
+}> {
+  const config = await getPackVaultConfig()
+  const poolBefore = Number(config.jackpot_pool_sol ?? 0)
+  const poolWithContribution =
+    Math.round((poolBefore + input.contributionSol) * 1_000_000_000) / 1_000_000_000
+
+  if (input.won) {
+    const payout = poolWithContribution
+    await updatePackVaultConfig({ jackpot_pool_sol: 0 })
+    return {
+      poolBeforeSol: poolBefore,
+      poolAfterSol: 0,
+      jackpotPayoutSol: payout,
+    }
+  }
+
+  await updatePackVaultConfig({ jackpot_pool_sol: poolWithContribution })
+  return {
+    poolBeforeSol: poolBefore,
+    poolAfterSol: poolWithContribution,
+    jackpotPayoutSol: null,
+  }
 }
 
 export async function countAvailableNftsInBand(
@@ -141,7 +190,39 @@ export async function removePackInventoryNft(id: string): Promise<void> {
   if (error) throw error
 }
 
-/** Reserve a random available NFT in [min,max] fair value. Returns null if none. */
+/** Available NFTs eligible for packs open (min fair value enforced; no 0.5 SOL cap). */
+export async function listAvailableNftsForOpen(): Promise<PackInventoryRow[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('pack_inventory')
+    .select('*')
+    .eq('status', 'available')
+    .gte('fair_value_sol', 0.05)
+    .order('mint_address', { ascending: true })
+  if (error) throw error
+  return (data as PackInventoryRow[]) ?? []
+}
+
+/** Atomically reserve a specific inventory row by id. Returns null if already taken. */
+export async function reserveNftById(
+  openId: string,
+  inventoryId: string
+): Promise<PackInventoryRow | null> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('pack_inventory')
+    .update({
+      status: 'reserved',
+      reserved_open_id: openId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', inventoryId)
+    .eq('status', 'available')
+    .select('*')
+    .maybeSingle()
+  if (error) throw error
+  return (data as PackInventoryRow | null) ?? null
+}
+
+/** @deprecated Prefer listAvailableNftsForOpen + reserveNftById (per-NFT FP weighting). */
 export async function reserveNftInBand(
   openId: string,
   minFair: number,
@@ -160,19 +241,8 @@ export async function reserveNftInBand(
   if (list.length === 0) return null
 
   for (const row of list) {
-    const { data, error: upErr } = await getSupabaseAdmin()
-      .from('pack_inventory')
-      .update({
-        status: 'reserved',
-        reserved_open_id: openId,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', row.id)
-      .eq('status', 'available')
-      .select('*')
-      .maybeSingle()
-    if (upErr) throw upErr
-    if (data) return data as PackInventoryRow
+    const reserved = await reserveNftById(openId, row.id)
+    if (reserved) return reserved
   }
   return null
 }

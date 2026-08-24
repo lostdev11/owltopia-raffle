@@ -18,7 +18,15 @@ import {
   listRecentCompletedOpens,
 } from '@/lib/packs/db'
 import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
+import { computePackOddsPercentages } from '@/lib/packs/odds'
+import {
+  PACK_JACKPOT_CONTRIBUTION_SOL,
+  PACK_JACKPOT_WIN_ODDS_BPS,
+  formatJackpotPoolSol,
+  jackpotWinPercentLabel,
+} from '@/lib/packs/jackpot'
 import { getPacksVaultPublicKey } from '@/lib/packs/vault'
+import { isPackVrfEnabled, resolvePackOpenAlgo } from '@/lib/packs/vrf-config'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,7 +45,6 @@ export async function GET() {
       recent = await listRecentCompletedOpens(24)
       inventory = await listPackInventory('available')
     } catch {
-      // Migration may not be applied yet — return static config
       vaultConfig = null
     }
 
@@ -53,6 +60,17 @@ export async function GET() {
       inventory,
     })
 
+    const oddsPct = computePackOddsPercentages({
+      owlSolPrice: vaultConfig?.owl_sol_price ?? null,
+      nftInventory: inventory.map((r) => ({
+        id: r.id,
+        mint_address: r.mint_address,
+        fair_value_sol: Number(r.fair_value_sol),
+        name: r.name,
+        image_url: r.image_url,
+      })),
+    })
+
     return NextResponse.json({
       product: {
         slug: product?.slug ?? PACKS_PRODUCT_SLUG,
@@ -66,14 +84,34 @@ export async function GET() {
         },
       },
       odds: {
-        owlTiers: PACK_OWL_TIERS.map((t) => ({ amount: t.amount, weight: t.weight })),
-        solTiers: PACK_SOL_TIERS.map((t) => ({ amountSol: t.amountSol, weight: t.weight })),
+        owlTiers: oddsPct.owlTiers,
+        solTiers: oddsPct.solTiers,
+        nftInventory: oddsPct.nftInventory.slice(0, 40),
         nftBands: PACK_NFT_VALUE_BANDS.map((b) => ({
           min: b.minFairValueSol,
           max: b.maxFairValueSol,
           weight: b.weight,
         })),
+        categories: oddsPct.categories,
         owlToTicketRatio: PACK_OWL_TO_TICKET_RATIO,
+        /** Raw weight ladders (admin / legacy). Prefer percent fields above. */
+        owlTiersRaw: PACK_OWL_TIERS.map((t) => ({ amount: t.amount, weight: t.weight })),
+        solTiersRaw: PACK_SOL_TIERS.map((t) => ({ amountSol: t.amountSol, weight: t.weight })),
+      },
+      fairness: {
+        openAlgo: resolvePackOpenAlgo(),
+        vrfEnabled: isPackVrfEnabled(),
+      },
+      jackpot: {
+        poolSol: Number(vaultConfig?.jackpot_pool_sol ?? 0),
+        contributionSol: Number(
+          vaultConfig?.jackpot_contribution_sol ?? PACK_JACKPOT_CONTRIBUTION_SOL
+        ),
+        winOddsBps: Number(vaultConfig?.jackpot_win_odds_bps ?? PACK_JACKPOT_WIN_ODDS_BPS),
+        winPercentLabel: jackpotWinPercentLabel(
+          Number(vaultConfig?.jackpot_win_odds_bps ?? PACK_JACKPOT_WIN_ODDS_BPS)
+        ),
+        poolLabel: formatJackpotPoolSol(Number(vaultConfig?.jackpot_pool_sol ?? 0)),
       },
       vault: {
         address: vault,
@@ -92,6 +130,7 @@ export async function GET() {
         category: o.category,
         prizeLabel: o.prize_label,
         freeTicketCredits: o.free_ticket_credits,
+        isJackpotWin: o.is_jackpot_win === true,
         completedAt: o.completed_at,
       })),
     })

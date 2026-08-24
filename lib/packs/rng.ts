@@ -2,12 +2,19 @@ import { createHash } from 'node:crypto'
 import {
   PACK_CATEGORY_WEIGHTS_BPS,
   PACK_NFT_VALUE_BANDS,
-  PACK_OWL_TIERS,
   PACK_SOL_TIERS,
   owlTiersWithPrice,
   type PackPrizeCategory,
+  type PackRegularCategory,
 } from '@/lib/packs/config'
 import type { WeightedTierPick } from '@/lib/packs/types'
+import {
+  buildWeightedNftPool,
+  poolFromSnapshot,
+  type NftPoolEntry,
+  type NftPoolSnapshotRow,
+  type WeightedNftPoolEntry,
+} from '@/lib/packs/nft-weights'
 import { generateDrawSeed, hashDrawCommit } from '@/lib/raffles/draw/rng'
 
 export { generateDrawSeed as generatePackOpenSeed, hashDrawCommit as hashPackOpenCommit }
@@ -25,7 +32,7 @@ export function hashMod(seed: string, domain: string, modulus: number): number {
   return Number(n % BigInt(modulus))
 }
 
-function pickWeightedIndex(seed: string, domain: string, weights: number[]): number {
+export function pickWeightedIndex(seed: string, domain: string, weights: number[]): number {
   const total = weights.reduce((a, b) => a + b, 0)
   if (total <= 0) throw new Error('weights must sum to a positive value')
   let ticket = hashMod(seed, domain, total)
@@ -36,16 +43,24 @@ function pickWeightedIndex(seed: string, domain: string, weights: number[]): num
   return weights.length - 1
 }
 
-export function pickCategory(seed: string): PackPrizeCategory {
-  const entries: PackPrizeCategory[] = ['owl', 'sol', 'nft']
+export function pickJackpotWin(seed: string, oddsBps: number): boolean {
+  if (!(oddsBps > 0)) return false
+  return hashMod(seed, 'jackpot', 10_000) < oddsBps
+}
+
+export function pickCategory(seed: string): PackRegularCategory {
+  const entries: PackRegularCategory[] = ['owl', 'sol', 'nft']
   const weights = entries.map((c) => PACK_CATEGORY_WEIGHTS_BPS[c])
   const idx = pickWeightedIndex(seed, 'category', weights)
   return entries[idx]!
 }
 
+/**
+ * Pick OWL or SOL tier. For NFT category use pickNftFromInventory instead.
+ */
 export function pickTier(
   seed: string,
-  category: PackPrizeCategory,
+  category: PackRegularCategory,
   owlSolPrice?: number | null
 ): WeightedTierPick {
   if (category === 'owl') {
@@ -77,6 +92,7 @@ export function pickTier(
       tierIndex: idx,
     }
   }
+  // Legacy band pick kept for verify of old v1 opens that used bands.
   const idx = pickWeightedIndex(
     seed,
     'tier:nft',
@@ -91,12 +107,58 @@ export function pickTier(
   }
 }
 
-/** Recompute category + tier from a published seed (verify page). */
+/**
+ * Pick a specific NFT from weighted inventory (inverse floor price).
+ * Pool must be pre-sorted (buildWeightedNftPool) for deterministic verify.
+ */
+export function pickNftFromInventory(
+  seed: string,
+  pool: WeightedNftPoolEntry[]
+): WeightedNftPoolEntry {
+  if (pool.length === 0) throw new Error('NFT pool is empty')
+  const idx = pickWeightedIndex(
+    seed,
+    'nft:mint',
+    pool.map((p) => p.weight)
+  )
+  return pool[idx]!
+}
+
+export function pickNftFromAvailableInventory(
+  seed: string,
+  inventory: NftPoolEntry[]
+): { pick: WeightedNftPoolEntry; pool: WeightedNftPoolEntry[] } {
+  const pool = buildWeightedNftPool(inventory)
+  if (pool.length === 0) throw new Error('No eligible NFTs in inventory')
+  return { pick: pickNftFromInventory(seed, pool), pool }
+}
+
+export function pickNftFromSnapshot(
+  seed: string,
+  snapshot: NftPoolSnapshotRow[]
+): WeightedNftPoolEntry {
+  const pool = poolFromSnapshot(snapshot)
+  return pickNftFromInventory(seed, pool)
+}
+
+/** Recompute category + OWL/SOL tier from a published seed (verify page). */
 export function recomputeOpenFromSeed(
   seed: string,
   owlSolPrice?: number | null
-): { category: PackPrizeCategory; pick: WeightedTierPick } {
+): { category: PackRegularCategory; pick: WeightedTierPick } {
   const category = pickCategory(seed)
+  if (category === 'nft') {
+    // NFT mint is recomputed via snapshot when present; return placeholder band pick.
+    return {
+      category: 'nft',
+      pick: {
+        category: 'nft',
+        bandIndex: 0,
+        minFairValueSol: 0.05,
+        maxFairValueSol: 0.5,
+      },
+    }
+  }
   const pick = pickTier(seed, category, owlSolPrice)
   return { category, pick }
 }

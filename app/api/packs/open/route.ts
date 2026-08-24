@@ -47,7 +47,9 @@ export async function POST(request: NextRequest) {
       result: {
         ...result,
         revealMessage:
-          result.category === 'owl'
+          result.isJackpotWin
+            ? `You won the ${result.prizeLabel}!`
+            : result.category === 'owl'
             ? `You have won ${result.freeTicketCredits} free tickets on raffle site`
             : `You won ${result.prizeLabel}`,
       },

@@ -7,7 +7,7 @@ Product utility: buy a pack with SOL, instantly rip it, always win a prize from 
 After payment confirms **and** `/api/packs/open` returns the real prize:
 
 1. User pays pack price → tx confirms (on-page **pack hovering** clip keeps looping)
-2. Server assigns the prize (NFT / SOL / $OWL)
+2. Server assigns the prize (NFT / SOL / $OWL) — VRF reveal may take a few seconds when enabled
 3. Fullscreen hovering clip + **Open pack**
 4. User taps Open pack → **pack opening** plays once (`/Animations/Pack opening.mp4`)
 5. Clip ends on white → CSS white overlay → video removed → white fades → real prize reveal + subtle confetti
@@ -37,17 +37,25 @@ The `/packs` page is a single-composition hero (OWL PACKS brand, pack visual, on
 | Pack price | **0.1 SOL** |
 | Outcome | Every pack wins |
 | Categories | **60% $OWL · 20% SOL · 20% NFT** |
-| OWL scale | 5 → 100 |
-| SOL scale | 0.05 → 0.5 SOL |
-| NFT fair value | 0.05 → 0.5 SOL (admin-tagged) |
+| OWL scale | **10 → 50** (10 OWL = 0.1 SOL at default rate) |
+| SOL scale | 0.02 → 0.08 SOL (sized for 0.1 SOL pack + 10–50 OWL) |
+| NFT fair value | 0.05+ SOL (admin-tagged, up to 50 SOL); **higher FP = rarer** |
 | RTP target | **80%** (EV ≈ 0.08 SOL / open) |
 | OWL win UX | “You have won N free tickets on raffle site” |
 | Ticket mapping | Default **1 OWL → 1 free raffle ticket credit** |
 | UX | Instant rip (`/packs`) |
+| Odds UI | ME-style **percentages** (category + tier + per-NFT) |
+| Randomness | Switchboard VRF when `PACK_VRF_ENABLED=true` (`owltopia-pack-open-v2-vrf`); else local commit–reveal (`v1`) |
+
+## Jackpot
+
+Each **0.1 SOL** pack contributes **0.02 SOL** to a visible accumulating jackpot pool (~**0.2%** win chance per open by default). On a jackpot hit, the buyer receives the **full pool** in SOL and the pool resets to zero. Regular OWL/SOL/NFT prizes apply when the jackpot roll misses.
+
+Apply migration **229** (`packs_jackpot`) alongside prior pack migrations.
 
 ## House edge
 
-Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payout ≈ 80% of pack price. Jackpots (up to 0.5 SOL / 100 OWL) are funded by common low-tier wins.
+Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payout ≈ 80% of pack price. Jackpots (SOL / OWL / premium NFTs) are funded by common low-tier wins.
 
 ## Ops
 
@@ -57,19 +65,28 @@ Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payo
    `npm run packs:install-vault-env` → merges into `.env.local` without printing the secret.
    For Vercel Production, add `PACKS_VAULT_SECRET_KEY` and `NEXT_PUBLIC_PACKS_VAULT_WALLET` in the dashboard (or `vercel env add` interactively).
 3. Fund the vault with SOL, OWL, and NFTs. **All pack purchase SOL goes to this wallet**; prize payouts leave from it (house edge stays as residual balance).
-4. Admin → Packs: load wallet NFTs, set floors (0.05–0.5 SOL), **Deposit & add**. SPL, Metaplex Core, and compressed NFTs are supported; pNFT and frozen/nested assets are not.
-5. Run `npm run packs:ev-simulator` before going live; adjust tier weights / `owl_sol_price` until EV ≈ 0.08 SOL.
-6. Admin → Packs → **Turn packs on** when the vault is funded (this is what opens buying to the public).
-7. Opens auto-pause when NFT inventory cannot cover the NFT category (solvency guard). Only a full admin can turn them back on.
+4. Admin → Packs: load wallet NFTs, set floors (0.05+ SOL; grails above 0.5 are allowed), **Deposit & add**. SPL, Metaplex Core, and compressed NFTs are supported; pNFT and frozen/nested assets are not. Aim for ~30 NFTs at launch.
+5. Apply migration **227** (`packs_vrf_and_nft_snapshot`).
+6. Optional fairness: set `PACK_VRF_ENABLED=true` (needs `FUNDS_ESCROW_SECRET_KEY` or `PRIZE_ESCROW_SECRET_KEY` for Switchboard fees — same as raffle VRF).
+7. Run `npm run packs:ev-simulator` before going live; set `owl_sol_price` until EV ≈ 0.08 SOL. Use Admin → **Launch checklist**.
+8. Admin → Packs → **Turn packs on** when the vault is funded.
+9. Opens auto-pause when NFT inventory cannot cover the NFT category (solvency guard). Only a full admin can turn them back on.
 
 ## Fairness
 
-Algo `owltopia-pack-open-v1`:
+### Algo `owltopia-pack-open-v2-vrf` (recommended)
 
-1. At open, server generates `open_seed` and stores `open_commit_hash = SHA256(seed)`.
-2. Category index = `SHA256(seed || ":category:" || weightSum) % weightSum`.
-3. Within category, tier/band via `SHA256(seed || ":tier:" || category || ":" || weightSum) % weightSum`.
-4. Public verify at `/packs/verify/[id]`.
+1. Payment verified → Switchboard commit + reveal on-chain.
+2. `open_seed` = VRF 32-byte hex; store `open_commit_hash = SHA256(seed)` plus VRF tx fields.
+3. Category = weighted pick from seed.
+4. OWL/SOL: weighted tier pick. NFT: inverse-FP weighted pick from live inventory snapshot (`nft_pool_snapshot`).
+5. Public verify at `/packs/verify/[id]` (seed, commit, VRF Solscan links, NFT snapshot recompute).
+
+### Algo `owltopia-pack-open-v1` (fallback when VRF off)
+
+1. Server generates `open_seed` and stores `open_commit_hash = SHA256(seed)`.
+2. Same category / tier / per-NFT math as v2.
+3. Public verify at `/packs/verify/[id]`.
 
 ## Legal / ToS posture
 

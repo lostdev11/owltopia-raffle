@@ -35,6 +35,9 @@ export type PackVaultConfigRow = {
   min_sol_balance: number
   min_nft_count: number
   owl_sol_price: number | null
+  jackpot_pool_sol: number
+  jackpot_contribution_sol: number
+  jackpot_win_odds_bps: number
   updated_at: string
 }
 
@@ -78,6 +81,15 @@ export type PackInventoryRow = {
   updated_at: string
 }
 
+export type PackOpenVrfStatus = 'pending' | 'failed' | 'fulfilled'
+
+export type PackNftPoolSnapshotRow = {
+  id: string
+  mint: string
+  fair_value_sol: number
+  weight: number
+}
+
 export type PackOpenRow = {
   id: string
   product_id: string
@@ -96,9 +108,19 @@ export type PackOpenRow = {
   fair_value_sol: number | null
   free_ticket_credits: number
   payout_signature: string | null
+  is_jackpot_win: boolean
+  jackpot_contribution_sol: number | null
+  jackpot_amount_sol: number | null
   error_message: string | null
   created_at: string
   completed_at: string | null
+  open_vrf_provider?: string | null
+  open_vrf_status?: PackOpenVrfStatus | null
+  open_vrf_account?: string | null
+  open_vrf_request_tx?: string | null
+  open_vrf_fulfill_tx?: string | null
+  open_vrf_error?: string | null
+  nft_pool_snapshot?: PackNftPoolSnapshotRow[] | null
 }
 
 export type PackTicketCreditRow = {
@@ -125,6 +147,9 @@ export type PackOpenResult = {
   openSeed: string
   openCommitHash: string
   openAlgo: string
+  isJackpotWin: boolean
+  jackpotAmountSol: number | null
+  jackpotPoolSol: number | null
 }
 
 export type WeightedTierPick =

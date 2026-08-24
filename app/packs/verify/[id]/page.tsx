@@ -17,12 +17,32 @@ type VerifyPayload = {
   category: string | null
   prizeLabel: string | null
   freeTicketCredits: number
+  isJackpotWin?: boolean
+  jackpotAmountSol?: number | null
+  jackpotContributionSol?: number | null
   completedAt: string | null
+  vrf: {
+    provider: string
+    status: string | null
+    account: string | null
+    requestTx: string | null
+    fulfillTx: string | null
+    error: string | null
+  } | null
   verify: {
     commitMatches: boolean | null
     recomputedCategory: string | null
+    recomputedNftMint: string | null
+    recomputedJackpotWin: boolean | null
+    nftSnapshotMatches: boolean | null
     expectedCommitHash: string
+    randomnessSource: string
   } | null
+}
+
+function solscanTx(sig: string | null | undefined): string | null {
+  if (!sig) return null
+  return `https://solscan.io/tx/${encodeURIComponent(sig)}`
 }
 
 export default function PackVerifyPage() {
@@ -61,12 +81,58 @@ export default function PackVerifyPage() {
           <Row label="Status" value={data.status} />
           <Row label="Prize" value={data.prizeLabel || '—'} />
           <Row label="Category" value={data.category || '—'} />
+          {data.isJackpotWin ? (
+            <Row
+              label="Jackpot"
+              value={`${data.jackpotAmountSol ?? '—'} SOL (contributed ${data.jackpotContributionSol ?? '—'} SOL)`}
+            />
+          ) : data.jackpotContributionSol != null ? (
+            <Row label="Jackpot contribution" value={`${data.jackpotContributionSol} SOL`} />
+          ) : null}
           <Row label="Buyer" value={data.buyerWallet} mono />
           <Row label="Algo" value={data.openAlgo} />
           <Row label="Commit" value={data.openCommitHash || '—'} mono />
           <Row label="Seed" value={data.openSeed || '(hidden until complete)'} mono />
           <Row label="Payment tx" value={data.paymentSignature || '—'} mono />
           <Row label="Payout tx" value={data.payoutSignature || '—'} mono />
+          {data.vrf && (
+            <div className="space-y-2 rounded-lg border border-white/10 bg-black/40 p-3">
+              <p className="text-xs uppercase tracking-wide text-emerald-100/40">
+                Switchboard VRF
+              </p>
+              <Row label="Status" value={data.vrf.status || '—'} />
+              <Row label="Account" value={data.vrf.account || '—'} mono />
+              {data.vrf.requestTx ? (
+                <p className="text-xs">
+                  Commit:{' '}
+                  <a
+                    className="text-emerald-400 underline"
+                    href={solscanTx(data.vrf.requestTx) ?? '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {data.vrf.requestTx.slice(0, 12)}…
+                  </a>
+                </p>
+              ) : null}
+              {data.vrf.fulfillTx ? (
+                <p className="text-xs">
+                  Reveal:{' '}
+                  <a
+                    className="text-emerald-400 underline"
+                    href={solscanTx(data.vrf.fulfillTx) ?? '#'}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {data.vrf.fulfillTx.slice(0, 12)}…
+                  </a>
+                </p>
+              ) : null}
+              {data.vrf.error ? (
+                <p className="text-xs text-red-300">{data.vrf.error}</p>
+              ) : null}
+            </div>
+          )}
           {data.verify && (
             <div className="mt-4 flex items-start gap-2 rounded-lg border border-white/10 bg-black/40 p-3">
               {data.verify.commitMatches ? (
@@ -79,8 +145,31 @@ export default function PackVerifyPage() {
                   Commit {data.verify.commitMatches ? 'matches' : 'mismatch'}
                 </p>
                 <p className="mt-1 text-xs text-emerald-100/50">
+                  Randomness: {data.verify.randomnessSource}
+                </p>
+                <p className="mt-1 text-xs text-emerald-100/50">
                   Recomputed category: {data.verify.recomputedCategory ?? '—'}
                 </p>
+                {data.verify.recomputedJackpotWin != null ? (
+                  <p className="mt-1 text-xs text-emerald-100/50">
+                    Recomputed jackpot win: {data.verify.recomputedJackpotWin ? 'yes' : 'no'}
+                    {data.isJackpotWin != null
+                      ? data.verify.recomputedJackpotWin === data.isJackpotWin
+                        ? ' (matches)'
+                        : ' (mismatch)'
+                      : ''}
+                  </p>
+                ) : null}
+                {data.verify.recomputedNftMint ? (
+                  <p className="mt-1 text-xs text-emerald-100/50">
+                    Recomputed NFT mint: {data.verify.recomputedNftMint}
+                    {data.verify.nftSnapshotMatches == null
+                      ? ''
+                      : data.verify.nftSnapshotMatches
+                        ? ' (matches)'
+                        : ' (mismatch)'}
+                  </p>
+                ) : null}
               </div>
             </div>
           )}

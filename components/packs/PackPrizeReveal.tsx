@@ -13,6 +13,7 @@ type Props = {
 }
 
 function categoryLabel(category: string) {
+  if (category === 'jackpot') return 'Jackpot'
   if (category === 'sol') return 'SOL'
   if (category === 'nft') return 'NFT'
   return '$OWL'
@@ -31,7 +32,7 @@ function PrizeArt({ result }: { result: PackOpenClientResult }) {
       />
     )
   }
-  if (result.category === 'sol') {
+  if (result.category === 'sol' || result.category === 'jackpot') {
     return <Coins className="h-16 w-16 text-[#00FF9C]" aria-hidden />
   }
   if (result.category === 'owl') {
@@ -54,8 +55,16 @@ export function PackPrizeReveal({ result, onRipAgain, className }: Props) {
         Congratulations
       </p>
       <h2 className="mt-2 font-display text-3xl tracking-[0.04em] text-white sm:text-4xl">
-        You revealed a{' '}
-        <span className="text-[#00FF9C]">{categoryLabel(result.category)}</span>
+        {result.category === 'jackpot' ? (
+          <>
+            <span className="text-amber-300">Jackpot!</span>
+          </>
+        ) : (
+          <>
+            You revealed a{' '}
+            <span className="text-[#00FF9C]">{categoryLabel(result.category)}</span>
+          </>
+        )}
       </h2>
       <p className="mt-2 text-sm text-white/55">Your reward appears!</p>
 
