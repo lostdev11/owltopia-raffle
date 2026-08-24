@@ -470,7 +470,7 @@ export default function AdminPartnerCreatorsPage() {
               </div>
               <ul className="space-y-6 divide-y divide-border/60">
                 {visibleRows.map((r) => (
-                <li key={r.creator_wallet} className="pt-6 first:pt-0 space-y-3">
+                  <li key={r.creator_wallet} className="pt-6 first:pt-0 space-y-3">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                     <p className="font-mono text-xs sm:text-sm break-all min-w-0">{r.creator_wallet}</p>
                     <Button
