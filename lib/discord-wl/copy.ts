@@ -227,10 +227,37 @@ export function formatPartnerLiveMessage(input: {
   ].join('\n')
 }
 
+export function formatMissingPartnerTenantMessage(input: {
+  hasPendingPayment: boolean
+}): string {
+  if (input.hasPendingPayment) {
+    return [
+      'Payment is still **pending verification** for this server.',
+      '',
+      'After your USDC transfer confirms, run:',
+      '`/owltopia-partner verify signature:<your_tx_signature>`',
+      '',
+      'Use the Solana transaction signature (Solscan link or Phantom history). The payment must include the exact `OWLGW:…` memo from your subscribe quote.',
+      '',
+      'Then run `/owltopia-wl create` again.',
+    ].join('\n')
+  }
+  return [
+    'This server needs an active Owltopia Discord partner subscription before whitelist spots work.',
+    '',
+    '1. `/owltopia-partner subscribe` — pay the USDC quote **with the exact memo** in the same transaction',
+    '2. `/owltopia-partner verify signature:<your_tx_signature>` — activates this server',
+    '3. `/owltopia-wl create` — open your whitelist spot',
+    '',
+    'Partner Pro on the website alone is not enough until Discord payment is verified here. Ask Owltopia support if your Discord was already linked by the team.',
+  ].join('\n')
+}
+
 export function formatSetupChecklist(): string {
   return [
     '**Set up a whitelist spot**',
     '',
+    '0. If this server is new to Owltopia Discord tools: `/owltopia-partner subscribe` → pay with memo → `/owltopia-partner verify signature:…` (paying alone does not activate).',
     '1. Run this in (or pick) your `#whitelist` channel.',
     '2. `/owltopia-wl create name:OG Whitelist phase:og` — defaults: this channel, unlimited cap, 1 mint spot.',
     '3. Pin the bot message. Share this with your community:',

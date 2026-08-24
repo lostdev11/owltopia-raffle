@@ -6,6 +6,7 @@ import {
   getDiscordGiveawayPartnerByGuildId,
   getDiscordGiveawayPartnerById,
 } from '@/lib/db/discord-giveaway-partners'
+import { getPendingIntentForGuild } from '@/lib/db/discord-partner-payment-intents'
 import { getPartnerRaffleVisibilityEntitlementForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
 import {
   getOwlCenterLaunchByIdAdmin,
@@ -42,6 +43,7 @@ import {
   buildUnlinkedWalletChoicePayload,
   buildWalletModal,
   discordWlDashboardUrl,
+  formatMissingPartnerTenantMessage,
   formatPartnerLiveMessage,
   formatSetupChecklist,
   formatSubmitSuccessMessage,
@@ -340,9 +342,13 @@ async function handleCreate(interaction: DiscordInteraction, strOptions: Record<
   const guildId = interaction.guild_id!.trim()
   const tenant = await resolvePartnerTenant(guildId, partner.wallet)
   if (!tenant) {
-    return ephemeral(
-      'This server needs a partner tenant. Run `/owltopia-partner subscribe` or ask Owltopia to link your Discord.'
-    )
+    let hasPendingPayment = false
+    try {
+      hasPendingPayment = Boolean(await getPendingIntentForGuild(guildId))
+    } catch (e) {
+      console.error('wl create pending intent check:', e)
+    }
+    return ephemeral(formatMissingPartnerTenantMessage({ hasPendingPayment }))
   }
 
   const name = (strOptions.name ?? '').trim()
