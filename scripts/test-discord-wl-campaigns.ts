@@ -15,6 +15,10 @@ import {
 } from '../lib/discord-wl/campaign-rules'
 import { buildDiscordWlExportCsv, mapPushWallets, discordWlWalletsPlaintext } from '../lib/discord-wl/csv'
 import { parseOwlwlCustomId, wlComponentNeedsImmediateResponse } from '../lib/discord-wl/custom-id'
+import {
+  formatMissingPartnerTenantMessage,
+  formatSetupChecklist,
+} from '../lib/discord-wl/copy'
 
 const SYS = '11111111111111111111111111111111'
 const TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
@@ -205,5 +209,21 @@ assert.equal(cid?.campaignId, 42)
 assert.equal(wlComponentNeedsImmediateResponse('owlwl:submit:42'), true)
 assert.equal(wlComponentNeedsImmediateResponse('owlwl:confirm:42'), false)
 assert.equal(parseOwlwlCustomId('owlwl:hack:1'), null)
+
+{
+  const pending = formatMissingPartnerTenantMessage({ hasPendingPayment: true })
+  assert.match(pending, /pending verification/i)
+  assert.match(pending, /owltopia-partner verify signature/i)
+  assert.match(pending, /OWLGW/i)
+
+  const fresh = formatMissingPartnerTenantMessage({ hasPendingPayment: false })
+  assert.match(fresh, /owltopia-partner subscribe/i)
+  assert.match(fresh, /verify signature/i)
+  assert.match(fresh, /Partner Pro on the website alone/i)
+
+  const setup = formatSetupChecklist()
+  assert.match(setup, /verify signature/i)
+  assert.match(setup, /paying alone does not activate/i)
+}
 
 console.log('test-discord-wl-campaigns: ok')
