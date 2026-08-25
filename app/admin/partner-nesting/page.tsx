@@ -1,7 +1,5 @@
-'use client'
+import { redirect } from 'next/navigation'
 
-import { AdminPartnerNestingClient } from '@/components/admin/AdminPartnerNestingClient'
-
-export default function AdminPartnerNestingPage() {
-  return <AdminPartnerNestingClient />
+export default function PartnerNestingRedirect() {
+  redirect('/admin/partners/nesting')
 }

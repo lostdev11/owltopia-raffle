@@ -212,18 +212,20 @@ assert.equal(parseOwlwlCustomId('owlwl:hack:1'), null)
 
 {
   const pending = formatMissingPartnerTenantMessage({ hasPendingPayment: true })
-  assert.match(pending, /pending verification/i)
-  assert.match(pending, /owltopia-partner verify signature/i)
-  assert.match(pending, /OWLGW/i)
+  assert.match(pending, /legacy/i)
+  assert.match(pending, /discontinued/i)
+  assert.match(pending, /Owl Vision/i)
 
   const fresh = formatMissingPartnerTenantMessage({ hasPendingPayment: false })
-  assert.match(fresh, /owltopia-partner subscribe/i)
-  assert.match(fresh, /verify signature/i)
-  assert.match(fresh, /Partner Pro on the website alone/i)
+  assert.match(fresh, /one-time/i)
+  assert.match(fresh, /Owl Vision/i)
+  assert.match(fresh, /server ID/i)
+  assert.doesNotMatch(fresh, /owltopia-partner subscribe/i)
 
   const setup = formatSetupChecklist()
-  assert.match(setup, /verify signature/i)
-  assert.match(setup, /paying alone does not activate/i)
+  assert.match(setup, /Owl Vision/i)
+  assert.match(setup, /one-time/i)
+  assert.doesNotMatch(setup, /verify signature/i)
 }
 
 console.log('test-discord-wl-campaigns: ok')

@@ -968,7 +968,7 @@ export function AdminNestingClient() {
           <p className="text-sm text-muted-foreground mt-1">
             Pools live in Supabase (read model). Adapter mode and on-chain addresses prepare for real staking without
             wallet-wide RPC scans. To onboard a partner collection, use{' '}
-            <Link href="/admin/partner-nesting" className="text-primary underline-offset-4 hover:underline">
+            <Link href="/admin/partners/nesting" className="text-primary underline-offset-4 hover:underline">
               Partner Nesting
             </Link>
             .
