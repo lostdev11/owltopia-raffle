@@ -227,10 +227,34 @@ export function formatPartnerLiveMessage(input: {
   ].join('\n')
 }
 
+export function formatMissingPartnerTenantMessage(input: {
+  hasPendingPayment: boolean
+}): string {
+  if (input.hasPendingPayment) {
+    return [
+      'This server still has a **legacy** Discord payment quote on file.',
+      '',
+      'Monthly Discord USDC renewals are **discontinued**. Partner Pro is a one-time setup.',
+      'Ask Owltopia to link this Discord server in **Owl Vision → Partners** (wallet + server ID).',
+      '',
+      'Then run `/owltopia-wl create` again.',
+    ].join('\n')
+  }
+  return [
+    'This server is not linked for Partner Pro Discord tools yet.',
+    '',
+    'Partner Pro is a **one-time** setup — no monthly Discord subscribe/verify.',
+    'Ask Owltopia to link your wallet + Discord **server ID** in Owl Vision → Partners.',
+    '',
+    'Then run `/owltopia-wl create` here.',
+  ].join('\n')
+}
+
 export function formatSetupChecklist(): string {
   return [
     '**Set up a whitelist spot**',
     '',
+    '0. Server must be linked for Partner Pro (Owl Vision → Partners → wallet + Discord server ID). One-time setup — no monthly Discord renewals.',
     '1. Run this in (or pick) your `#whitelist` channel.',
     '2. `/owltopia-wl create name:OG Whitelist phase:og` — defaults: this channel, unlimited cap, 1 mint spot.',
     '3. Pin the bot message. Share this with your community:',
