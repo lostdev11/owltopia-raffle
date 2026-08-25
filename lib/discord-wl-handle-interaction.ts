@@ -494,6 +494,7 @@ async function handleOpenClose(
         phaseLabel: discordWlPhaseLabel(live.phase_key),
         maxEntries: live.max_entries,
         spots: live.spots_per_wallet,
+        requiredRoleName: live.required_role_name,
       })
     )
   }

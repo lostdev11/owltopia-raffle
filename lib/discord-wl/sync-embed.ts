@@ -46,6 +46,7 @@ export function discordWlPublicMessagePayload(
     status: campaign.status,
     currentCount: ctx.currentCount,
     maxEntries: campaign.max_entries,
+    requiredRoleId: campaign.required_role_id,
     requiredRoleName: campaign.required_role_name,
     launchName: ctx.launchName,
     launchSlug: ctx.launchSlug,

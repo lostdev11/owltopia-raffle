@@ -16,6 +16,8 @@ import {
 import { buildDiscordWlExportCsv, mapPushWallets, discordWlWalletsPlaintext } from '../lib/discord-wl/csv'
 import { parseOwlwlCustomId, wlComponentNeedsImmediateResponse } from '../lib/discord-wl/custom-id'
 import {
+  buildDiscordWlPublicEmbed,
+  formatDiscordWlRequirementsValue,
   formatMissingPartnerTenantMessage,
   formatPartnerLiveMessage,
   formatSetupChecklist,
@@ -239,6 +241,48 @@ assert.equal(parseOwlwlCustomId('owlwl:hack:1'), null)
   })
   assert.match(live, /@OG/)
   assert.match(live, /Role gate/i)
+}
+
+assert.equal(formatDiscordWlRequirementsValue({}), 'Anyone in this server')
+assert.equal(
+  formatDiscordWlRequirementsValue({ requiredRoleId: '99', requiredRoleName: 'OG' }),
+  '<@&99> role required'
+)
+assert.equal(
+  formatDiscordWlRequirementsValue({ requiredRoleName: 'OG' }),
+  '@OG role required'
+)
+
+{
+  const embed = buildDiscordWlPublicEmbed({
+    name: 'Breppe WL',
+    phaseKey: 'wl',
+    status: 'open',
+    currentCount: 0,
+    maxEntries: null,
+    requiredRoleId: '1368550123456789012',
+    requiredRoleName: 'OG',
+    launchName: null,
+    launchSlug: null,
+  })
+  const req = embed.fields.find((f) => f.name === 'Requirements')
+  assert.equal(req?.value, '<@&1368550123456789012> role required')
+}
+
+{
+  const open = buildDiscordWlPublicEmbed({
+    name: 'Breppe WL',
+    phaseKey: 'wl',
+    status: 'open',
+    currentCount: 0,
+    maxEntries: null,
+    requiredRoleId: null,
+    requiredRoleName: null,
+    launchName: null,
+    launchSlug: null,
+  })
+  const req = open.fields.find((f) => f.name === 'Requirements')
+  assert.equal(req?.value, 'Anyone in this server')
 }
 
 console.log('test-discord-wl-campaigns: ok')
