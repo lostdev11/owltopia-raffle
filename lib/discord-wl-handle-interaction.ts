@@ -114,20 +114,27 @@ function getSubcommandAndOptions(data: DiscordInteraction['data']): {
   sub: string | null
   strOptions: Record<string, string>
   numOptions: Record<string, number>
+  boolOptions: Record<string, boolean>
 } {
   const opts = data?.options ?? []
   const sub = opts.find((o) => o.type === 1)
-  if (!sub) return { sub: null, strOptions: {}, numOptions: {} }
+  if (!sub) return { sub: null, strOptions: {}, numOptions: {}, boolOptions: {} }
   const strOptions: Record<string, string> = {}
   const numOptions: Record<string, number> = {}
-  const nested = (sub.options ?? []) as Array<{ name: string; type: number; value?: string | number }>
+  const boolOptions: Record<string, boolean> = {}
+  const nested = (sub.options ?? []) as Array<{
+    name: string
+    type: number
+    value?: string | number | boolean
+  }>
   for (const o of nested) {
     if ((o.type === 3 || o.type === 6 || o.type === 7 || o.type === 8) && typeof o.value === 'string') {
       strOptions[o.name] = o.value
     }
     if (o.type === 4 && typeof o.value === 'number') numOptions[o.name] = o.value
+    if (o.type === 5 && typeof o.value === 'boolean') boolOptions[o.name] = o.value
   }
-  return { sub: sub.name ?? null, strOptions, numOptions }
+  return { sub: sub.name ?? null, strOptions, numOptions, boolOptions }
 }
 
 function modalWalletValue(interaction: DiscordInteraction): string {
@@ -407,7 +414,57 @@ async function handleCreate(interaction: DiscordInteraction, strOptions: Record<
       phaseLabel: discordWlPhaseLabel(live.phase_key),
       maxEntries: live.max_entries,
       spots: live.spots_per_wallet,
+      requiredRoleName: live.required_role_name,
     })
+  )
+}
+
+async function handleSetRole(
+  interaction: DiscordInteraction,
+  strOptions: Record<string, string>,
+  boolOptions: Record<string, boolean>
+) {
+  const partner = await requirePartner(interaction)
+  if (!partner.ok) return partner.response
+  const campaign = await resolveCampaignFromCommand(interaction, strOptions)
+  if (!campaign) {
+    return ephemeral('No whitelist spot in this server yet. Run `/owltopia-wl create` first (you can pass `role:` there too).')
+  }
+
+  const clear = boolOptions.clear === true
+  const roleId = strOptions.role?.trim() || null
+  if (!clear && !roleId) {
+    return ephemeral(
+      [
+        'Pick a **role** to require for Submit wallet, or set `clear:True` to remove the gate.',
+        '',
+        'Examples:',
+        '`/owltopia-wl set-role role:@OG`',
+        '`/owltopia-wl set-role clear:True`',
+        '',
+        'When creating a new spot: `/owltopia-wl create name:OG Whitelist role:@OG`',
+      ].join('\n')
+    )
+  }
+
+  const roleName = roleId ? interaction.data?.resolved?.roles?.[roleId]?.name ?? null : null
+  const updated = await updateDiscordWlCampaign(campaign.id, {
+    required_role_id: clear ? null : roleId,
+    required_role_name: clear ? null : roleName,
+  })
+  const live = updated ?? {
+    ...campaign,
+    required_role_id: clear ? null : roleId,
+    required_role_name: clear ? null : roleName,
+  }
+  await syncDiscordWlCampaignEmbed(live)
+
+  if (clear || !live.required_role_id) {
+    return ephemeral(`Role gate **cleared** on **${live.name}**. Anyone in the channel can submit (channel perms still apply).`)
+  }
+  const label = live.required_role_name?.trim() || live.required_role_id
+  return ephemeral(
+    `Role gate set on **${live.name}**: only **@${label.replace(/^@/, '')}** can press Submit wallet. Embed updated.`
   )
 }
 
@@ -592,9 +649,10 @@ async function handleRemove(interaction: DiscordInteraction, strOptions: Record<
 }
 
 export async function handleDiscordWlCommand(interaction: DiscordInteraction): Promise<Record<string, unknown>> {
-  const { sub, strOptions, numOptions } = getSubcommandAndOptions(interaction.data)
+  const { sub, strOptions, numOptions, boolOptions } = getSubcommandAndOptions(interaction.data)
   if (sub === 'setup') return ephemeral(formatSetupChecklist())
   if (sub === 'create') return handleCreate(interaction, strOptions, numOptions)
+  if (sub === 'set-role') return handleSetRole(interaction, strOptions, boolOptions)
   if (sub === 'open') return handleOpenClose(interaction, strOptions, 'open')
   if (sub === 'close') return handleOpenClose(interaction, strOptions, 'closed')
   if (sub === 'status') return handleStatus(interaction, strOptions)

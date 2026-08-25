@@ -216,11 +216,17 @@ export function formatPartnerLiveMessage(input: {
   phaseLabel: string
   maxEntries: number | null
   spots: number
+  requiredRoleName?: string | null
 }): string {
   const cap = input.maxEntries != null ? String(input.maxEntries) : 'unlimited'
+  const role = input.requiredRoleName?.trim()
+  const roleLine = role
+    ? `· Role gate: **@${role.replace(/^@/, '')}** required to submit`
+    : '· Role gate: none (add with `role:` on create, or `/owltopia-wl set-role role:@YourRole`)'
   return [
     `Whitelist spot is live in <#${input.channelId}>`,
     `· Phase: ${input.phaseLabel} · Cap: ${cap} · ${input.spots} spot${input.spots === 1 ? '' : 's'} per wallet`,
+    roleLine,
     '· Next: pin the message, announce in announcements',
     '· When ready: `/owltopia-wl close` then export or push',
     `Dashboard: ${discordWlDashboardUrl()}`,
@@ -255,8 +261,10 @@ export function formatSetupChecklist(): string {
     '**Set up a whitelist spot**',
     '',
     '0. Server must be linked for Partner Pro (Owl Vision → Partners → wallet + Discord server ID). One-time setup — no monthly Discord renewals.',
-    '1. Run this in (or pick) your `#whitelist` channel.',
-    '2. `/owltopia-wl create name:OG Whitelist phase:og` — defaults: this channel, unlimited cap, 1 mint spot.',
+    '1. Run this in (or pick) your `#whitelist` channel (Text; turn off Send Messages for @everyone if you only want the button).',
+    '2. Create with an optional **role gate**:',
+    '   `/owltopia-wl create name:OG Whitelist phase:og role:@OG`',
+    '   Already created? `/owltopia-wl set-role role:@OG`',
     '3. Pin the bot message. Share this with your community:',
     `> ${DISCORD_WL_ANNOUNCEMENT_SNIPPET}`,
     '4. When you’re done: `/owltopia-wl close`',
