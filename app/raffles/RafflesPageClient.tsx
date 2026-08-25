@@ -49,7 +49,6 @@ import { GiveawayBrowseCarouselSection } from '@/components/giveaways/GiveawayBr
 import { PartnerRafflesCarousel } from '@/components/PartnerRafflesCarousel'
 import { SolDomainsHubIntro } from '@/components/SolDomainsHubIntro'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { RaffleOwlPlayer } from '@/components/RaffleOwlPlayer'
 import { RaffleOverThresholdFlexShowcase } from '@/components/RaffleOverThresholdFlexShowcase'
 import {
   PURCHASE_COMPLETED_EVENT,
@@ -1254,7 +1253,6 @@ export function RafflesPageClient({
 
   return (
   <div className="w-full min-w-0 container mx-auto py-4 sm:py-6 md:py-8 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:px-4">
-      <RaffleOwlPlayer enabled />
       {/* Debug panel: ?debug=1 only. No env values, no full keys. */}
       {debug && (
         <div className="mb-6 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 text-sm">

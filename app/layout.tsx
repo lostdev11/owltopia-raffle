@@ -25,7 +25,6 @@ import { MaintenanceBanner } from '@/components/MaintenanceBanner'
 import { Gen2PresaleBanner } from '@/components/owl-center/Gen2PresaleBanner'
 import { MobileClientUpdateBanner } from '@/components/MobileClientUpdateBanner'
 import { ReferralCapture } from '@/components/ReferralCapture'
-import { PlatformMusicProvider } from '@/components/PlatformMusic'
 
 // Avoid static prerender so client components (WalletProvider, etc.) don't run with React null during build
 export const dynamic = 'force-dynamic'
@@ -261,28 +260,26 @@ export default function RootLayout({
         />
         <ErrorHandler />
         <SolflareTouchFix />
-        <PlatformMusicProvider>
-          <WalletContextProvider>
-            <CartProvider>
-              <Suspense fallback={null}>
-                <ReferralCapture />
-              </Suspense>
-              <div className="flex flex-col min-h-screen">
-                <MaintenanceBanner />
-                <MobileClientUpdateBanner />
-                <Gen2PresaleBanner />
-                <ConditionalHeader />
-                <main className="flex-1 min-h-0 w-full min-w-0 overflow-auto safe-area-bottom">
-                  <PageTransition>{children}</PageTransition>
-                  <GlobalLiveActivity />
-                </main>
-                <ConditionalFooter />
-              </div>
-              <AdminTweetMirrorHost />
-              <RaffleShareCopyHost />
-            </CartProvider>
-          </WalletContextProvider>
-        </PlatformMusicProvider>
+        <WalletContextProvider>
+          <CartProvider>
+            <Suspense fallback={null}>
+              <ReferralCapture />
+            </Suspense>
+            <div className="flex flex-col min-h-screen">
+              <MaintenanceBanner />
+              <MobileClientUpdateBanner />
+              <Gen2PresaleBanner />
+              <ConditionalHeader />
+              <main className="flex-1 min-h-0 w-full min-w-0 overflow-auto safe-area-bottom">
+                <PageTransition>{children}</PageTransition>
+                <GlobalLiveActivity />
+              </main>
+              <ConditionalFooter />
+            </div>
+            <AdminTweetMirrorHost />
+            <RaffleShareCopyHost />
+          </CartProvider>
+        </WalletContextProvider>
         <Analytics />
       </body>
     </html>
