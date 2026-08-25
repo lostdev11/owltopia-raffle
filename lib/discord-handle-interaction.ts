@@ -5,6 +5,7 @@ import {
   isPartnerTenantEntitled,
   updateDiscordGiveawayPartner,
 } from '@/lib/db/discord-giveaway-partners'
+import { getDiscordBotInviteUrl } from '@/lib/discord-bot-invite'
 import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 import { assertDiscordPartnerCommandAccess } from '@/lib/discord-partner-command-access'
 import { handleDiscordMarketplaceCommand } from '@/lib/discord-marketplace-handle-interaction'
@@ -23,19 +24,9 @@ function ephemeral(content: string) {
   }
 }
 
-function botInviteUrl(): string | null {
-  const custom = process.env.DISCORD_BOT_INVITE_URL?.trim()
-  if (custom) return custom
-  const appId = process.env.DISCORD_APPLICATION_ID?.trim()
-  if (!appId) return null
-  // View Channel + Send Messages + Embed Links + Use Application Commands
-  const perms = '2147503104'
-  return `https://discord.com/api/oauth2/authorize?client_id=${encodeURIComponent(appId)}&permissions=${perms}&scope=bot%20applications.commands`
-}
-
 function partnerProBillingHelp(): string {
   const base = getSiteBaseUrl()
-  const invite = botInviteUrl()
+  const invite = getDiscordBotInviteUrl()
   const lines = [
     `**${PLATFORM_NAME} Partner Pro — one-time setup**`,
     '',
