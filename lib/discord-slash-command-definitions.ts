@@ -356,7 +356,7 @@ export const OWLTOPIA_WL_SLASH_COMMAND = {
         },
         {
           name: 'role',
-          description: 'Optional Discord role required to submit',
+          description: 'Require this Discord role to press Submit wallet (role gate)',
           type: 8,
           required: false,
         },
@@ -364,6 +364,26 @@ export const OWLTOPIA_WL_SLASH_COMMAND = {
           name: 'launch',
           description: 'Owl Center collection slug or id (optional)',
           type: 3,
+          required: false,
+        },
+      ],
+    },
+    {
+      name: 'set-role',
+      description: 'Require a Discord role to submit (or clear the gate) on an existing whitelist spot',
+      type: 1,
+      options: [
+        {
+          name: 'role',
+          description: 'Role required to submit — omit or leave empty to clear the gate',
+          type: 8,
+          required: false,
+        },
+        { name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false },
+        {
+          name: 'clear',
+          description: 'Set true to remove the role gate',
+          type: 5,
           required: false,
         },
       ],

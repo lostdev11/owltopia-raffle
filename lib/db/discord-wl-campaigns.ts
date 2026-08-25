@@ -207,6 +207,8 @@ export async function updateDiscordWlCampaign(
     closed_at: string | null
     last_pushed_at: string | null
     launch_id: string | null
+    required_role_id: string | null
+    required_role_name: string | null
   }>
 ): Promise<DiscordWlCampaignRow | null> {
   const db = getSupabaseAdmin()

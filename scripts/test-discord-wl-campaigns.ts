@@ -17,6 +17,7 @@ import { buildDiscordWlExportCsv, mapPushWallets, discordWlWalletsPlaintext } fr
 import { parseOwlwlCustomId, wlComponentNeedsImmediateResponse } from '../lib/discord-wl/custom-id'
 import {
   formatMissingPartnerTenantMessage,
+  formatPartnerLiveMessage,
   formatSetupChecklist,
 } from '../lib/discord-wl/copy'
 
@@ -225,7 +226,19 @@ assert.equal(parseOwlwlCustomId('owlwl:hack:1'), null)
   const setup = formatSetupChecklist()
   assert.match(setup, /Owl Vision/i)
   assert.match(setup, /one-time/i)
+  assert.match(setup, /set-role/i)
+  assert.match(setup, /role:@OG/i)
   assert.doesNotMatch(setup, /verify signature/i)
+
+  const live = formatPartnerLiveMessage({
+    channelId: '1',
+    phaseLabel: 'OG',
+    maxEntries: 100,
+    spots: 1,
+    requiredRoleName: 'OG',
+  })
+  assert.match(live, /@OG/)
+  assert.match(live, /Role gate/i)
 }
 
 console.log('test-discord-wl-campaigns: ok')
