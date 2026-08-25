@@ -504,19 +504,21 @@ export function CoinArtUpgradePanel() {
         <div className="space-y-2">
           <Button
             type="button"
-            className="min-h-[52px] w-full touch-manipulation text-base"
+            className="min-h-[52px] h-auto w-full touch-manipulation whitespace-normal px-3 py-3 text-base leading-snug text-center"
             disabled={busy || selected.size === 0}
             onClick={() => void handleUpgradeSelected()}
           >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden /> : null}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2 shrink-0" aria-hidden /> : null}
             {selected.size === 0
-              ? `Select coins to upgrade (${formatSol(config.fee_sol)} SOL${platformFeePerCoinLabel ? ` + ${platformFeePerCoinLabel}` : ''} each)`
+              ? 'Select coins to upgrade'
               : `Upgrade ${selected.size} coin${selected.size === 1 ? '' : 's'} · ${totalSol} SOL${platformFeeSelectedLabel ? ` + ${platformFeeSelectedLabel}` : ''}`}
           </Button>
           <p className="text-[11px] text-muted-foreground text-center">
-            One wallet approval for the fee{platformFeePerCoinLabel ? ' and platform fees' : ''} — the art
-            update is signed by Owltopia, so nested coins never unlock. New art is revealed only after
-            upgrade. Up to {config.max_per_request} coins per batch.
+            {formatSol(config.fee_sol)} SOL
+            {platformFeePerCoinLabel ? ` + ${platformFeePerCoinLabel}` : ''} each. One wallet approval for
+            the fee{platformFeePerCoinLabel ? ' and platform fees' : ''} — the art update is signed by
+            Owltopia, so nested coins never unlock. New art is revealed only after upgrade. Up to{' '}
+            {config.max_per_request} coins per batch.
           </p>
         </div>
       ) : sellable && upgradedCount === coins.length && coins.length > 0 ? (
