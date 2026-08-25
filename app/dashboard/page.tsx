@@ -45,6 +45,7 @@ import {
   formatRefundClaimButtonLabel,
 } from '@/lib/raffles/entry-refund-amount'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { raffleWinnerPrizeClaimWindowOpen } from '@/lib/raffles/purchase-window'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import {
   canCreatorClaimPrizeBackFromEscrow,
@@ -207,12 +208,6 @@ type EntryWithRaffle = {
   referred_by_label?: string | null
 }
 
-function raffleEndedOrCompleted(raffle: { end_time: string; status: string | null }): boolean {
-  if (raffle.status === 'completed') return true
-  const endMs = new Date(raffle.end_time).getTime()
-  return !Number.isNaN(endMs) && endMs <= Date.now()
-}
-
 /** Live / ready listing: cancellation was requested but post-start fee not recorded yet. */
 function needsPayCancellationStraggler(raffle: Raffle): boolean {
   const s = (raffle.status ?? '').toLowerCase()
@@ -238,7 +233,8 @@ function canClaimEscrowPrize(raffle: EntryWithRaffle['raffle'], wallet: string):
   if (!raffle.prize_deposited_at) return false
   if (raffle.prize_returned_at) return false
   if (raffle.nft_transfer_transaction?.trim()) return false
-  if (!raffleEndedOrCompleted(raffle)) return false
+  // Sell-out early draw → successful_pending_claims before original end_time.
+  if (!raffleWinnerPrizeClaimWindowOpen(raffle)) return false
   return true
 }
 
@@ -4144,8 +4140,8 @@ export default function DashboardPage() {
                       </Link>
                       {prizeState === 'waiting' && (
                         <p className="text-xs text-muted-foreground">
-                          Prize not ready to claim yet (waiting for verified escrow deposit or raffle to finish). Open the
-                          raffle page for status.
+                          Prize not ready to claim yet (waiting for verified escrow deposit). Open the raffle page for
+                          status.
                         </p>
                       )}
                       {prizeState === 'returned' && (

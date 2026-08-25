@@ -10,6 +10,7 @@ import {
   raffleAcceptsTicketPurchases,
   raffleIsDueForWinnerDraw,
   raffleStatusAllowsTicketPurchases,
+  raffleWinnerPrizeClaimWindowOpen,
 } from '../lib/raffles/purchase-window'
 import { raffleCheckoutBlockedReason } from '../lib/cart/validate-raffle-checkout'
 import { raffleEligibleForReferralFreeEntry } from '../lib/referrals/program'
@@ -155,6 +156,34 @@ assert.equal(
 assert.equal(
   raffleIsDueForWinnerDraw({ end_time: fixedPast, status: 'live' }, fixedNow),
   true
+)
+
+assert.equal(
+  raffleWinnerPrizeClaimWindowOpen(
+    { end_time: fixedLater, status: 'successful_pending_claims' },
+    fixedNow
+  ),
+  true,
+  'sell-out early draw: claim opens while scheduled end_time is still in the future'
+)
+assert.equal(
+  raffleWinnerPrizeClaimWindowOpen({ end_time: fixedLater, status: 'completed' }, fixedNow),
+  true
+)
+assert.equal(
+  raffleWinnerPrizeClaimWindowOpen({ end_time: fixedLater, status: 'live' }, fixedNow),
+  false,
+  'live raffle before end_time is not claimable'
+)
+assert.equal(
+  raffleWinnerPrizeClaimWindowOpen({ end_time: fixedPast, status: 'live' }, fixedNow),
+  true,
+  'scheduled end still allows claim even if status lagging'
+)
+assert.equal(
+  raffleWinnerPrizeClaimWindowOpen({ end_time: fixedLater, status: 'ready_to_draw' }, fixedNow),
+  false,
+  'ready_to_draw without draw completion is not a claim window'
 )
 
 console.log('purchase-window: ok')
