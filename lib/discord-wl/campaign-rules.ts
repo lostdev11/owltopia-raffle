@@ -112,12 +112,10 @@ export function shouldRefreshCampaignEmbed(input: {
   maxEntries: number | null
 }): boolean {
   if (input.becameClosed || input.becameOpen) return true
-  if (isDiscordWlFull(input.maxEntries, input.nextCount) && input.previousCount !== input.nextCount) {
-    return true
-  }
-  const prevBucket = Math.floor(input.previousCount / 10)
-  const nextBucket = Math.floor(input.nextCount / 10)
-  return nextBucket !== prevBucket
+  // Always refresh when the registered count changes so small partner lists
+  // don't stay stuck at "0 registered" until the next 10-signup bucket.
+  if (input.previousCount !== input.nextCount) return true
+  return false
 }
 
 export function discordWlEmbedColor(input: {

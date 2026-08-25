@@ -134,6 +134,26 @@ assert.equal(isDiscordWlFull(null, 999), false)
 
 assert.equal(
   shouldRefreshCampaignEmbed({
+    previousCount: 0,
+    nextCount: 1,
+    becameClosed: false,
+    becameOpen: false,
+    maxEntries: null,
+  }),
+  true
+)
+assert.equal(
+  shouldRefreshCampaignEmbed({
+    previousCount: 1,
+    nextCount: 2,
+    becameClosed: false,
+    becameOpen: false,
+    maxEntries: null,
+  }),
+  true
+)
+assert.equal(
+  shouldRefreshCampaignEmbed({
     previousCount: 9,
     nextCount: 10,
     becameClosed: false,
@@ -146,6 +166,16 @@ assert.equal(
   shouldRefreshCampaignEmbed({
     previousCount: 10,
     nextCount: 11,
+    becameClosed: false,
+    becameOpen: false,
+    maxEntries: 100,
+  }),
+  true
+)
+assert.equal(
+  shouldRefreshCampaignEmbed({
+    previousCount: 10,
+    nextCount: 10,
     becameClosed: false,
     becameOpen: false,
     maxEntries: 100,
