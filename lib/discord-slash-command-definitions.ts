@@ -4,18 +4,18 @@
  */
 export const OWLTOPIA_PARTNER_SLASH_COMMAND = {
   name: 'owltopia-partner',
-  description: 'Owltopia paid Discord giveaway bridge (Solana USDC + webhooks)',
+  description: 'Owltopia Partner Pro Discord tools (webhooks + status)',
   type: 1,
   dm_permission: false,
   options: [
     {
       name: 'subscribe',
-      description: 'Get Solana USDC payment instructions for this server',
+      description: 'Partner Pro billing info (one-time setup — monthly Discord renewals discontinued)',
       type: 1,
     },
     {
       name: 'verify',
-      description: 'Verify USDC payment using the Solana transaction signature',
+      description: 'Legacy monthly USDC verify (discontinued — Partner Pro is one-time)',
       type: 1,
       options: [
         {
@@ -67,7 +67,7 @@ export const OWLTOPIA_PARTNER_SLASH_COMMAND = {
     },
     {
       name: 'status',
-      description: 'Show subscription, webhook, and API status for this server',
+      description: 'Show partner Discord link, webhook, and API status for this server',
       type: 1,
     },
   ],

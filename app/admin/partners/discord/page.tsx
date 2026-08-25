@@ -313,12 +313,13 @@ export default function AdminDiscordGiveawayPartnersPage() {
         <Link href="/admin/partners" className="text-primary underline">
           Partners overview → Link Discord
         </Link>
-        . After a community pays (off-platform for now), create a tenant here: they add a channel **incoming webhook**,
-        you set status and optional <span className="font-mono text-xs">active_until</span>. They receive automatic
-        Discord posts when an NFT giveaway is linked to their tenant and deposit is verified / prize claimed.
-        In Discord they can set <span className="font-mono text-xs">/owltopia-partner webhook-raffle-*</span> to mirror
-        the main site’s created/winner feed for ticket raffles (after you link a partner-creator wallet to this tenant
-        in <Link href="/admin/partners/creators" className="text-primary underline">Partner program creators</Link>).
+        . Partner Pro is a <strong className="text-foreground">one-time setup</strong> — monthly Discord USDC renewals
+        are discontinued. Create a tenant here with guild ID (webhook optional), set status{' '}
+        <span className="font-mono text-xs">active</span>. They receive automatic Discord posts when an NFT giveaway is
+        linked to their tenant and deposit is verified / prize claimed. In Discord they can set{' '}
+        <span className="font-mono text-xs">/owltopia-partner webhook-raffle-*</span> to mirror the main site’s
+        created/winner feed for ticket raffles (after you link a partner-creator wallet to this tenant in{' '}
+        <Link href="/admin/partners/creators" className="text-primary underline">Partner program creators</Link>).
         They can also call <span className="font-mono text-xs">{notifyPath}</span> with their API secret to push custom
         embeds (e.g. from their own bot).
       </p>

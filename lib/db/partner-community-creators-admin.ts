@@ -11,8 +11,7 @@ export type PartnerCommunityCreatorRow = {
   /** When set, new raffles from this wallet use that partner tenant for Discord raffle webhooks. */
   discord_partner_tenant_id: string | null
   /**
-   * Whole USDC charged per `/owltopia-partner subscribe` cycle when `discord_partner_tenant_id` matches that tenant.
-   * Null means catalog standard (`DISCORD_PARTNER_USDC_PRICE`).
+   * @deprecated Monthly Discord USDC renewals discontinued. Column may still exist on older rows.
    */
   partner_pro_monthly_quote_usdc: number | null
   created_at: string

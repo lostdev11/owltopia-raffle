@@ -214,9 +214,9 @@ export default function AdminPartnersOverviewPage() {
         <CardHeader>
           <CardTitle className="text-lg">Link Discord in one step</CardTitle>
           <CardDescription>
-            Partner already on the allowlist (e.g. Partner Pro) and paid off-platform? Paste their{' '}
-            <strong className="font-medium text-foreground">server ID</strong> — we create/reuse the Discord
-            tenant and attach it. No USDC verify required. Webhook optional (add later for channel posts).
+            Partner already on the allowlist (e.g. Partner Pro one-time setup) and paid? Paste their{' '}
+            <strong className="font-medium text-foreground">server ID</strong> — we create/reuse the Discord tenant and
+            attach it. No monthly Discord USDC renewals. Webhook optional (add later for channel posts).
           </CardDescription>
         </CardHeader>
         <CardContent>

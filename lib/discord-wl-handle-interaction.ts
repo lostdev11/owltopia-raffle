@@ -341,7 +341,7 @@ async function handleCreate(interaction: DiscordInteraction, strOptions: Record<
   const tenant = await resolvePartnerTenant(guildId, partner.wallet)
   if (!tenant) {
     return ephemeral(
-      'This server needs a partner tenant. Run `/owltopia-partner subscribe` or ask Owltopia to link your Discord.'
+      'This server is not linked for Partner Pro Discord tools yet. Ask Owltopia to link your wallet + Discord server ID in Owl Vision → Partners (one-time Partner Pro — no monthly subscribe).'
     )
   }
 

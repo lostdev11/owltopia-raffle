@@ -69,6 +69,8 @@ export async function findPartnerTenantByApiSecret(
 
 export function isPartnerTenantEntitled(t: DiscordGiveawayPartnerTenant): boolean {
   if (t.status === 'suspended') return false
+  // Partner Pro is one-time setup; active tenants do not expire on active_until.
+  if (t.status === 'active') return true
   if (!t.active_until) return true
   const until = new Date(t.active_until).getTime()
   return Number.isFinite(until) && until > Date.now()
