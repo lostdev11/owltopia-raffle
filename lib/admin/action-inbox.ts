@@ -458,7 +458,7 @@ export async function buildAdminActionInbox(now = new Date()): Promise<AdminActi
       fingerprint: `${app.status}|${app.updated_at}`,
       title: app.project_name?.trim() || 'Partner application',
       detail: `New partner application from ${app.contact_handle?.trim() || 'unknown contact'}`,
-      href: '/admin/partner-applications',
+      href: '/admin/partners/applications',
       occurredAt: app.created_at,
     })
   }

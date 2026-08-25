@@ -3567,16 +3567,16 @@ export default function AdminDashboardPage() {
                   </CardHeader>
                 </Link>
               </Card>
-              <Card className="hover:border-primary transition-colors cursor-pointer">
-                <Link href="/admin/discord-giveaway-partners">
+              <Card className="hover:border-primary transition-colors cursor-pointer border-primary/40">
+                <Link href="/admin/partners">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <Radio className="h-5 w-5" />
-                      Discord giveaway partners
+                      <HeartHandshake className="h-5 w-5" />
+                      Partners
                     </CardTitle>
                     <CardDescription>
-                      Paid communities: channel webhook + API secret, optional pings on NFT giveaway verify/claim, or
-                      they POST custom embeds to your API.
+                      One hub: Partner Pro allowlist, Discord server linking (guild ID → tenant), applications, nesting,
+                      and nest requests — no jumping between pages to paste UUIDs.
                     </CardDescription>
                   </CardHeader>
                 </Link>
@@ -3591,47 +3591,6 @@ export default function AdminDashboardPage() {
                     <CardDescription>
                       Catalog of NFT collections that have raffled here — search, notes, and outreach tags. Not a
                       partner fee allowlist.
-                    </CardDescription>
-                  </CardHeader>
-                </Link>
-              </Card>
-              <Card className="hover:border-primary transition-colors cursor-pointer">
-                <Link href="/admin/partner-creators">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <HeartHandshake className="h-5 w-5" />
-                      Partner program creators
-                    </CardTitle>
-                    <CardDescription>
-                      Allowlist creator wallets for the 2% partner fee tier and partner raffles spotlight — add, edit,
-                      activate, or remove without running SQL.
-                    </CardDescription>
-                  </CardHeader>
-                </Link>
-              </Card>
-              <Card className="hover:border-primary transition-colors cursor-pointer">
-                <Link href="/admin/partner-nesting">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Bird className="h-5 w-5" />
-                      Partner Nesting
-                    </CardTitle>
-                    <CardDescription>
-                      Add a partner collection address to open an Owl Nesting stake perch — pick allowlisted partner,
-                      paste mint, choose lock standard.
-                    </CardDescription>
-                  </CardHeader>
-                </Link>
-              </Card>
-              <Card className="hover:border-primary transition-colors cursor-pointer">
-                <Link href="/admin/partner-nest-applications">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Inbox className="h-5 w-5" />
-                      Partner Nesting requests
-                    </CardTitle>
-                    <CardDescription>
-                      Accept or reject partner self-serve nest requests (collection + optional reward SPL mint).
                     </CardDescription>
                   </CardHeader>
                 </Link>
@@ -3681,14 +3640,14 @@ export default function AdminDashboardPage() {
               </>
               )}
               <Card className="hover:border-primary transition-colors cursor-pointer">
-                <Link href="/admin/partner-applications">
+                <Link href="/admin/partners/applications">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <Inbox className="h-5 w-5" />
                       Partner applications
                     </CardTitle>
                     <CardDescription>
-                      Review inbound partner requests from the public partner page before allowlisting creator wallets.
+                      Review inbound partner requests (Partners hub → Applications).
                     </CardDescription>
                   </CardHeader>
                 </Link>

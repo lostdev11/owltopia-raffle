@@ -951,7 +951,7 @@ export default function PartnerHostDashboardPage() {
           ) : adminPreviewMode ? (
             <p className="text-sm leading-relaxed text-muted-foreground">
               No tenant on this wallet row. Manage allowlisted creators in{' '}
-              <Link href="/admin/partner-creators" className="font-medium text-primary underline-offset-2 hover:underline">
+              <Link href="/admin/partners/creators" className="font-medium text-primary underline-offset-2 hover:underline">
                 partner creators
               </Link>
               .
@@ -959,7 +959,7 @@ export default function PartnerHostDashboardPage() {
           ) : (
             <p className="text-sm leading-relaxed text-muted-foreground">
               Not linked yet. Ask the team to set a tenant in{' '}
-              <Link href="/admin/partner-creators" className="font-medium text-primary underline-offset-2 hover:underline">
+              <Link href="/admin/partners/creators" className="font-medium text-primary underline-offset-2 hover:underline">
                 partner creators
               </Link>{' '}
               or use Discord <code className="rounded bg-muted/60 px-1 font-mono text-xs">/owltopia-partner</code> after

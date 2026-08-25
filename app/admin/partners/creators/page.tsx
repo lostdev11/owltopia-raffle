@@ -1,0 +1,798 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { useWallet } from '@solana/wallet-adapter-react'
+import Link from 'next/link'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { WalletConnectButton } from '@/components/WalletConnectButton'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
+import { Loader2, ArrowLeft, HeartHandshake, Trash2 } from 'lucide-react'
+import type { PartnerCommunityCreatorRow } from '@/lib/db/partner-community-creators-admin'
+import {
+  PARTNER_PRO_GRANDFATHER_MONTHLY_USD,
+  PARTNER_PRO_SETUP_USD,
+  PARTNER_PRO_STANDARD_MONTHLY_USD,
+} from '@/lib/config/partner-program-pricing'
+
+type PartnerCreatorAdminRow = PartnerCommunityCreatorRow & { profile_display_name: string | null }
+const TIER_OPTIONS = [
+  { value: '$0_partner', label: '$0 Partner (2% fee + Discord support)' },
+  {
+    value: 'partner_pro',
+    label: `Partner Pro ($${PARTNER_PRO_SETUP_USD} setup + 2% raffle fee)`,
+  },
+  { value: 'white_label', label: 'White-label (custom)' },
+] as const
+
+export default function AdminPartnerCreatorsPage() {
+  const { publicKey, connected } = useWallet()
+  const wallet = publicKey?.toBase58() ?? ''
+  const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
+  const [loading, setLoading] = useState(() => !cachedTrue)
+  const [rows, setRows] = useState<PartnerCreatorAdminRow[]>([])
+  const [loadingList, setLoadingList] = useState(true)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [listError, setListError] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [deletingWallet, setDeletingWallet] = useState<string | null>(null)
+  const [deleteConfirmWallet, setDeleteConfirmWallet] = useState<string | null>(null)
+  const [labelEditWallet, setLabelEditWallet] = useState<string | null>(null)
+  const [labelEditValue, setLabelEditValue] = useState('')
+  const [walletEditFrom, setWalletEditFrom] = useState<string | null>(null)
+  const [walletEditValue, setWalletEditValue] = useState('')
+  const [walletEditError, setWalletEditError] = useState<string | null>(null)
+  const [savingWallet, setSavingWallet] = useState<string | null>(null)
+  const [savedWallet, setSavedWallet] = useState<string | null>(null)
+  const [tenantEdits, setTenantEdits] = useState<Record<string, string>>({})
+
+  const [form, setForm] = useState({
+    creator_wallet: '',
+    display_label: '',
+    partner_tier: '$0_partner',
+    sort_order: '0',
+    is_active: true,
+    discord_partner_tenant_id: '',
+  })
+
+  useEffect(() => {
+    if (!connected || !publicKey) {
+      setIsAdmin(false)
+      setLoading(false)
+      return
+    }
+    const addr = publicKey.toBase58()
+    if (getCachedAdmin(addr) === true) {
+      setIsAdmin(true)
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    let cancelled = false
+    fetch(`/api/admin/check?wallet=${addr}`)
+      .then((res) => (cancelled ? undefined : res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled) return
+        const admin = data?.isAdmin === true
+        const role = admin && data?.role ? data.role : null
+        setCachedAdmin(addr, admin, role)
+        setIsAdmin(admin)
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connected, publicKey])
+
+  const fetchList = useCallback(async () => {
+    setLoadingList(true)
+    setListError(null)
+    try {
+      const res = await fetch('/api/admin/partner-community-creators', { credentials: 'include' })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && Array.isArray(data.creators)) {
+        const creators = data.creators as PartnerCreatorAdminRow[]
+        setRows(creators)
+        setTenantEdits(
+          Object.fromEntries(
+            creators.map((c) => [c.creator_wallet, c.discord_partner_tenant_id ?? ''])
+          )
+        )
+      } else {
+        setListError(typeof data.error === 'string' ? data.error : 'Could not load partner creators')
+      }
+    } catch {
+      setListError('Could not load partner creators')
+    } finally {
+      setLoadingList(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isAdmin) void fetchList()
+  }, [isAdmin, fetchList])
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setCreateError(null)
+    setCreating(true)
+    try {
+      const sortParsed = parseInt(String(form.sort_order).trim(), 10)
+      const res = await fetch('/api/admin/partner-community-creators', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          creator_wallet: form.creator_wallet.trim(),
+          display_label: form.display_label.trim() || null,
+          partner_tier: form.partner_tier,
+          sort_order: Number.isFinite(sortParsed) ? sortParsed : 0,
+          is_active: form.is_active,
+          discord_partner_tenant_id:
+            form.discord_partner_tenant_id.trim() || undefined,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setCreateError(typeof data.error === 'string' ? data.error : 'Could not add partner wallet')
+        return
+      }
+      setForm({
+        creator_wallet: '',
+        display_label: '',
+        partner_tier: '$0_partner',
+        sort_order: '0',
+        is_active: true,
+        discord_partner_tenant_id: '',
+      })
+      await fetchList()
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const patchRow = async (
+    creator_wallet: string,
+    body: Record<string, unknown>
+  ): Promise<{ ok: true; creator_wallet: string } | { ok: false; error: string }> => {
+    setSavingWallet(creator_wallet)
+    setSavedWallet(null)
+    setListError(null)
+    const previousRows = rows
+    const isRename = typeof body.new_creator_wallet === 'string'
+    if (!isRename && Object.keys(body).length > 0) {
+      setRows((prev) =>
+        prev.map((r) => (r.creator_wallet === creator_wallet ? { ...r, ...body } : r))
+      )
+    }
+    try {
+      const enc = encodeURIComponent(creator_wallet)
+      const res = await fetch(`/api/admin/partner-community-creators/${enc}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setRows(previousRows)
+        const error =
+          typeof data.error === 'string' ? data.error : 'Could not save partner update'
+        setListError(error)
+        return { ok: false, error }
+      }
+      const nextWallet =
+        typeof data?.creator?.creator_wallet === 'string'
+          ? data.creator.creator_wallet
+          : creator_wallet
+      setSavedWallet(nextWallet)
+      setTimeout(() => {
+        setSavedWallet((current) => (current === nextWallet ? null : current))
+      }, 1800)
+      await fetchList()
+      return { ok: true, creator_wallet: nextWallet }
+    } catch {
+      setRows(previousRows)
+      const error = 'Could not save partner update'
+      setListError(error)
+      return { ok: false, error }
+    } finally {
+      setSavingWallet(null)
+    }
+  }
+
+  const deleteRow = async (creator_wallet: string) => {
+    setDeletingWallet(creator_wallet)
+    try {
+      const enc = encodeURIComponent(creator_wallet)
+      const res = await fetch(`/api/admin/partner-community-creators/${enc}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      if (res.ok) {
+        setDeleteConfirmWallet(null)
+        await fetchList()
+      }
+    } finally {
+      setDeletingWallet(null)
+    }
+  }
+
+  if (!connected) {
+    return (
+      <div className="container mx-auto max-w-lg py-12 px-4 text-center">
+        <p className="text-muted-foreground mb-6">Connect a full-admin wallet to manage partner creators.</p>
+        <WalletConnectButton />
+      </div>
+    )
+  }
+
+  if (loading || isAdmin === null) {
+    return (
+      <div className="container mx-auto py-12 px-4 flex justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-label="Loading" />
+      </div>
+    )
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="container mx-auto max-w-lg py-12 px-4 text-center">
+        <p className="text-muted-foreground mb-6">Full Owl Vision access is required.</p>
+        <Button asChild variant="outline" className="min-h-[44px] touch-manipulation">
+          <Link href="/admin">Back to Owl Vision</Link>
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="container mx-auto max-w-4xl py-8 px-4">
+      <Button asChild variant="ghost" size="sm" className="touch-manipulation min-h-[44px] mb-6">
+        <Link href="/admin/partners">
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Partners hub
+        </Link>
+      </Button>
+
+      <h1 className="text-2xl sm:text-3xl font-bold mb-2 flex items-center gap-2">
+        <HeartHandshake className="h-7 w-7 shrink-0 text-violet-400" aria-hidden />
+        Partner program creators
+      </h1>
+      <p className="text-muted-foreground text-sm mb-8">
+        Prefer{' '}
+        <Link href="/admin/partners" className="text-primary underline-offset-4 hover:underline">
+          Partners overview
+        </Link>{' '}
+        to link Discord by server ID in one step. To open staking for a partner collection, use{' '}
+        <Link href="/admin/partners/nesting" className="text-primary underline-offset-4 hover:underline">
+          Partner Nesting
+        </Link>{' '}
+        after they are allowlisted here. Wallets here get the <strong className="text-foreground">2%</strong> partner
+        fee tier (including the $0 partner program) and appear in the partner spotlight on{' '}
+        <Link href="/raffles?tab=partner-raffles" className="text-primary underline-offset-4 hover:underline">Raffles</Link>.
+        If you set a <strong className="text-foreground">Discord partner tenant id</strong> (from{' '}
+        <Link href="/admin/partners/discord" className="text-primary underline-offset-4 hover:underline">
+          Discord partners
+        </Link>
+        ), new ticket raffles from that wallet can mirror Owltopia-style announcements in their server (created + winner
+        webhooks they configure; claims stay on the user dashboard).{' '}
+        Optional <strong className="text-foreground">Discord Partner Pro renewal</strong> quotes use{' '}
+        <span className="font-mono text-xs">partner_pro_monthly_quote_usdc</span> when linked (not part of the public
+        Partner Pro catalog — that is ${PARTNER_PRO_SETUP_USD} setup only). Bot fallback defaults:{' '}
+        {PARTNER_PRO_GRANDFATHER_MONTHLY_USD}/{PARTNER_PRO_STANDARD_MONTHLY_USD} USDC or{' '}
+        <span className="font-mono text-xs">DISCORD_PARTNER_USDC_PRICE</span>. On raffle cards we show the creator&apos;s{' '}
+        <strong className="text-foreground">dashboard display name</strong> from{' '}
+        <Link href="/dashboard" className="text-primary underline-offset-4 hover:underline">wallet profile</Link> when set;
+        otherwise the optional allowlist label below. Public site reads active rows only; you can deactivate without
+        deleting. Cache refreshes on save.
+      </p>
+
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle className="text-lg">Add partner wallet</CardTitle>
+          <CardDescription>
+            Validates as a Solana address. Duplicate wallets return an error. Partners should save a display name on
+            their dashboard so listings show a friendly name.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleCreate} className="space-y-4">
+            {createError && <p className="text-sm text-destructive">{createError}</p>}
+            <div className="space-y-2">
+              <Label htmlFor="creator_wallet">Creator wallet</Label>
+              <Input
+                id="creator_wallet"
+                name="creator_wallet"
+                className="font-mono text-sm touch-manipulation min-h-[44px]"
+                placeholder="Solana public key"
+                value={form.creator_wallet}
+                onChange={(e) => setForm((f) => ({ ...f, creator_wallet: e.target.value }))}
+                required
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="display_label">Allowlist label (optional fallback)</Label>
+              <Input
+                id="display_label"
+                name="display_label"
+                className="touch-manipulation min-h-[44px]"
+                placeholder="Only if they have no dashboard display name"
+                value={form.display_label}
+                onChange={(e) => setForm((f) => ({ ...f, display_label: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="partner_tier">Partner tier</Label>
+              <select
+                id="partner_tier"
+                value={form.partner_tier}
+                onChange={(e) => setForm((f) => ({ ...f, partner_tier: e.target.value }))}
+                className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                {TIER_OPTIONS.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="discord_partner_tenant_id">Discord partner tenant id (optional)</Label>
+              <Input
+                id="discord_partner_tenant_id"
+                className="font-mono text-xs touch-manipulation min-h-[44px]"
+                placeholder="UUID from Discord giveaway partners — links raffle webhooks to this host wallet"
+                value={form.discord_partner_tenant_id}
+                onChange={(e) => setForm((f) => ({ ...f, discord_partner_tenant_id: e.target.value }))}
+                autoComplete="off"
+              />
+            </div>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+              <div className="space-y-2 sm:max-w-[140px]">
+                <Label htmlFor="sort_order">Sort order</Label>
+                <Input
+                  id="sort_order"
+                  name="sort_order"
+                  inputMode="numeric"
+                  className="touch-manipulation min-h-[44px]"
+                  value={form.sort_order}
+                  onChange={(e) => setForm((f) => ({ ...f, sort_order: e.target.value }))}
+                />
+              </div>
+              <label className="flex items-center gap-2 min-h-[44px] touch-manipulation cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.is_active}
+                  onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))}
+                  className="h-4 w-4 rounded border-input"
+                />
+                <span className="text-sm">Active</span>
+              </label>
+            </div>
+            <Button type="submit" disabled={creating} className="min-h-[44px] w-full sm:w-auto touch-manipulation">
+              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add wallet'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Allowlisted wallets</CardTitle>
+          <CardDescription>
+            Toggle active, change wallet, or edit sort order inline. Delete removes the row (fee tier reverts to
+            holder/standard rules).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {listError ? <p className="mb-3 text-sm text-destructive">{listError}</p> : null}
+          {loadingList ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : rows.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No rows yet. Add a wallet above.</p>
+          ) : (
+            <ul className="space-y-6 divide-y divide-border/60">
+              {rows.map((r) => (
+                <li key={r.creator_wallet} className="pt-6 first:pt-0 space-y-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                    <p className="font-mono text-xs sm:text-sm break-all min-w-0">{r.creator_wallet}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-[44px] shrink-0 touch-manipulation w-full sm:w-auto"
+                      disabled={savingWallet === r.creator_wallet}
+                      onClick={() => {
+                        setWalletEditError(null)
+                        setWalletEditFrom(r.creator_wallet)
+                        setWalletEditValue(r.creator_wallet)
+                      }}
+                    >
+                      Change wallet
+                    </Button>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Dashboard display name:{' '}
+                    <span className="font-medium text-foreground">
+                      {r.profile_display_name ?? '— not set (show allowlist label or generic partner text)'}
+                    </span>
+                  </p>
+                  {r.display_label && (
+                    <p className="text-sm text-muted-foreground">
+                      Allowlist fallback label: <span className="text-foreground">{r.display_label}</span>
+                    </p>
+                  )}
+                  <p className="text-sm text-muted-foreground">
+                    Partner tier:{' '}
+                    <span className="font-medium text-foreground">
+                      {r.partner_tier === '$0_partner'
+                        ? '$0 Partner'
+                        : r.partner_tier === 'partner_pro'
+                          ? 'Partner Pro'
+                          : r.partner_tier === 'white_label'
+                            ? 'White-label'
+                            : r.partner_tier}
+                    </span>
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Discord partner tenant:{' '}
+                    <span className="font-mono text-xs text-foreground break-all">
+                      {r.discord_partner_tenant_id ?? '— (not linked)'}
+                    </span>
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Discord Partner Pro renewal quote:{' '}
+                    <span className="font-medium text-foreground">
+                      {r.partner_pro_monthly_quote_usdc != null
+                        ? `${r.partner_pro_monthly_quote_usdc} USDC`
+                        : `bot default ${PARTNER_PRO_STANDARD_MONTHLY_USD} USDC`}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {' '}
+                      (optional Discord bot billing via{' '}
+                      <span className="font-mono text-xs">/owltopia-partner subscribe</span>; public Partner Pro is $
+                      {PARTNER_PRO_SETUP_USD} setup only)
+                    </span>
+                  </p>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                    <label className="flex items-center gap-2 min-h-[44px] touch-manipulation cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={r.is_active}
+                        disabled={savingWallet === r.creator_wallet}
+                        onChange={(e) => void patchRow(r.creator_wallet, { is_active: e.target.checked })}
+                        className="h-4 w-4 rounded border-input"
+                      />
+                      <span className="text-sm">Active</span>
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Label htmlFor={`tier-${r.creator_wallet}`} className="text-sm sr-only sm:not-sr-only sm:inline">
+                        Tier
+                      </Label>
+                      <select
+                        id={`tier-${r.creator_wallet}`}
+                        value={
+                          r.partner_tier === '$0_partner' ||
+                          r.partner_tier === 'partner_pro' ||
+                          r.partner_tier === 'white_label'
+                            ? r.partner_tier
+                            : '$0_partner'
+                        }
+                        className="min-h-[44px] rounded-md border border-input bg-background px-3 py-2 text-sm touch-manipulation"
+                        disabled={savingWallet === r.creator_wallet}
+                        onChange={(e) => {
+                          const t = e.target.value
+                          if (t !== r.partner_tier) {
+                            void patchRow(r.creator_wallet, { partner_tier: t })
+                          }
+                        }}
+                      >
+                        {TIER_OPTIONS.map((t) => (
+                          <option key={t.value} value={t.value}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                      {savedWallet === r.creator_wallet ? (
+                        <span className="text-xs font-medium text-green-500">Saved</span>
+                      ) : null}
+                      <Label htmlFor={`sort-${r.creator_wallet}`} className="text-sm sr-only sm:not-sr-only sm:inline">
+                        Sort
+                      </Label>
+                      <Input
+                        id={`sort-${r.creator_wallet}`}
+                        inputMode="numeric"
+                        className="w-24 font-mono text-sm min-h-[44px] touch-manipulation"
+                        defaultValue={String(r.sort_order)}
+                        key={`${r.creator_wallet}-${r.sort_order}-${r.updated_at}`}
+                        onBlur={(e) => {
+                          const n = parseInt(e.target.value.trim(), 10)
+                          if (!Number.isFinite(n) || n !== r.sort_order) {
+                            void patchRow(r.creator_wallet, { sort_order: Number.isFinite(n) ? n : 0 })
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="min-h-[44px] touch-manipulation"
+                        disabled={savingWallet === r.creator_wallet}
+                        onClick={() => {
+                          setLabelEditWallet(r.creator_wallet)
+                          setLabelEditValue(r.display_label ?? '')
+                        }}
+                      >
+                        Set label
+                      </Button>
+                      <div className="flex min-w-[min(100%,22rem)] flex-1 flex-col gap-1">
+                        <Label htmlFor={`tenant-${r.creator_wallet}`} className="text-xs text-muted-foreground">
+                          Discord partner tenant UUID
+                        </Label>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <Input
+                            id={`tenant-${r.creator_wallet}`}
+                            value={tenantEdits[r.creator_wallet] ?? ''}
+                            onChange={(e) =>
+                              setTenantEdits((prev) => ({
+                                ...prev,
+                                [r.creator_wallet]: e.target.value,
+                              }))
+                            }
+                            placeholder="Paste tenant UUID — or use Partners overview to link by server ID"
+                            className="min-h-[44px] flex-1 font-mono text-xs touch-manipulation"
+                            autoComplete="off"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="min-h-[44px] touch-manipulation"
+                            disabled={savingWallet === r.creator_wallet}
+                            onClick={() => {
+                              const t = (tenantEdits[r.creator_wallet] ?? '').trim()
+                              void patchRow(r.creator_wallet, {
+                                discord_partner_tenant_id: t === '' ? null : t,
+                              })
+                            }}
+                          >
+                            Save tenant
+                          </Button>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          Faster:{' '}
+                          <Link href="/admin/partners" className="underline underline-offset-2">
+                            Link Discord by server ID
+                          </Link>
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        className="min-h-[44px] touch-manipulation"
+                        disabled={deletingWallet === r.creator_wallet}
+                        onClick={() => setDeleteConfirmWallet(r.creator_wallet)}
+                      >
+                        {deletingWallet === r.creator_wallet ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Trash2 className="h-4 w-4 sm:mr-1" />
+                            <span className="hidden sm:inline">Delete</span>
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <p className="mt-8 text-xs text-muted-foreground">
+        Marketing copy for partners: <Link href="/partner-program" className="underline-offset-2 hover:underline">Partner program</Link>{' '}
+        (tiers, fees, Partner Pro SPL ticket currency gated per creator wallet).
+      </p>
+
+      <Dialog
+        open={!!labelEditWallet}
+        onOpenChange={(open) => {
+          if (!open && savingWallet !== labelEditWallet) {
+            setLabelEditWallet(null)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set allowlist fallback label</DialogTitle>
+            <DialogDescription>
+              Shown when the partner wallet has no profile display name. Leave empty to clear.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="partner-label-edit">Label</Label>
+            <Input
+              id="partner-label-edit"
+              value={labelEditValue}
+              onChange={(e) => setLabelEditValue(e.target.value)}
+              placeholder="e.g. Necros"
+              className="min-h-[44px] touch-manipulation"
+              autoComplete="off"
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={savingWallet === labelEditWallet}
+              onClick={() => setLabelEditWallet(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={!labelEditWallet || savingWallet === labelEditWallet}
+              onClick={() => {
+                if (!labelEditWallet) return
+                void patchRow(labelEditWallet, {
+                  display_label: labelEditValue.trim() === '' ? null : labelEditValue.trim(),
+                }).then((result) => {
+                  if (result.ok) setLabelEditWallet(null)
+                })
+              }}
+            >
+              {savingWallet === labelEditWallet ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!walletEditFrom}
+        onOpenChange={(open) => {
+          if (!open && savingWallet !== walletEditFrom) {
+            setWalletEditFrom(null)
+            setWalletEditError(null)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change partner wallet</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2 pt-1">
+                <p>
+                  Moves this allowlist entry to a new Solana address (tier, label, Discord link, and
+                  logo stay the same). The old wallet loses partner fee / spotlight access.
+                </p>
+                {walletEditFrom ? (
+                  <p className="break-all font-mono text-xs text-foreground">Current: {walletEditFrom}</p>
+                ) : null}
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="partner-wallet-edit">New creator wallet</Label>
+            <Input
+              id="partner-wallet-edit"
+              value={walletEditValue}
+              onChange={(e) => {
+                setWalletEditValue(e.target.value)
+                setWalletEditError(null)
+              }}
+              placeholder="Solana public key"
+              className="min-h-[44px] font-mono text-sm touch-manipulation"
+              autoComplete="off"
+            />
+            {walletEditError ? <p className="text-sm text-destructive">{walletEditError}</p> : null}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={savingWallet === walletEditFrom}
+              onClick={() => {
+                setWalletEditFrom(null)
+                setWalletEditError(null)
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={
+                !walletEditFrom ||
+                savingWallet === walletEditFrom ||
+                walletEditValue.trim() === '' ||
+                walletEditValue.trim() === walletEditFrom
+              }
+              onClick={() => {
+                if (!walletEditFrom) return
+                const next = walletEditValue.trim()
+                void patchRow(walletEditFrom, { new_creator_wallet: next }).then((result) => {
+                  if (result.ok) {
+                    setWalletEditFrom(null)
+                    setWalletEditError(null)
+                    return
+                  }
+                  setWalletEditError(result.error)
+                })
+              }}
+            >
+              {savingWallet === walletEditFrom ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Save wallet
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!deleteConfirmWallet}
+        onOpenChange={(open) => !open && !deletingWallet && setDeleteConfirmWallet(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove partner wallet?</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2 pt-1">
+                <p>This removes the wallet from the partner creators list.</p>
+                {deleteConfirmWallet ? (
+                  <p className="break-all font-mono text-xs text-foreground">{deleteConfirmWallet}</p>
+                ) : null}
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={!!deletingWallet}
+              onClick={() => setDeleteConfirmWallet(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              type="button"
+              className="min-h-[44px] touch-manipulation w-full sm:w-auto"
+              disabled={!!deletingWallet}
+              onClick={() => deleteConfirmWallet && void deleteRow(deleteConfirmWallet)}
+            >
+              {deletingWallet ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}

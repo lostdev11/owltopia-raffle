@@ -99,7 +99,7 @@ export default function AdminGiveawaysPage() {
 
   const fetchDiscordPartners = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/discord-giveaway-partners', { credentials: 'include' })
+      const res = await fetch('/api/admin/partners/discord', { credentials: 'include' })
       const data = await res.json().catch(() => ({}))
       if (res.ok && Array.isArray(data.partners)) {
         setDiscordPartners(
@@ -311,7 +311,7 @@ export default function AdminGiveawaysPage() {
           <CardDescription>
             Mint = SPL mint, MPL Core asset id, or compressed asset id as appropriate. For compressed, fill token ID
             if different from mint field. Optional: link a{' '}
-            <Link href="/admin/discord-giveaway-partners" className="text-primary underline">
+            <Link href="/admin/partners/discord" className="text-primary underline">
               Discord partner
             </Link>{' '}
             to ping their channel when deposit is verified and when the prize is claimed.
@@ -490,7 +490,7 @@ export default function AdminGiveawaysPage() {
                         ) : discordPartners.length === 0 ? (
                           <p className="text-xs text-muted-foreground">
                             No partners in the list yet — add one under{' '}
-                            <Link href="/admin/discord-giveaway-partners" className="underline">
+                            <Link href="/admin/partners/discord" className="underline">
                               Discord giveaway partners
                             </Link>
                             .
