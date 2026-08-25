@@ -87,3 +87,19 @@ export function raffleIsDueForWinnerDraw(
   if (status === 'ready_to_draw') return true
   return raffleHasEnded(raffle, now)
 }
+
+/**
+ * True when the winner may claim the escrowed prize (dashboard + claim-prize API).
+ *
+ * Sell-out early draw moves status to `successful_pending_claims` immediately while
+ * the scheduled `end_time` is still in the future — claims must open right after the
+ * draw, not wait for the original end clock.
+ */
+export function raffleWinnerPrizeClaimWindowOpen(
+  raffle: Pick<RafflePurchaseWindowFields, 'end_time' | 'status'>,
+  now: Date = new Date()
+): boolean {
+  const status = (raffle.status ?? '').trim().toLowerCase()
+  if (status === 'successful_pending_claims' || status === 'completed') return true
+  return raffleHasEnded(raffle, now)
+}
