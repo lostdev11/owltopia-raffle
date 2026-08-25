@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { ArrowLeft, CheckCircle2, HeartHandshake, Loader2, Radio } from 'lucide-react'
+import { ArrowLeft, Bot, CheckCircle2, Copy, HeartHandshake, Loader2, Radio } from 'lucide-react'
 import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -26,6 +26,8 @@ export default function AdminPartnersOverviewPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [apiSecret, setApiSecret] = useState<string | null>(null)
+  const [botInviteUrl, setBotInviteUrl] = useState<string | null>(null)
+  const [copiedInvite, setCopiedInvite] = useState(false)
 
   const [form, setForm] = useState({
     creator_wallet: '',
@@ -86,10 +88,33 @@ export default function AdminPartnersOverviewPage() {
   }, [])
 
   useEffect(() => {
-    if (isAdmin) void fetchCreators()
+    if (!isAdmin) return
+    void fetchCreators()
+    let cancelled = false
+    fetch('/api/admin/discord/bot-invite', { credentials: 'include' })
+      .then((res) => (cancelled ? undefined : res.json().then((j) => ({ ok: res.ok, j }))))
+      .then((r) => {
+        if (cancelled || !r) return
+        if (r.ok && typeof r.j.inviteUrl === 'string') setBotInviteUrl(r.j.inviteUrl)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [isAdmin, fetchCreators])
 
   const unlinked = creators.filter((c) => c.is_active && !c.discord_partner_tenant_id?.trim())
+
+  const copyInvite = async () => {
+    if (!botInviteUrl) return
+    try {
+      await navigator.clipboard.writeText(botInviteUrl)
+      setCopiedInvite(true)
+      setTimeout(() => setCopiedInvite(false), 2000)
+    } catch {
+      // ignore
+    }
+  }
 
   const onLink = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -174,6 +199,44 @@ export default function AdminPartnersOverviewPage() {
           Owl Vision
         </Link>
       </Button>
+
+      {botInviteUrl ? (
+        <Card className="mb-8 border-emerald-500/30">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Bot className="h-4 w-4" />
+              Owltopia bot invite
+            </CardTitle>
+            <CardDescription>
+              Share this full link only — a bare <code className="text-xs">?client_id=…</code> URL does not add the bot
+              to the server. Needs <strong className="font-medium text-foreground">Manage Server</strong> on their side.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <code className="block break-all rounded-md bg-muted/60 p-3 text-xs">{botInviteUrl}</code>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-[44px] touch-manipulation"
+                onClick={() => void copyInvite()}
+              >
+                {copiedInvite ? (
+                  <CheckCircle2 className="mr-2 h-4 w-4 text-green-500" />
+                ) : (
+                  <Copy className="mr-2 h-4 w-4" />
+                )}
+                Copy invite
+              </Button>
+              <Button asChild className="min-h-[44px] touch-manipulation">
+                <a href={botInviteUrl} target="_blank" rel="noopener noreferrer">
+                  Open invite
+                </a>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="mb-8 grid gap-4 sm:grid-cols-2">
         <Card>
@@ -309,8 +372,8 @@ export default function AdminPartnersOverviewPage() {
       </Card>
 
       <p className="text-sm text-muted-foreground">
-        After linking: partner connects Discord on the Owltopia dashboard (same wallet), invites the bot, then runs{' '}
-        <code className="rounded bg-muted/60 px-1 text-xs">/owltopia-wl create</code> in their server.
+        After linking: partner connects Discord on the Owltopia dashboard (same wallet), invites the bot with the link
+        above, then runs <code className="rounded bg-muted/60 px-1 text-xs">/owltopia-wl create</code> in their server.
       </p>
     </div>
   )
