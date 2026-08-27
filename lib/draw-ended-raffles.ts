@@ -15,7 +15,7 @@ import {
   updateRaffle,
   getRaffleMinimum,
 } from '@/lib/db/raffles'
-import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
+import { hasExhaustedMinThresholdTimeExtensions, raffleSecondRoundEnabled } from '@/lib/raffles/ticket-escrow-policy'
 import { buildMinThresholdMissExtensionPatch } from '@/lib/raffles/min-threshold-extension'
 import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
@@ -65,13 +65,15 @@ export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult>
     if (!canDraw) {
       if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
         await finalizeMinThresholdTerminalFailure(raffle.id)
+        const refundReason = raffleSecondRoundEnabled(raffle)
+          ? 'Minimum was not met after the deadline extension. Ticket buyers can claim refunds; the escrowed prize is returned to the creator when the on-chain transfer succeeds.'
+          : 'Minimum was not met when Round 1 ended (second round disabled). Ticket buyers can claim refunds; the escrowed prize is returned to the creator when the on-chain transfer succeeds.'
         return {
           raffleId: raffle.id,
           raffleTitle: raffle.title,
           success: false,
           winnerWallet: null,
-          error:
-            'Minimum was not met after the deadline extension. Ticket buyers can claim refunds; the escrowed prize is returned to the creator when the on-chain transfer succeeds.',
+          error: refundReason,
         }
       }
       // Threshold not met (or zero sales): second selling round — extend once by the original raffle duration.

@@ -59,6 +59,15 @@ export function raffleAllowsAdminFundsEscrowRefund(
 /** Max automatic deadline extensions when min_tickets is not met at end; then refunds + NFT return. */
 export const MAX_MIN_THRESHOLD_TIME_EXTENSIONS = 1
 
+/** Legacy rows and omitted API fields default to ON (automatic Round 2). */
+export function raffleSecondRoundEnabled(
+  raffle: Pick<Raffle, 'second_round_enabled'> | { second_round_enabled?: boolean | null }
+): boolean {
+  const v = raffle.second_round_enabled
+  if (v === undefined || v === null) return true
+  return v === true
+}
+
 /** True when ticket gross must be verified as paid into the funds escrow wallet. */
 export function raffleUsesFundsEscrow(raffle: {
   ticket_payments_to_funds_escrow?: boolean | null | string | number
@@ -88,6 +97,7 @@ export function raffleCountsTowardLiveFundsEscrowBreakdown(
 
 /** True after the raffle has already been extended the maximum times for min-threshold misses. */
 export function hasExhaustedMinThresholdTimeExtensions(raffle: Raffle): boolean {
+  if (!raffleSecondRoundEnabled(raffle)) return true
   const n = raffle.time_extension_count ?? 0
   return n >= MAX_MIN_THRESHOLD_TIME_EXTENSIONS
 }

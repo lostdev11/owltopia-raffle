@@ -116,7 +116,7 @@ async function checkNftMigrationApplied(): Promise<boolean> {
 
 /** After `image_url` / optional `image_fallback_url` (migrations 036, 038, 040 tail). */
 const RAFFLE_TAIL_CORE =
-  ',prize_amount,prize_currency,ticket_price,currency,alternate_ticket_currency,alternate_ticket_price,max_tickets,max_tickets_per_wallet,min_tickets,start_time,end_time,original_end_time,time_extension_count,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx'
+  ',prize_amount,prize_currency,ticket_price,currency,alternate_ticket_currency,alternate_ticket_price,max_tickets,max_tickets_per_wallet,min_tickets,start_time,end_time,original_end_time,time_extension_count,second_round_enabled,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx'
 
 /** Funds-escrow + creator claim (migration 044). Included in minimal select so fallback queries still populate dashboard claim tracker. */
 const RAFFLE_TAIL_FUNDS_ESCROW =
@@ -1062,6 +1062,11 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
       return Number.isFinite(n) && n > 0 ? Math.floor(n) : null
     })(),
     time_extension_count,
+    second_round_enabled: (() => {
+      const raw = (row as { second_round_enabled?: unknown }).second_round_enabled
+      if (raw === undefined || raw === null) return true
+      return raw === true || raw === 'true' || raw === 1
+    })(),
     draw_algo: (row.draw_algo as string | null | undefined) ?? null,
     draw_seed: (row.draw_seed as string | null | undefined) ?? null,
     draw_commit_hash: (row.draw_commit_hash as string | null | undefined) ?? null,
@@ -1673,6 +1678,7 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     end_time: raffle.end_time,
     original_end_time: raffle.original_end_time,
     time_extension_count: raffle.time_extension_count ?? 0,
+    second_round_enabled: raffle.second_round_enabled !== false,
     theme_accent: raffle.theme_accent,
     edited_after_entries: raffle.edited_after_entries,
     created_by: raffle.created_by,

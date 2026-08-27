@@ -279,6 +279,11 @@ export interface Raffle {
   original_end_time: string | null
   /** How many times end_time was extended because min_tickets was not met at deadline (max 1 before terminal). */
   time_extension_count: number
+  /**
+   * When true (default), min-threshold miss at first end extends once (2nd selling round).
+   * When false, refunds open immediately after Round 1 if the draw goal is not met.
+   */
+  second_round_enabled: boolean
   theme_accent: ThemeAccent
   edited_after_entries: boolean
   created_at: string
