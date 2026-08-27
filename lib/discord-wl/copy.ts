@@ -29,9 +29,27 @@ export type DiscordWlEmbedCampaign = {
   status: DiscordWlCampaignStatus
   currentCount: number
   maxEntries: number | null
+  requiredRoleId: string | null
   requiredRoleName: string | null
   launchName: string | null
   launchSlug: string | null
+}
+
+/** Public embed “Requirements” field — mirrors the submit role gate. */
+export function formatDiscordWlRequirementsValue(input: {
+  requiredRoleId?: string | null
+  requiredRoleName?: string | null
+}): string {
+  const roleId = input.requiredRoleId?.trim()
+  if (roleId) {
+    // Discord renders <@&id> as the live role mention in embed fields.
+    return `<@&${roleId}> role required`
+  }
+  const roleName = input.requiredRoleName?.trim()
+  if (roleName) {
+    return `@${roleName.replace(/^@/, '')} role required`
+  }
+  return 'Anyone in this server'
 }
 
 export function buildDiscordWlPublicEmbed(campaign: DiscordWlEmbedCampaign): {
@@ -50,9 +68,10 @@ export function buildDiscordWlPublicEmbed(campaign: DiscordWlEmbedCampaign): {
     : 'Tap **Submit wallet** below to register. One wallet per Discord account.'
 
   const statusValue = full ? 'Full' : campaign.status === 'open' ? 'Open' : campaign.status === 'closed' ? 'Closed' : 'Draft'
-  const roleValue = campaign.requiredRoleName?.trim()
-    ? `@${campaign.requiredRoleName.replace(/^@/, '')} role required`
-    : 'Anyone in this server'
+  const roleValue = formatDiscordWlRequirementsValue({
+    requiredRoleId: campaign.requiredRoleId,
+    requiredRoleName: campaign.requiredRoleName,
+  })
 
   const fields: { name: string; value: string; inline?: boolean }[] = [
     { name: 'Status', value: statusValue, inline: true },
