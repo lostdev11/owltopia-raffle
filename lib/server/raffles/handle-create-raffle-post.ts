@@ -176,6 +176,14 @@ function coerceThemeAccent(raw: unknown): ThemeAccent {
   return (THEME_ACCENT_VALUES as readonly string[]).includes(s) ? (s as ThemeAccent) : 'prime'
 }
 
+/** Community vote: default ON when omitted (matches legacy automatic Round 2). */
+function parseSecondRoundEnabled(body: Record<string, unknown>): boolean {
+  const raw = body.second_round_enabled ?? body.secondRoundEnabled
+  if (raw === undefined || raw === null) return true
+  if (raw === false || raw === 'false' || raw === 0 || raw === '0') return false
+  return true
+}
+
 /** Wrap a promise with a timeout; rejects with step info so we can return 502 + step */
 async function withTimeout<T>(
   promise: Promise<T>,
@@ -488,6 +496,7 @@ export async function handleCreateRafflePost(
       }
     }
     const list_on_platform = !requestUnlisted
+    const second_round_enabled = parseSecondRoundEnabled(body)
 
     let raffleData: Omit<Raffle, 'id' | 'created_at' | 'updated_at'>
 
@@ -596,6 +605,7 @@ export async function handleCreateRafflePost(
         end_time: body.end_time,
         original_end_time: body.end_time,
         time_extension_count: 0,
+        second_round_enabled,
         theme_accent: coerceThemeAccent(body.theme_accent),
         edited_after_entries: false,
         created_by: walletAddress,
@@ -835,6 +845,7 @@ export async function handleCreateRafflePost(
         end_time: body.end_time,
         original_end_time: body.end_time,
         time_extension_count: 0,
+        second_round_enabled,
         theme_accent: coerceThemeAccent(body.theme_accent),
         edited_after_entries: false,
         created_by: walletAddress,

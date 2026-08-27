@@ -353,6 +353,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
   const { connection } = useConnection()
   const [themeAccent, setThemeAccent] = useState<ThemeAccent>('prime')
   const [milestonesEnabled, setMilestonesEnabled] = useState(false)
+  const [secondRoundEnabled, setSecondRoundEnabled] = useState(true)
   const [milestoneRows, setMilestoneRows] = useState<MilestoneDraftRow[]>([{ ...DEFAULT_MILESTONE_ROW }])
   const milestoneRulesCopy = useMemo(() => buildMilestoneBonusRulesCopy(), [])
   // datetime-local expects a *local* time string. Using toISOString() here would be UTC and can shift by timezone,
@@ -1125,6 +1126,7 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       slug: slugifyRaffleTitle(titleTrimmed),
       wallet_address: publicKey.toBase58(),
       prize_type: isPartner ? 'crypto' : 'nft',
+      second_round_enabled: secondRoundEnabled,
     }
     if (isPartner) {
       data.prize_currency = tokenPrizeCurrency
@@ -2521,6 +2523,28 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
             <p className="text-xs text-muted-foreground">
               Caps how many tickets one wallet can buy. Leave empty for no personal limit.
             </p>
+          </div>
+
+          <div className="rounded-lg border border-sky-500/25 bg-sky-500/5 p-4 space-y-2">
+            <label className="flex items-start gap-3 cursor-pointer touch-manipulation min-h-[44px]">
+              <input
+                type="checkbox"
+                checked={secondRoundEnabled}
+                onChange={(e) => setSecondRoundEnabled(e.target.checked)}
+                className="mt-1 h-5 w-5"
+                id="second-round-enabled"
+              />
+              <span>
+                <span className="text-sm font-medium text-foreground">
+                  Second round ({secondRoundEnabled ? 'ON' : 'OFF'})
+                </span>
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  When ON, if the draw goal is not met when Round 1 ends, the deadline extends once for a second
+                  selling round (today&apos;s default). When OFF, missing the draw goal at the end of Round 1 opens
+                  ticket refunds immediately — there is no automatic extension.
+                </span>
+              </span>
+            </label>
           </div>
 
           <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-4 space-y-3">

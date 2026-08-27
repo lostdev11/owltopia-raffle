@@ -61,6 +61,7 @@ import {
   raffleUsesFundsEscrow,
   hasExhaustedMinThresholdTimeExtensions,
   raffleAllowsAdminFundsEscrowRefund,
+  raffleSecondRoundEnabled,
 } from '@/lib/raffles/ticket-escrow-policy'
 import {
   getThemeAccentBorderStyle,
@@ -1007,6 +1008,8 @@ export function RaffleDetailClient({
     }
     return Array.from(map.entries()).map(([currency, total]) => ({ currency, total }))
   }, [buyerLegacyRefundEntries, raffle.currency])
+
+  const secondRoundEnabled = raffleSecondRoundEnabled(raffle)
 
   /** Ended, no winner, min threshold not met after max extension — matches server finalize rules. */
   const minThresholdRefundRules = useMemo(() => {
@@ -4081,6 +4084,15 @@ export function RaffleDetailClient({
                         Draw Threshold: {minTickets}
                       </Badge>
                     )}
+                    {!secondRoundEnabled && isActive && minTickets != null && minTickets > 0 && (
+                      <Badge
+                        variant="outline"
+                        className="bg-sky-500/20 border-sky-500 text-sky-400 hover:bg-sky-500/30"
+                        title="This raffle does not get an automatic second selling round if the draw goal is missed at the end time."
+                      >
+                        No second round
+                      </Badge>
+                    )}
                     <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} />
                     {raffle.prize_type === 'nft' && (
                       <Badge
@@ -4326,9 +4338,10 @@ export function RaffleDetailClient({
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-foreground">Enable ticket refunds</p>
                         <p className="text-sm text-muted-foreground mt-1">
-                          The draw minimum was not met after the extended deadline, but this listing has not switched to
-                          refund mode yet. Tap below to update it—then use Claim refund for each of your entries (connect
-                          the wallet you bought with).
+                          The draw minimum was not met
+                          {secondRoundEnabled ? ' after the extended deadline' : ' when Round 1 ended'}, but this
+                          listing has not switched to refund mode yet. Tap below to update it—then use Claim refund for
+                          each of your entries (connect the wallet you bought with).
                         </p>
                       </div>
                     </div>
@@ -4364,8 +4377,9 @@ export function RaffleDetailClient({
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-foreground">Claim your ticket refund</p>
                         <p className="text-sm text-muted-foreground mt-1">
-                          The minimum was not met after the extension. Claim each confirmed payment back from funds escrow.
-                          On mobile, use Wi‑Fi or stable data if the request fails.
+                          The minimum was not met
+                          {secondRoundEnabled ? ' after the extension' : ' when Round 1 ended'}. Claim each confirmed
+                          payment back from funds escrow. On mobile, use Wi‑Fi or stable data if the request fails.
                         </p>
                       </div>
                     </div>

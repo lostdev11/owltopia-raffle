@@ -1,6 +1,7 @@
 /**
  * Regression checks for min-threshold flow: first end misses threshold → one extension (2nd selling round);
  * second end with threshold met → eligible to draw (via canSelectWinner), no extra time gate.
+ * Also covers community-vote optional second round OFF (refunds path without extension).
  *
  * Run: npx --yes tsx scripts/test-min-threshold-second-round.ts
  */
@@ -12,7 +13,10 @@ import {
   isRaffleEligibleToDraw,
   calculateTicketsSold,
 } from '../lib/db/raffles'
-import { hasExhaustedMinThresholdTimeExtensions } from '../lib/raffles/ticket-escrow-policy'
+import {
+  hasExhaustedMinThresholdTimeExtensions,
+  raffleSecondRoundEnabled,
+} from '../lib/raffles/ticket-escrow-policy'
 import { buildMinThresholdMissExtensionPatch } from '../lib/raffles/min-threshold-extension'
 
 function entry(q: number): Entry {
@@ -37,6 +41,7 @@ function baseRaffle(over: Partial<Raffle>): Raffle {
     end_time: end,
     original_end_time: null,
     time_extension_count: 0,
+    second_round_enabled: true,
     min_tickets: 100,
     prize_type: 'crypto',
     status: 'live',
@@ -52,6 +57,7 @@ async function main() {
   assert.equal(isRaffleEligibleToDraw(raffle, entriesLow), false)
   assert.equal(canSelectWinner(raffle, entriesLow), false)
   assert.equal(hasExhaustedMinThresholdTimeExtensions(raffle), false)
+  assert.equal(raffleSecondRoundEnabled(raffle), true)
 
   const patch = buildMinThresholdMissExtensionPatch(raffle)
   assert.equal(patch.time_extension_count, 1)
@@ -77,6 +83,17 @@ async function main() {
   assert.equal(calculateTicketsSold(entriesOk), 100)
   assert.equal(isRaffleEligibleToDraw(afterExtend, entriesOk), true)
   assert.equal(canSelectWinner(afterExtend, entriesOk), true)
+
+  // Legacy / missing field defaults to second round ON
+  const legacyRaffle = baseRaffle({ second_round_enabled: undefined as unknown as boolean })
+  assert.equal(raffleSecondRoundEnabled(legacyRaffle), true)
+  assert.equal(hasExhaustedMinThresholdTimeExtensions(legacyRaffle), false)
+
+  // Second round OFF: treat extensions as exhausted at Round 1 end (refunds, no extension)
+  const noSecondRound = baseRaffle({ second_round_enabled: false })
+  assert.equal(raffleSecondRoundEnabled(noSecondRound), false)
+  assert.equal(hasExhaustedMinThresholdTimeExtensions(noSecondRound), true)
+  assert.equal(canSelectWinner(noSecondRound, entriesLow), false)
 
   console.log('min-threshold second round checks: OK')
 }
