@@ -278,6 +278,40 @@ assert.equal(wlParsed.phase_schedule.PUBLIC, publicStartIso)
 assert.equal(wlParsed.phase_schedule.WHITELIST, wlStartIso)
 assert.equal(wlParsed.partner_allowlist_phases[0]?.starts_at, wlStartIso)
 
+const phaseLimitPayload = mintDetailsPayloadFromForm(
+  dateForm({
+    total_supply: '100',
+    public_price: '1',
+    wallet_mint_limit: '5',
+    launch_date: localKickoff,
+    public_start: publicStart,
+    wl_enabled: true,
+    allowlist_phases: [
+      {
+        key: 'wl',
+        label: 'Whitelist',
+        start: wlStart,
+        supply: '20',
+        price: '10',
+        wallet_mint_limit: '3',
+      },
+      {
+        key: 'free',
+        label: 'Free Mint',
+        start: leftoverPublic,
+        supply: '5',
+        price: '0',
+        wallet_mint_limit: '1',
+      },
+    ],
+  })
+)
+const phaseLimitParsed = parseMintDetailsConfig(phaseLimitPayload)
+assert.ok(!('error' in phaseLimitParsed), 'per-phase wallet limits should parse')
+assert.equal(phaseLimitParsed.partner_allowlist_phases[0]?.wallet_mint_limit, 3)
+assert.equal(phaseLimitParsed.partner_allowlist_phases[1]?.wallet_mint_limit, 1)
+assert.equal(phaseLimitParsed.wallet_mint_limit, 5)
+
 const wlPatch = buildMintDetailsPatchFromBody(wlPayload, baseLaunch({ creator_wl_enabled: true, wl_supply: 20 }))
 assert.ok(!('error' in wlPatch))
 assert.equal(wlPatch.launch_deadline_at, localIso)

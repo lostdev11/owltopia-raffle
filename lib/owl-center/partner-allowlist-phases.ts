@@ -20,6 +20,11 @@ export type PartnerAllowlistPhase = {
   starts_at: string | null
   supply: number
   price_usdc: number | null
+  /**
+   * Max mints per wallet during this allowlist phase.
+   * Null / omit = inherit launch.wallet_mint_limit (public / legacy default).
+   */
+  wallet_mint_limit?: number | null
 }
 
 export type PartnerAllowlistPhaseFormRow = {
@@ -28,6 +33,29 @@ export type PartnerAllowlistPhaseFormRow = {
   start: string
   supply: string
   price: string
+  /** Empty / omit = inherit public / launch wallet_mint_limit. */
+  wallet_mint_limit?: string
+}
+
+/** Clamp partner per-wallet mint caps (matches launch.wallet_mint_limit bounds). */
+export function clampPartnerWalletMintLimit(raw: number | null | undefined): number {
+  const n = Math.floor(Number(raw))
+  if (!Number.isFinite(n)) return 5
+  return Math.min(50, Math.max(1, n))
+}
+
+/**
+ * Resolve the effective per-wallet cap for an allowlist phase.
+ * Phase override when set; otherwise launch-level (public) wallet_mint_limit.
+ */
+export function resolvePartnerPhaseWalletMintLimit(
+  phase: Pick<PartnerAllowlistPhase, 'wallet_mint_limit'> | null | undefined,
+  launchWalletMintLimit: number | null | undefined
+): number {
+  if (phase?.wallet_mint_limit != null && phase.wallet_mint_limit > 0) {
+    return clampPartnerWalletMintLimit(phase.wallet_mint_limit)
+  }
+  return clampPartnerWalletMintLimit(launchWalletMintLimit)
 }
 
 function parseIsoMs(iso: string | null | undefined): number | null {
@@ -67,12 +95,18 @@ export function parsePartnerAllowlistPhases(raw: unknown): PartnerAllowlistPhase
       priceRaw != null && priceRaw !== '' && Number.isFinite(Number(priceRaw))
         ? Math.max(0, Number(priceRaw))
         : null
+    const limitRaw = row.wallet_mint_limit
+    const wallet_mint_limit =
+      limitRaw != null && limitRaw !== '' && Number.isFinite(Number(limitRaw))
+        ? clampPartnerWalletMintLimit(Number(limitRaw))
+        : null
     out.push({
       key,
       label,
       starts_at: startsMs != null ? new Date(startsMs).toISOString() : null,
       supply,
       price_usdc,
+      wallet_mint_limit,
     })
     if (out.length >= PARTNER_ALLOWLIST_MAX_PHASES) break
   }
@@ -109,6 +143,7 @@ export function resolvePartnerAllowlistPhases(launch: {
       starts_at: launch.phase_schedule?.WHITELIST ?? null,
       supply: Number(launch.wl_supply ?? 0),
       price_usdc: launch.wl_price_usdc ?? null,
+      wallet_mint_limit: null,
     },
   ]
 }
@@ -249,6 +284,7 @@ export function formRowsFromPartnerAllowlistPhases(
     start: p.starts_at ? isoToLocal(p.starts_at) : '',
     supply: p.supply > 0 ? String(p.supply) : '',
     price: p.price_usdc != null ? String(p.price_usdc) : '',
+    wallet_mint_limit: p.wallet_mint_limit != null ? String(p.wallet_mint_limit) : '',
   }))
 }
 
@@ -274,12 +310,18 @@ export function partnerAllowlistPhasesFromFormRows(
       row.price.trim() && Number.isFinite(Number(row.price))
         ? Math.max(0, Number(row.price))
         : null
+    const limitTrim = (row.wallet_mint_limit ?? '').trim()
+    const wallet_mint_limit =
+      limitTrim && Number.isFinite(Number(limitTrim))
+        ? clampPartnerWalletMintLimit(Number(limitTrim))
+        : null
     built.push({
       key,
       label,
       starts_at: startIso,
       supply,
       price_usdc: price,
+      wallet_mint_limit,
     })
   }
   return sortPartnerAllowlistPhases(built)

@@ -64,7 +64,12 @@ function guardFingerprint(input: {
   solPayment: PayOpt
   groups: Array<{
     label: string
-    guards: { startDate: DateOpt; endDate: DateOpt; solPayment: PayOpt }
+    guards: {
+      startDate: DateOpt
+      endDate: DateOpt
+      solPayment: PayOpt
+      mintLimit?: Option<{ id: number; limit: number }> | null | undefined
+    }
   }>
 }): string {
   const limit =
@@ -73,10 +78,13 @@ function guardFingerprint(input: {
       : 'none'
   const groupBits = [...input.groups]
     .sort((a, b) => a.label.localeCompare(b.label))
-    .map(
-      (g) =>
-        `${g.label}|${optionUnixSeconds(g.guards.startDate)}|${optionUnixSeconds(g.guards.endDate)}|${optionSolPayment(g.guards.solPayment)}`
-    )
+    .map((g) => {
+      const ml =
+        g.guards.mintLimit && isSome(g.guards.mintLimit)
+          ? `${g.guards.mintLimit.value.id}:${g.guards.mintLimit.value.limit}`
+          : 'none'
+      return `${g.label}|${optionUnixSeconds(g.guards.startDate)}|${optionUnixSeconds(g.guards.endDate)}|${optionSolPayment(g.guards.solPayment)}|${ml}`
+    })
     .join(';')
   return [
     limit,
@@ -94,17 +102,20 @@ function planMatchesOnChain(current: string, plan: PublicSimpleGuardPlan): boole
     plan.groups.length > 0 || plan.defaultSolLamports <= 0n || !plan.destination
       ? 'none'
       : `${plan.defaultSolLamports}:${plan.destination}`
+  const wantDefaultLimit =
+    plan.groups.length > 0 ? 'none' : `1:${plan.walletMintLimit}`
   const wantGroups = [...plan.groups]
     .sort((a, b) => a.label.localeCompare(b.label))
     .map((g) => {
       const pay =
         g.solLamports > 0n && plan.destination ? `${g.solLamports}:${plan.destination}` : 'none'
-      return `${g.label}|${isoUnixSeconds(g.startDateIso)}|${isoUnixSeconds(g.endDateIso)}|${pay}`
+      const ml = `${g.mintLimitId}:${g.walletMintLimit}`
+      return `${g.label}|${isoUnixSeconds(g.startDateIso)}|${isoUnixSeconds(g.endDateIso)}|${pay}|${ml}`
     })
     .join(';')
 
   return (
-    bits[0] === `1:${plan.walletMintLimit}` &&
+    bits[0] === wantDefaultLimit &&
     bits[1] === wantStart &&
     bits[2] === '' &&
     bits[3] === wantPay &&
@@ -158,6 +169,7 @@ export async function syncPublicSimpleCandyGuards(
             startDate: g.guards.startDate,
             endDate: g.guards.endDate,
             solPayment: g.guards.solPayment,
+            mintLimit: g.guards.mintLimit,
           },
         })),
       })
@@ -202,6 +214,7 @@ export async function syncPublicSimpleCandyGuards(
           startDate: g.guards.startDate,
           endDate: g.guards.endDate,
           solPayment: g.guards.solPayment,
+          mintLimit: g.guards.mintLimit,
         },
       })),
     })

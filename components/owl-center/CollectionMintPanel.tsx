@@ -436,7 +436,7 @@ export function CollectionMintPanel({
           {' · '}
           {platformFeeLabel}
           {' · '}
-          limit {launch.wallet_mint_limit}/wallet/phase
+          limit {elig?.wallet_mint_limit ?? launch.wallet_mint_limit}/wallet
           {elig && connected ? ` · you: ${elig.wallet_minted}/${elig.wallet_mint_limit}` : ''} · {remaining}{' '}
           remaining
         </p>

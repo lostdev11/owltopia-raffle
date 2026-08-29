@@ -61,6 +61,7 @@ function launch(
         starts_at: '2026-08-24T11:48:00.000Z',
         supply: 222,
         price_usdc: 9,
+        wallet_mint_limit: 4,
       },
     ],
     ...overrides,
@@ -93,6 +94,10 @@ async function main() {
   assert.equal(wl.endDateIso, '2026-08-24T13:45:00.000Z')
   assert.equal(pub.startDateIso, '2026-08-24T13:45:00.000Z')
   assert.equal(breppe.plan.destination, DEST)
+  assert.equal(wl.walletMintLimit, 4)
+  assert.equal(wl.mintLimitId, 2)
+  assert.equal(pub.walletMintLimit, 2)
+  assert.equal(pub.mintLimitId, 1)
 
   const publicOnly = await buildPublicSimpleGuardPlan(
     launch({

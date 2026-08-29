@@ -145,8 +145,8 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
           </div>
         ) : launch.wallet_mint_limit > 0 ? (
           <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
-            <dt className="text-[#5C6773]">Per wallet</dt>
-            <dd className="text-[#E8EEF2]">{launch.wallet_mint_limit} max / phase</dd>
+            <dt className="text-[#5C6773]">Public per wallet</dt>
+            <dd className="text-[#E8EEF2]">{launch.wallet_mint_limit} max</dd>
           </div>
         ) : null}
         {launch.mint_mode === 'public_simple' ? (

@@ -9,6 +9,7 @@ import { creatorWlWalletsApiPath } from '@/lib/owl-center/creator-api-paths'
 import { launchHasWhitelistProgram } from '@/lib/owl-center/launch-wl-window'
 import {
   resolvePartnerAllowlistPhases,
+  resolvePartnerPhaseWalletMintLimit,
   type PartnerAllowlistPhase,
 } from '@/lib/owl-center/partner-allowlist-phases'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -32,7 +33,11 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
   const wlEnabled = launchHasWhitelistProgram(launch)
   const [phaseKey, setPhaseKey] = useState(phases[0]?.key ?? 'wl')
   const [text, setText] = useState('')
-  const [allowed, setAllowed] = useState('1')
+  const defaultSpotsForPhase = (key: string) => {
+    const phase = resolvePartnerAllowlistPhases(launch).find((p) => p.key === key)
+    return String(resolvePartnerPhaseWalletMintLimit(phase, launch.wallet_mint_limit))
+  }
+  const [allowed, setAllowed] = useState(() => defaultSpotsForPhase(phases[0]?.key ?? 'wl'))
   const [rows, setRows] = useState<WlRow[]>([])
   const [apiPhases, setApiPhases] = useState<PartnerAllowlistPhase[]>(phases)
   const [loading, setLoading] = useState(false)
@@ -47,7 +52,9 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
     const next = resolvePartnerAllowlistPhases(launch)
     setApiPhases(next)
     if (next.length > 0 && !next.some((p) => p.key === phaseKey)) {
-      setPhaseKey(next[0]!.key)
+      const first = next[0]!.key
+      setPhaseKey(first)
+      setAllowed(String(resolvePartnerPhaseWalletMintLimit(next[0], launch.wallet_mint_limit)))
     }
   }, [launch, phaseKey])
 
@@ -197,7 +204,10 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
               key={p.key}
               type="button"
               disabled={saving}
-              onClick={() => setPhaseKey(p.key)}
+              onClick={() => {
+                setPhaseKey(p.key)
+                setAllowed(String(resolvePartnerPhaseWalletMintLimit(p, launch.wallet_mint_limit)))
+              }}
               className={`min-h-[40px] border px-3 py-2 font-mono text-[10px] uppercase tracking-widest ${
                 phaseKey === p.key
                   ? 'border-[#00FF9C]/50 bg-[#00FF9C]/15 text-[#00FF9C]'

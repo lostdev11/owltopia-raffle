@@ -4,7 +4,10 @@
  */
 
 import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
-import { resolvePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
+import {
+  resolvePartnerAllowlistPhases,
+  resolvePartnerPhaseWalletMintLimit,
+} from '@/lib/owl-center/partner-allowlist-phases'
 import { publicSimpleSolMintPrice } from '@/lib/owl-center/partner-mint-phase-schedule'
 import {
   getPublicSimpleMintOpensAt,
@@ -21,6 +24,14 @@ function clampWalletMintLimit(raw: number | null | undefined): number {
 }
 
 export const PUBLIC_SIMPLE_PUBLIC_GROUP_LABEL = 'pub'
+
+/** Candy Guard mintLimit id for public / default (must match mintArgs on mint). */
+export const PUBLIC_SIMPLE_PUBLIC_MINT_LIMIT_ID = 1
+
+/** mintLimit ids for allowlist groups: 2 + index (stable while phase order is preserved). */
+export function publicSimpleAllowlistMintLimitId(phaseIndex: number): number {
+  return Math.min(255, 2 + Math.max(0, Math.floor(phaseIndex)))
+}
 
 export type PublicSimpleGuardLaunch = Pick<
   OwlCenterLaunchPublic,
@@ -46,9 +57,13 @@ export type PublicSimpleGuardGroupPlan = {
   startDateIso: string | null
   endDateIso: string | null
   solLamports: bigint
+  /** Per-phase on-chain mintLimit (unique id per group). */
+  mintLimitId: number
+  walletMintLimit: number
 }
 
 export type PublicSimpleGuardPlan = {
+  /** Public / default-set wallet mint limit (also used when there are no groups). */
   walletMintLimit: number
   /** Default-set startDate. Null when groups own the windows (must not AND with PUBLIC). */
   defaultStartDateIso: string | null
@@ -179,6 +194,8 @@ export async function buildPublicSimpleGuardPlan(
         startDateIso: parkedStart(phase.starts_at),
         endDateIso: next?.starts_at ?? publicStart,
         solLamports: priced.lamports,
+        mintLimitId: publicSimpleAllowlistMintLimitId(i),
+        walletMintLimit: resolvePartnerPhaseWalletMintLimit(phase, walletMintLimit),
       })
     }
 
@@ -195,6 +212,8 @@ export async function buildPublicSimpleGuardPlan(
       startDateIso: parkedStart(publicStart),
       endDateIso: null,
       solLamports: pubPriced.lamports,
+      mintLimitId: PUBLIC_SIMPLE_PUBLIC_MINT_LIMIT_ID,
+      walletMintLimit,
     })
 
     const paid = groups.some((g) => g.solLamports > 0n)
