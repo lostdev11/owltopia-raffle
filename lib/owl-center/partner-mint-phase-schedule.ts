@@ -9,6 +9,7 @@ import {
   getActivePartnerAllowlistPhase,
   resolveEffectivePartnerAllowlistPhases,
   resolvePartnerAllowlistPhases,
+  resolvePartnerPhaseWalletMintLimit,
   type PartnerAllowlistPhase,
 } from '@/lib/owl-center/partner-allowlist-phases'
 import { formatCreatorMintPriceLabel } from '@/lib/owl-center/platform-mint-fee'
@@ -154,7 +155,7 @@ export function buildPartnerMintPhaseSchedule(
       price_sol: null,
       starts_at,
       ends_at,
-      wallet_mint_limit: null,
+      wallet_mint_limit: launch.wallet_mint_limit > 0 ? launch.wallet_mint_limit : null,
       status,
       is_active: status === 'live' && !terminal,
     })
@@ -170,6 +171,7 @@ export function buildPartnerMintPhaseSchedule(
     const ends_at = next?.starts_at ?? publicStarts
     const status = rowStatus(phase.starts_at, ends_at, nowMs, terminal)
     const is_active = !terminal && activeAllowlist?.key === phase.key
+    const phaseLimit = resolvePartnerPhaseWalletMintLimit(phase, launch.wallet_mint_limit)
     rows.push({
       key: phase.key,
       label: phase.label,
@@ -179,7 +181,7 @@ export function buildPartnerMintPhaseSchedule(
       price_sol: null,
       starts_at: phase.starts_at,
       ends_at,
-      wallet_mint_limit: launch.wallet_mint_limit > 0 ? launch.wallet_mint_limit : null,
+      wallet_mint_limit: phaseLimit > 0 ? phaseLimit : null,
       status: is_active ? 'live' : status,
       is_active,
     })

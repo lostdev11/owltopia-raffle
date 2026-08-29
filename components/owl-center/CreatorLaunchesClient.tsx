@@ -153,7 +153,7 @@ export function CreatorLaunchesClient() {
                 <div>
                   <p className="font-display text-xl text-[#F4FBF8]">{l.name}</p>
                   <p className="mt-1 font-mono text-xs leading-relaxed text-[#5C6773]">
-                    {l.symbol ?? '—'} · {l.minted_count}/{l.total_supply} minted · {l.wallet_mint_limit}/wallet/phase
+                    {l.symbol ?? '—'} · {l.minted_count}/{l.total_supply} minted · {l.wallet_mint_limit}/wallet public
                     {adminLabels ? <> · slug {l.slug.slice(0, 12)}…</> : null}
                   </p>
                   {!adminLabels && friendly.hint ? (

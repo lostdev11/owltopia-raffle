@@ -63,9 +63,9 @@ function launch(
 > {
   return {
     partner_allowlist_phases: [
-      { key: 'team', label: 'Team', starts_at: past, supply: 10, price_usdc: 0 },
-      { key: 'og', label: 'OG', starts_at: mid, supply: 40, price_usdc: 15 },
-      { key: 'wl', label: 'Whitelist', starts_at: future, supply: 222, price_usdc: 9 },
+      { key: 'team', label: 'Team', starts_at: past, supply: 10, price_usdc: 0, wallet_mint_limit: 1 },
+      { key: 'og', label: 'OG', starts_at: mid, supply: 40, price_usdc: 15, wallet_mint_limit: 2 },
+      { key: 'wl', label: 'Whitelist', starts_at: future, supply: 222, price_usdc: 9, wallet_mint_limit: 3 },
     ],
     creator_wl_enabled: true,
     wl_supply: 272,
@@ -99,9 +99,11 @@ assert.equal(rows[1]!.ends_at, future)
 assert.equal(rows[2]!.key, 'wl')
 assert.equal(rows[2]!.status, 'upcoming')
 assert.equal(rows[2]!.price_usdc, 9)
+assert.equal(rows[2]!.wallet_mint_limit, 3)
 assert.equal(rows[3]!.key, 'public')
 assert.equal(rows[3]!.status, 'upcoming')
 assert.equal(rows[3]!.price_usdc, 25)
+assert.equal(rows[3]!.wallet_mint_limit, 2)
 
 const price = resolvePartnerMintUnitPrice(launch(), now)
 assert.equal(price.from_allowlist, true)
@@ -115,7 +117,7 @@ assert.equal(afterPublic.price_sol, null)
 
 const breppeLike = launch({
   partner_allowlist_phases: [
-    { key: 'wl', label: 'Whitelist', starts_at: future, supply: 222, price_usdc: 9 },
+    { key: 'wl', label: 'Whitelist', starts_at: future, supply: 222, price_usdc: 9, wallet_mint_limit: null },
   ],
   public_supply: 0,
   public_price_usdc: null,
@@ -163,8 +165,8 @@ assert.equal(formatPartnerPhasePriceUsdc(null), 'TBA')
 
 const ends = partnerAllowlistPhaseEndsAt(
   [
-    { key: 'a', label: 'A', starts_at: past, supply: 1, price_usdc: 1 },
-    { key: 'b', label: 'B', starts_at: mid, supply: 1, price_usdc: 2 },
+    { key: 'a', label: 'A', starts_at: past, supply: 1, price_usdc: 1, wallet_mint_limit: null },
+    { key: 'b', label: 'B', starts_at: mid, supply: 1, price_usdc: 2, wallet_mint_limit: null },
   ],
   0,
   later
@@ -190,7 +192,7 @@ const clamped = buildPartnerMintPhaseSchedule(
   launch({
     launch_deadline_at: kickoff,
     partner_allowlist_phases: [
-      { key: 'wl', label: 'Whitelist', starts_at: staleWl, supply: 20, price_usdc: 9 },
+      { key: 'wl', label: 'Whitelist', starts_at: staleWl, supply: 20, price_usdc: 9, wallet_mint_limit: null },
     ],
     phase_schedule: { PUBLIC: '2026-09-05T13:44:00.000Z', WHITELIST: staleWl },
     creator_wl_enabled: true,

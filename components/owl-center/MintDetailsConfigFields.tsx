@@ -199,10 +199,10 @@ export function MintDetailsConfigFields({
 
       <div className="grid gap-3 border border-[#1A222B] bg-[#0F1419]/60 p-4">
         <p className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
-          Per-wallet mint limit
+          Public per-wallet mint limit
         </p>
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-          Max mints per wallet (each phase)
+          Max mints per wallet (public phase)
           <input
             type="number"
             min={1}
@@ -213,9 +213,9 @@ export function MintDetailsConfigFields({
           />
         </label>
         <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
-          Each wallet can mint up to this many NFTs during PUBLIC (and presale / WL when those phases are
-          enabled). Enforced on-chain via Candy Guard mintLimit — changing this after deploy updates the
-          on-chain cap when you save.
+          Each wallet can mint up to this many NFTs during PUBLIC. Allowlist phases set their own
+          per-wallet caps below (Show Advanced). Enforced on-chain via Candy Guard mintLimit —
+          changing this after deploy updates the on-chain cap when you save.
         </p>
       </div>
 
@@ -356,6 +356,7 @@ export function MintDetailsConfigFields({
                         start: values.wl_start,
                         supply: values.wl_supply,
                         price: values.wl_price,
+                        wallet_mint_limit: values.wallet_mint_limit || '1',
                       } satisfies PartnerAllowlistPhaseFormRow,
                     ]
               onChange({ ...values, wl_enabled: true, allowlist_phases: seed })
@@ -419,6 +420,22 @@ export function MintDetailsConfigFields({
                   className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
                 />
               </label>
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                Max per wallet
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={phase.wallet_mint_limit ?? ''}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = { ...phase, wallet_mint_limit: e.target.value }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  placeholder={values.wallet_mint_limit || '1'}
+                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                />
+              </label>
               <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
                 Phase starts
                 <input
@@ -461,7 +478,14 @@ export function MintDetailsConfigFields({
                   wl_enabled: true,
                   allowlist_phases: [
                     ...values.allowlist_phases,
-                    { key: preset.key, label: preset.label, start: '', supply: '', price: '' },
+                    {
+                      key: preset.key,
+                      label: preset.label,
+                      start: '',
+                      supply: '',
+                      price: '',
+                      wallet_mint_limit: values.wallet_mint_limit || '1',
+                    },
                   ],
                 })
               }}
@@ -471,8 +495,9 @@ export function MintDetailsConfigFields({
           ) : null}
           <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
             Set Public start above so the last allowlist window ends when public mint opens. Phase supply is a hard
-            cap (mints stop for that phase when used). Per-phase prices are shown in UI; on-chain Candy Machine price
-            is still the collection mint price unless redeployed with separate guards.
+            cap (mints stop for that phase when used). Max per wallet defaults Spots per wallet when you paste lists
+            below; leave blank to inherit the public per-wallet limit. Per-phase prices are shown in UI; on-chain Candy
+            Machine price updates when guards sync after save.
           </p>
         </div>
       ) : null}

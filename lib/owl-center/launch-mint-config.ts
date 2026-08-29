@@ -400,6 +400,7 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
         starts_at: phase_schedule.WHITELIST ?? null,
         supply: wl_supply,
         price_usdc: wl_price_usdc,
+        wallet_mint_limit: null,
       },
     ]
   }

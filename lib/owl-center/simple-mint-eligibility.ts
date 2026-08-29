@@ -6,6 +6,7 @@ import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { launchScheduledPublicReason } from '@/lib/owl-center/launch-mint-open'
 import { resolvePartnerMintUnitPrice, publicSimpleSolMintLamports } from '@/lib/owl-center/partner-mint-phase-schedule'
+import { resolvePartnerPhaseWalletMintLimit } from '@/lib/owl-center/partner-allowlist-phases'
 import {
   formatAllowlistOpensReason,
   getLaunchActiveAllowlistPhase,
@@ -76,9 +77,14 @@ export async function buildSimpleMintEligibility(
   const onChainSoldOut = onChainRemaining === 0 && dbRemaining > 0
   const wallet = walletRaw?.trim() ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
   const wallet_minted = wallet ? await walletPublicMintCount(launch.id, wallet, mint_network) : 0
-  const walletRemaining = Math.max(0, launch.wallet_mint_limit - wallet_minted)
-  const scheduleClosed = publicSimpleMintClosedInfo(launch)
   const allowlistOpen = isLaunchWhitelistWindowOpen(launch)
+  const activeAllowlistPhase = allowlistOpen ? getLaunchActiveAllowlistPhase(launch) : null
+  const effectiveWalletLimit = allowlistOpen
+    ? resolvePartnerPhaseWalletMintLimit(activeAllowlistPhase, launch.wallet_mint_limit)
+    : Math.max(1, Math.floor(Number(launch.wallet_mint_limit) || 1))
+  // During allowlist, per-wallet progress is WL used_mints (below); public uses mint_events count.
+  const walletRemainingPublic = Math.max(0, effectiveWalletLimit - wallet_minted)
+  const scheduleClosed = publicSimpleMintClosedInfo(launch)
   const mint_window_open = allowlistOpen || scheduleClosed == null
 
   const prices_lamports = await getLaunchPriceLamportsQuotes(launch)
@@ -105,6 +111,7 @@ export async function buildSimpleMintEligibility(
   let reason: string | null = null
   let is_eligible = false
   let max_mintable = 0
+  let reported_wallet_minted = wallet_minted
   let wallet_sol_balance_lamports: string | null = null
   let mint_sol_needed_lamports: string | null = null
 
@@ -158,13 +165,13 @@ export async function buildSimpleMintEligibility(
     reason = launchScheduledPublicReason(launch) ?? 'Public mint is not open yet'
   } else if (!wallet) {
     reason = 'Connect wallet to mint'
-  } else if (walletRemaining <= 0) {
-    reason = `Wallet limit reached (${launch.wallet_mint_limit} per wallet)`
+  } else if (!allowlistOpen && walletRemainingPublic <= 0) {
+    reason = `Wallet limit reached (${effectiveWalletLimit} per wallet)`
   } else {
-    max_mintable = Math.min(walletRemaining, remaining)
+    max_mintable = Math.min(allowlistOpen ? effectiveWalletLimit : walletRemainingPublic, remaining)
 
-    if (isLaunchWhitelistWindowOpen(launch)) {
-      const activePhase = getLaunchActiveAllowlistPhase(launch)
+    if (allowlistOpen) {
+      const activePhase = activeAllowlistPhase
       const phaseKey = activePhase?.key ?? 'wl'
       const phaseSupply = Math.max(0, Math.floor(Number(activePhase?.supply ?? 0) || 0))
       const phaseUsed = await sumLaunchWlPhaseUsedMints(launch.id, phaseKey)
@@ -186,12 +193,17 @@ export async function buildSimpleMintEligibility(
             ? `Wallet is not on the ${activePhase.label} list`
             : 'Wallet is not on this collection whitelist'
         } else {
+          reported_wallet_minted = wlRow.used_mints
+          const phaseWalletRemaining = Math.max(0, effectiveWalletLimit - wlRow.used_mints)
           const wlRemaining = Math.max(0, wlRow.allowed_mints - wlRow.used_mints)
-          if (wlRemaining <= 0) {
+          if (phaseWalletRemaining <= 0) {
+            max_mintable = 0
+            reason = `Wallet limit reached (${effectiveWalletLimit} per wallet for ${activePhase?.label ?? 'this phase'})`
+          } else if (wlRemaining <= 0) {
             max_mintable = 0
             reason = `${activePhase?.label ?? 'Whitelist'} mint allocation exhausted`
           } else {
-            max_mintable = Math.min(max_mintable, wlRemaining, phaseRemaining)
+            max_mintable = Math.min(max_mintable, wlRemaining, phaseWalletRemaining, phaseRemaining)
           }
         }
       }
@@ -224,8 +236,8 @@ export async function buildSimpleMintEligibility(
     is_eligible,
     max_mintable,
     reason,
-    wallet_minted,
-    wallet_mint_limit: launch.wallet_mint_limit,
+    wallet_minted: reported_wallet_minted,
+    wallet_mint_limit: effectiveWalletLimit,
     unit_lamports_estimate,
     sol_usd_price: null,
     price_usdc,

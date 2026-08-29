@@ -2,13 +2,14 @@ import { dateTime, lamports, none, publicKey, some, sol } from '@metaplex-founda
 import type { DefaultGuardSetArgs } from '@metaplex-foundation/mpl-core-candy-machine'
 
 import type { PublicSimpleGuardPlan } from '@/lib/owl-center/public-simple-guard-plan'
+import { PUBLIC_SIMPLE_PUBLIC_MINT_LIMIT_ID } from '@/lib/owl-center/public-simple-guard-plan'
 import {
   resolvePublicSimpleGuardStartDateIso,
   type PublicSimpleMintWindowLaunch,
 } from '@/lib/owl-center/phase-schedule'
 
-/** Candy Guard mintLimit id for public_simple (must match mintArgs on mint). */
-export const PUBLIC_SIMPLE_MINT_LIMIT_ID = 1
+/** @deprecated Prefer PUBLIC_SIMPLE_PUBLIC_MINT_LIMIT_ID — kept for existing imports. */
+export const PUBLIC_SIMPLE_MINT_LIMIT_ID = PUBLIC_SIMPLE_PUBLIC_MINT_LIMIT_ID
 
 export type PublicSimpleGuardOpts = {
   walletMintLimit?: number
@@ -51,28 +52,42 @@ function endDateGuard(iso: string | null | undefined): DefaultGuardSetArgs['endD
   return endDateIso ? some({ date: dateTime(endDateIso) }) : none()
 }
 
-function botTaxAndMintLimit(limit: number) {
+function mintLimitGuard(id: number, limit: number): DefaultGuardSetArgs['mintLimit'] {
+  return some({ id, limit })
+}
+
+function botTaxOnly() {
   return {
     botTax: some({ lamports: sol(0.001), lastInstruction: false }),
-    mintLimit: some({ id: PUBLIC_SIMPLE_MINT_LIMIT_ID, limit }),
   }
 }
 
-/** Default Candy Guard set (shared mintLimit / botTax; price lives on groups when present). */
+function botTaxAndMintLimit(limit: number) {
+  return {
+    ...botTaxOnly(),
+    mintLimit: mintLimitGuard(PUBLIC_SIMPLE_MINT_LIMIT_ID, limit),
+  }
+}
+
+/**
+ * Default Candy Guard set.
+ * With phase groups: botTax only — each group carries its own mintLimit / price / window.
+ * Without groups: botTax + shared mintLimit + startDate + solPayment on default.
+ */
 export function publicSimpleCandyGuardUmiGuardsFromPlan(
   plan: PublicSimpleGuardPlan
 ): Partial<DefaultGuardSetArgs> {
-  const shared = botTaxAndMintLimit(plan.walletMintLimit)
   if (plan.groups.length > 0) {
     return {
-      ...shared,
+      ...botTaxOnly(),
+      mintLimit: none(),
       startDate: none(),
       endDate: none(),
       solPayment: none(),
     }
   }
   return {
-    ...shared,
+    ...botTaxAndMintLimit(plan.walletMintLimit),
     startDate: startDateGuard(plan.defaultStartDateIso),
     endDate: none(),
     solPayment: solPaymentGuard(plan.defaultSolLamports, plan.destination),
@@ -88,6 +103,7 @@ export function publicSimpleCandyGuardUmiGroupsFromPlan(
       startDate: startDateGuard(group.startDateIso),
       endDate: endDateGuard(group.endDateIso),
       solPayment: solPaymentGuard(group.solLamports, plan.destination),
+      mintLimit: mintLimitGuard(group.mintLimitId, group.walletMintLimit),
     },
   }))
 }
@@ -124,17 +140,17 @@ function sugarDate(iso: string | null | undefined) {
 
 /** Sugar CLI config.json guards. */
 export function publicSimpleSugarGuardsConfigFromPlan(plan: PublicSimpleGuardPlan) {
-  const defaultGuards: Record<string, unknown> = {
-    botTax: {
-      value: 0.001,
-      lastInstruction: false,
-    },
-    mintLimit: {
-      id: PUBLIC_SIMPLE_MINT_LIMIT_ID,
-      limit: plan.walletMintLimit,
-    },
-  }
   if (plan.groups.length === 0) {
+    const defaultGuards: Record<string, unknown> = {
+      botTax: {
+        value: 0.001,
+        lastInstruction: false,
+      },
+      mintLimit: {
+        id: PUBLIC_SIMPLE_MINT_LIMIT_ID,
+        limit: plan.walletMintLimit,
+      },
+    }
     const start = sugarDate(plan.defaultStartDateIso)
     if (start) defaultGuards.startDate = start
     const pay = sugarSolPayment(plan.defaultSolLamports, plan.destination)
@@ -142,9 +158,21 @@ export function publicSimpleSugarGuardsConfigFromPlan(plan: PublicSimpleGuardPla
     return { default: defaultGuards }
   }
 
+  const defaultGuards: Record<string, unknown> = {
+    botTax: {
+      value: 0.001,
+      lastInstruction: false,
+    },
+  }
+
   const groups: Record<string, { guards: Record<string, unknown> }> = {}
   for (const group of plan.groups) {
-    const guards: Record<string, unknown> = {}
+    const guards: Record<string, unknown> = {
+      mintLimit: {
+        id: group.mintLimitId,
+        limit: group.walletMintLimit,
+      },
+    }
     const start = sugarDate(group.startDateIso)
     if (start) guards.startDate = start
     const end = sugarDate(group.endDateIso)

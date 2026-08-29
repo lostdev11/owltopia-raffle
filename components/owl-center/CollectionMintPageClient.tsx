@@ -103,7 +103,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
       {canEditMintSettings ? (
         <p className="mb-6 break-words rounded border border-[#1A222B] bg-[#0F1419]/80 px-4 py-3 font-mono text-xs leading-relaxed text-[#9BA8B4]">
           Per-wallet cap:{' '}
-          <span className="text-[#E8EEF2]">{launch.wallet_mint_limit} max per phase</span>
+          <span className="text-[#E8EEF2]">{launch.wallet_mint_limit} max (public)</span>
           {' · '}
           <Link href={`/owl-center/my-launches/${launch.id}/mint-details`} className="text-[#00FF9C] hover:underline">
             Edit mint settings
