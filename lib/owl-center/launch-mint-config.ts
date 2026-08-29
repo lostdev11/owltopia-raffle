@@ -7,6 +7,7 @@ import {
   partnerAllowlistPhasesFromFormRows,
   partnerAllowlistPrimaryPriceUsdc,
   partnerAllowlistTotalSupply,
+  partnerPhasePriceSol,
   resolveEffectiveAllowlistStartsAt,
   resolvePartnerAllowlistPhases,
   type PartnerAllowlistPhase,
@@ -251,7 +252,12 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
     // Form rows use {start,price}; stored rows use {starts_at,price_usdc}
     const looksLikeForm =
       rawRows.length > 0 &&
-      rawRows.some((r) => r && typeof r === 'object' && ('start' in (r as object) || 'price' in (r as object)))
+      rawRows.some(
+        (r) =>
+          r &&
+          typeof r === 'object' &&
+          ('start' in (r as object) || 'price' in (r as object) || 'price_currency' in (r as object))
+      )
     if (looksLikeForm) {
       const parsedPhases = partnerAllowlistPhasesFromFormRows(
         rawRows as PartnerAllowlistPhaseFormRow[],
@@ -384,10 +390,11 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
         ? wl_price
         : null
 
-  // If multi-phase had no prices but legacy wl_price was sent, keep it on first phase.
+  // If multi-phase had no USDC prices but legacy wl_price was sent, keep it on first
+  // phase only when that phase is not SOL-priced.
   if (partner_allowlist_phases.length > 0 && multiPrice == null && wl_price != null) {
     partner_allowlist_phases = partner_allowlist_phases.map((p, i) =>
-      i === 0 ? { ...p, price_usdc: wl_price } : p
+      i === 0 && partnerPhasePriceSol(p) == null ? { ...p, price_usdc: wl_price } : p
     )
   }
 
@@ -400,6 +407,7 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
         starts_at: phase_schedule.WHITELIST ?? null,
         supply: wl_supply,
         price_usdc: wl_price_usdc,
+        price_sol: null,
         wallet_mint_limit: null,
       },
     ]
@@ -532,11 +540,13 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
     : {}
 
   const wlPrice =
-    first?.price.trim()
-      ? Number(first.price)
-      : values.wl_price.trim()
-        ? Number(values.wl_price)
-        : null
+    first?.price_currency === 'SOL'
+      ? null
+      : first?.price.trim()
+        ? Number(first.price)
+        : values.wl_price.trim()
+          ? Number(values.wl_price)
+          : null
 
   return {
     total_supply: Number(values.total_supply),

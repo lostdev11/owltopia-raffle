@@ -92,7 +92,9 @@ export async function buildSimpleMintEligibility(
   const price_usdc = unitPrice.price_usdc
   let unit_lamports_estimate: string | null = prices_lamports.public
   if (unitPrice.from_allowlist) {
-    if (price_usdc != null && price_usdc > 0) {
+    if (unitPrice.price_sol != null && unitPrice.price_sol > 0) {
+      unit_lamports_estimate = String(Math.round(unitPrice.price_sol * 1_000_000_000))
+    } else if (price_usdc != null && price_usdc > 0) {
       const q = await getOptionalLamportsQuoteForUsdc(price_usdc)
       unit_lamports_estimate = q ? q.unitLamports.toString() : null
     } else {

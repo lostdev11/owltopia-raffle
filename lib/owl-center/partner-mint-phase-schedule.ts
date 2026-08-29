@@ -7,6 +7,7 @@ import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-s
 import { launchHasPresaleProgram } from '@/lib/owl-center/launch-presale'
 import {
   getActivePartnerAllowlistPhase,
+  partnerPhasePriceSol,
   resolveEffectivePartnerAllowlistPhases,
   resolvePartnerAllowlistPhases,
   resolvePartnerPhaseWalletMintLimit,
@@ -94,6 +95,16 @@ export function resolvePartnerMintUnitPrice(
 ): PartnerMintPricePick {
   const active = getActivePartnerAllowlistPhase(launch, nowMs)
   if (active) {
+    const price_sol = partnerPhasePriceSol(active)
+    if (price_sol != null) {
+      return {
+        price_usdc: null,
+        from_allowlist: true,
+        allowlist_key: active.key,
+        allowlist_label: active.label,
+        price_sol,
+      }
+    }
     return {
       price_usdc: active.price_usdc ?? launch.wl_price_usdc ?? launch.public_price_usdc,
       from_allowlist: true,
@@ -177,8 +188,8 @@ export function buildPartnerMintPhaseSchedule(
       label: phase.label,
       kind: 'allowlist',
       supply: phase.supply,
-      price_usdc: phase.price_usdc,
-      price_sol: null,
+      price_usdc: partnerPhasePriceSol(phase) != null ? null : phase.price_usdc,
+      price_sol: partnerPhasePriceSol(phase),
       starts_at: phase.starts_at,
       ends_at,
       wallet_mint_limit: phaseLimit > 0 ? phaseLimit : null,
@@ -269,13 +280,20 @@ export function publicSimpleSettlementLabel(
     Partial<Pick<OwlCenterLaunchPublic, 'partner_allowlist_phases' | 'wl_supply'>>
 ): string {
   const solPublic = publicSimpleSolMintPrice(launch)
-  const hasWl =
-    launch.wl_price_usdc != null ||
-    Boolean(launch.creator_wl_enabled) ||
-    (launch.wl_supply ?? 0) > 0 ||
-    (launch.partner_allowlist_phases?.length ?? 0) > 0
-  if (solPublic != null && hasWl) return 'WL in USDC · public in SOL'
+  const phases = resolvePartnerAllowlistPhases(launch)
+  const hasSolAllowlist = phases.some((p) => partnerPhasePriceSol(p) != null)
+  const hasUsdcAllowlist =
+    phases.some((p) => partnerPhasePriceSol(p) == null && p.price_usdc != null) ||
+    (phases.length === 0 &&
+      (launch.wl_price_usdc != null ||
+        Boolean(launch.creator_wl_enabled) ||
+        (launch.wl_supply ?? 0) > 0))
+  if (solPublic != null && hasSolAllowlist && hasUsdcAllowlist) return 'Allowlist SOL/USDC · public in SOL'
+  if (solPublic != null && hasSolAllowlist) return 'SOL mint price'
+  if (solPublic != null && hasUsdcAllowlist) return 'WL in USDC · public in SOL'
   if (solPublic != null) return 'SOL mint price'
+  if (hasSolAllowlist && hasUsdcAllowlist) return 'Allowlist SOL/USDC · pay in SOL'
+  if (hasSolAllowlist) return 'Allowlist in SOL'
   return 'USDC price · pay in SOL'
 }
 

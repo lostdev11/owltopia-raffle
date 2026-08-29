@@ -356,6 +356,7 @@ export function MintDetailsConfigFields({
                         start: values.wl_start,
                         supply: values.wl_supply,
                         price: values.wl_price,
+                        price_currency: 'USDC',
                         wallet_mint_limit: values.wallet_mint_limit || '1',
                       } satisfies PartnerAllowlistPhaseFormRow,
                     ]
@@ -405,7 +406,25 @@ export function MintDetailsConfigFields({
                 />
               </label>
               <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-                Price (USDC)
+                Currency
+                <select
+                  value={phase.price_currency === 'SOL' ? 'SOL' : 'USDC'}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = {
+                      ...phase,
+                      price_currency: e.target.value === 'SOL' ? 'SOL' : 'USDC',
+                    }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                >
+                  <option value="USDC">USDC (pay in SOL · live rate)</option>
+                  <option value="SOL">SOL (fixed)</option>
+                </select>
+              </label>
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                {phase.price_currency === 'SOL' ? 'Price (SOL)' : 'Price (USDC)'}
                 <input
                   type="number"
                   step="any"
@@ -416,7 +435,7 @@ export function MintDetailsConfigFields({
                     next[idx] = { ...phase, price: e.target.value }
                     onChange({ ...values, allowlist_phases: next, wl_enabled: true })
                   }}
-                  placeholder="30"
+                  placeholder={phase.price_currency === 'SOL' ? '0.12' : '9'}
                   className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
                 />
               </label>
@@ -484,6 +503,7 @@ export function MintDetailsConfigFields({
                       start: '',
                       supply: '',
                       price: '',
+                      price_currency: 'USDC',
                       wallet_mint_limit: values.wallet_mint_limit || '1',
                     },
                   ],
@@ -496,8 +516,8 @@ export function MintDetailsConfigFields({
           <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
             Set Public start above so the last allowlist window ends when public mint opens. Phase supply is a hard
             cap (mints stop for that phase when used). Max per wallet defaults Spots per wallet when you paste lists
-            below; leave blank to inherit the public per-wallet limit. Per-phase prices are shown in UI; on-chain Candy
-            Machine price updates when guards sync after save.
+            below; leave blank to inherit the public per-wallet limit. Price currency: USDC is re-quoted to SOL as the
+            market moves; SOL stays fixed on-chain (same as public SOL mint).
           </p>
         </div>
       ) : null}
