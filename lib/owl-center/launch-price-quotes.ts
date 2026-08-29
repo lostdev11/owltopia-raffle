@@ -2,7 +2,10 @@ import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { formatCreatorMintPriceLabel } from '@/lib/owl-center/platform-mint-fee'
 import { launchHasPresaleProgram } from '@/lib/owl-center/launch-presale'
 import { formatPhasePriceSol } from '@/lib/owl-center/format-phase-price-sol'
-import { resolvePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
+import {
+  partnerPhasePriceSol,
+  resolvePartnerAllowlistPhases,
+} from '@/lib/owl-center/partner-allowlist-phases'
 import { publicSimpleSolMintLamports, publicSimpleSolMintPrice } from '@/lib/owl-center/partner-mint-phase-schedule'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
@@ -23,8 +26,11 @@ export type LaunchMintPriceDisplay = {
 /** Live SOL lamports quotes for mint-time prices (WL / public). Presale redemption is free when presale is on. */
 export async function getLaunchPriceLamportsQuotes(launch: OwlCenterLaunchPublic): Promise<LaunchPriceQuotes> {
   const allowlists = resolvePartnerAllowlistPhases(launch)
+  const solAllowlist = allowlists.map((p) => partnerPhasePriceSol(p)).find((s) => s != null && s > 0)
   const wlUsdc =
-    allowlists.find((p) => p.price_usdc != null && p.price_usdc > 0)?.price_usdc ?? launch.wl_price_usdc
+    solAllowlist != null
+      ? null
+      : allowlists.find((p) => p.price_usdc != null && p.price_usdc > 0)?.price_usdc ?? launch.wl_price_usdc
   const publicUsdc = launch.public_price_usdc
   const solPublicLamports = publicSimpleSolMintLamports(launch)
 
@@ -35,9 +41,12 @@ export async function getLaunchPriceLamportsQuotes(launch: OwlCenterLaunchPublic
     publicUsdc != null ? getOptionalLamportsQuoteForUsdc(publicUsdc) : Promise.resolve(null),
   ])
 
+  const wlFixedLamports =
+    solAllowlist != null ? String(Math.round(solAllowlist * 1_000_000_000)) : null
+
   return {
     presale: null,
-    whitelist: whitelist ? whitelist.unitLamports.toString() : null,
+    whitelist: whitelist ? whitelist.unitLamports.toString() : wlFixedLamports,
     public: pub ? pub.unitLamports.toString() : solPublicLamports,
   }
 }
@@ -52,6 +61,18 @@ async function formatUsdcPhasePrice(price_usdc: number | null): Promise<string |
   return `$${price_usdc} USDC`
 }
 
+function formatAllowlistPhasePrice(phase: {
+  price_usdc: number | null
+  price_sol?: number | null
+}): Promise<string | null> | string | null {
+  const sol = partnerPhasePriceSol(phase)
+  if (sol != null) {
+    if (sol <= 0) return 'Free'
+    return formatCreatorMintPriceLabel(sol, 'SOL')
+  }
+  return formatUsdcPhasePrice(phase.price_usdc)
+}
+
 /** Card-friendly price strings for Mint details section. */
 export async function getLaunchMintPriceDisplay(launch: OwlCenterLaunchPublic): Promise<LaunchMintPriceDisplay> {
   const presale = launchHasPresaleProgram(launch) ? 'Free' : null
@@ -59,7 +80,7 @@ export async function getLaunchMintPriceDisplay(launch: OwlCenterLaunchPublic): 
 
   const allowlist_phases: Array<{ label: string; price: string }> = []
   for (const phase of allowlists) {
-    const label = await formatUsdcPhasePrice(phase.price_usdc)
+    const label = await formatAllowlistPhasePrice(phase)
     allowlist_phases.push({
       label: phase.label,
       price: label ?? 'TBA',

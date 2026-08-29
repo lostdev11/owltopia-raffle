@@ -105,6 +105,50 @@ assert.equal(rows[3]!.status, 'upcoming')
 assert.equal(rows[3]!.price_usdc, 25)
 assert.equal(rows[3]!.wallet_mint_limit, 2)
 
+const fixedSolRows = buildPartnerMintPhaseSchedule(
+  launch({
+    partner_allowlist_phases: [
+      {
+        key: 'wl',
+        label: 'Whitelist',
+        starts_at: past,
+        supply: 222,
+        price_usdc: null,
+        price_sol: 0.12,
+        wallet_mint_limit: 2,
+      },
+    ],
+    public_price_usdc: null,
+    creator_mint_price: 0.15,
+    creator_mint_currency: 'SOL',
+    wl_supply: 222,
+  }),
+  now
+)
+assert.equal(fixedSolRows[0]!.price_sol, 0.12)
+assert.equal(fixedSolRows[0]!.price_usdc, null)
+assert.equal(fixedSolRows[1]!.price_sol, 0.15)
+assert.equal(publicSimpleSettlementLabel(launch({
+  partner_allowlist_phases: [
+    { key: 'wl', label: 'Whitelist', starts_at: past, supply: 10, price_usdc: null, price_sol: 0.12 },
+  ],
+  public_price_usdc: null,
+  creator_mint_price: 0.15,
+  creator_mint_currency: 'SOL',
+})), 'SOL mint price')
+const liveSolPrice = resolvePartnerMintUnitPrice(
+  launch({
+    partner_allowlist_phases: [
+      { key: 'wl', label: 'Whitelist', starts_at: past, supply: 10, price_usdc: null, price_sol: 0.12 },
+    ],
+    phase_schedule: { PUBLIC: later },
+  }),
+  now
+)
+assert.equal(liveSolPrice.from_allowlist, true)
+assert.equal(liveSolPrice.price_sol, 0.12)
+assert.equal(liveSolPrice.price_usdc, null)
+
 const price = resolvePartnerMintUnitPrice(launch(), now)
 assert.equal(price.from_allowlist, true)
 assert.equal(price.price_usdc, 15)
