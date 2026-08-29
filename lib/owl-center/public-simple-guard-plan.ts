@@ -7,6 +7,7 @@ import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import {
   resolvePartnerAllowlistPhases,
   resolvePartnerPhaseWalletMintLimit,
+  partnerPhasePriceSol,
 } from '@/lib/owl-center/partner-allowlist-phases'
 import { publicSimpleSolMintPrice } from '@/lib/owl-center/partner-mint-phase-schedule'
 import {
@@ -183,7 +184,7 @@ export async function buildPublicSimpleGuardPlan(
       const next = allowlists[i + 1]
       const priced = await resolvePhaseLamports({
         priceUsdc: phase.price_usdc,
-        priceSol: null,
+        priceSol: partnerPhasePriceSol(phase),
         quoteUsdc,
         label: phase.label,
       })

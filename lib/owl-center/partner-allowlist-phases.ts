@@ -19,7 +19,16 @@ export type PartnerAllowlistPhase = {
   /** ISO start time; required for the phase to open. */
   starts_at: string | null
   supply: number
+  /**
+   * USDC notional — paid in SOL at live USDC→SOL rate (re-pegged by guard sync cron).
+   * Mutually exclusive with `price_sol` when > 0.
+   */
   price_usdc: number | null
+  /**
+   * Fixed SOL mint price for this phase (does not move when SOL/USD changes).
+   * When set (> 0), takes precedence over `price_usdc`.
+   */
+  price_sol?: number | null
   /**
    * Max mints per wallet during this allowlist phase.
    * Null / omit = inherit launch.wallet_mint_limit (public / legacy default).
@@ -32,9 +41,28 @@ export type PartnerAllowlistPhaseFormRow = {
   label: string
   start: string
   supply: string
+  /** Amount in `price_currency`. */
   price: string
+  /** SOL = fixed on-chain lamports; USDC = live quote → SOL. */
+  price_currency?: 'SOL' | 'USDC'
   /** Empty / omit = inherit public / launch wallet_mint_limit. */
   wallet_mint_limit?: string
+}
+
+/** True when this phase uses a fixed SOL mint price (not USDC→SOL). */
+export function partnerPhaseHasFixedSolPrice(
+  phase: Pick<PartnerAllowlistPhase, 'price_sol' | 'price_usdc'> | null | undefined
+): boolean {
+  const sol = Number(phase?.price_sol)
+  return Number.isFinite(sol) && sol > 0
+}
+
+/** Effective SOL amount when phase is SOL-priced; null otherwise. */
+export function partnerPhasePriceSol(
+  phase: Pick<PartnerAllowlistPhase, 'price_sol' | 'price_usdc'> | null | undefined
+): number | null {
+  if (!partnerPhaseHasFixedSolPrice(phase)) return null
+  return Math.max(0, Number(phase!.price_sol))
 }
 
 /** Clamp partner per-wallet mint caps (matches launch.wallet_mint_limit bounds). */
@@ -90,11 +118,18 @@ export function parsePartnerAllowlistPhases(raw: unknown): PartnerAllowlistPhase
     const startsRaw = typeof row.starts_at === 'string' ? row.starts_at : null
     const startsMs = parseIsoMs(startsRaw)
     const supply = Math.max(0, Math.floor(Number(row.supply ?? 0) || 0))
+    const solRaw = row.price_sol
+    const price_sol =
+      solRaw != null && solRaw !== '' && Number.isFinite(Number(solRaw)) && Number(solRaw) > 0
+        ? Math.max(0, Number(solRaw))
+        : null
     const priceRaw = row.price_usdc
     const price_usdc =
-      priceRaw != null && priceRaw !== '' && Number.isFinite(Number(priceRaw))
-        ? Math.max(0, Number(priceRaw))
-        : null
+      price_sol != null
+        ? null
+        : priceRaw != null && priceRaw !== '' && Number.isFinite(Number(priceRaw))
+          ? Math.max(0, Number(priceRaw))
+          : null
     const limitRaw = row.wallet_mint_limit
     const wallet_mint_limit =
       limitRaw != null && limitRaw !== '' && Number.isFinite(Number(limitRaw))
@@ -106,6 +141,7 @@ export function parsePartnerAllowlistPhases(raw: unknown): PartnerAllowlistPhase
       starts_at: startsMs != null ? new Date(startsMs).toISOString() : null,
       supply,
       price_usdc,
+      price_sol,
       wallet_mint_limit,
     })
     if (out.length >= PARTNER_ALLOWLIST_MAX_PHASES) break
@@ -143,6 +179,7 @@ export function resolvePartnerAllowlistPhases(launch: {
       starts_at: launch.phase_schedule?.WHITELIST ?? null,
       supply: Number(launch.wl_supply ?? 0),
       price_usdc: launch.wl_price_usdc ?? null,
+      price_sol: null,
       wallet_mint_limit: null,
     },
   ]
@@ -205,9 +242,10 @@ export function partnerAllowlistTotalSupply(phases: PartnerAllowlistPhase[]): nu
   return phases.reduce((s, p) => s + Math.max(0, p.supply), 0)
 }
 
-/** Price for the active allowlist phase (first non-null among sorted, or active). */
+/** Price for the active allowlist phase (first non-null USDC among sorted, or active). */
 export function partnerAllowlistPrimaryPriceUsdc(phases: PartnerAllowlistPhase[]): number | null {
   for (const p of sortPartnerAllowlistPhases(phases)) {
+    if (partnerPhasePriceSol(p) != null) continue
     if (p.price_usdc != null) return p.price_usdc
   }
   return null
@@ -278,14 +316,23 @@ export function formRowsFromPartnerAllowlistPhases(
   phases: PartnerAllowlistPhase[],
   isoToLocal: (iso: string) => string
 ): PartnerAllowlistPhaseFormRow[] {
-  return phases.map((p) => ({
-    key: p.key,
-    label: p.label,
-    start: p.starts_at ? isoToLocal(p.starts_at) : '',
-    supply: p.supply > 0 ? String(p.supply) : '',
-    price: p.price_usdc != null ? String(p.price_usdc) : '',
-    wallet_mint_limit: p.wallet_mint_limit != null ? String(p.wallet_mint_limit) : '',
-  }))
+  return phases.map((p) => {
+    const sol = partnerPhasePriceSol(p)
+    return {
+      key: p.key,
+      label: p.label,
+      start: p.starts_at ? isoToLocal(p.starts_at) : '',
+      supply: p.supply > 0 ? String(p.supply) : '',
+      price:
+        sol != null
+          ? String(sol)
+          : p.price_usdc != null
+            ? String(p.price_usdc)
+            : '',
+      price_currency: sol != null ? 'SOL' : 'USDC',
+      wallet_mint_limit: p.wallet_mint_limit != null ? String(p.wallet_mint_limit) : '',
+    }
+  })
 }
 
 export function partnerAllowlistPhasesFromFormRows(
@@ -306,10 +353,18 @@ export function partnerAllowlistPhasesFromFormRows(
     const startIso = row.start.trim() ? datetimeLocalToIso(row.start.trim()) : null
     if (row.start.trim() && !startIso) return { error: `Invalid start time for ${label}` }
     const supply = Math.max(0, Math.floor(Number(row.supply) || 0))
-    const price =
+    const currency = row.price_currency === 'SOL' ? 'SOL' : 'USDC'
+    const amount =
       row.price.trim() && Number.isFinite(Number(row.price))
         ? Math.max(0, Number(row.price))
         : null
+    const price_sol = currency === 'SOL' && amount != null && amount > 0 ? amount : null
+    const price_usdc =
+      currency === 'USDC' && amount != null
+        ? amount
+        : currency === 'SOL' && amount === 0
+          ? 0
+          : null
     const limitTrim = (row.wallet_mint_limit ?? '').trim()
     const wallet_mint_limit =
       limitTrim && Number.isFinite(Number(limitTrim))
@@ -320,7 +375,8 @@ export function partnerAllowlistPhasesFromFormRows(
       label,
       starts_at: startIso,
       supply,
-      price_usdc: price,
+      price_usdc,
+      price_sol,
       wallet_mint_limit,
     })
   }

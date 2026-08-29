@@ -312,6 +312,34 @@ assert.equal(phaseLimitParsed.partner_allowlist_phases[0]?.wallet_mint_limit, 3)
 assert.equal(phaseLimitParsed.partner_allowlist_phases[1]?.wallet_mint_limit, 1)
 assert.equal(phaseLimitParsed.wallet_mint_limit, 5)
 
+const solPhasePayload = mintDetailsPayloadFromForm(
+  dateForm({
+    total_supply: '100',
+    public_price: '0.15',
+    currency: 'SOL',
+    wallet_mint_limit: '2',
+    launch_date: localKickoff,
+    public_start: publicStart,
+    wl_enabled: true,
+    allowlist_phases: [
+      {
+        key: 'wl',
+        label: 'Whitelist',
+        start: wlStart,
+        supply: '222',
+        price: '0.12',
+        price_currency: 'SOL',
+        wallet_mint_limit: '2',
+      },
+    ],
+  })
+)
+const solPhaseParsed = parseMintDetailsConfig(solPhasePayload)
+assert.ok(!('error' in solPhaseParsed), 'fixed SOL allowlist price should parse')
+assert.equal(solPhaseParsed.partner_allowlist_phases[0]?.price_sol, 0.12)
+assert.equal(solPhaseParsed.partner_allowlist_phases[0]?.price_usdc, null)
+assert.equal(solPhaseParsed.wl_price_usdc, null)
+
 const wlPatch = buildMintDetailsPatchFromBody(wlPayload, baseLaunch({ creator_wl_enabled: true, wl_supply: 20 }))
 assert.ok(!('error' in wlPatch))
 assert.equal(wlPatch.launch_deadline_at, localIso)

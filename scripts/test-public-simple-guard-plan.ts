@@ -99,6 +99,28 @@ async function main() {
   assert.equal(pub.walletMintLimit, 2)
   assert.equal(pub.mintLimitId, 1)
 
+  const solWl = await buildPublicSimpleGuardPlan(
+    launch({
+      partner_allowlist_phases: [
+        {
+          key: 'wl',
+          label: 'Whitelist',
+          starts_at: '2026-08-24T11:48:00.000Z',
+          supply: 222,
+          price_usdc: null,
+          price_sol: 0.12,
+        },
+      ],
+      wallet_mint_limit: 2,
+    }),
+    { quoteUsdc }
+  )
+  if (!solWl.ok) throw new Error(solWl.error)
+  const solGroup = solWl.plan.groups.find((g) => g.label === 'wl')
+  assert.ok(solGroup)
+  assert.equal(solGroup.solLamports, 120_000_000n, 'fixed 0.12 SOL must not use USDC quote')
+  assert.equal(solWl.plan.groups.find((g) => g.label === 'pub')?.solLamports, 150_000_000n)
+
   const publicOnly = await buildPublicSimpleGuardPlan(
     launch({
       partner_allowlist_phases: [],
