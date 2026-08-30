@@ -29,6 +29,15 @@ import {
   packDepositDisabledReason,
   packDepositRequirements,
 } from '@/lib/packs/deposit-requirements'
+import {
+  chunkPackDepositBatches,
+  depositPackClassicSplBatch,
+  estimatePackDepositApprovals,
+  PACK_DEPOSIT_MAX_PER_TX,
+  packDepositApprovalGapMs,
+  packDepositNeedsSpecialPath,
+  rewriteOwlSendCopyForPacks,
+} from '@/lib/packs/deposit-nft-batch'
 import { packsNftBlockReason } from '@/lib/packs/inventory-eligibility'
 import { walletNftMintMatches } from '@/lib/raffles/wallet-nft-picker'
 import { depositPrizeNftToEscrowFromWallet } from '@/lib/solana/deposit-prize-nft-to-escrow-wallet'
@@ -261,12 +270,19 @@ export function AdminPacksInventoryForm({
       setFormError('Connect a wallet and configure the packs vault first.')
       return
     }
+    if (!sendTransaction) {
+      setFormError('Your wallet did not expose a transaction sender. Try another wallet.')
+      return
+    }
     setBusy(true)
     setFormError(null)
     setProgress(null)
     const queue = drafts.filter((d) => d.status !== 'registered')
     let registered = 0
     const nextDrafts = [...drafts]
+    const approvalEstimate = estimatePackDepositApprovals(
+      queue.filter((d) => d.status !== 'deposited' || !d.depositSig).map((d) => d.nft)
+    )
 
     const patch = (mint: string, update: Partial<DraftRow>) => {
       const i = nextDrafts.findIndex((d) => walletNftMintMatches(d.nft.mint, mint))
@@ -274,21 +290,41 @@ export function AdminPacksInventoryForm({
       setDrafts([...nextDrafts])
     }
 
-    try {
-      for (let i = 0; i < queue.length; i++) {
-        const row = queue[i]!
-        const floor = parseFloor(row.floor)
-        if (floor == null) {
-          patch(row.nft.mint, {
-            status: 'failed',
-            registerError: `Floor must be ${PACK_NFT_MIN_FAIR_SOL}–${PACK_NFT_MAX_FAIR_SOL} SOL`,
-          })
-          continue
-        }
+    const mintSet = (mints: string[]) => new Set(mints.map((m) => m.trim()))
 
-        let depositSig = row.depositSig
-        if (row.status !== 'deposited' || !depositSig) {
-          setProgress(`Depositing ${i + 1}/${queue.length}: ${row.nft.name || shortenMint(row.nft.mint)}`)
+    try {
+      const needDeposit = queue.filter((d) => d.status !== 'deposited' || !d.depositSig)
+
+      const batches = chunkPackDepositBatches(needDeposit.map((d) => d.nft))
+      let approvalIndex = 0
+
+      for (const batchNfts of batches) {
+        approvalIndex += 1
+        const batchRows = batchNfts
+          .map((nft) => needDeposit.find((d) => walletNftMintMatches(d.nft.mint, nft.mint)))
+          .filter((d): d is DraftRow => d != null)
+
+        // Validate floors before opening the wallet; skip bad floors, deposit the rest.
+        const readyRows: DraftRow[] = []
+        for (const row of batchRows) {
+          if (parseFloor(row.floor) == null) {
+            patch(row.nft.mint, {
+              status: 'failed',
+              registerError: `Floor must be ${PACK_NFT_MIN_FAIR_SOL}–${PACK_NFT_MAX_FAIR_SOL} SOL`,
+            })
+          } else {
+            readyRows.push(row)
+          }
+        }
+        if (readyRows.length === 0) continue
+
+        const special =
+          readyRows.length === 1 && packDepositNeedsSpecialPath(readyRows[0]!.nft)
+        if (special) {
+          const row = readyRows[0]!
+          setProgress(
+            `Depositing ${approvalIndex}/${approvalEstimate}: ${row.nft.name || shortenMint(row.nft.mint)} (1 approval)`
+          )
           const dep = await depositPrizeNftToEscrowFromWallet({
             connection,
             publicKey,
@@ -310,27 +346,122 @@ export function AdminPacksInventoryForm({
               status: 'failed',
               registerError: formatPackDepositError(dep.error),
             })
-            continue
+          } else {
+            patch(row.nft.mint, {
+              status: 'deposited',
+              depositSig: dep.signature,
+              registerError: undefined,
+            })
           }
-          depositSig = dep.signature
-          patch(row.nft.mint, { status: 'deposited', depositSig, registerError: undefined })
+        } else {
+          // Classic SPL: peel until the whole selection is sent (packet-size may shrink).
+          let remaining = [...readyRows]
+          while (remaining.length > 0) {
+            const labels = remaining
+              .slice(0, PACK_DEPOSIT_MAX_PER_TX)
+              .map((r) => r.nft.name || shortenMint(r.nft.mint))
+              .join(', ')
+            setProgress(
+              `Depositing batch ${approvalIndex}/${approvalEstimate}: ${remaining.length} NFT${remaining.length === 1 ? '' : 's'} (${labels}${remaining.length > PACK_DEPOSIT_MAX_PER_TX ? '…' : ''}) — one wallet approval`
+            )
+            const dep = await depositPackClassicSplBatch({
+              connection,
+              owner: publicKey,
+              sendTransaction,
+              walletAdapter: wallet?.adapter ?? null,
+              vaultAddress,
+              nfts: remaining.map((r) => r.nft),
+              onPhase: (phase) => {
+                if (phase === 'approving') {
+                  setProgress(
+                    `Approve in wallet (${remaining.length} NFT${remaining.length === 1 ? '' : 's'} → packs vault)…`
+                  )
+                } else if (phase === 'confirming') {
+                  setProgress('Confirming deposit on-chain…')
+                }
+              },
+            })
+            if (!dep.ok) {
+              const explicit = dep.failedMints
+              const markAll = !explicit || explicit.length === 0
+              const failed = mintSet(explicit ?? [])
+              const nextRemaining: DraftRow[] = []
+              for (const row of remaining) {
+                if (markAll || failed.has(row.nft.mint.trim())) {
+                  patch(row.nft.mint, {
+                    status: 'failed',
+                    registerError: formatPackDepositError(
+                      rewriteOwlSendCopyForPacks(dep.error)
+                    ),
+                  })
+                } else {
+                  nextRemaining.push(row)
+                }
+              }
+              if (markAll || nextRemaining.length === 0) break
+              remaining = nextRemaining
+              approvalIndex += 1
+              await new Promise((r) => setTimeout(r, packDepositApprovalGapMs()))
+              continue
+            }
+
+            const sent = mintSet(dep.sentMints)
+            const nextRemaining: DraftRow[] = []
+            for (const row of remaining) {
+              if (sent.has(row.nft.mint.trim())) {
+                patch(row.nft.mint, {
+                  status: 'deposited',
+                  depositSig: dep.signature,
+                  registerError: undefined,
+                })
+              } else {
+                nextRemaining.push(row)
+              }
+            }
+            remaining = nextRemaining
+            if (remaining.length > 0) {
+              approvalIndex += 1
+              await new Promise((r) => setTimeout(r, packDepositApprovalGapMs()))
+            }
+          }
         }
 
-        setProgress(`Registering ${i + 1}/${queue.length}: ${row.nft.name || shortenMint(row.nft.mint)}`)
+        if (approvalIndex < approvalEstimate) {
+          await new Promise((r) => setTimeout(r, packDepositApprovalGapMs()))
+        }
+      }
+
+      // Register everything that landed in the vault (this run or a prior deposit).
+      const toRegister = nextDrafts.filter((d) => d.status === 'deposited' && d.depositSig)
+      for (const live of toRegister) {
+        const floor = parseFloor(live.floor)
+        if (floor == null) {
+          patch(live.nft.mint, {
+            status: 'failed',
+            registerError: `Floor must be ${PACK_NFT_MIN_FAIR_SOL}–${PACK_NFT_MAX_FAIR_SOL} SOL`,
+          })
+          continue
+        }
+
+        setProgress(`Registering: ${live.nft.name || shortenMint(live.nft.mint)}`)
         try {
           await registerInventoryNft({
-            mint_address: row.nft.mint,
+            mint_address: live.nft.mint,
             fair_value_sol: floor,
-            name: row.nft.name,
-            image_url: row.nft.image,
-            prize_standard: packsPrizeStandardForNft(row.nft),
+            name: live.nft.name,
+            image_url: live.nft.image,
+            prize_standard: packsPrizeStandardForNft(live.nft),
           })
-          patch(row.nft.mint, { status: 'registered', depositSig, registerError: undefined })
+          patch(live.nft.mint, {
+            status: 'registered',
+            depositSig: live.depositSig,
+            registerError: undefined,
+          })
           registered += 1
         } catch (e) {
-          patch(row.nft.mint, {
+          patch(live.nft.mint, {
             status: 'deposited',
-            depositSig,
+            depositSig: live.depositSig,
             registerError: e instanceof Error ? e.message : 'Register failed — retry without sending again',
           })
         }
@@ -353,8 +484,10 @@ export function AdminPacksInventoryForm({
         <h2 className="font-medium">Add NFTs to inventory</h2>
         <p className="text-xs text-muted-foreground">
           Load this wallet, pick NFTs, set a floor price ({PACK_NFT_MIN_FAIR_SOL}–{PACK_NFT_MAX_FAIR_SOL}{' '}
-          SOL; higher floors = rarer odds), then send them to the packs vault. Floor is how we value
-          the NFT for prize odds. Some NFT types (pNFT, frozen, nested) can’t be paid out yet.
+          SOL; higher floors = rarer odds), then send them to the packs vault. Classic SPL NFTs
+          deposit in batches of up to {PACK_DEPOSIT_MAX_PER_TX} per wallet approval (so 10 NFTs ≈ 3
+          approvals). Core / compressed still need one approval each. Floor is how we value the NFT
+          for prize odds. Some NFT types (pNFT, frozen, nested) can’t be paid out yet.
         </p>
       </div>
 
@@ -528,6 +661,12 @@ export function AdminPacksInventoryForm({
           <p className="mt-2 text-xs text-muted-foreground">
             Ready to deposit: {pendingDrafts.length} NFT
             {pendingDrafts.length === 1 ? '' : 's'}
+            {(() => {
+              const needSig = pendingDrafts.filter((d) => d.status !== 'deposited' || !d.depositSig)
+              if (needSig.length === 0) return ' (register only — already on-chain)'
+              const approvals = estimatePackDepositApprovals(needSig.map((d) => d.nft))
+              return ` · ~${approvals} wallet approval${approvals === 1 ? '' : 's'}`
+            })()}
           </p>
         )}
         {depositDisabledReason && (
