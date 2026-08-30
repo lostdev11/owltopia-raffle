@@ -1,14 +1,14 @@
 import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
 
-/** Share of the Gen 1 nest pool allocated to all staked Gen 1 owls (non-1/1). */
+/** Share of the Gen 1 nest pool divided evenly across ALL staked Gen 1 owls (including 1/1s). */
 export const GEN1_REV_SHARE_STANDARD_POOL_FRACTION = 0.9
 
-/** Share of the Gen 1 nest pool allocated to staked Gen 1 1/1 owls. */
+/** Bonus share of the Gen 1 nest pool divided evenly across staked Gen 1 1/1s (on top of the 90%). */
 export const GEN1_REV_SHARE_ONE_OF_ONE_POOL_FRACTION = 0.1
 
 export function genOwlRevShareDistributionHeadline(group: GenOwlStakingGroupKey): string {
   if (group === 'gen1-owl') {
-    return '90% all staked · 10% 1/1 · claim anytime after open'
+    return '90% all staked · 10% 1/1 bonus · claim anytime after open'
   }
   return 'Even split · claim anytime after open'
 }
@@ -19,21 +19,21 @@ export const GEN_OWL_REV_SHARE_SHORT_BLURB =
 
 export function genOwlRevShareDistributionSummary(group: GenOwlStakingGroupKey): string {
   if (group === 'gen1-owl') {
-    return 'Gen 1: 90% split across all nests · 10% across 1/1s.'
+    return 'Gen 1: 90% across all nests · 10% 1/1 bonus (1/1s get both).'
   }
   return 'Gen 2: split evenly across your nests.'
 }
 
 export function genOwlRevShareDistributionDetail(group: GenOwlStakingGroupKey): string {
   if (group === 'gen1-owl') {
-    return 'Gen 1 pool: 90% split evenly across all staked Gen 1 owls; 10% split evenly across staked Gen 1 1/1s. Claims open on the last day of the month (UTC) and stack until you claim.'
+    return 'Gen 1 pool: 90% split evenly across all staked Gen 1 owls; 10% bonus split evenly across staked Gen 1 1/1s (each 1/1 receives both shares). Claims open on the last day of the month (UTC) and stack until you claim.'
   }
   return 'Split evenly across eligible nests at month-end. Claims open on the last day of the month (UTC) and stack until you claim.'
 }
 
 export function genOwlRevShareAdminDistributionNote(group: GenOwlStakingGroupKey): string {
   if (group === 'gen1-owl') {
-    return 'Total SOL/USDC for Gen 1 owl stakers — 90% divided evenly across all staked Gen 1 owls; 10% divided evenly across staked Gen 1 1/1s (90d and 180d tiers combined).'
+    return 'Total SOL/USDC for Gen 1 owl stakers — 90% divided evenly across all staked Gen 1 owls (including 1/1s); 10% bonus divided evenly across staked Gen 1 1/1s (90d and 180d tiers combined).'
   }
   return 'Separate pool for Gen 2 owl stakers — even split across active Gen 2 nests.'
 }

@@ -123,7 +123,7 @@ export function GenOwlRevShareNotice({ groupKey, className, compact = false }: P
         </p>
       ) : groupKey === 'gen1-owl' && preview.gen1_buckets && count > 0 ? (
         <div className="mt-1 space-y-1 text-foreground/90">
-          {preview.gen1_buckets.standard_count > 0 &&
+          {(preview.gen1_buckets.standard_count > 0 || preview.gen1_buckets.one_of_one_count > 0) &&
           (preview.gen1_buckets.standard_per_nest_sol != null ||
             preview.gen1_buckets.standard_per_nest_usdc != null) ? (
             <p>
@@ -142,7 +142,9 @@ export function GenOwlRevShareNotice({ groupKey, className, compact = false }: P
                   {formatGenOwlRevShareUsdc(preview.gen1_buckets.standard_per_nest_usdc)} USDC
                 </span>
               ) : null}{' '}
-              per staked Gen 1 owl ({preview.gen1_buckets.standard_count} today)
+              per staked Gen 1 owl (
+              {preview.gen1_buckets.standard_count + preview.gen1_buckets.one_of_one_count} today ·
+              90% pool)
             </p>
           ) : null}
           {preview.gen1_buckets.one_of_one_count > 0 &&
@@ -164,7 +166,7 @@ export function GenOwlRevShareNotice({ groupKey, className, compact = false }: P
                   {formatGenOwlRevShareUsdc(preview.gen1_buckets.one_of_one_per_nest_usdc)} USDC
                 </span>
               ) : null}{' '}
-              per staked Gen 1 1/1 ({preview.gen1_buckets.one_of_one_count} today)
+              per staked Gen 1 1/1 ({preview.gen1_buckets.one_of_one_count} today · 90% + 10% bonus)
             </p>
           ) : null}
         </div>
@@ -206,7 +208,8 @@ export function GenOwlRevShareAdminPreview({
         isGen1 && preview.gen1_buckets ? (
           <div className="mt-1 space-y-1 text-muted-foreground leading-relaxed">
             <p>
-              Staked Gen 1 owls ({preview.gen1_buckets.standard_count}):{' '}
+              All staked Gen 1 (
+              {preview.gen1_buckets.standard_count + preview.gen1_buckets.one_of_one_count}):{' '}
               {preview.gen1_buckets.standard_per_nest_sol != null ? (
                 <span className="font-semibold tabular-nums text-emerald-400">
                   {formatGenOwlRevShareSol(preview.gen1_buckets.standard_per_nest_sol)} SOL
@@ -222,7 +225,7 @@ export function GenOwlRevShareAdminPreview({
               ) : (
                 <span>— USDC</span>
               )}{' '}
-              each (90% pool)
+              each from 90% pool
             </p>
             <p>
               Staked Gen 1 1/1s ({preview.gen1_buckets.one_of_one_count}):{' '}
@@ -241,12 +244,13 @@ export function GenOwlRevShareAdminPreview({
               ) : (
                 <span>— USDC</span>
               )}{' '}
-              each (10% pool)
+              each (90% share + 10% bonus)
             </p>
           </div>
         ) : isGen1 ? (
           <p className="mt-1 text-muted-foreground leading-relaxed">
-            90% pool split evenly across all staked Gen 1 owls · 10% split evenly across staked Gen 1 1/1s
+            90% pool split evenly across all staked Gen 1 owls · 10% bonus across staked Gen 1 1/1s
+            (1/1s receive both)
             {preview.active_nest_count <= 0 ? ' (no active nests yet)' : null}
           </p>
         ) : (
