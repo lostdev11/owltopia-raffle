@@ -318,12 +318,12 @@ export function PacksClient({
           <p className="text-sm text-[#A9CBB9]">
             {isPublic
               ? 'Connect a wallet to rip a pack.'
-              : 'Admin preview — connect your Owl Vision admin wallet, then sign in.'}
+              : 'Restricted launch — connect an admin or test wallet, then sign in if needed.'}
           </p>
           <WalletConnectButton />
           {!isPublic ? (
             <p className="text-xs text-white/40">
-              Or open{' '}
+              Admins can open{' '}
               <Link href="/admin" className="text-[#00FF9C] underline-offset-2 hover:underline">
                 Admin
               </Link>{' '}
@@ -339,14 +339,15 @@ export function PacksClient({
           <Package className="h-10 w-10 text-[#00FF9C]" aria-hidden />
           <h1 className="font-display text-3xl tracking-wide">Owl Packs</h1>
           <p className="text-sm text-[#A9CBB9]">
-            Admin preview only. This connected wallet is not on the Owl Vision admin list.
+            Restricted launch only. This connected wallet is not an admin and is not on the Packs
+            test-wallet list.
           </p>
           <p className="text-xs text-white/45">
-            Switch to an admin wallet, or sign in below if this wallet is an admin (clears a stale
-            session).
+            Switch to an allowed wallet, or ask an admin to add this address under Admin → Packs →
+            Test wallets.
           </p>
           <Gen2PresaleSignInPrompt
-            title="Sign in to unlock admin preview"
+            title="Sign in if this wallet is an admin"
             message="Sign a one-time message (no fee). Your wallet must be in the admins table."
             onSignedIn={() => {
               access.recheck()
