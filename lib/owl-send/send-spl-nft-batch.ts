@@ -90,13 +90,20 @@ export async function buildOwlSendSplNftTransaction(params: {
   lines: OwlSendLine[]
   /** Owltopia holder discount (bps). */
   feeDiscountBps?: number
+  /**
+   * Skip the OwlSend platform fee (e.g. admin packs vault deposit).
+   * Transfers only — no treasury SystemProgram.transfer.
+   */
+  omitPlatformFee?: boolean
 }): Promise<
   | { ok: true; tx: Transaction; newAtaCount: number; includedCount: number }
   | { ok: false; error: string; failedMints: string[] }
 > {
   const { connection, owner, lines } = params
   const treasury = getPlatformFeeTreasuryWalletAddressClient()
-  const feeLamports = getOwlSendFeeLamportsForCount(lines.length, params.feeDiscountBps ?? 0)
+  const feeLamports = params.omitPlatformFee
+    ? 0
+    : getOwlSendFeeLamportsForCount(lines.length, params.feeDiscountBps ?? 0)
   if (feeLamports > 0 && !treasury) {
     return {
       ok: false,
@@ -270,7 +277,9 @@ export async function buildOwlSendSplNftTransaction(params: {
 
   const assemble = (count: number, includeRevoke: boolean) => {
     const slice = resolved.slice(0, count)
-    const sliceFee = getOwlSendFeeLamportsForCount(slice.length, params.feeDiscountBps ?? 0)
+    const sliceFee = params.omitPlatformFee
+      ? 0
+      : getOwlSendFeeLamportsForCount(slice.length, params.feeDiscountBps ?? 0)
     const tx = new Transaction()
     let newAtaCount = 0
 
@@ -387,6 +396,8 @@ export async function sendOwlSendSplNftBatch(params: {
   onPhase?: (phase: OwlSendSendPhase) => void
   /** Owltopia holder discount (bps). */
   feeDiscountBps?: number
+  /** Skip OwlSend platform fee (packs vault deposit). */
+  omitPlatformFee?: boolean
   /** When set, fail fast if Phantom's injected provider is unreachable (no popup). */
   walletAdapter?: WalletAdapter | null
 }): Promise<OwlSendBatchResult> {
@@ -409,6 +420,7 @@ export async function sendOwlSendSplNftBatch(params: {
         owner,
         lines,
         feeDiscountBps: params.feeDiscountBps,
+        omitPlatformFee: params.omitPlatformFee,
       }),
       OWL_SEND_BUILD_TIMEOUT_MS,
       OWL_SEND_BUILD_TIMEOUT_HINT
