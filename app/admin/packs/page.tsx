@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { AdminPacksInventoryForm } from '@/components/admin/AdminPacksInventoryForm'
+import { AdminPacksLaunchPanel } from '@/components/admin/AdminPacksLaunchPanel'
 import { AdminPacksVaultFundingForm } from '@/components/admin/AdminPacksVaultFundingForm'
 import { PacksOpeningPreviewPanel } from '@/components/admin/PacksOpeningPreviewPanel'
 import { PacksLaunchChecklist } from '@/components/admin/PacksLaunchChecklist'
@@ -180,18 +181,23 @@ export default function AdminPacksPage() {
       </Link>
       <h1 className="mt-4 text-2xl font-semibold">Packs vault</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        The{' '}
-        <Link href="/packs" className="text-theme-prime underline-offset-2 hover:underline">
-          /packs
-        </Link>{' '}
-        page is public. Buying stays off until you turn packs on below. Fund the vault with SOL,
-        $OWL, and prize NFTs first — purchases go into this wallet, and prizes pay out from it.
+        Choose{' '}
+        <strong>Restricted live</strong> (admins + test wallets) or{' '}
+        <strong>Public live</strong> below. Buying stays off until you turn packs on. Fund the
+        vault with SOL, $OWL, and prize NFTs first — purchases go into this wallet, and prizes pay
+        out from it.
       </p>
 
       {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
 
       {data && (
         <div className="mt-6 space-y-6">
+          <AdminPacksLaunchPanel
+            busy={busy}
+            onBusy={setBusy}
+            onError={setError}
+          />
+
           <PacksLaunchChecklist
             vaultConfigured={Boolean(data.vault.configuredAddress)}
             solBalance={data.vault.solBalance}
@@ -235,9 +241,9 @@ export default function AdminPacksPage() {
             </p>
             <PacksAdminExtraDetails notes={data.ev.notes}>
               <p className="text-xs text-muted-foreground">
-                Turning packs on makes buying live for everyone on /packs. Return-to-player
-                estimate: {(data.ev.estimatedRtpBps / 100).toFixed(2)}% (
-                {data.ev.estimatedRtpBps} bps).
+                Turning packs on enables buying for whoever launch mode allows (public or
+                admins/test wallets). Return-to-player estimate:{' '}
+                {(data.ev.estimatedRtpBps / 100).toFixed(2)}% ({data.ev.estimatedRtpBps} bps).
               </p>
             </PacksAdminExtraDetails>
             <div className="mt-3 flex flex-wrap gap-2">

@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Twitter, MessageCircle, FileText, Coins, Info, Trophy, HeartHandshake, Landmark, Package } from 'lucide-react'
 import { MagicEdenIcon } from '@/components/icons/MagicEdenIcon'
@@ -12,9 +12,9 @@ import {
   OWLTOPIA_MAGIC_EDEN_COLLECTION_LINKS,
   OWLTOPIA_ORBIS_COLLECTION_LINKS,
 } from '@/lib/owltopia-marketplace-links'
-import { isPacksPublicClient } from '@/lib/packs/access'
+import { isPacksEnvKillSwitchClient, isPacksPublicClient } from '@/lib/packs/access'
 
-function buildGlassCardItems(): GlassIconItem[] {
+function buildGlassCardItems(showPacks: boolean): GlassIconItem[] {
   const items: GlassIconItem[] = [
     {
       label: 'How It Works',
@@ -32,7 +32,7 @@ function buildGlassCardItems(): GlassIconItem[] {
       icon: <Coins className="h-6 w-6" />,
     },
   ]
-  if (isPacksPublicClient()) {
+  if (showPacks) {
     items.push({
       label: 'Owl Packs',
       href: '/packs',
@@ -91,7 +91,29 @@ function buildGlassCardItems(): GlassIconItem[] {
 }
 
 export function Footer() {
-  const glassCardItems = buildGlassCardItems()
+  const [showPacks, setShowPacks] = useState(() => isPacksPublicClient())
+
+  useEffect(() => {
+    if (isPacksEnvKillSwitchClient()) {
+      setShowPacks(false)
+      return
+    }
+    let cancelled = false
+    fetch('/api/packs/public-settings', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled || data === undefined) return
+        setShowPacks(data?.isPublic === true)
+      })
+      .catch(() => {
+        /* keep prior */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const glassCardItems = buildGlassCardItems(showPacks)
   return (
     <footer className="w-full bg-black border-t border-green-500/40 mt-auto">
       <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-6">

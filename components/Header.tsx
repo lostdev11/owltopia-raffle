@@ -33,7 +33,7 @@ import {
   type SiteNavGroup,
 } from '@/lib/site-nav'
 import { isOwlSendPublicClient } from '@/lib/owl-send/access'
-import { isPacksPublicClient } from '@/lib/packs/access'
+import { isPacksEnvKillSwitchClient, isPacksPublicClient } from '@/lib/packs/access'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
@@ -50,6 +50,9 @@ export function Header() {
   )
   /** SIWS session wallet is admin — shows Owl Vision even if the wallet adapter is disconnected (common on mobile). */
   const [adminSessionActive, setAdminSessionActive] = useState<boolean | null>(null)
+  /** DB launch mode public (or env hint). */
+  const [packsPublicLive, setPacksPublicLive] = useState(() => isPacksPublicClient())
+  const [packsTester, setPacksTester] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -109,6 +112,51 @@ export function Header() {
     return () => { cancelled = true }
   }, [connected, publicKey, visibilityTick])
 
+  useEffect(() => {
+    if (isPacksEnvKillSwitchClient()) {
+      setPacksPublicLive(false)
+      return
+    }
+    let cancelled = false
+    fetch('/api/packs/public-settings', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled || data === undefined) return
+        setPacksPublicLive(data?.isPublic === true)
+      })
+      .catch(() => {
+        /* keep prior hint */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [visibilityTick])
+
+  useEffect(() => {
+    if (packsPublicLive || !connected || !publicKey) {
+      setPacksTester(false)
+      return
+    }
+    const addr = publicKey.toBase58()
+    let cancelled = false
+    fetch(`/api/packs/access-check?wallet=${encodeURIComponent(addr)}`, {
+      credentials: 'include',
+      cache: 'no-store',
+    })
+      .then((res) => (res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled || data === undefined) return
+        setPacksTester(data?.isTester === true)
+        if (data?.isPublic === true) setPacksPublicLive(true)
+      })
+      .catch(() => {
+        /* keep prior */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connected, publicKey, packsPublicLive, visibilityTick])
+
   // Full admins see Owl Vision (connected wallet in admins table, or SIWS session from /admin).
   const showOwlVision = isAdmin === true || adminSessionActive === true
 
@@ -126,8 +174,8 @@ export function Header() {
 
   const owlSendPublic = isOwlSendPublicClient()
   const showOwlSendNav = owlSendPublic || showOwlVision
-  const packsPublic = isPacksPublicClient()
-  const showOwlPacksNav = packsPublic || showOwlVision
+  const packsPublic = packsPublicLive
+  const showOwlPacksNav = packsPublic || showOwlVision || packsTester
   const communityNavGroup = useMemo<SiteNavGroup>(
     () => ({
       ...COMMUNITY_NAV_GROUP,

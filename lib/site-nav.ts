@@ -133,7 +133,7 @@ const OWL_SEND_NAV_DESCRIPTION_PUBLIC = 'Send NFTs & tokens — 0.001 SOL fee'
 const OWL_SEND_NAV_DESCRIPTION_PREVIEW = 'Send NFTs & tokens — 0.001 SOL fee (admin preview)'
 const OWL_PACKS_NAV_DESCRIPTION_PUBLIC = 'Rip packs — every open wins OWL, SOL, or NFT'
 const OWL_PACKS_NAV_DESCRIPTION_PREVIEW =
-  'Rip packs — every open wins OWL, SOL, or NFT (admin preview)'
+  'Rip packs — every open wins OWL, SOL, or NFT (restricted launch)'
 
 export const OWLS_NAV_GROUP: SiteNavGroup = {
   id: 'owls',

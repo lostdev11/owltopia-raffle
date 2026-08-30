@@ -450,11 +450,19 @@ export function PacksClient({
       <section className="relative mx-auto max-w-6xl px-4 pb-10 pt-6 sm:px-6 sm:pt-10 lg:pb-6">
         {showAdminPreview ? (
           <p className="mb-5 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-center text-xs font-medium text-amber-100 sm:text-left">
-            Admin-only view — public nav is hidden. Set PACKS_PUBLIC to show /packs to everyone.
+            Restricted launch — only admins and test wallets. Switch to{' '}
+            <Link href="/admin/packs" className="underline underline-offset-2 hover:text-white">
+              Public live in Admin → Packs
+            </Link>{' '}
+            when ready.
+          </p>
+        ) : access.isTester && !isPublic ? (
+          <p className="mb-5 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-center text-xs font-medium text-amber-100 sm:text-left">
+            Test wallet access — Packs is in restricted launch mode.
           </p>
         ) : access.isAdmin && paused ? (
           <p className="mb-5 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-center text-xs font-medium text-amber-100 sm:text-left">
-            Public can see this page, but buying is off.{' '}
+            Allowed users can see this page, but buying is off.{' '}
             <Link href="/admin/packs" className="underline underline-offset-2 hover:text-white">
               Turn packs on in Admin → Packs
             </Link>
