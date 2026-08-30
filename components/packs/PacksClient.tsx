@@ -21,6 +21,7 @@ import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import { Gen2PresaleSignInPrompt } from '@/components/gen2-presale/Gen2PresaleSignInPrompt'
 import {
   Check,
+  ChevronDown,
   Gift,
   Loader2,
   Package,
@@ -734,22 +735,39 @@ export function PacksClient({
               <p className="mt-1 text-[11px] text-white/40">
                 Higher floor = rarer. Showing live inventory odds.
               </p>
-              <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto text-sm text-[#A9CBB9]">
-                {(config?.odds.nftInventory ?? []).length === 0 && (
-                  <li className="text-white/40">No NFTs in vault yet</li>
-                )}
-                {(config?.odds.nftInventory ?? []).map((n) => (
-                  <li key={n.mint} className="flex justify-between gap-2">
-                    <span className="min-w-0 truncate">
-                      {n.name || `${n.mint.slice(0, 4)}…`}{' '}
-                      <span className="text-white/30">({n.fairValueSol} SOL)</span>
+              <details className="group mt-2">
+                <summary
+                  className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-2 text-sm text-[#A9CBB9] touch-manipulation [&::-webkit-details-marker]:hidden"
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  <span>
+                    Inventory
+                    <span className="ml-1.5 text-white/40">
+                      ({(config?.odds.nftInventory ?? []).length})
                     </span>
-                    <span className="shrink-0 tabular-nums text-[#00FF9C]/80">
-                      {n.percentOverall}%
-                    </span>
-                  </li>
-                ))}
-              </ul>
+                  </span>
+                  <ChevronDown
+                    className="h-4 w-4 shrink-0 text-white/40 transition-transform group-open:rotate-180"
+                    aria-hidden
+                  />
+                </summary>
+                <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto text-sm text-[#A9CBB9]">
+                  {(config?.odds.nftInventory ?? []).length === 0 && (
+                    <li className="text-white/40">No NFTs in vault yet</li>
+                  )}
+                  {(config?.odds.nftInventory ?? []).map((n) => (
+                    <li key={n.mint} className="flex justify-between gap-2">
+                      <span className="min-w-0 truncate">
+                        {n.name || `${n.mint.slice(0, 4)}…`}{' '}
+                        <span className="text-white/30">({n.fairValueSol} SOL)</span>
+                      </span>
+                      <span className="shrink-0 tabular-nums text-[#00FF9C]/80">
+                        {n.percentOverall}%
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
             </div>
           </div>
         </div>
