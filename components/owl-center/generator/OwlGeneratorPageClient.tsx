@@ -28,7 +28,7 @@ import {
   createEmptyProject,
   ensureDefaultCategories,
 } from '@/lib/owl-center/generator/demo-project'
-import { exportBatchAsSugarZip, exportFullSupplyStreaming } from '@/lib/owl-center/generator/export-zip'
+import { exportBatchAsOpenSeaZip, exportBatchAsSugarZip, exportFullSupplyOpenSeaStreaming, exportFullSupplyStreaming } from '@/lib/owl-center/generator/export-zip'
 import { fetchGen2GeneratorLink } from '@/lib/owl-center/generator/gen2-stage-client'
 import { generateBatch, generateBatchAsync } from '@/lib/owl-center/generator/generate-batch'
 import { buildLaunchDraft, saveExportMetaToSession, saveGeneratorProjectIdToSession, saveLaunchDraftToSession } from '@/lib/owl-center/generator/launch-draft'
@@ -99,6 +99,7 @@ export function OwlGeneratorPageClient({ gen2Mode: gen2ModeProp = false }: { gen
   const [batchSize, setBatchSize] = useState(5)
   const [exportBusy, setExportBusy] = useState(false)
   const [exportFullBusy, setExportFullBusy] = useState(false)
+  const [openSeaBaseUri, setOpenSeaBaseUri] = useState('')
   const [lastExportZip, setLastExportZip] = useState<{ blob: Blob; filename: string } | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   // Dedicated export feedback so progress AND errors are always visible right
@@ -576,6 +577,124 @@ export function OwlGeneratorPageClient({ gen2Mode: gen2ModeProp = false }: { gen
     },
     [project]
   )
+
+  const openSeaExportOptions = useMemo(
+    () => (openSeaBaseUri.trim() ? { baseUri: openSeaBaseUri.trim() } : undefined),
+    [openSeaBaseUri]
+  )
+
+  const exportMergedOpenSeaBatch = useCallback(
+    async (generativeCount: number, label: string): Promise<number | null> => {
+      if (!project) return null
+      const entries = oneOfOnesForProject(project)
+      if (generativeCount > 0 && !project.traits.length) {
+        setMessage('Add trait layers before exporting generative pieces')
+        return null
+      }
+      const generative =
+        generativeCount > 0 ? generateBatch(project, generativeCount, { requireAllCategories: true }) : []
+      const batch = mergeOneOfOnesIntoCollection(
+        generative,
+        entries,
+        project.oneOfOnePlacement,
+        project.id
+      )
+      const built = await exportBatchAsOpenSeaZip(project, batch, undefined, (p) => {
+        if (p.phase === 'compositing') {
+          setMessage(`Rendering ${p.completed.toLocaleString()} / ${p.total.toLocaleString()} pieces…`)
+        } else {
+          setMessage(`Packaging OpenSea ZIP… ${p.completed}%`)
+        }
+      }, openSeaExportOptions)
+      setLastExportZip({ blob: built.blob, filename: built.filename })
+      setMessage(`Exported ${built.count} OpenSea-ready asset(s) (${label})`)
+      return built.count
+    },
+    [project, openSeaExportOptions]
+  )
+
+  const handleOpenSeaExport = useCallback(async () => {
+    if (!project) return
+    setExportBusy(true)
+    setMessage(null)
+    setExportStatus('Preparing OpenSea preview batch…')
+    try {
+      const entries = oneOfOnesForProject(project)
+      const totalRequested = Math.min(50, Math.max(1, batchSize))
+      const generativeCount = Math.max(0, totalRequested - entries.length)
+      const count = await exportMergedOpenSeaBatch(generativeCount, `${totalRequested} preview batch`)
+      setExportStatus(count != null ? `Exported ${count.toLocaleString()} OpenSea preview asset(s).` : null)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'OpenSea export failed'
+      setMessage(msg)
+      setExportStatus(msg)
+    } finally {
+      setExportBusy(false)
+    }
+  }, [project, batchSize, exportMergedOpenSeaBatch])
+
+  const handleOpenSeaExportFullSupply = useCallback(async () => {
+    if (!project) return
+    setExportFullBusy(true)
+    setMessage(null)
+    const report = (m: string) => {
+      setMessage(m)
+      setExportStatus(m)
+    }
+    try {
+      const entries = oneOfOnesForProject(project)
+      const generativeCount = generativeCountForSupply(targetSupply, entries.length)
+      if (generativeCount <= 0 && !entries.length) {
+        report('Set target supply or add 1/1 images before exporting')
+        return
+      }
+      if (generativeCount > 0 && !project.traits.length) {
+        report('Add trait layers before exporting generative pieces')
+        return
+      }
+
+      let cappedBelowTarget = false
+      const result = await exportFullSupplyOpenSeaStreaming(
+        project,
+        async () => {
+          report(`Building ${generativeCount.toLocaleString()} unique combos…`)
+          const generative =
+            generativeCount > 0
+              ? await generateBatchAsync(project, generativeCount, {
+                  requireAllCategories: true,
+                  bestEffort: true,
+                  onProgress: (completed, total) =>
+                    report(`Building combos ${completed.toLocaleString()} / ${total.toLocaleString()}…`),
+                })
+              : []
+          cappedBelowTarget = generative.length < generativeCount
+          return mergeOneOfOnesIntoCollection(generative, entries, project.oneOfOnePlacement, project.id)
+        },
+        (p) => {
+          if (p.phase === 'compositing') {
+            report(`Rendering ${p.completed.toLocaleString()} / ${p.total.toLocaleString()} pieces…`)
+          } else {
+            report(`Packaging OpenSea ZIP… ${p.completed}%`)
+          }
+        },
+        openSeaExportOptions
+      )
+
+      report(
+        cappedBelowTarget
+          ? `Exported ${result.count.toLocaleString()} OpenSea asset(s) (rules capped below ${targetSupply.toLocaleString()})`
+          : `Exported ${result.count.toLocaleString()} OpenSea-ready asset(s) (full supply)`
+      )
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        report('OpenSea export cancelled')
+      } else {
+        report(e instanceof Error ? e.message : 'OpenSea full export failed')
+      }
+    } finally {
+      setExportFullBusy(false)
+    }
+  }, [project, targetSupply, openSeaExportOptions])
 
   const handleExport = useCallback(async () => {
     if (!project) return
@@ -1173,6 +1292,52 @@ export function OwlGeneratorPageClient({ gen2Mode: gen2ModeProp = false }: { gen
                 Submit to Owl Center launch
               </DeployButton>
             ) : null}
+          </CommandCard>
+
+          <CommandCard label="EXPORT // OpenSea (EVM)">
+            <p className="text-sm text-[#9BA8B4]">
+              Same trait combos as Sugar export, with JSON shaped for OpenSea / ERC-721 (Robinhood Chain, Ethereum, etc.).
+              Includes <span className="font-mono text-[#C5D0D8]">images/</span>,{' '}
+              <span className="font-mono text-[#C5D0D8]">metadata/</span>, and a readme — no Solana launch required.
+            </p>
+            <label className="mt-4 block text-sm">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                Hosted base URI (optional)
+              </span>
+              <input
+                type="url"
+                placeholder="ipfs://bafy… or https://cdn.example.com/my-collection"
+                className="mt-1 w-full min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 text-[#E8EEF2] touch-manipulation"
+                value={openSeaBaseUri}
+                onChange={(e) => setOpenSeaBaseUri(e.target.value)}
+              />
+            </label>
+            <p className="mt-2 text-xs text-[#5C6773]">
+              Leave blank to use a replaceable placeholder in each JSON&apos;s <span className="font-mono">image</span>{' '}
+              field; fill in after you upload to IPFS or your CDN.
+            </p>
+            <DeployButton
+              className="mt-4 w-full"
+              disabled={exportBusy || exportFullBusy || (!project.traits.length && !oneOfOnes.length)}
+              onClick={() => void handleOpenSeaExport()}
+            >
+              {exportBusy ? 'Exporting…' : 'Download OpenSea ZIP (preview batch)'}
+            </DeployButton>
+            <DeployButton
+              variant="ghost"
+              className="mt-3 w-full"
+              disabled={
+                exportBusy ||
+                exportFullBusy ||
+                (!project.traits.length && !oneOfOnes.length) ||
+                (generativeCountForSupply(targetSupply, oneOfOnes.length) <= 0 && !oneOfOnes.length)
+              }
+              onClick={() => void handleOpenSeaExportFullSupply()}
+            >
+              {exportFullBusy
+                ? `Exporting ${targetSupply.toLocaleString()}…`
+                : `Download OpenSea full supply (${targetSupply.toLocaleString()})`}
+            </DeployButton>
           </CommandCard>
 
           {gen2Mode ? (

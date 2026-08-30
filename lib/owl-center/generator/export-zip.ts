@@ -2,6 +2,11 @@ import JSZip from 'jszip'
 
 import { clearCompositeImageCache, compositeTraitsToBlob } from '@/lib/owl-center/generator/composite'
 import { dataUrlToBlob } from '@/lib/owl-center/generator/one-of-one'
+import {
+  OPENSEA_EXPORT_README,
+  serializeOpenSeaTokenMetadata,
+  type OpenSeaMetadataOptions,
+} from '@/lib/owl-center/generator/opensea-metadata'
 import type { GeneratedNft, GeneratorProject } from '@/lib/owl-center/generator/types'
 import {
   StreamingZip,
@@ -49,6 +54,20 @@ function sugarZipFilename(project: GeneratorProject, batchLength: number, filena
   return `${safeProjectName(project, filename)}-batch-${batchLength}.zip`
 }
 
+function openSeaZipFilename(project: GeneratorProject, batchLength: number, filename?: string): string {
+  return `${safeProjectName(project, filename)}-opensea-batch-${batchLength}.zip`
+}
+
+async function compositeNftToPngBlob(
+  nft: GeneratedNft,
+  project: GeneratorProject,
+  scratchCanvas?: HTMLCanvasElement
+): Promise<Blob> {
+  return nft.oneOfOneImageSrc
+    ? dataUrlToBlob(nft.oneOfOneImageSrc)
+    : compositeTraitsToBlob(nft.traits, project.categories, 1024, scratchCanvas)
+}
+
 /** Composite one NFT and write its PNG + metadata JSON into the assets folder. */
 async function addNftToAssets(
   assets: JSZip,
@@ -57,9 +76,7 @@ async function addNftToAssets(
   scratchCanvas?: HTMLCanvasElement
 ): Promise<void> {
   const { collectionName, symbol, description } = project
-  const png = nft.oneOfOneImageSrc
-    ? await dataUrlToBlob(nft.oneOfOneImageSrc)
-    : await compositeTraitsToBlob(nft.traits, project.categories, 1024, scratchCanvas)
+  const png = await compositeNftToPngBlob(nft, project, scratchCanvas)
   // PNGs are already compressed — STORE avoids re-deflating (less CPU/memory).
   assets.file(`${nft.index}.png`, png, { compression: 'STORE' })
   assets.file(
@@ -237,9 +254,7 @@ export async function exportFullSupplyStreaming(
   try {
     let done = 0
     for (const nft of batch) {
-      const pngBlob = nft.oneOfOneImageSrc
-        ? await dataUrlToBlob(nft.oneOfOneImageSrc)
-        : await compositeTraitsToBlob(nft.traits, project.categories, 1024, scratchCanvas)
+      const pngBlob = await compositeNftToPngBlob(nft, project, scratchCanvas)
       await zip.add(`assets/${nft.index}.png`, new Uint8Array(await pngBlob.arrayBuffer()))
       await zip.add(`assets/${nft.index}.json`, encoder.encode(nftMetadataJson(project, nft)))
       done += 1
@@ -254,6 +269,132 @@ export async function exportFullSupplyStreaming(
   }
 
   const filename = sugarZipFilename(project, batch.length)
+  if (close) {
+    await close()
+  } else if (blobParts) {
+    onProgress?.({ phase: 'zipping', completed: 100, total: 100 })
+    triggerDownload(new Blob(blobParts, { type: 'application/zip' }), filename)
+  }
+
+  return { filename, count: batch.length, streamedToDisk }
+}
+
+async function addNftToOpenSeaAssets(
+  images: JSZip,
+  metadata: JSZip,
+  nft: GeneratedNft,
+  project: GeneratorProject,
+  openSeaOptions: OpenSeaMetadataOptions | undefined,
+  scratchCanvas?: HTMLCanvasElement
+): Promise<void> {
+  const png = await compositeNftToPngBlob(nft, project, scratchCanvas)
+  images.file(`${nft.index}.png`, png, { compression: 'STORE' })
+  metadata.file(
+    `${nft.index}.json`,
+    serializeOpenSeaTokenMetadata(project, nft, openSeaOptions)
+  )
+}
+
+export async function buildOpenSeaZipBlob(
+  project: GeneratorProject,
+  batch: GeneratedNft[],
+  filename?: string,
+  onProgress?: (p: SugarZipProgress) => void,
+  openSeaOptions?: OpenSeaMetadataOptions
+): Promise<{ blob: Blob; filename: string; count: number }> {
+  const zip = new JSZip()
+  const images = zip.folder('images')
+  const metadata = zip.folder('metadata')
+  if (!images || !metadata) throw new Error('Zip folder failed')
+
+  const scratchCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : undefined
+
+  let done = 0
+  try {
+    for (const nft of batch) {
+      await addNftToOpenSeaAssets(images, metadata, nft, project, openSeaOptions, scratchCanvas)
+      done += 1
+      onProgress?.({ phase: 'compositing', completed: done, total: batch.length })
+      if (done % 25 === 0) await yieldToBrowser()
+    }
+  } finally {
+    clearCompositeImageCache()
+  }
+
+  zip.file('traits.csv', traitsCsv(project, batch))
+  zip.file('OPENSEA_README.txt', OPENSEA_EXPORT_README)
+
+  const blob = await zip.generateAsync(
+    { type: 'blob', compression: 'STORE', streamFiles: true },
+    (meta) => {
+      onProgress?.({ phase: 'zipping', completed: Math.round(meta.percent), total: 100 })
+    }
+  )
+  const outName = openSeaZipFilename(project, batch.length, filename)
+  return { blob, filename: outName, count: batch.length }
+}
+
+export async function exportBatchAsOpenSeaZip(
+  project: GeneratorProject,
+  batch: GeneratedNft[],
+  filename?: string,
+  onProgress?: (p: SugarZipProgress) => void,
+  openSeaOptions?: OpenSeaMetadataOptions
+): Promise<{ blob: Blob; filename: string; count: number }> {
+  const built = await buildOpenSeaZipBlob(project, batch, filename, onProgress, openSeaOptions)
+  triggerDownload(built.blob, built.filename)
+  return built
+}
+
+export async function exportFullSupplyOpenSeaStreaming(
+  project: GeneratorProject,
+  prepareBatch: () => Promise<GeneratedNft[]>,
+  onProgress?: (p: SugarZipProgress) => void,
+  openSeaOptions?: OpenSeaMetadataOptions
+): Promise<FullSupplyExportResult> {
+  const encoder = new TextEncoder()
+  const scratchCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : undefined
+
+  let sink: ZipSink
+  let close: (() => Promise<void>) | null = null
+  let blobParts: Blob[] | null = null
+  const streamedToDisk = supportsFileSystemAccess()
+
+  if (streamedToDisk) {
+    const opened = await openZipFileSink(`${safeProjectName(project)}-opensea.zip`)
+    sink = opened.sink
+    close = opened.close
+  } else {
+    blobParts = []
+    sink = (chunk) => {
+      blobParts!.push(new Blob([chunk as BlobPart]))
+    }
+  }
+
+  const batch = await prepareBatch()
+  const zip = new StreamingZip(sink)
+
+  try {
+    let done = 0
+    for (const nft of batch) {
+      const pngBlob = await compositeNftToPngBlob(nft, project, scratchCanvas)
+      await zip.add(`images/${nft.index}.png`, new Uint8Array(await pngBlob.arrayBuffer()))
+      await zip.add(
+        `metadata/${nft.index}.json`,
+        encoder.encode(serializeOpenSeaTokenMetadata(project, nft, openSeaOptions))
+      )
+      done += 1
+      onProgress?.({ phase: 'compositing', completed: done, total: batch.length })
+      if (done % 10 === 0) await yieldToBrowser()
+    }
+    await zip.add('traits.csv', encoder.encode(traitsCsv(project, batch)))
+    await zip.add('OPENSEA_README.txt', encoder.encode(OPENSEA_EXPORT_README))
+    await zip.finish()
+  } finally {
+    clearCompositeImageCache()
+  }
+
+  const filename = openSeaZipFilename(project, batch.length)
   if (close) {
     await close()
   } else if (blobParts) {
