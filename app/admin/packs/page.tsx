@@ -18,7 +18,7 @@ import { packPauseReasonLabel, packRtpPercentLabel } from '@/lib/packs/admin-cop
 import { OWL_TICKER } from '@/lib/council/owl-ticker'
 import { packNftBandLabel } from '@/lib/packs/ev-simulator'
 import { packInventoryPrizeStandardLabel } from '@/lib/packs/types'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft, ChevronDown, Loader2 } from 'lucide-react'
 
 type AdminPacksData = {
   vault: {
@@ -315,57 +315,73 @@ export default function AdminPacksPage() {
             />
           </div>
 
-          <div className="rounded-lg border p-4">
-            <h2 className="font-medium">Inventory</h2>
-            <p className="text-xs text-muted-foreground">
-              Remove only unlists the row. It does not send the NFT back from the vault.
-            </p>
-            <ul className="mt-3 divide-y text-sm">
-              {data.inventory.length === 0 && (
-                <li className="py-3 text-muted-foreground">No items</li>
-              )}
-              {data.inventory.map((item) => {
-                const band = packNftBandLabel(Number(item.fair_value_sol))
-                return (
-                  <li key={item.id} className="flex items-center justify-between gap-2 py-2">
-                    <div className="flex min-w-0 items-center gap-3">
-                      {item.image_url ? (
-                        <img
-                          src={item.image_url}
-                          alt=""
-                          className="h-10 w-10 shrink-0 rounded object-cover"
-                        />
-                      ) : (
-                        <div className="h-10 w-10 shrink-0 rounded bg-muted" />
-                      )}
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{item.name || 'NFT'}</p>
-                        <p className="font-mono text-xs text-muted-foreground break-all">
-                          {item.mint_address}
-                        </p>
-                        <p className="text-muted-foreground">
-                          {item.fair_value_sol} SOL
-                          {band ? ` · ${band}` : ''} ·{' '}
-                          {packInventoryPrizeStandardLabel(item.prize_standard)} · {item.status}
-                        </p>
+          <details className="group rounded-lg border">
+            <summary
+              className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 touch-manipulation [&::-webkit-details-marker]:hidden"
+              style={{ touchAction: 'manipulation' }}
+            >
+              <span className="font-medium">
+                Inventory
+                <span className="ml-2 font-normal text-muted-foreground">
+                  ({data.inventory.length})
+                </span>
+              </span>
+              <ChevronDown
+                className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                aria-hidden
+              />
+            </summary>
+            <div className="border-t border-border/50 px-4 pb-4 pt-2">
+              <p className="text-xs text-muted-foreground">
+                Remove only unlists the row. It does not send the NFT back from the vault.
+              </p>
+              <ul className="mt-3 divide-y text-sm">
+                {data.inventory.length === 0 && (
+                  <li className="py-3 text-muted-foreground">No items</li>
+                )}
+                {data.inventory.map((item) => {
+                  const band = packNftBandLabel(Number(item.fair_value_sol))
+                  return (
+                    <li key={item.id} className="flex items-center justify-between gap-2 py-2">
+                      <div className="flex min-w-0 items-center gap-3">
+                        {item.image_url ? (
+                          <img
+                            src={item.image_url}
+                            alt=""
+                            className="h-10 w-10 shrink-0 rounded object-cover"
+                          />
+                        ) : (
+                          <div className="h-10 w-10 shrink-0 rounded bg-muted" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{item.name || 'NFT'}</p>
+                          <p className="font-mono text-xs text-muted-foreground break-all">
+                            {item.mint_address}
+                          </p>
+                          <p className="text-muted-foreground">
+                            {item.fair_value_sol} SOL
+                            {band ? ` · ${band}` : ''} ·{' '}
+                            {packInventoryPrizeStandardLabel(item.prize_standard)} · {item.status}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                    {item.status === 'available' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="min-h-[44px] shrink-0 touch-manipulation"
-                        disabled={busy}
-                        onClick={() => void removeNft(item.id)}
-                      >
-                        Remove
-                      </Button>
-                    )}
-                  </li>
-                )
-              })}
-            </ul>
-          </div>
+                      {item.status === 'available' && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="min-h-[44px] shrink-0 touch-manipulation"
+                          disabled={busy}
+                          onClick={() => void removeNft(item.id)}
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          </details>
         </div>
       )}
     </div>
