@@ -99,7 +99,7 @@ export function PacksLaunchChecklist(props: PacksLaunchChecklistProps) {
         </p>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Complete these before turning packs on for the public.
+        Complete these before turning packs on for allowed wallets (restricted or public launch).
       </p>
       <ul className="mt-3 space-y-2">
         {items.map((item) => (

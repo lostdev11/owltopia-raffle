@@ -7,13 +7,15 @@ import { parseAdminRole } from '@/lib/admin/roles'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 
 type AccessState = {
-  /** True when viewer may use Owl Packs (public by default, SIWS admin session, or connected admin wallet). */
+  /** True when viewer may use Owl Packs (public, SIWS admin, admin wallet, or test allowlist). */
   allowed: boolean
   /** Connected wallet (or session) resolved as admin. */
   isAdmin: boolean
+  /** Connected wallet is on the pack test allowlist (restricted mode). */
+  isTester: boolean
   /** Still resolving wallet/session checks. */
   loading: boolean
-  /** Connected wallet successfully checked and is not admin (and no SIWS admin session). */
+  /** Connected wallet checked and not allowed. */
   denied: boolean
   /** SIWS cookie session is an Owl Vision admin (works even if adapter disconnected). */
   adminSessionActive: boolean
@@ -22,11 +24,10 @@ type AccessState = {
 }
 
 /**
- * Owl Packs access gate aligned with Header / OwlSend:
- * - public by default; env kill switch hides the page from non-admins
- * - SIWS `?session=1` keeps admin access after disconnect/reconnect
- * - wallet `?wallet=` check with cache
- * - transient API errors never hard-deny
+ * Owl Packs access gate:
+ * - public launch mode → everyone
+ * - restricted → admin (SIWS/wallet) or test allowlist wallet
+ * - env kill switch → admins only
  */
 export function usePacksAdminAccess(params: {
   initialViewerIsAdmin: boolean
@@ -47,6 +48,7 @@ export function usePacksAdminAccess(params: {
     }
     return initialViewerIsAdmin ? true : null
   })
+  const [walletIsTester, setWalletIsTester] = useState(false)
   const [walletCheckPending, setWalletCheckPending] = useState(() => {
     if (isPublic) return false
     if (!connected || !wallet) return false
@@ -80,16 +82,17 @@ export function usePacksAdminAccess(params: {
   useEffect(() => {
     if (isPublic) {
       setWalletCheckPending(false)
+      setWalletIsTester(false)
       return
     }
     if (!connected || !publicKey) {
       setWalletIsAdmin(null)
+      setWalletIsTester(false)
       setWalletCheckPending(false)
       return
     }
     const addr = publicKey.toBase58()
     const cached = getCachedAdmin(addr)
-    // After a manual recheck (SIWS), always hit the network — don't trust a stale false.
     if (cached !== null && manualTick === 0) {
       setWalletIsAdmin(cached)
       setWalletCheckPending(false)
@@ -98,7 +101,7 @@ export function usePacksAdminAccess(params: {
     }
 
     let cancelled = false
-    fetch(`/api/admin/check?wallet=${encodeURIComponent(addr)}`, {
+    fetch(`/api/packs/access-check?wallet=${encodeURIComponent(addr)}`, {
       credentials: 'include',
       cache: 'no-store',
     })
@@ -108,18 +111,15 @@ export function usePacksAdminAccess(params: {
       })
       .then((data) => {
         if (cancelled || data === undefined) return
-        if (data?.checkFailed === true) {
-          // Connectivity failure — keep prior state; do not hard-deny admins.
-          setWalletCheckPending(false)
-          return
-        }
         const admin = data?.isAdmin === true
+        const tester = data?.isTester === true
         const role = admin ? parseAdminRole(data?.role) : null
         setCachedAdmin(addr, admin, role)
         setWalletIsAdmin(admin)
+        setWalletIsTester(tester)
       })
       .catch(() => {
-        /* do not clear admin on network errors */
+        /* do not clear access on network errors */
       })
       .finally(() => {
         if (!cancelled) setWalletCheckPending(false)
@@ -131,13 +131,15 @@ export function usePacksAdminAccess(params: {
 
   const isAdmin =
     walletIsAdmin === true || adminSessionActive === true || initialViewerIsAdmin === true
-  const allowed = isPublic || isAdmin
+  const isTester = walletIsTester === true
+  const allowed = isPublic || isAdmin || isTester
   const denied =
     !isPublic &&
     connected &&
     Boolean(publicKey) &&
     !walletCheckPending &&
     walletIsAdmin === false &&
+    !walletIsTester &&
     !adminSessionActive &&
     !initialViewerIsAdmin
 
@@ -150,6 +152,7 @@ export function usePacksAdminAccess(params: {
   return {
     allowed,
     isAdmin,
+    isTester,
     loading,
     denied,
     adminSessionActive,

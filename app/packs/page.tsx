@@ -39,7 +39,7 @@ export const dynamic = 'force-dynamic'
 export default async function PacksPage() {
   const session = parseSessionCookieValue((await cookies()).get(SESSION_COOKIE_NAME)?.value)
   const role = session ? await getOwlVisionAdminRole(session.wallet) : null
-  const isPublic = isPacksPublic()
+  const isPublic = await isPacksPublic()
 
   return (
     <PacksClient

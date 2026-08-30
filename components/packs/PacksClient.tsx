@@ -318,12 +318,12 @@ export function PacksClient({
           <p className="text-sm text-[#A9CBB9]">
             {isPublic
               ? 'Connect a wallet to rip a pack.'
-              : 'Admin preview — connect your Owl Vision admin wallet, then sign in.'}
+              : 'Restricted launch — connect an admin or test wallet, then sign in if needed.'}
           </p>
           <WalletConnectButton />
           {!isPublic ? (
             <p className="text-xs text-white/40">
-              Or open{' '}
+              Admins can open{' '}
               <Link href="/admin" className="text-[#00FF9C] underline-offset-2 hover:underline">
                 Admin
               </Link>{' '}
@@ -339,14 +339,15 @@ export function PacksClient({
           <Package className="h-10 w-10 text-[#00FF9C]" aria-hidden />
           <h1 className="font-display text-3xl tracking-wide">Owl Packs</h1>
           <p className="text-sm text-[#A9CBB9]">
-            Admin preview only. This connected wallet is not on the Owl Vision admin list.
+            Restricted launch only. This connected wallet is not an admin and is not on the Packs
+            test-wallet list.
           </p>
           <p className="text-xs text-white/45">
-            Switch to an admin wallet, or sign in below if this wallet is an admin (clears a stale
-            session).
+            Switch to an allowed wallet, or ask an admin to add this address under Admin → Packs →
+            Test wallets.
           </p>
           <Gen2PresaleSignInPrompt
-            title="Sign in to unlock admin preview"
+            title="Sign in if this wallet is an admin"
             message="Sign a one-time message (no fee). Your wallet must be in the admins table."
             onSignedIn={() => {
               access.recheck()
@@ -450,11 +451,19 @@ export function PacksClient({
       <section className="relative mx-auto max-w-6xl px-4 pb-10 pt-6 sm:px-6 sm:pt-10 lg:pb-6">
         {showAdminPreview ? (
           <p className="mb-5 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-center text-xs font-medium text-amber-100 sm:text-left">
-            Admin-only view — public nav is hidden. Set PACKS_PUBLIC to show /packs to everyone.
+            Restricted launch — only admins and test wallets. Switch to{' '}
+            <Link href="/admin/packs" className="underline underline-offset-2 hover:text-white">
+              Public live in Admin → Packs
+            </Link>{' '}
+            when ready.
+          </p>
+        ) : access.isTester && !isPublic ? (
+          <p className="mb-5 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-center text-xs font-medium text-amber-100 sm:text-left">
+            Test wallet access — Packs is in restricted launch mode.
           </p>
         ) : access.isAdmin && paused ? (
           <p className="mb-5 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-center text-xs font-medium text-amber-100 sm:text-left">
-            Public can see this page, but buying is off.{' '}
+            Allowed users can see this page, but buying is off.{' '}
             <Link href="/admin/packs" className="underline underline-offset-2 hover:text-white">
               Turn packs on in Admin → Packs
             </Link>

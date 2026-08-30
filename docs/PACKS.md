@@ -21,14 +21,23 @@ Config: `lib/packs/animations.ts`. Dev playground (local only): `/dev/pack-openi
 
 The `/packs` page is a single-composition hero (OWL PACKS brand, pack visual, one CTA). Odds, ticket credits, recent opens, and prize tiers live below the fold.
 
-## Public landing, admin unpause
+## Launch modes (Admin → Packs)
 
-`/packs` and Community nav are **public**. Buying stays off until a full admin turns packs on:
+Two modes, switched from Admin without redeploying:
+
+| Mode | Who can use `/packs` + buy (when unpaused) |
+|------|--------------------------------------------|
+| **Restricted live** | Owl Vision admins + wallets on the test allowlist |
+| **Public live** | Everyone |
+
+Buying stays off until a full admin turns packs on (`pack_vault_config.paused`):
 
 - Vault row defaults to `paused = true` (migration 212)
+- Launch mode defaults to **restricted** (migration 232)
 - Create/open APIs reject purchases while paused (and auto-pause if NFT inventory is too low)
-- Go live for buyers: Admin → Packs → **Turn packs on** (needs vault key + min NFT inventory)
-- Hide the page again: `PACKS_PUBLIC=false` and `NEXT_PUBLIC_PACKS_PUBLIC=false`, then redeploy
+- Soft-launch: Admin → Packs → **Restricted live** → add **Test wallets** → **Turn packs on**
+- Full go-live: Admin → Packs → **Public live** (clear test wallets optionally)
+- Emergency hide: `PACKS_PUBLIC=false` and `NEXT_PUBLIC_PACKS_PUBLIC=false`, then redeploy (admins only; test wallets blocked)
 
 ## Locked MVP decisions
 
@@ -51,7 +60,7 @@ The `/packs` page is a single-composition hero (OWL PACKS brand, pack visual, on
 
 Each **0.1 SOL** pack contributes **0.02 SOL** to a visible accumulating jackpot pool (~**0.2%** win chance per open by default). On a jackpot hit, the buyer receives the **full pool** in SOL and the pool resets to zero. Regular OWL/SOL/NFT prizes apply when the jackpot roll misses.
 
-Apply migration **229** (`packs_jackpot`) alongside prior pack migrations.
+Apply migration **229** (`packs_jackpot`) and **232** (`packs_launch_mode_and_test_wallets`) alongside prior pack migrations.
 
 ## House edge
 
@@ -69,7 +78,7 @@ Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payo
 5. Apply migration **227** (`packs_vrf_and_nft_snapshot`).
 6. Optional fairness: set `PACK_VRF_ENABLED=true` (needs `FUNDS_ESCROW_SECRET_KEY` or `PRIZE_ESCROW_SECRET_KEY` for Switchboard fees — same as raffle VRF).
 7. Run `npm run packs:ev-simulator` before going live; set `owl_sol_price` until EV ≈ 0.08 SOL. Use Admin → **Launch checklist**.
-8. Admin → Packs → **Turn packs on** when the vault is funded.
+8. Admin → Packs → set **Restricted live** (testers) or **Public live**, then **Turn packs on** when the vault is funded.
 9. Opens auto-pause when NFT inventory cannot cover the NFT category (solvency guard). Only a full admin can turn them back on.
 
 ## Fairness
