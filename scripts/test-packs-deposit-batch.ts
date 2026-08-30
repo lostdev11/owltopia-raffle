@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import {
   chunkPackDepositBatches,
   estimatePackDepositApprovals,
+  halvePackDepositChunk,
   packDepositNeedsSpecialPath,
   PACK_DEPOSIT_MAX_PER_TX,
   rewriteOwlSendCopyForPacks,
@@ -31,7 +32,7 @@ function nft(
   }
 }
 
-assert.equal(PACK_DEPOSIT_MAX_PER_TX, 4)
+assert.equal(PACK_DEPOSIT_MAX_PER_TX, 3)
 
 assert.equal(packDepositNeedsSpecialPath(nft('a')), false)
 assert.equal(packDepositNeedsSpecialPath(nft('b', { compressed: true })), true)
@@ -40,11 +41,13 @@ assert.equal(packDepositNeedsSpecialPath(nft('d', { interface: 'ProgrammableNFT'
 
 const tenClassic = Array.from({ length: 10 }, (_, i) => nft(`mint${i}`))
 const classicChunks = chunkPackDepositBatches(tenClassic)
-assert.equal(classicChunks.length, 3)
-assert.equal(classicChunks[0]!.length, 4)
-assert.equal(classicChunks[1]!.length, 4)
-assert.equal(classicChunks[2]!.length, 2)
-assert.equal(estimatePackDepositApprovals(tenClassic), 3)
+assert.equal(classicChunks.length, 4) // 3+3+3+1
+assert.equal(classicChunks[0]!.length, 3)
+assert.equal(classicChunks[1]!.length, 3)
+assert.equal(classicChunks[2]!.length, 3)
+assert.equal(classicChunks[3]!.length, 1)
+assert.equal(estimatePackDepositApprovals(tenClassic), 4)
+assert.equal(estimatePackDepositApprovals(tenClassic, { signAllClassic: true }), 1)
 
 const mixed = [
   nft('s1'),
@@ -58,13 +61,15 @@ const mixed = [
   nft('s7'),
 ]
 const mixedChunks = chunkPackDepositBatches(mixed)
-// s1,s2 | core1 | s3 | cnft1 | s4,s5,s6,s7
-assert.equal(mixedChunks.length, 5)
+// s1,s2 | core1 | s3 | cnft1 | s4,s5,s6 | s7
+assert.equal(mixedChunks.length, 6)
 assert.deepEqual(
   mixedChunks.map((c) => c.map((n) => n.mint)),
-  [['s1', 's2'], ['core1'], ['s3'], ['cnft1'], ['s4', 's5', 's6', 's7']]
+  [['s1', 's2'], ['core1'], ['s3'], ['cnft1'], ['s4', 's5', 's6'], ['s7']]
 )
-assert.equal(estimatePackDepositApprovals(mixed), 5)
+assert.equal(estimatePackDepositApprovals(mixed), 6)
+// sign-all collapses 4 classic txs → 1 sheet + 2 special = 3
+assert.equal(estimatePackDepositApprovals(mixed, { signAllClassic: true }), 3)
 
 const lines = walletNftsToPackDepositLines([nft('m1', { name: 'Owl #1' })], 'Vault111')
 assert.equal(lines.length, 1)
@@ -76,5 +81,11 @@ assert.equal(
   rewriteOwlSendCopyForPacks('OwlSend will use a smaller approval — tap Retry.'),
   'Pack deposit will use a smaller batch — retry deposit.'
 )
+
+assert.deepEqual(
+  halvePackDepositChunk([1, 2, 3, 4]).map((c) => c.length),
+  [2, 2]
+)
+assert.deepEqual(halvePackDepositChunk([1]), [[1]])
 
 console.log('test-packs-deposit-batch: ok')

@@ -1,10 +1,15 @@
 /**
  * Pure helpers for pack-inventory deposit batching (no wallet / RPC imports).
- * Classic SPL NFTs share one approval; Core / compressed stay 1-per-tx.
+ * Classic SPL NFTs share approvals; Core / compressed stay 1-per-tx.
+ *
+ * Cap classic size at 2: createATA + leftover-CM revoke + transfer ×4 often fits our
+ * 900-byte pre-check, but Phantom/Jupiter Lighthouse guards (per transfer) can push
+ * the signed packet over 1232 — which made multi-NFT packs deposits fail and look
+ * like “one approval per NFT” after manual retry.
  */
 import {
   OWL_SEND_CHAIN_APPROVAL_GAP_MS,
-  OWL_SEND_MAX_PER_TX_NFT_ONE,
+  OWL_SEND_MAX_PER_TX_NFT_SCATTER,
 } from '@/lib/owl-send/constants'
 import type { OwlSendLine } from '@/lib/owl-send/batch'
 import {
@@ -14,8 +19,11 @@ import {
 import { isProgrammableNftInterface } from '@/lib/solana/nft-transfer-lock'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
 
-/** Classic SPL → vault fits ~4 per tx (same as OwlSend send-to-one). */
-export const PACK_DEPOSIT_MAX_PER_TX = OWL_SEND_MAX_PER_TX_NFT_ONE
+/**
+ * Classic SPL → vault: 2 per tx leaves Lighthouse headroom (each mint needs its own
+ * destination ATA, same as OwlSend scatter sizing).
+ */
+export const PACK_DEPOSIT_MAX_PER_TX = OWL_SEND_MAX_PER_TX_NFT_SCATTER
 
 export function packDepositNeedsSpecialPath(
   nft: Pick<WalletNft, 'compressed' | 'interface'>
@@ -28,7 +36,7 @@ export function packDepositNeedsSpecialPath(
   return false
 }
 
-/** Split NFTs into wallet-approval chunks (classic ≤4, special = 1). */
+/** Split NFTs into on-chain chunks (classic ≤2, special = 1). */
 export function chunkPackDepositBatches<T extends Pick<WalletNft, 'compressed' | 'interface'>>(
   nfts: T[],
   maxClassicPerTx: number = PACK_DEPOSIT_MAX_PER_TX
@@ -59,11 +67,24 @@ export function chunkPackDepositBatches<T extends Pick<WalletNft, 'compressed' |
   return chunks
 }
 
-/** How many wallet approvals a selection needs (before packet-size peel). */
+/**
+ * How many on-chain txs a selection needs (before packet peel).
+ * With Phantom sign-all, classic txs collapse to **one wallet sheet**.
+ */
 export function estimatePackDepositApprovals(
-  nfts: Array<Pick<WalletNft, 'compressed' | 'interface'>>
+  nfts: Array<Pick<WalletNft, 'compressed' | 'interface'>>,
+  opts?: { signAllClassic?: boolean }
 ): number {
-  return chunkPackDepositBatches(nfts).length
+  const chunks = chunkPackDepositBatches(nfts)
+  if (!opts?.signAllClassic) return chunks.length
+  let classicTxs = 0
+  let specialTxs = 0
+  for (const chunk of chunks) {
+    if (chunk.length === 1 && packDepositNeedsSpecialPath(chunk[0]!)) specialTxs += 1
+    else classicTxs += 1
+  }
+  const classicSheets = classicTxs === 0 ? 0 : 1
+  return classicSheets + specialTxs
 }
 
 export function walletNftsToPackDepositLines(
@@ -91,4 +112,11 @@ export function rewriteOwlSendCopyForPacks(message: string): string {
     .replace(/\bOwlSend\b/g, 'Pack deposit')
     .replace(/\bsingle-NFT send\b/gi, 'single-NFT deposit')
     .replace(/\bsmaller approval — tap Retry\b/gi, 'smaller batch — retry deposit')
+}
+
+/** Halve a classic chunk for packet-size retry (min size 1). */
+export function halvePackDepositChunk<T>(items: T[]): T[][] {
+  if (items.length <= 1) return [items]
+  const mid = Math.ceil(items.length / 2)
+  return [items.slice(0, mid), items.slice(mid)]
 }
