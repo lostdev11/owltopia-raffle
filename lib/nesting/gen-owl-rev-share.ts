@@ -60,7 +60,10 @@ function poolFractionsForGen1Buckets(standardCount: number, oneOfOneCount: numbe
   }
 }
 
-/** Gen 1: 90% / 10% pools, each split evenly within its bucket. Empty bucket → full pool to the other. */
+/**
+ * Gen 1: 90% divided evenly across ALL staked nests; 10% bonus divided across 1/1s.
+ * Each 1/1 receives both shares. Empty bucket → full pool to the other side.
+ */
 export function computeGen1RevShareBucketAmounts(params: {
   totalSol: number | null
   totalUsdc: number | null
@@ -69,23 +72,39 @@ export function computeGen1RevShareBucketAmounts(params: {
 }): Gen1RevShareBucketAmounts {
   const standard_count = Math.max(0, Math.floor(params.standardCount))
   const one_of_one_count = Math.max(0, Math.floor(params.oneOfOneCount))
+  const all_count = standard_count + one_of_one_count
   const fractions = poolFractionsForGen1Buckets(standard_count, one_of_one_count)
 
   const totalSol = safePositiveNumber(params.totalSol)
   const totalUsdc = safePositiveNumber(params.totalUsdc)
 
-  const standardSolPool = totalSol != null ? totalSol * fractions.standard : null
-  const oneOfOneSolPool = totalSol != null ? totalSol * fractions.one_of_one : null
-  const standardUsdcPool = totalUsdc != null ? totalUsdc * fractions.standard : null
-  const oneOfOneUsdcPool = totalUsdc != null ? totalUsdc * fractions.one_of_one : null
+  const allStakedSolPool = totalSol != null ? totalSol * fractions.standard : null
+  const oneOfOneBonusSolPool = totalSol != null ? totalSol * fractions.one_of_one : null
+  const allStakedUsdcPool = totalUsdc != null ? totalUsdc * fractions.standard : null
+  const oneOfOneBonusUsdcPool = totalUsdc != null ? totalUsdc * fractions.one_of_one : null
+
+  // 90% (or 100% when no 1/1s) ÷ every staked Gen 1 nest — including 1/1s.
+  const standard_per_nest_sol = computeEvenRevSharePerNest(allStakedSolPool, all_count)
+  const standard_per_nest_usdc = computeEvenRevSharePerNest(allStakedUsdcPool, all_count)
+
+  const bonus_sol = computeEvenRevSharePerNest(oneOfOneBonusSolPool, one_of_one_count)
+  const bonus_usdc = computeEvenRevSharePerNest(oneOfOneBonusUsdcPool, one_of_one_count)
+
+  const sumShares = (base: number | null, bonus: number | null): number | null => {
+    if (base == null && bonus == null) return null
+    return (base ?? 0) + (bonus ?? 0)
+  }
 
   return {
     standard_count,
     one_of_one_count,
-    standard_per_nest_sol: computeEvenRevSharePerNest(standardSolPool, standard_count),
-    standard_per_nest_usdc: computeEvenRevSharePerNest(standardUsdcPool, standard_count),
-    one_of_one_per_nest_sol: computeEvenRevSharePerNest(oneOfOneSolPool, one_of_one_count),
-    one_of_one_per_nest_usdc: computeEvenRevSharePerNest(oneOfOneUsdcPool, one_of_one_count),
+    standard_per_nest_sol,
+    standard_per_nest_usdc,
+    // 1/1 payout = all-staked share + 10% bonus (or full pool when no standard nests).
+    one_of_one_per_nest_sol:
+      one_of_one_count > 0 ? sumShares(standard_per_nest_sol, bonus_sol) : null,
+    one_of_one_per_nest_usdc:
+      one_of_one_count > 0 ? sumShares(standard_per_nest_usdc, bonus_usdc) : null,
   }
 }
 

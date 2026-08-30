@@ -2477,7 +2477,7 @@ export default function AdminDashboardPage() {
           <CardDescription className="mb-4">
             Set display dates (and optional homepage amounts), then deposit from your connected wallet into the
             dedicated rev-share pool (not funds escrow). Only deposits credit claimable period totals — Save alone
-            does not fund claims. Gen 1 uses a 90% / 10% split (all staked vs 1/1 staked); Gen 2 is an even split
+            does not fund claims. Gen 1 uses a 90% / 10% split (90% all staked, 10% 1/1 bonus on top); Gen 2 is an even split
             across active nests.             Nested holders see projected amounts on Nesting; claims open on the last day of the
             month (UTC), stack until claimed, and pay from the rev-share pool.
           </CardDescription>
@@ -2515,8 +2515,8 @@ export default function AdminDashboardPage() {
               <div>
                 <h3 className="text-sm font-semibold text-foreground">Gen 1 nest rev share</h3>
                 <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                  Date and total SOL/USDC for Gen 1 owl stakers — 90% divided evenly across all staked Gen 1 owls;
-                  10% divided evenly across staked Gen 1 1/1s (90d and 180d tiers combined).
+                  Date and total SOL/USDC for Gen 1 owl stakers — 90% divided evenly across all staked Gen 1 owls
+                  (including 1/1s); 10% bonus divided evenly across staked Gen 1 1/1s (90d and 180d tiers combined).
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
