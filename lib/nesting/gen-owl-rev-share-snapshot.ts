@@ -1,12 +1,14 @@
 import { countActiveGenOwlNestsByGroup, listActiveGenOwlNestMintsByGroup } from '@/lib/db/gen-owl-rev-share-stats'
 import { getRevShareSchedule } from '@/lib/db/rev-share-schedule'
 import { classifyGen1OneOfOneMints } from '@/lib/nesting/gen1-one-of-one'
+import { classifyGen2OneOfOneMints } from '@/lib/nesting/gen2-one-of-one'
 import { genOwlStakingGroupLabel } from '@/lib/nesting/gen-owl-staking-groups'
 import {
   buildGenOwlRevSharePreview,
-  computeGen1RevShareBucketAmounts,
+  computeGenOwlRevShareBucketAmounts,
   type GenOwlRevSharePreview,
 } from '@/lib/nesting/gen-owl-rev-share'
+import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
 
 export type GenOwlRevShareSnapshot = {
   next_date: string | null
@@ -16,13 +18,17 @@ export type GenOwlRevShareSnapshot = {
   gen2: GenOwlRevSharePreview
 }
 
-async function buildGen1BucketPreview(params: {
+async function buildBucketPreview(params: {
+  group: GenOwlStakingGroupKey
   totalSol: number | null
   totalUsdc: number | null
   activeNestCount: number
 }): Promise<GenOwlRevSharePreview> {
-  const mints = await listActiveGenOwlNestMintsByGroup('gen1-owl')
-  const classification = await classifyGen1OneOfOneMints(mints)
+  const mints = await listActiveGenOwlNestMintsByGroup(params.group)
+  const classification =
+    params.group === 'gen1-owl'
+      ? await classifyGen1OneOfOneMints(mints)
+      : await classifyGen2OneOfOneMints(mints)
   let standard_count = 0
   let one_of_one_count = 0
   for (const mint of mints) {
@@ -30,7 +36,7 @@ async function buildGen1BucketPreview(params: {
     else standard_count++
   }
 
-  const gen1Buckets = computeGen1RevShareBucketAmounts({
+  const buckets = computeGenOwlRevShareBucketAmounts({
     totalSol: params.totalSol,
     totalUsdc: params.totalUsdc,
     standardCount: standard_count,
@@ -38,12 +44,12 @@ async function buildGen1BucketPreview(params: {
   })
 
   return buildGenOwlRevSharePreview({
-    group: 'gen1-owl',
-    label: genOwlStakingGroupLabel('gen1-owl'),
+    group: params.group,
+    label: genOwlStakingGroupLabel(params.group),
     activeNestCount: params.activeNestCount,
     totalSol: params.totalSol,
     totalUsdc: params.totalUsdc,
-    gen1Buckets,
+    buckets,
   })
 }
 
@@ -54,20 +60,18 @@ export async function getGenOwlRevShareSnapshot(): Promise<GenOwlRevShareSnapsho
   const counts = await countActiveGenOwlNestsByGroup()
 
   const [gen1, gen2] = await Promise.all([
-    buildGen1BucketPreview({
+    buildBucketPreview({
+      group: 'gen1-owl',
       totalSol: schedule.gen1_total_sol,
       totalUsdc: schedule.gen1_total_usdc,
       activeNestCount: counts['gen1-owl'],
     }),
-    Promise.resolve(
-      buildGenOwlRevSharePreview({
-        group: 'gen2-owl',
-        label: genOwlStakingGroupLabel('gen2-owl'),
-        activeNestCount: counts['gen2-owl'],
-        totalSol: schedule.gen2_total_sol,
-        totalUsdc: schedule.gen2_total_usdc,
-      })
-    ),
+    buildBucketPreview({
+      group: 'gen2-owl',
+      totalSol: schedule.gen2_total_sol,
+      totalUsdc: schedule.gen2_total_usdc,
+      activeNestCount: counts['gen2-owl'],
+    }),
   ])
 
   return {

@@ -7,6 +7,7 @@ import {
   GEN2_OWL_STAKING_POOL_SLUGS,
 } from '@/lib/nesting/gen1-staking-pools'
 import { classifyGen1OneOfOneMints } from '@/lib/nesting/gen1-one-of-one'
+import { classifyGen2OneOfOneMints } from '@/lib/nesting/gen2-one-of-one'
 import { endOfPeriodMonthUtc, groupKeyForPoolSlug } from '@/lib/nesting/gen-owl-rev-share-month'
 
 /** PostgREST caps each response at 1000 rows — paginate or Gen1 180d nests get dropped. */
@@ -99,27 +100,37 @@ export function countEligibleByGroup(nests: GenOwlEligibleNest[]): Record<GenOwl
   return { 'gen1-owl': gen1, 'gen2-owl': gen2 }
 }
 
-export function listGen1EligibleMints(nests: GenOwlEligibleNest[]): string[] {
+function listEligibleMintsForGroup(nests: GenOwlEligibleNest[], group: GenOwlStakingGroupKey): string[] {
   const mints: string[] = []
   for (const n of nests) {
-    if (n.group !== 'gen1-owl') continue
+    if (n.group !== group) continue
     const mint = n.position.asset_identifier?.trim()
     if (mint) mints.push(mint)
   }
   return mints
 }
 
-export async function countGen1EligibleByRevShareBucket(
-  nests: GenOwlEligibleNest[]
-): Promise<{ standard: number; one_of_one: number }> {
-  const gen1Mints = listGen1EligibleMints(nests)
-  if (!gen1Mints.length) return { standard: 0, one_of_one: 0 }
+export function listGen1EligibleMints(nests: GenOwlEligibleNest[]): string[] {
+  return listEligibleMintsForGroup(nests, 'gen1-owl')
+}
 
-  const classification = await classifyGen1OneOfOneMints(gen1Mints)
+export function listGen2EligibleMints(nests: GenOwlEligibleNest[]): string[] {
+  return listEligibleMintsForGroup(nests, 'gen2-owl')
+}
+
+async function countEligibleByRevShareBucket(
+  nests: GenOwlEligibleNest[],
+  group: GenOwlStakingGroupKey,
+  classify: (mints: string[]) => Promise<Map<string, 'standard' | 'one-of-one'>>
+): Promise<{ standard: number; one_of_one: number }> {
+  const groupMints = listEligibleMintsForGroup(nests, group)
+  if (!groupMints.length) return { standard: 0, one_of_one: 0 }
+
+  const classification = await classify(groupMints)
   let standard = 0
   let one_of_one = 0
   for (const n of nests) {
-    if (n.group !== 'gen1-owl') continue
+    if (n.group !== group) continue
     const mint = n.position.asset_identifier?.trim()
     if (!mint) {
       standard++
@@ -129,6 +140,18 @@ export async function countGen1EligibleByRevShareBucket(
     else standard++
   }
   return { standard, one_of_one }
+}
+
+export async function countGen1EligibleByRevShareBucket(
+  nests: GenOwlEligibleNest[]
+): Promise<{ standard: number; one_of_one: number }> {
+  return countEligibleByRevShareBucket(nests, 'gen1-owl', classifyGen1OneOfOneMints)
+}
+
+export async function countGen2EligibleByRevShareBucket(
+  nests: GenOwlEligibleNest[]
+): Promise<{ standard: number; one_of_one: number }> {
+  return countEligibleByRevShareBucket(nests, 'gen2-owl', classifyGen2OneOfOneMints)
 }
 
 export function poolSlugsForGroup(group: GenOwlStakingGroupKey): readonly string[] {

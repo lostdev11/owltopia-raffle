@@ -239,13 +239,12 @@ export default function HowItWorksPage() {
             creators pay <strong>2%</strong> on ticket sales, including when tickets are priced in a partner&apos;s custom SPL (same percentage). Of that fee revenue, <strong>50%</strong> is allocated to holder rev share. Amounts are tracked in <strong>SOL</strong> and <strong>USDC</strong>; the home page shows the next scheduled rev share when the team has published it.
           </p>
           <p className="mb-4">
-            For nested Gen 1 owls, rev share is <strong>not</strong> split evenly across every nest:{' '}
-            <strong>90%</strong> of the Gen 1 pool is divided evenly across all staked Gen 1 owls, and{' '}
-            <strong>10%</strong> is a bonus divided evenly across staked Gen 1 1/1s — so each nested 1/1 receives
-            both shares. Gen 2 nest rev share is split evenly across eligible Gen 2 nests. The team deposits
-            SOL/USDC into a <strong>dedicated rev-share pool</strong> (separate from raffle funds escrow). Nested
-            holders can see projected monthly amounts on Nesting; claims open on the 1st of the month after each
-            period ends (UTC) and pay from that pool.
+            For nested Gen 1 and Gen 2 owls, rev share is <strong>not</strong> split evenly across every nest:{' '}
+            <strong>90%</strong> of each gen&apos;s pool is divided evenly across all staked owls in that gen, and{' '}
+            <strong>10%</strong> is a bonus divided evenly across staked 1/1s — so each nested 1/1 receives both
+            shares. The team deposits SOL/USDC into a <strong>dedicated rev-share pool</strong> (separate from raffle
+            funds escrow). Nested holders can see projected monthly amounts on Nesting; claims open on the 1st of the
+            month after each period ends (UTC) and pay from that pool.
           </p>
         </section>
 

@@ -1,7 +1,7 @@
 import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
 import {
-  GEN1_REV_SHARE_ONE_OF_ONE_POOL_FRACTION,
-  GEN1_REV_SHARE_STANDARD_POOL_FRACTION,
+  GEN_OWL_REV_SHARE_ONE_OF_ONE_POOL_FRACTION,
+  GEN_OWL_REV_SHARE_STANDARD_POOL_FRACTION,
 } from '@/lib/nesting/gen-owl-rev-share-copy'
 
 export type GenOwlRevShareTotals = {
@@ -9,7 +9,8 @@ export type GenOwlRevShareTotals = {
   total_usdc: number | null
 }
 
-export type Gen1RevShareBucketPreview = {
+/** 90/10 bucket preview shared by Gen 1 and Gen 2. */
+export type GenOwlRevShareBucketPreview = {
   standard_count: number
   one_of_one_count: number
   standard_per_nest_sol: number | null
@@ -18,6 +19,9 @@ export type Gen1RevShareBucketPreview = {
   one_of_one_per_nest_usdc: number | null
 }
 
+/** @deprecated Use GenOwlRevShareBucketPreview */
+export type Gen1RevShareBucketPreview = GenOwlRevShareBucketPreview
+
 export type GenOwlRevSharePreview = {
   group: GenOwlStakingGroupKey
   label: string
@@ -25,11 +29,18 @@ export type GenOwlRevSharePreview = {
   totals: GenOwlRevShareTotals
   per_nest_sol: number | null
   per_nest_usdc: number | null
-  /** Present for Gen 1 previews when bucket counts are known. */
-  gen1_buckets?: Gen1RevShareBucketPreview
+  /** Present when 90/10 bucket counts are known (Gen 1 and Gen 2). */
+  buckets?: GenOwlRevShareBucketPreview
+  /**
+   * Alias of `buckets` for Gen 1 responses (older admin clients).
+   * Prefer `buckets`.
+   */
+  gen1_buckets?: GenOwlRevShareBucketPreview
 }
 
-export type Gen1RevShareBucketAmounts = Gen1RevShareBucketPreview
+export type GenOwlRevShareBucketAmounts = GenOwlRevShareBucketPreview
+/** @deprecated Use GenOwlRevShareBucketAmounts */
+export type Gen1RevShareBucketAmounts = GenOwlRevShareBucketAmounts
 
 function safePositiveNumber(value: unknown): number | null {
   if (value == null) return null
@@ -38,14 +49,14 @@ function safePositiveNumber(value: unknown): number | null {
   return n
 }
 
-/** Gen 2: total ÷ active nest count. */
+/** Even split: total ÷ active nest count. */
 export function computeEvenRevSharePerNest(total: number | null, activeNestCount: number): number | null {
   const amount = safePositiveNumber(total)
   if (amount == null || activeNestCount <= 0) return null
   return amount / activeNestCount
 }
 
-function poolFractionsForGen1Buckets(standardCount: number, oneOfOneCount: number): {
+function poolFractionsForBuckets(standardCount: number, oneOfOneCount: number): {
   standard: number
   one_of_one: number
 } {
@@ -55,25 +66,25 @@ function poolFractionsForGen1Buckets(standardCount: number, oneOfOneCount: numbe
   if (ooo <= 0) return { standard: 1, one_of_one: 0 }
   if (std <= 0) return { standard: 0, one_of_one: 1 }
   return {
-    standard: GEN1_REV_SHARE_STANDARD_POOL_FRACTION,
-    one_of_one: GEN1_REV_SHARE_ONE_OF_ONE_POOL_FRACTION,
+    standard: GEN_OWL_REV_SHARE_STANDARD_POOL_FRACTION,
+    one_of_one: GEN_OWL_REV_SHARE_ONE_OF_ONE_POOL_FRACTION,
   }
 }
 
 /**
- * Gen 1: 90% divided evenly across ALL staked nests; 10% bonus divided across 1/1s.
+ * Gen 1 / Gen 2: 90% divided evenly across ALL staked nests; 10% bonus divided across 1/1s.
  * Each 1/1 receives both shares. Empty bucket → full pool to the other side.
  */
-export function computeGen1RevShareBucketAmounts(params: {
+export function computeGenOwlRevShareBucketAmounts(params: {
   totalSol: number | null
   totalUsdc: number | null
   standardCount: number
   oneOfOneCount: number
-}): Gen1RevShareBucketAmounts {
+}): GenOwlRevShareBucketAmounts {
   const standard_count = Math.max(0, Math.floor(params.standardCount))
   const one_of_one_count = Math.max(0, Math.floor(params.oneOfOneCount))
   const all_count = standard_count + one_of_one_count
-  const fractions = poolFractionsForGen1Buckets(standard_count, one_of_one_count)
+  const fractions = poolFractionsForBuckets(standard_count, one_of_one_count)
 
   const totalSol = safePositiveNumber(params.totalSol)
   const totalUsdc = safePositiveNumber(params.totalUsdc)
@@ -83,7 +94,6 @@ export function computeGen1RevShareBucketAmounts(params: {
   const allStakedUsdcPool = totalUsdc != null ? totalUsdc * fractions.standard : null
   const oneOfOneBonusUsdcPool = totalUsdc != null ? totalUsdc * fractions.one_of_one : null
 
-  // 90% (or 100% when no 1/1s) ÷ every staked Gen 1 nest — including 1/1s.
   const standard_per_nest_sol = computeEvenRevSharePerNest(allStakedSolPool, all_count)
   const standard_per_nest_usdc = computeEvenRevSharePerNest(allStakedUsdcPool, all_count)
 
@@ -100,7 +110,6 @@ export function computeGen1RevShareBucketAmounts(params: {
     one_of_one_count,
     standard_per_nest_sol,
     standard_per_nest_usdc,
-    // 1/1 payout = all-staked share + 10% bonus (or full pool when no standard nests).
     one_of_one_per_nest_sol:
       one_of_one_count > 0 ? sumShares(standard_per_nest_sol, bonus_sol) : null,
     one_of_one_per_nest_usdc:
@@ -108,13 +117,18 @@ export function computeGen1RevShareBucketAmounts(params: {
   }
 }
 
+/** @deprecated Use computeGenOwlRevShareBucketAmounts */
+export const computeGen1RevShareBucketAmounts = computeGenOwlRevShareBucketAmounts
+
 export function buildGenOwlRevSharePreview(params: {
   group: GenOwlStakingGroupKey
   label: string
   activeNestCount: number
   totalSol: number | null
   totalUsdc: number | null
-  gen1Buckets?: Gen1RevShareBucketPreview
+  buckets?: GenOwlRevShareBucketPreview
+  /** @deprecated Use buckets */
+  gen1Buckets?: GenOwlRevShareBucketPreview
 }): GenOwlRevSharePreview {
   const count = Math.max(0, Math.floor(params.activeNestCount))
   const totals: GenOwlRevShareTotals = {
@@ -122,23 +136,21 @@ export function buildGenOwlRevSharePreview(params: {
     total_usdc: safePositiveNumber(params.totalUsdc),
   }
 
-  const gen1_buckets =
-    params.group === 'gen1-owl' ? params.gen1Buckets : undefined
+  const buckets = params.buckets ?? params.gen1Buckets
 
   return {
     group: params.group,
     label: params.label,
     active_nest_count: count,
     totals,
-    per_nest_sol:
-      params.group === 'gen2-owl'
-        ? computeEvenRevSharePerNest(totals.total_sol, count)
-        : gen1_buckets?.standard_per_nest_sol ?? null,
-    per_nest_usdc:
-      params.group === 'gen2-owl'
-        ? computeEvenRevSharePerNest(totals.total_usdc, count)
-        : gen1_buckets?.standard_per_nest_usdc ?? null,
-    gen1_buckets,
+    per_nest_sol: buckets
+      ? buckets.standard_per_nest_sol ?? null
+      : computeEvenRevSharePerNest(totals.total_sol, count),
+    per_nest_usdc: buckets
+      ? buckets.standard_per_nest_usdc ?? null
+      : computeEvenRevSharePerNest(totals.total_usdc, count),
+    buckets,
+    gen1_buckets: params.group === 'gen1-owl' ? buckets : undefined,
   }
 }
 
@@ -148,6 +160,15 @@ export function gen1RevShareUsesBucketColumns(period: {
 }): boolean {
   return (
     period.gen1_standard_per_nest_sol != null || period.gen1_one_of_one_per_nest_sol != null
+  )
+}
+
+export function gen2RevShareUsesBucketColumns(period: {
+  gen2_standard_per_nest_sol?: number | null
+  gen2_one_of_one_per_nest_sol?: number | null
+}): boolean {
+  return (
+    period.gen2_standard_per_nest_sol != null || period.gen2_one_of_one_per_nest_sol != null
   )
 }
 
@@ -177,6 +198,35 @@ export function resolveGen1PerNestAmounts(
   return {
     sol: period.gen1_per_nest_sol ?? 0,
     usdc: period.gen1_per_nest_usdc ?? 0,
+  }
+}
+
+export function resolveGen2PerNestAmounts(
+  period: {
+    gen2_per_nest_sol?: number | null
+    gen2_per_nest_usdc?: number | null
+    gen2_standard_per_nest_sol?: number | null
+    gen2_standard_per_nest_usdc?: number | null
+    gen2_one_of_one_per_nest_sol?: number | null
+    gen2_one_of_one_per_nest_usdc?: number | null
+  },
+  bucket: 'standard' | 'one-of-one'
+): { sol: number; usdc: number } {
+  if (gen2RevShareUsesBucketColumns(period)) {
+    if (bucket === 'one-of-one') {
+      return {
+        sol: period.gen2_one_of_one_per_nest_sol ?? 0,
+        usdc: period.gen2_one_of_one_per_nest_usdc ?? 0,
+      }
+    }
+    return {
+      sol: period.gen2_standard_per_nest_sol ?? 0,
+      usdc: period.gen2_standard_per_nest_usdc ?? 0,
+    }
+  }
+  return {
+    sol: period.gen2_per_nest_sol ?? 0,
+    usdc: period.gen2_per_nest_usdc ?? 0,
   }
 }
 
