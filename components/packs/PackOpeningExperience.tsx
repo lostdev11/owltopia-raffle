@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { createPortal } from 'react-dom'
 import Image from 'next/image'
 import Link from 'next/link'
-import { CheckCircle2, Coins, ImageIcon, Sparkles, Ticket } from 'lucide-react'
+import { CheckCircle2, Coins, ImageIcon, Ticket } from 'lucide-react'
 import type { PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
 import {
   PACK_ANIMATION_POSTER,
@@ -12,7 +12,9 @@ import {
   PACK_REVEAL_TIMING,
   getPackCategoryReveal,
 } from '@/lib/packs/animations'
+import { getPackRewardPreloadUrl } from '@/lib/packs/media'
 import { PackHoverClip } from '@/components/packs/PackHoverVideo'
+import { PackOwlPrizeImage } from '@/components/packs/PackOwlPrizeImage'
 import { fireMintConfetti } from '@/lib/confetti'
 import { cn } from '@/lib/utils'
 
@@ -79,7 +81,7 @@ function PrizeArt({ reward }: { reward: PackOpenClientResult }) {
     return <Coins className="h-20 w-20 text-[#00FF9C]" aria-hidden />
   }
   if (reward.category === 'owl') {
-    return <Sparkles className="h-20 w-20 text-[#00FF9C]" aria-hidden />
+    return <PackOwlPrizeImage size={320} priority />
   }
   return <ImageIcon className="h-20 w-20 text-[#00FF9C]" aria-hidden />
 }
@@ -165,7 +167,8 @@ export function PackOpeningExperience({
   // Preload reward image as soon as we have the reward
   useEffect(() => {
     let cancelled = false
-    void preloadRewardImage(reward.nftImageUrl).then(() => {
+    const preloadUrl = getPackRewardPreloadUrl(reward)
+    void preloadRewardImage(preloadUrl).then(() => {
       if (cancelled) return
       rewardReadyRef.current = true
       tryStartReveal()
@@ -179,7 +182,7 @@ export function PackOpeningExperience({
       cancelled = true
       window.clearTimeout(grace)
     }
-  }, [reward.nftImageUrl, tryStartReveal])
+  }, [reward, tryStartReveal])
 
   // Reduced motion / failed open / whiteTransition entry
   useEffect(() => {

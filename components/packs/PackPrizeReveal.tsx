@@ -2,8 +2,9 @@
 
 import Image from 'next/image'
 import Link from 'next/link'
-import { CheckCircle2, Coins, ImageIcon, Sparkles, Ticket } from 'lucide-react'
+import { CheckCircle2, Coins, ImageIcon, Ticket } from 'lucide-react'
 import type { PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
+import { PackOwlPrizeImage } from '@/components/packs/PackOwlPrizeImage'
 import { cn } from '@/lib/utils'
 
 type Props = {
@@ -36,7 +37,7 @@ function PrizeArt({ result }: { result: PackOpenClientResult }) {
     return <Coins className="h-16 w-16 text-[#00FF9C]" aria-hidden />
   }
   if (result.category === 'owl') {
-    return <Sparkles className="h-16 w-16 text-[#00FF9C]" aria-hidden />
+    return <PackOwlPrizeImage size={280} priority />
   }
   return <ImageIcon className="h-16 w-16 text-[#00FF9C]" aria-hidden />
 }
