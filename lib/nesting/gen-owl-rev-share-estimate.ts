@@ -1,12 +1,12 @@
-import { countActiveGenOwlNestsByGroup, listActiveGenOwlNestMintsByGroup } from '@/lib/db/gen-owl-rev-share-stats'
+import { listActiveGenOwlNestMintsByGroup } from '@/lib/db/gen-owl-rev-share-stats'
 import { getGenOwlRevSharePeriod } from '@/lib/db/gen-owl-rev-share-periods'
 import { getRevShareSchedule } from '@/lib/db/rev-share-schedule'
 import { listStakingPositionsByWallet } from '@/lib/db/staking-positions'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import { classifyGen1OneOfOneMints } from '@/lib/nesting/gen1-one-of-one'
+import { classifyGen2OneOfOneMints } from '@/lib/nesting/gen2-one-of-one'
 import {
-  computeEvenRevSharePerNest,
-  computeGen1RevShareBucketAmounts,
+  computeGenOwlRevShareBucketAmounts,
   formatGenOwlRevShareSol,
   formatGenOwlRevShareUsdc,
 } from '@/lib/nesting/gen-owl-rev-share'
@@ -89,24 +89,40 @@ export async function getGenOwlRevShareEstimateForWallet(
   const active = positions.filter((p) => p.status === 'active')
   if (active.length === 0) return null
 
-  const counts = await countActiveGenOwlNestsByGroup()
-  const gen1Mints = await listActiveGenOwlNestMintsByGroup('gen1-owl')
-  const classification = await classifyGen1OneOfOneMints(gen1Mints)
-  let standardCount = 0
-  let oneOfOneCount = 0
+  const [gen1Mints, gen2Mints] = await Promise.all([
+    listActiveGenOwlNestMintsByGroup('gen1-owl'),
+    listActiveGenOwlNestMintsByGroup('gen2-owl'),
+  ])
+  const [gen1Classification, gen2Classification] = await Promise.all([
+    classifyGen1OneOfOneMints(gen1Mints),
+    classifyGen2OneOfOneMints(gen2Mints),
+  ])
+
+  let gen1Standard = 0
+  let gen1Ooo = 0
   for (const mint of gen1Mints) {
-    if (classification.get(mint) === 'one-of-one') oneOfOneCount++
-    else standardCount++
+    if (gen1Classification.get(mint) === 'one-of-one') gen1Ooo++
+    else gen1Standard++
+  }
+  let gen2Standard = 0
+  let gen2Ooo = 0
+  for (const mint of gen2Mints) {
+    if (gen2Classification.get(mint) === 'one-of-one') gen2Ooo++
+    else gen2Standard++
   }
 
-  const gen1Buckets = computeGen1RevShareBucketAmounts({
+  const gen1Buckets = computeGenOwlRevShareBucketAmounts({
     totalSol: pool_gen1_sol || null,
     totalUsdc: pool_gen1_usdc || null,
-    standardCount,
-    oneOfOneCount,
+    standardCount: gen1Standard,
+    oneOfOneCount: gen1Ooo,
   })
-  const gen2PerSol = computeEvenRevSharePerNest(pool_gen2_sol || null, counts['gen2-owl'])
-  const gen2PerUsdc = computeEvenRevSharePerNest(pool_gen2_usdc || null, counts['gen2-owl'])
+  const gen2Buckets = computeGenOwlRevShareBucketAmounts({
+    totalSol: pool_gen2_sol || null,
+    totalUsdc: pool_gen2_usdc || null,
+    standardCount: gen2Standard,
+    oneOfOneCount: gen2Ooo,
+  })
 
   const nests: GenOwlRevShareEstimateRow[] = []
   let total_sol = 0
@@ -117,25 +133,17 @@ export async function getGenOwlRevShareEstimateForWallet(
     const group = groupKeyForPoolSlug(pool?.slug)
     if (!group) continue
 
-    let amount_sol = 0
-    let amount_usdc = 0
-    let bucket: 'standard' | 'one_of_one' | null = null
-
-    if (group === 'gen2-owl') {
-      amount_sol = gen2PerSol ?? 0
-      amount_usdc = gen2PerUsdc ?? 0
-    } else {
-      const mint = position.asset_identifier?.trim()
-      const isOoo = mint ? classification.get(mint) === 'one-of-one' : false
-      bucket = isOoo ? 'one_of_one' : 'standard'
-      if (isOoo) {
-        amount_sol = gen1Buckets.one_of_one_per_nest_sol ?? 0
-        amount_usdc = gen1Buckets.one_of_one_per_nest_usdc ?? 0
-      } else {
-        amount_sol = gen1Buckets.standard_per_nest_sol ?? 0
-        amount_usdc = gen1Buckets.standard_per_nest_usdc ?? 0
-      }
-    }
+    const mint = position.asset_identifier?.trim()
+    const classification = group === 'gen1-owl' ? gen1Classification : gen2Classification
+    const buckets = group === 'gen1-owl' ? gen1Buckets : gen2Buckets
+    const isOoo = mint ? classification.get(mint) === 'one-of-one' : false
+    const bucket: 'standard' | 'one_of_one' = isOoo ? 'one_of_one' : 'standard'
+    const amount_sol = isOoo
+      ? buckets.one_of_one_per_nest_sol ?? 0
+      : buckets.standard_per_nest_sol ?? 0
+    const amount_usdc = isOoo
+      ? buckets.one_of_one_per_nest_usdc ?? 0
+      : buckets.standard_per_nest_usdc ?? 0
 
     if (amount_sol <= 0 && amount_usdc <= 0) continue
 

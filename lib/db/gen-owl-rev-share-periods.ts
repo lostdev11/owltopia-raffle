@@ -11,6 +11,8 @@ export type GenOwlRevSharePeriodRow = {
   gen2_eligible_count: number | null
   gen1_standard_eligible_count: number | null
   gen1_one_of_one_eligible_count: number | null
+  gen2_standard_eligible_count: number | null
+  gen2_one_of_one_eligible_count: number | null
   gen1_per_nest_sol: number | null
   gen1_per_nest_usdc: number | null
   gen1_standard_per_nest_sol: number | null
@@ -19,6 +21,10 @@ export type GenOwlRevSharePeriodRow = {
   gen1_one_of_one_per_nest_usdc: number | null
   gen2_per_nest_sol: number | null
   gen2_per_nest_usdc: number | null
+  gen2_standard_per_nest_sol: number | null
+  gen2_standard_per_nest_usdc: number | null
+  gen2_one_of_one_per_nest_sol: number | null
+  gen2_one_of_one_per_nest_usdc: number | null
   finalized_at: string | null
   updated_at: string
 }
@@ -36,6 +42,10 @@ function mapPeriodRow(data: Record<string, unknown>): GenOwlRevSharePeriodRow {
       data.gen1_standard_eligible_count != null ? Number(data.gen1_standard_eligible_count) : null,
     gen1_one_of_one_eligible_count:
       data.gen1_one_of_one_eligible_count != null ? Number(data.gen1_one_of_one_eligible_count) : null,
+    gen2_standard_eligible_count:
+      data.gen2_standard_eligible_count != null ? Number(data.gen2_standard_eligible_count) : null,
+    gen2_one_of_one_eligible_count:
+      data.gen2_one_of_one_eligible_count != null ? Number(data.gen2_one_of_one_eligible_count) : null,
     gen1_per_nest_sol: data.gen1_per_nest_sol != null ? Number(data.gen1_per_nest_sol) : null,
     gen1_per_nest_usdc: data.gen1_per_nest_usdc != null ? Number(data.gen1_per_nest_usdc) : null,
     gen1_standard_per_nest_sol:
@@ -48,6 +58,14 @@ function mapPeriodRow(data: Record<string, unknown>): GenOwlRevSharePeriodRow {
       data.gen1_one_of_one_per_nest_usdc != null ? Number(data.gen1_one_of_one_per_nest_usdc) : null,
     gen2_per_nest_sol: data.gen2_per_nest_sol != null ? Number(data.gen2_per_nest_sol) : null,
     gen2_per_nest_usdc: data.gen2_per_nest_usdc != null ? Number(data.gen2_per_nest_usdc) : null,
+    gen2_standard_per_nest_sol:
+      data.gen2_standard_per_nest_sol != null ? Number(data.gen2_standard_per_nest_sol) : null,
+    gen2_standard_per_nest_usdc:
+      data.gen2_standard_per_nest_usdc != null ? Number(data.gen2_standard_per_nest_usdc) : null,
+    gen2_one_of_one_per_nest_sol:
+      data.gen2_one_of_one_per_nest_sol != null ? Number(data.gen2_one_of_one_per_nest_sol) : null,
+    gen2_one_of_one_per_nest_usdc:
+      data.gen2_one_of_one_per_nest_usdc != null ? Number(data.gen2_one_of_one_per_nest_usdc) : null,
     finalized_at: data.finalized_at != null ? String(data.finalized_at) : null,
     updated_at: String(data.updated_at ?? new Date().toISOString()),
   }
@@ -110,6 +128,8 @@ export async function finalizeGenOwlRevSharePeriod(input: {
   gen2_eligible_count: number
   gen1_standard_eligible_count: number
   gen1_one_of_one_eligible_count: number
+  gen2_standard_eligible_count: number
+  gen2_one_of_one_eligible_count: number
   gen1_per_nest_sol: number | null
   gen1_per_nest_usdc: number | null
   gen1_standard_per_nest_sol: number | null
@@ -118,6 +138,10 @@ export async function finalizeGenOwlRevSharePeriod(input: {
   gen1_one_of_one_per_nest_usdc: number | null
   gen2_per_nest_sol: number | null
   gen2_per_nest_usdc: number | null
+  gen2_standard_per_nest_sol: number | null
+  gen2_standard_per_nest_usdc: number | null
+  gen2_one_of_one_per_nest_sol: number | null
+  gen2_one_of_one_per_nest_usdc: number | null
 }): Promise<GenOwlRevSharePeriodRow | null> {
   const db = getSupabaseAdmin()
   const { data, error } = await db
@@ -127,6 +151,8 @@ export async function finalizeGenOwlRevSharePeriod(input: {
       gen2_eligible_count: input.gen2_eligible_count,
       gen1_standard_eligible_count: input.gen1_standard_eligible_count,
       gen1_one_of_one_eligible_count: input.gen1_one_of_one_eligible_count,
+      gen2_standard_eligible_count: input.gen2_standard_eligible_count,
+      gen2_one_of_one_eligible_count: input.gen2_one_of_one_eligible_count,
       gen1_per_nest_sol: input.gen1_per_nest_sol,
       gen1_per_nest_usdc: input.gen1_per_nest_usdc,
       gen1_standard_per_nest_sol: input.gen1_standard_per_nest_sol,
@@ -135,6 +161,10 @@ export async function finalizeGenOwlRevSharePeriod(input: {
       gen1_one_of_one_per_nest_usdc: input.gen1_one_of_one_per_nest_usdc,
       gen2_per_nest_sol: input.gen2_per_nest_sol,
       gen2_per_nest_usdc: input.gen2_per_nest_usdc,
+      gen2_standard_per_nest_sol: input.gen2_standard_per_nest_sol,
+      gen2_standard_per_nest_usdc: input.gen2_standard_per_nest_usdc,
+      gen2_one_of_one_per_nest_sol: input.gen2_one_of_one_per_nest_sol,
+      gen2_one_of_one_per_nest_usdc: input.gen2_one_of_one_per_nest_usdc,
       finalized_at: new Date().toISOString(),
     })
     .eq('period_month', input.period_month.trim())
@@ -160,6 +190,8 @@ export async function clearGenOwlRevSharePeriodFinalization(
       gen2_eligible_count: null,
       gen1_standard_eligible_count: null,
       gen1_one_of_one_eligible_count: null,
+      gen2_standard_eligible_count: null,
+      gen2_one_of_one_eligible_count: null,
       gen1_per_nest_sol: null,
       gen1_per_nest_usdc: null,
       gen1_standard_per_nest_sol: null,
@@ -168,6 +200,10 @@ export async function clearGenOwlRevSharePeriodFinalization(
       gen1_one_of_one_per_nest_usdc: null,
       gen2_per_nest_sol: null,
       gen2_per_nest_usdc: null,
+      gen2_standard_per_nest_sol: null,
+      gen2_standard_per_nest_usdc: null,
+      gen2_one_of_one_per_nest_sol: null,
+      gen2_one_of_one_per_nest_usdc: null,
       finalized_at: null,
     })
     .eq('period_month', periodMonth.trim())
