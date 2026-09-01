@@ -649,8 +649,19 @@ async function handleRemove(interaction: DiscordInteraction, strOptions: Record<
   return ephemeral(`Removed ${result.removed} ${result.removed === 1 ? 'entry' : 'entries'} from **${campaign.name}**.`)
 }
 
-export async function handleDiscordWlCommand(interaction: DiscordInteraction): Promise<Record<string, unknown>> {
-  const { sub, strOptions, numOptions, boolOptions } = getSubcommandAndOptions(interaction.data)
+const DISCORD_QUERY_WL_ALIAS: Record<string, string> = {
+  mintlist: 'export',
+  status: 'status',
+  spots: 'list',
+}
+
+async function dispatchDiscordWlSubcommand(
+  sub: string | null,
+  interaction: DiscordInteraction,
+  strOptions: Record<string, string>,
+  numOptions: Record<string, number>,
+  boolOptions: Record<string, boolean>
+): Promise<Record<string, unknown>> {
   if (sub === 'setup') return ephemeral(formatSetupChecklist())
   if (sub === 'create') return handleCreate(interaction, strOptions, numOptions)
   if (sub === 'set-role') return handleSetRole(interaction, strOptions, boolOptions)
@@ -664,6 +675,30 @@ export async function handleDiscordWlCommand(interaction: DiscordInteraction): P
   return ephemeral(
     `Unknown subcommand. Try \`/owltopia-wl setup\` — ${PLATFORM_NAME} whitelist collection.`
   )
+}
+
+export async function handleDiscordWlCommand(interaction: DiscordInteraction): Promise<Record<string, unknown>> {
+  const { sub, strOptions, numOptions, boolOptions } = getSubcommandAndOptions(interaction.data)
+  return dispatchDiscordWlSubcommand(sub, interaction, strOptions, numOptions, boolOptions)
+}
+
+/** `/query` — read-only alias for mintlist / status / spots lookups. */
+export async function handleDiscordQueryCommand(interaction: DiscordInteraction): Promise<Record<string, unknown>> {
+  const { sub, strOptions, numOptions, boolOptions } = getSubcommandAndOptions(interaction.data)
+  const mapped = sub ? DISCORD_QUERY_WL_ALIAS[sub] ?? null : null
+  if (!mapped) {
+    return ephemeral(
+      [
+        'Look up whitelist data:',
+        '· `/query mintlist` — wallets on a spot',
+        '· `/query status` — open/closed, count, linked collection',
+        '· `/query spots` — all spots in this server',
+        '',
+        'Same as `/owltopia-wl export`, `status`, and `list`.',
+      ].join('\n')
+    )
+  }
+  return dispatchDiscordWlSubcommand(mapped, interaction, strOptions, numOptions, boolOptions)
 }
 
 export async function handleDiscordWlDeferred(interaction: DiscordInteraction): Promise<Record<string, unknown>> {

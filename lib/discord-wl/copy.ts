@@ -287,6 +287,7 @@ export function formatSetupChecklist(): string {
     '3. Pin the bot message. Share this with your community:',
     `> ${DISCORD_WL_ANNOUNCEMENT_SNIPPET}`,
     '4. When you’re done: `/owltopia-wl close`',
+    '   Look up wallets anytime: `/query mintlist` or `/owltopia-wl export`',
     `5. Download CSV or push to Owl Center from ${discordWlDashboardUrl()}`,
     '',
     'Members only tap **Submit wallet** — they never need a slash command.',
