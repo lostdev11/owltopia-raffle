@@ -28,6 +28,10 @@ export type DashboardOverviewStats = {
   hostedRaffles: number
   pendingClaims: number
   prizesToClaim: number
+  winCurrentStreak: number
+  winBestStreak: number
+  participationCurrentStreak: number
+  participationBestStreak: number
 }
 
 function formatMultiCurrency(by: Record<string, number>): string {
@@ -191,14 +195,24 @@ export function DashboardOverviewSection({
           icon={<Ticket className="h-4 w-4 text-blue-300" aria-hidden />}
           label="Raffles entered"
           value={stats.rafflesEntered.toLocaleString()}
-          hint={`${stats.ticketsEntered.toLocaleString()} ticket${stats.ticketsEntered === 1 ? '' : 's'} total`}
+          hint={
+            stats.participationCurrentStreak >= 2
+              ? `🔥 ${stats.participationCurrentStreak}-day entry streak · best ${stats.participationBestStreak}`
+              : `${stats.ticketsEntered.toLocaleString()} ticket${stats.ticketsEntered === 1 ? '' : 's'} total`
+          }
           accent="bg-blue-500/15"
         />
         <OverviewMetricCard
           icon={<Trophy className="h-4 w-4 text-violet-300" aria-hidden />}
           label="Wins"
           value={stats.wins.toLocaleString()}
-          hint={stats.prizesToClaim > 0 ? `${stats.prizesToClaim} prize${stats.prizesToClaim === 1 ? '' : 's'} to claim` : 'NFT & crypto prizes'}
+          hint={
+            stats.winCurrentStreak >= 2
+              ? `🔥 ${stats.winCurrentStreak}-win streak · best ${stats.winBestStreak}`
+              : stats.prizesToClaim > 0
+                ? `${stats.prizesToClaim} prize${stats.prizesToClaim === 1 ? '' : 's'} to claim`
+                : 'NFT & crypto prizes'
+          }
           accent="bg-violet-500/15"
         />
         <OverviewMetricCard

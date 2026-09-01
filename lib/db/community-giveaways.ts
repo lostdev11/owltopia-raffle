@@ -407,6 +407,10 @@ export async function drawCommunityGiveawayWinner(giveawayId: string): Promise<s
     console.error('drawCommunityGiveawayWinner:', error.message)
     throw new Error(error.message)
   }
+  if (data) {
+    const { applyCommunityGiveawayWinStreak } = await import('@/lib/db/wallet-streaks')
+    await applyCommunityGiveawayWinStreak(giveawayId, winnerWallet, wallets, now)
+  }
   return data ? winnerWallet : null
 }
 

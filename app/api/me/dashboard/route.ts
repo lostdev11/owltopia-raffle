@@ -38,6 +38,7 @@ import { listOfferRefundCandidatesByWallet } from '@/lib/db/raffle-offers'
 import { listMilestoneBonusWinsForWallet } from '@/lib/db/raffle-milestones'
 import { getDiscordPartnerTenantIdForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
 import { isAdmin as isWalletRegisteredAdmin } from '@/lib/db/admins'
+import { getWalletStreaks } from '@/lib/db/wallet-streaks'
 
 export const dynamic = 'force-dynamic'
 
@@ -185,6 +186,7 @@ export async function GET(request: NextRequest) {
       buyoutOffers,
       viewerIsSiteAdmin,
       milestoneBonusWins,
+      streaks,
     ] = await Promise.all([
       Promise.resolve(rafflesForResponse),
       getAuctionsByCreator(wallet).catch((err) => {
@@ -228,6 +230,17 @@ export async function GET(request: NextRequest) {
       listMilestoneBonusWinsForWallet(wallet).catch((err) => {
         console.error('[me/dashboard] milestone bonus wins:', err instanceof Error ? err.message : err)
         return []
+      }),
+      getWalletStreaks(wallet).catch((err) => {
+        console.error('[me/dashboard] wallet streaks:', err instanceof Error ? err.message : err)
+        return {
+          winCurrentStreak: 0,
+          winBestStreak: 0,
+          winTotalWins: 0,
+          participationCurrentStreak: 0,
+          participationBestStreak: 0,
+          lastParticipationDate: null,
+        }
       }),
     ])
 
@@ -378,6 +391,7 @@ export async function GET(request: NextRequest) {
       referralGrowth: referralProgramActive ? referralGrowth : null,
       buyoutOffers: buyoutOffersWithDepositSource,
       engagement,
+      streaks,
       /** True when session wallet is listed in `admins` (unlock partner hub preview, etc.). */
       viewerIsSiteAdmin,
       milestoneBonusWins,
