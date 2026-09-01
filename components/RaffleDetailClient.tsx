@@ -35,7 +35,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { raffleSoldOutButtonLabel, raffleSoldOutDetailMessage } from '@/lib/raffles/sold-out-copy'
+import {
+  raffleIsSoldOutAwaitingDraw,
+  raffleSoldOutButtonLabel,
+  raffleSoldOutDetailMessage,
+} from '@/lib/raffles/sold-out-copy'
 import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer, RaffleCurrency, RaffleMilestone } from '@/lib/types'
 import { RaffleMilestonesPanel } from '@/components/RaffleMilestonesPanel'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
@@ -543,10 +547,6 @@ export function RaffleDetailClient({
   const themeColor = isPendingDraft ? '#f59e0b' : (isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent)))
   const isEndingSoon =
     isActive && endTimeMs - nowMs <= 60 * 60 * 1000 && new Date(raffle.end_time) > serverTime
-  const statusPillLabel = isPendingDraft ? 'Pending' : (isFuture ? 'Upcoming' : isActive ? (isEndingSoon ? 'Ending soon' : 'Live now') : 'Ended')
-  const statusBadgeClass = isPendingDraft
-    ? 'bg-amber-500 hover:bg-amber-600 text-white'
-    : (isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'))
   const timeToEndLabel = isFuture
     ? `Starts ${formatDateTimeLocal(raffle.start_time)}`
     : isActive
@@ -590,6 +590,8 @@ export function RaffleDetailClient({
   // "Refund owed (legacy listing)" after platform payouts until a manual refresh.
   const shouldSyncRaffleEntries =
     isActive ||
+    raffle.status === 'ready_to_draw' ||
+    raffle.status === 'successful_pending_claims' ||
     raffle.status === 'failed_refund_available' ||
     raffle.status === 'pending_min_not_met' ||
     raffle.status === 'cancelled'
@@ -829,6 +831,27 @@ export function RaffleDetailClient({
     : null
   const soldOutLabel = raffleSoldOutButtonLabel(raffle, availableTickets)
   const soldOutDetailMessage = raffleSoldOutDetailMessage(raffle, availableTickets)
+  const isSoldOutAwaitingDraw = raffleIsSoldOutAwaitingDraw(raffle, availableTickets)
+  const statusPillLabel = isPendingDraft
+    ? 'Pending'
+    : isSoldOutAwaitingDraw
+      ? 'Draw pending'
+      : isFuture
+        ? 'Upcoming'
+        : isActive
+          ? isEndingSoon
+            ? 'Ending soon'
+            : 'Live now'
+          : 'Ended'
+  const statusBadgeClass = isPendingDraft
+    ? 'bg-amber-500 hover:bg-amber-600 text-white'
+    : isSoldOutAwaitingDraw
+      ? 'bg-amber-500 hover:bg-amber-600 text-white'
+      : isFuture
+        ? 'bg-red-500 hover:bg-red-600 text-white'
+        : isActive
+          ? 'bg-green-500 hover:bg-green-600 text-white'
+          : 'bg-blue-500 hover:bg-blue-600 text-white'
 
   // Calculate user's tickets (from confirmed entries only)
   const userTickets = connected && publicKey
