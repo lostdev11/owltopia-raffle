@@ -1,14 +1,6 @@
 import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
-import {
-  getRaffleBySlug,
-  getEntriesByRaffleId,
-  selectWinner,
-  isRaffleEligibleToDraw,
-  getRaffleMinimum,
-} from '@/lib/db/raffles'
-import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
-import { buildMinThresholdMissExtensionPatch } from '@/lib/raffles/min-threshold-extension'
+import { getRaffleBySlug, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { getMilestonesByRaffleId } from '@/lib/db/raffle-milestones'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
@@ -26,9 +18,7 @@ import { lookupOrbisNftUrl } from '@/lib/nft-marketplace-orbis'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
-import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
-import { isRaffleEligibleForWinnerSelection } from '@/lib/raffles/sell-out-eligibility'
-import { raffleRequiresPrizeEscrowForDraw } from '@/lib/raffles/visibility'
+import { scheduleRaffleDrawOnVisit } from '@/lib/raffles/schedule-raffle-draw-on-visit'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import { canonicalRaffleSlug, raffleSlugNeedsRedirect } from '@/lib/raffles/slug-aliases'
 // Force dynamic rendering to prevent caching stale data
@@ -97,7 +87,7 @@ export default async function RaffleDetailPage({
     redirect(`/raffles/${encodeURIComponent(redirectTo)}`)
   }
 
-  let raffle = await getRaffleBySlug(slug)
+  const raffle = await getRaffleBySlug(slug)
   
   if (!raffle) {
     notFound()
@@ -118,103 +108,9 @@ export default async function RaffleDetailPage({
     notFound()
   }
 
-  // Check if raffle has ended and doesn't have a winner yet.
-  // ready_to_draw is due even if end_time was pushed into the future after a failed VRF.
-  const now = new Date()
-  const hasEnded = raffleIsDueForWinnerDraw(raffle, now)
-  const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
-  // Match `/api/cron/draw-ended-raffles`: draw by status, not `is_active` alone (that flag is mainly for ticket sales).
-  // NFT raffles must have prize in escrow before a draw, same as `getEndedRafflesWithoutWinner`.
-  // Repair stuck sell-out: legacy caps / escrow rules may have blocked early draw on last ticket.
-  if (hasNoWinner && (raffle.status === 'live' || raffle.status === 'ready_to_draw')) {
-    try {
-      const { maybeTriggerDrawOnSellOut } = await import('@/lib/raffles/sell-out-draw')
-      const sellOut = await maybeTriggerDrawOnSellOut(raffle.id)
-      if (sellOut.triggered) {
-        raffle = await getRaffleBySlug(slug)
-        if (!raffle) {
-          notFound()
-        }
-      }
-    } catch (err) {
-      console.error('[raffle page] sell-out draw repair failed:', err)
-    }
-  }
-
-  if (!raffle) {
-    notFound()
-  }
-
-  const hasNoWinnerAfterSellOut = !raffle.winner_wallet && !raffle.winner_selected_at
-  const mayAutoDrawAfterSellOut =
-    (raffle.status === 'live' ||
-      raffle.status === 'ready_to_draw' ||
-      raffle.status === 'pending_min_not_met') &&
-    !(raffleRequiresPrizeEscrowForDraw(raffle) && !raffle.prize_deposited_at)
-
-  if (hasEnded && hasNoWinnerAfterSellOut && mayAutoDrawAfterSellOut) {
-    try {
-      // Get entries to check eligibility
-      const entries = await getEntriesByRaffleId(raffle.id)
-      const { updateRaffle } = await import('@/lib/db/raffles')
-
-      // Check if raffle can have a winner selected (threshold met and at least one confirmed ticket)
-      const canDraw = isRaffleEligibleForWinnerSelection(raffle, entries)
-
-      if (canDraw) {
-        // Automatically select a winner based on ticket quantities
-        const winnerWallet = await selectWinner(raffle.id)
-        
-        if (winnerWallet) {
-          // Refresh raffle data to get updated winner information
-          raffle = await getRaffleBySlug(slug)
-          if (!raffle) {
-            notFound()
-          }
-        }
-      } else {
-        // Ticket threshold (min_tickets) not met: one extension, then failed_refund + NFT return
-        const hasMinTickets = getRaffleMinimum(raffle) != null
-        const meetsMinTickets = hasMinTickets ? isRaffleEligibleToDraw(raffle, entries) : false
-
-        if (hasMinTickets && !meetsMinTickets) {
-          if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
-            const { finalizeMinThresholdTerminalFailure } = await import(
-              '@/lib/raffles/min-threshold-terminal'
-            )
-            await finalizeMinThresholdTerminalFailure(raffle.id)
-            raffle = await getRaffleBySlug(slug)
-            if (!raffle) {
-              notFound()
-            }
-          } else {
-            await updateRaffle(raffle.id, buildMinThresholdMissExtensionPatch(raffle))
-
-            raffle = await getRaffleBySlug(slug)
-            if (!raffle) {
-              notFound()
-            }
-          }
-        } else if (!hasMinTickets) {
-          if (raffle.status !== 'ready_to_draw') {
-            await updateRaffle(raffle.id, { status: 'ready_to_draw' })
-            raffle = await getRaffleBySlug(slug)
-            if (!raffle) {
-              notFound()
-            }
-          }
-        }
-      }
-    } catch (error) {
-      // Log error but don't fail the page - winner selection can be retried
-      console.error('Error auto-selecting winner for raffle:', error)
-    }
-  }
-
-  // Ensure raffle is not null before proceeding
-  if (!raffle) {
-    notFound()
-  }
+  // Draw / min-threshold processing runs after the response (see scheduleRaffleDrawOnVisit).
+  // Blocking selectWinner() during SSR left ended undrawn raffles stuck on "Loading raffles..." for up to ~75s (VRF).
+  scheduleRaffleDrawOnVisit(raffle)
 
   const entries = await getEntriesByRaffleId(raffle.id)
   const milestones = await getMilestonesByRaffleId(raffle.id)
