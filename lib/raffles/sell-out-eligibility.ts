@@ -9,10 +9,13 @@ function confirmedTicketCount(entries: Entry[]): number {
 }
 
 /**
- * Sell-out draws when the ticket cap is exhausted and there is at least one confirmed ticket.
+ * Whether a winner may be selected now: draw threshold met, or ticket cap sold out with ≥1 ticket.
  * Legacy rows may have max_tickets below the current computed draw goal — still draw at cap.
  */
-export function canDrawOnSellOut(raffle: Pick<Raffle, 'max_tickets' | 'min_tickets' | 'prize_type' | 'floor_price' | 'ticket_price'>, entries: Entry[]): boolean {
+export function isRaffleEligibleForWinnerSelection(
+  raffle: Pick<Raffle, 'max_tickets' | 'min_tickets' | 'prize_type' | 'floor_price' | 'ticket_price'>,
+  entries: Entry[]
+): boolean {
   const confirmedTickets = confirmedTicketCount(entries)
   if (confirmedTickets <= 0) return false
 
@@ -23,4 +26,12 @@ export function canDrawOnSellOut(raffle: Pick<Raffle, 'max_tickets' | 'min_ticke
   }
 
   return confirmedTickets > 0
+}
+
+/** Sell-out hook alias — same eligibility rules as {@link isRaffleEligibleForWinnerSelection}. */
+export function canDrawOnSellOut(
+  raffle: Pick<Raffle, 'max_tickets' | 'min_tickets' | 'prize_type' | 'floor_price' | 'ticket_price'>,
+  entries: Entry[]
+): boolean {
+  return isRaffleEligibleForWinnerSelection(raffle, entries)
 }

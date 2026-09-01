@@ -26,6 +26,7 @@ import {
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
+import { isRaffleEligibleForWinnerSelection } from '@/lib/raffles/sell-out-eligibility'
 import { raffleRequiresPrizeEscrowForDraw } from '@/lib/raffles/visibility'
 import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
 import { getSupabasePublishableKey, getSupabaseSecretKey } from '@/lib/supabase-env'
@@ -2131,8 +2132,8 @@ export async function selectWinner(
     return null
   }
 
-  // Draw eligibility: {@link canSelectWinner} (ticket threshold / ≥1 ticket when no min). No separate 7-day gate.
-  if (!forceOverride && !canSelectWinner(raffle, entries)) {
+  // Draw eligibility: threshold met, or sold out at max (legacy caps below computed min still draw).
+  if (!forceOverride && !isRaffleEligibleForWinnerSelection(raffle, entries)) {
     if (!isRaffleEligibleToDraw(raffle, entries)) {
       console.warn(`Raffle ${raffleId} does not meet minimum ticket requirements`)
     } else {

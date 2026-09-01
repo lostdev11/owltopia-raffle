@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { getSellOutDrawSkipReason } from '../lib/raffles/sell-out-draw'
-import { canDrawOnSellOut } from '../lib/raffles/sell-out-eligibility'
+import { isRaffleEligibleForWinnerSelection } from '../lib/raffles/sell-out-eligibility'
+import { canSelectWinner } from '../lib/db/raffles'
 import type { Entry } from '@/lib/types'
 
 function check(label: string, ok: boolean) {
@@ -76,12 +77,19 @@ const legacyBelowMinRaffle = {
 } as import('@/lib/types').Raffle
 
 check(
-  'canDrawOnSellOut true when sold out below stored min (legacy cap)',
-  canDrawOnSellOut(legacyBelowMinRaffle, legacyEntries)
+  'isRaffleEligibleForWinnerSelection true when sold out below stored min (legacy cap)',
+  isRaffleEligibleForWinnerSelection(legacyBelowMinRaffle, legacyEntries)
 )
 check(
-  'canDrawOnSellOut false when no confirmed tickets',
-  !canDrawOnSellOut({ max_tickets: 10, prize_type: 'crypto' } as import('@/lib/types').Raffle, [])
+  'canSelectWinner false when sold out below stored min (legacy cap)',
+  !canSelectWinner(legacyBelowMinRaffle, legacyEntries)
+)
+check(
+  'isRaffleEligibleForWinnerSelection false when no confirmed tickets',
+  !isRaffleEligibleForWinnerSelection(
+    { max_tickets: 10, prize_type: 'crypto' } as import('@/lib/types').Raffle,
+    []
+  )
 )
 
 assert.equal(process.exitCode ?? 0, 0, 'one or more checks failed')

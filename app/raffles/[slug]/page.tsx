@@ -5,7 +5,6 @@ import {
   getEntriesByRaffleId,
   selectWinner,
   isRaffleEligibleToDraw,
-  canSelectWinner,
   getRaffleMinimum,
 } from '@/lib/db/raffles'
 import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
@@ -28,6 +27,7 @@ import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
 import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
+import { isRaffleEligibleForWinnerSelection } from '@/lib/raffles/sell-out-eligibility'
 import { raffleRequiresPrizeEscrowForDraw } from '@/lib/raffles/visibility'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import { canonicalRaffleSlug, raffleSlugNeedsRedirect } from '@/lib/raffles/slug-aliases'
@@ -159,7 +159,7 @@ export default async function RaffleDetailPage({
       const { updateRaffle } = await import('@/lib/db/raffles')
 
       // Check if raffle can have a winner selected (threshold met and at least one confirmed ticket)
-      const canDraw = canSelectWinner(raffle, entries)
+      const canDraw = isRaffleEligibleForWinnerSelection(raffle, entries)
 
       if (canDraw) {
         // Automatically select a winner based on ticket quantities

@@ -19,6 +19,7 @@ import { hasExhaustedMinThresholdTimeExtensions, raffleSecondRoundEnabled } from
 import { buildMinThresholdMissExtensionPatch } from '@/lib/raffles/min-threshold-extension'
 import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
 import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
+import { isRaffleEligibleForWinnerSelection } from '@/lib/raffles/sell-out-eligibility'
 import { raffleRequiresPrizeEscrowForDraw } from '@/lib/raffles/visibility'
 import type { Raffle } from '@/lib/types'
 
@@ -57,7 +58,7 @@ export async function processEndedRaffleByIdIfApplicable(raffleId: string): Prom
 export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult> {
   try {
     const entries = await getEntriesByRaffleId(raffle.id)
-    const canDraw = canSelectWinner(raffle, entries)
+    const canDraw = isRaffleEligibleForWinnerSelection(raffle, entries)
 
     // If {@link canSelectWinner} is false (min not hit, or no sales when there's no drawable min),
     // extend once then terminal refund state — do not force `ready_to_draw` while still undrawable.
