@@ -125,7 +125,7 @@ function bucketRaffles(raffles: Raffle[], now: Date): { active: RaffleWithEntrie
       pausedPending.push(withEntries(raffle))
       continue
     }
-    if (raffle.winner_selected_at || raffle.status === 'completed') {
+    if (raffle.winner_selected_at || raffle.status === 'completed' || raffle.status === 'successful_pending_claims') {
       past.push(withEntries(raffle))
       continue
     }

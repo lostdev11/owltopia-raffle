@@ -55,6 +55,9 @@ export const metadata: Metadata = {
 
 type RaffleWithEntries = Array<{ raffle: Raffle; entries: Entry[] }>
 
+/** Stable empty buckets for error SSR (new `[]` each render can trigger React max update depth in RafflesList). */
+const EMPTY_RAFFLES_WITH_ENTRIES: RaffleWithEntries = []
+
 function toRaffleWithEntries(raffles: Raffle[]): RaffleWithEntries {
   return raffles.map((raffle) => ({ raffle, entries: [] }))
 }
@@ -203,7 +206,7 @@ export default async function RafflesPage() {
         pausedPendingRaffles.push(raffle)
         continue
       }
-      if (raffle.winner_selected_at || raffle.status === 'completed') {
+      if (raffle.winner_selected_at || raffle.status === 'completed' || raffle.status === 'successful_pending_claims') {
         pastRaffles.push(raffle)
         continue
       }
@@ -248,10 +251,10 @@ export default async function RafflesPage() {
     return (
       <Suspense fallback={<RafflesLoadingFallback />}>
         <RafflesPageClient
-          activeRafflesWithEntries={[]}
-          pausedPendingRafflesWithEntries={[]}
-          futureRafflesWithEntries={[]}
-          pastRafflesWithEntries={[]}
+          activeRafflesWithEntries={EMPTY_RAFFLES_WITH_ENTRIES}
+          pausedPendingRafflesWithEntries={EMPTY_RAFFLES_WITH_ENTRIES}
+          futureRafflesWithEntries={EMPTY_RAFFLES_WITH_ENTRIES}
+          pastRafflesWithEntries={EMPTY_RAFFLES_WITH_ENTRIES}
           fetchStatus="error"
           initialError={{ message, code: 'PAGE_ERROR' }}
           partnerCreatorWallets={[]}
