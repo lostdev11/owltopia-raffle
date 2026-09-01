@@ -1,13 +1,13 @@
 import {
   calculateTicketsSold,
-  canSelectWinner,
   getEntriesByRaffleId,
   getRaffleById,
   updateRaffle,
 } from '@/lib/db/raffles'
 import { processEndedRaffleByIdIfApplicable, type DrawResult } from '@/lib/draw-ended-raffles'
-import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { isRaffleSoldOutAtMax } from '@/lib/raffles/max-tickets'
+import { canDrawOnSellOut } from '@/lib/raffles/sell-out-eligibility'
+import { raffleRequiresPrizeEscrowForDraw } from '@/lib/raffles/visibility'
 
 export type SellOutDrawSkipReason =
   | 'not_sold_out'
@@ -28,6 +28,7 @@ export type SellOutDrawPreconditionInput = {
   winner_wallet?: string | null
   winner_selected_at?: string | null
   confirmedTickets: number
+  /** When true, sold-out early draw may run (see {@link canDrawOnSellOut}). */
   canDraw: boolean
   prizeRequiresEscrow: boolean
   prizeDeposited: boolean
@@ -59,15 +60,15 @@ export async function maybeTriggerDrawOnSellOut(raffleId: string): Promise<SellO
 
   const entries = await getEntriesByRaffleId(raffleId)
   const confirmedTickets = calculateTicketsSold(entries)
+  const prizeRequiresEscrow = raffleRequiresPrizeEscrowForDraw(raffle)
   const skipReason = getSellOutDrawSkipReason({
     max_tickets: raffle.max_tickets,
     status: raffle.status,
     winner_wallet: raffle.winner_wallet,
     winner_selected_at: raffle.winner_selected_at,
     confirmedTickets,
-    canDraw: canSelectWinner(raffle, entries),
-    prizeRequiresEscrow:
-      raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle),
+    canDraw: canDrawOnSellOut(raffle, entries),
+    prizeRequiresEscrow,
     prizeDeposited: Boolean(raffle.prize_deposited_at),
   })
 

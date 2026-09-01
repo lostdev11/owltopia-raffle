@@ -55,6 +55,21 @@ export function nftRaffleExemptFromEscrowRequirement(raffle: Raffle): boolean {
 }
 
 /**
+ * Whether winner selection / sell-out draw must wait for verified prize escrow.
+ * Matches ticket purchase rules: legacy pre-escrow NFT listings may draw without deposit.
+ */
+export function raffleRequiresPrizeEscrowForDraw(raffle: Raffle): boolean {
+  if (raffle.prize_type === 'crypto') return false
+  if (isPartnerSplPrizeRaffle(raffle)) {
+    return !nftRaffleExemptFromEscrowRequirement(raffle)
+  }
+  if (raffle.prize_type === 'nft') {
+    return !nftRaffleExemptFromEscrowRequirement(raffle)
+  }
+  return false
+}
+
+/**
  * Raffles that are "pending" for public listing/admin pending buckets: blocked purchases, or
  * missing escrow verification while already live / draft-past-start. Uses `nowMs` so list
  * bucketing matches server time.

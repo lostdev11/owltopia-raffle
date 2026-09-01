@@ -26,6 +26,7 @@ import {
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
+import { raffleRequiresPrizeEscrowForDraw } from '@/lib/raffles/visibility'
 import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
 import { getSupabasePublishableKey, getSupabaseSecretKey } from '@/lib/supabase-env'
 import { raffleSlugStorageCandidates } from '@/lib/raffles/slug-aliases'
@@ -2392,7 +2393,7 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
   const filteredRaffles = raffles.filter(raffle => {
     if (!raffleIsDueForWinnerDraw(raffle, now)) return false
     const prizeEscrowPending =
-      (raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)) && !raffle.prize_deposited_at
+      raffleRequiresPrizeEscrowForDraw(raffle) && !raffle.prize_deposited_at
     if (prizeEscrowPending) return false
     return true
   })

@@ -28,6 +28,7 @@ import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
 import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
+import { raffleRequiresPrizeEscrowForDraw } from '@/lib/raffles/visibility'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import { canonicalRaffleSlug, raffleSlugNeedsRedirect } from '@/lib/raffles/slug-aliases'
 // Force dynamic rendering to prevent caching stale data
@@ -124,13 +125,34 @@ export default async function RaffleDetailPage({
   const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
   // Match `/api/cron/draw-ended-raffles`: draw by status, not `is_active` alone (that flag is mainly for ticket sales).
   // NFT raffles must have prize in escrow before a draw, same as `getEndedRafflesWithoutWinner`.
-  const mayAutoDraw =
+  // Repair stuck sell-out: legacy caps / escrow rules may have blocked early draw on last ticket.
+  if (hasNoWinner && (raffle.status === 'live' || raffle.status === 'ready_to_draw')) {
+    try {
+      const { maybeTriggerDrawOnSellOut } = await import('@/lib/raffles/sell-out-draw')
+      const sellOut = await maybeTriggerDrawOnSellOut(raffle.id)
+      if (sellOut.triggered) {
+        raffle = await getRaffleBySlug(slug)
+        if (!raffle) {
+          notFound()
+        }
+      }
+    } catch (err) {
+      console.error('[raffle page] sell-out draw repair failed:', err)
+    }
+  }
+
+  if (!raffle) {
+    notFound()
+  }
+
+  const hasNoWinnerAfterSellOut = !raffle.winner_wallet && !raffle.winner_selected_at
+  const mayAutoDrawAfterSellOut =
     (raffle.status === 'live' ||
       raffle.status === 'ready_to_draw' ||
       raffle.status === 'pending_min_not_met') &&
-    !(raffle.prize_type === 'nft' && !raffle.prize_deposited_at)
+    !(raffleRequiresPrizeEscrowForDraw(raffle) && !raffle.prize_deposited_at)
 
-  if (hasEnded && hasNoWinner && mayAutoDraw) {
+  if (hasEnded && hasNoWinnerAfterSellOut && mayAutoDrawAfterSellOut) {
     try {
       // Get entries to check eligibility
       const entries = await getEntriesByRaffleId(raffle.id)

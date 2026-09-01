@@ -18,8 +18,8 @@ import {
 import { hasExhaustedMinThresholdTimeExtensions, raffleSecondRoundEnabled } from '@/lib/raffles/ticket-escrow-policy'
 import { buildMinThresholdMissExtensionPatch } from '@/lib/raffles/min-threshold-extension'
 import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
-import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
+import { raffleRequiresPrizeEscrowForDraw } from '@/lib/raffles/visibility'
 import type { Raffle } from '@/lib/types'
 
 export type DrawResult = {
@@ -49,8 +49,7 @@ export async function processEndedRaffleByIdIfApplicable(raffleId: string): Prom
   }
   // ready_to_draw is due even if end_time was pushed into the future after a failed draw.
   if (!raffleIsDueForWinnerDraw(raffle)) return null
-  const needsPrizeEscrow =
-    (raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)) && !raffle.prize_deposited_at
+  const needsPrizeEscrow = raffleRequiresPrizeEscrowForDraw(raffle) && !raffle.prize_deposited_at
   if (needsPrizeEscrow) return null
   return processOneEndedRaffle(raffle)
 }
