@@ -131,7 +131,8 @@ export function PartnerDiscordWlCampaignsCard() {
       <CardHeader className="border-b border-border/50 pb-4">
         <CardTitle className="text-lg">Whitelist spots</CardTitle>
         <CardDescription>
-          Discord collection from <code className="rounded bg-muted/60 px-1 font-mono text-xs">/owltopia-wl</code>.
+          Discord collection from <code className="rounded bg-muted/60 px-1 font-mono text-xs">/owltopia-wl</code>{' '}
+          or <code className="rounded bg-muted/60 px-1 font-mono text-xs">/query mintlist</code>.
           Members tap Submit wallet — download CSV or push into Owl Center when you close the list.
         </CardDescription>
       </CardHeader>

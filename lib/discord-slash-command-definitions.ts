@@ -439,9 +439,37 @@ export const OWLTOPIA_WL_SLASH_COMMAND = {
   ],
 } as const
 
+/** Read-only alias for `/owltopia-wl` status, list, and export (mintlist lookup). */
+export const OWLTOPIA_QUERY_SLASH_COMMAND = {
+  name: 'query',
+  description: 'Look up whitelist spots and mint lists (Partner Pro)',
+  type: 1,
+  dm_permission: false,
+  options: [
+    {
+      name: 'mintlist',
+      description: 'Wallets registered on a whitelist spot (same as /owltopia-wl export)',
+      type: 1,
+      options: [{ name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false }],
+    },
+    {
+      name: 'status',
+      description: 'Spot status — open/closed, count, linked collection',
+      type: 1,
+      options: [{ name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false }],
+    },
+    {
+      name: 'spots',
+      description: 'All whitelist spots in this server (same as /owltopia-wl list)',
+      type: 1,
+    },
+  ],
+} as const
+
 export const ALL_DISCORD_SLASH_COMMANDS = [
   OWLTOPIA_PARTNER_SLASH_COMMAND,
   OWLTOPIA_SHOP_SLASH_COMMAND,
   OWLTOPIA_ALERTS_SLASH_COMMAND,
   OWLTOPIA_WL_SLASH_COMMAND,
+  OWLTOPIA_QUERY_SLASH_COMMAND,
 ] as const

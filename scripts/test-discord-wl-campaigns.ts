@@ -315,4 +315,16 @@ assert.equal(
   assert.equal(req?.value, 'Anyone in this server')
 }
 
+import {
+  ALL_DISCORD_SLASH_COMMANDS,
+  OWLTOPIA_QUERY_SLASH_COMMAND,
+} from '../lib/discord-slash-command-definitions'
+
+assert.equal(OWLTOPIA_QUERY_SLASH_COMMAND.name, 'query')
+const querySubs = OWLTOPIA_QUERY_SLASH_COMMAND.options.map((o) => o.name)
+assert.deepEqual(querySubs, ['mintlist', 'status', 'spots'])
+const commandNames = ALL_DISCORD_SLASH_COMMANDS.map((c) => c.name)
+assert.equal(new Set(commandNames).size, commandNames.length)
+assert.ok(commandNames.includes('query'))
+
 console.log('test-discord-wl-campaigns: ok')

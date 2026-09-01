@@ -10,7 +10,7 @@ import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 import { assertDiscordPartnerCommandAccess } from '@/lib/discord-partner-command-access'
 import { handleDiscordMarketplaceCommand } from '@/lib/discord-marketplace-handle-interaction'
 import { handleDiscordRaffleAlertsCommand } from '@/lib/discord-raffle-alerts-handle-interaction'
-import { handleDiscordWlCommand } from '@/lib/discord-wl-handle-interaction'
+import { handleDiscordQueryCommand, handleDiscordWlCommand } from '@/lib/discord-wl-handle-interaction'
 
 const MANAGE_WEBHOOKS_BIT = 1n << 29n
 
@@ -92,6 +92,9 @@ export async function handleDiscordApplicationCommand(
   }
   if (root === 'owltopia-wl') {
     return handleDiscordWlCommand(interaction)
+  }
+  if (root === 'query') {
+    return handleDiscordQueryCommand(interaction)
   }
   if (root !== 'owltopia-partner') {
     return ephemeral('Unknown command.')
