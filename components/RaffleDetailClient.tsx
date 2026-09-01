@@ -40,6 +40,7 @@ import {
   raffleSoldOutButtonLabel,
   raffleSoldOutDetailMessage,
 } from '@/lib/raffles/sold-out-copy'
+import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
 import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer, RaffleCurrency, RaffleMilestone } from '@/lib/types'
 import { RaffleMilestonesPanel } from '@/components/RaffleMilestonesPanel'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
@@ -814,6 +815,46 @@ export function RaffleDetailClient({
     raffle.prize_deposit_tx,
     router,
   ])
+
+  // Ended / sold-out raffles awaiting draw: background job may take up to ~75s (VRF). Refresh until resolved.
+  const awaitingDrawResolution = useMemo(() => {
+    if (raffle.winner_wallet || raffle.winner_selected_at) return false
+    const status = (raffle.status ?? '').trim().toLowerCase()
+    if (status !== 'live' && status !== 'ready_to_draw' && status !== 'pending_min_not_met') {
+      return false
+    }
+    const vrfStatus = (raffle.draw_vrf_status ?? '').trim()
+    if (vrfStatus === 'pending' || vrfStatus === 'failed') return true
+    return (
+      raffleIsDueForWinnerDraw(raffle, serverTime) ||
+      status === 'ready_to_draw' ||
+      raffleIsSoldOutAwaitingDraw(
+        raffle,
+        raffle.max_tickets != null ? raffle.max_tickets - calculateTicketsSold(entries) : null
+      )
+    )
+  }, [
+    raffle,
+    serverTime,
+    entries,
+    raffle.winner_wallet,
+    raffle.winner_selected_at,
+    raffle.status,
+    raffle.draw_vrf_status,
+    raffle.end_time,
+    raffle.max_tickets,
+  ])
+
+  useEffect(() => {
+    if (!awaitingDrawResolution) return
+    let ticks = 0
+    const iv = setInterval(() => {
+      ticks++
+      router.refresh()
+      if (ticks >= 90) clearInterval(iv)
+    }, 5000)
+    return () => clearInterval(iv)
+  }, [awaitingDrawResolution, router, raffle.id])
 
   // Real-time updates are now handled by useRealtimeEntries hook
   // No need for separate polling logic - it's built into the hook
