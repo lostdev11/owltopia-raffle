@@ -66,6 +66,7 @@ export {
   resolveVrfRevealWaitMs,
   isSwitchboardGatewayTransientError,
   isVrfRevealTimeoutError,
+  isInvalidVrfSecpSignatureError,
   isRetryableVrfRevealError,
   vrfRevealRetryDelayMs,
   vrfRequestAgeMs,
