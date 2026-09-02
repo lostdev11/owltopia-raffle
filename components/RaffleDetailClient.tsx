@@ -847,13 +847,31 @@ export function RaffleDetailClient({
 
   useEffect(() => {
     if (!awaitingDrawResolution) return
+
+    let cancelled = false
+    const trigger = async () => {
+      try {
+        await fetch(`/api/raffles/${encodeURIComponent(raffle.id)}/process-ended`, {
+          method: 'POST',
+          credentials: 'same-origin',
+        })
+        if (!cancelled) router.refresh()
+      } catch {
+        /* polling below will retry */
+      }
+    }
+    void trigger()
+
     let ticks = 0
     const iv = setInterval(() => {
       ticks++
       router.refresh()
       if (ticks >= 90) clearInterval(iv)
     }, 5000)
-    return () => clearInterval(iv)
+    return () => {
+      cancelled = true
+      clearInterval(iv)
+    }
   }, [awaitingDrawResolution, router, raffle.id])
 
   // Real-time updates are now handled by useRealtimeEntries hook

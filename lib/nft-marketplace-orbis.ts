@@ -23,12 +23,16 @@ export async function lookupOrbisNftUrl(mint: string): Promise<OrbisMintLookupRe
   if (!m) return { found: false, url: null }
 
   try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), ORBIS_FLOOR_TIMEOUT_MS)
     const res = await fetch(ORBIS_LOOKUP_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'lookupMint', mint: m }),
       next: { revalidate: 3600 },
+      signal: controller.signal,
     })
+    clearTimeout(timeout)
     const data = (await res.json()) as OrbisLookupMintResponse
 
     if (data.success && data.found && data.collectionPathname?.trim()) {

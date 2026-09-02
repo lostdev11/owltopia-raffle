@@ -14,11 +14,8 @@ function raffleMayAutoDrawOnVisit(raffle: Raffle): boolean {
   return true
 }
 
-/**
- * Kick off draw / min-threshold processing after the raffle page response is sent.
- * Avoids blocking SSR on VRF (up to ~75s) which left detail URLs stuck on "Loading raffles...".
- */
-export function scheduleRaffleDrawOnVisit(raffle: Raffle): void {
+/** Draw / min-threshold pipeline for one raffle (sell-out repair + ended processing). */
+export async function runRaffleDrawOnVisit(raffle: Raffle): Promise<void> {
   if (!raffleMayAutoDrawOnVisit(raffle)) return
 
   const raffleId = raffle.id
@@ -26,17 +23,27 @@ export function scheduleRaffleDrawOnVisit(raffle: Raffle): void {
   const status = (raffle.status ?? '').trim().toLowerCase()
   const mayRepairSellOut = status === 'live' || status === 'ready_to_draw'
 
+  if (mayRepairSellOut) {
+    const { maybeTriggerDrawOnSellOut } = await import('@/lib/raffles/sell-out-draw')
+    await maybeTriggerDrawOnSellOut(raffleId)
+  }
+  if (hasEnded) {
+    await processEndedRaffleByIdIfApplicable(raffleId)
+  }
+}
+
+/**
+ * Kick off draw / min-threshold processing after the raffle page response is sent.
+ * Client also POSTs `/api/raffles/[id]/process-ended` as a reliable fallback when `after()` is cut short.
+ */
+export function scheduleRaffleDrawOnVisit(raffle: Raffle): void {
+  if (!raffleMayAutoDrawOnVisit(raffle)) return
+
   after(async () => {
     try {
-      if (mayRepairSellOut) {
-        const { maybeTriggerDrawOnSellOut } = await import('@/lib/raffles/sell-out-draw')
-        await maybeTriggerDrawOnSellOut(raffleId)
-      }
-      if (hasEnded) {
-        await processEndedRaffleByIdIfApplicable(raffleId)
-      }
+      await runRaffleDrawOnVisit(raffle)
     } catch (err) {
-      console.error('[scheduleRaffleDrawOnVisit]', raffleId, err)
+      console.error('[scheduleRaffleDrawOnVisit]', raffle.id, err)
     }
   })
 }
