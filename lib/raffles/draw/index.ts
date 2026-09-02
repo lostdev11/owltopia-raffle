@@ -70,4 +70,6 @@ export {
   vrfRevealRetryDelayMs,
   vrfRequestAgeMs,
   shouldAutoForceNewVrfRequest,
+  resolveAdminVrfForceNewRequest,
+  ADMIN_VRF_RECOVERY_WAIT_MS,
 } from '@/lib/raffles/draw/vrf-retry-policy'
