@@ -7,7 +7,9 @@ import {
   PublicKey,
   Connection,
   Transaction,
+  TransactionInstruction,
   VersionedTransaction,
+  SystemProgram,
 } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
@@ -95,6 +97,146 @@ export function keypairWallet(payer: Keypair) {
 async function loadSbProgram(connection: Connection, payer: Keypair) {
   const sb = await loadSb()
   return sb.AnchorUtils.loadProgramFromConnection(connection, keypairWallet(payer))
+}
+
+function normalizeGatewayUrl(raw: string | null | undefined): string | null {
+  const trimmed = (raw ?? '').trim().replace(/\/$/, '')
+  return trimmed || null
+}
+
+/** Collect oracle + Crossbar gateway URLs — assigned oracle gateway is often the one returning 503. */
+async function collectRevealGatewayUrls(
+  program: Awaited<ReturnType<typeof loadSbProgram>>,
+  data: {
+    oracle: PublicKey
+    queue: PublicKey
+    gatewayUri?: Uint8Array | number[] | Buffer | null
+  }
+): Promise<string[]> {
+  const sb = await loadSb()
+  const { CrossbarClient } = await import('@switchboard-xyz/common')
+  const urls: string[] = []
+  const seen = new Set<string>()
+  const add = (raw: string | null | undefined) => {
+    const normalized = normalizeGatewayUrl(raw)
+    if (!normalized || seen.has(normalized)) return
+    seen.add(normalized)
+    urls.push(normalized)
+  }
+
+  // Prefer Crossbar-published gateways (health-checked) before the oracle's on-chain URI.
+  try {
+    const crossbar = CrossbarClient.default()
+    const network = isDevnetRpc(resolveServerSolanaRpcUrl()) ? 'devnet' : 'mainnet'
+    const fromCrossbar = await crossbar.fetchGateways(network)
+    for (const gateway of fromCrossbar) add(gateway)
+  } catch {
+    // ignore
+  }
+
+  try {
+    const queue = new sb.Queue(program, data.queue)
+    const crossbar = CrossbarClient.default()
+    const gateway = await queue.fetchGatewayByLatestVersion(crossbar)
+    add(gateway.gatewayUrl)
+  } catch {
+    // ignore
+  }
+
+  if (data.gatewayUri) {
+    add(Buffer.from(data.gatewayUri).toString('utf8').replace(/\0+$/, ''))
+  } else {
+    try {
+      const oracle = new sb.Oracle(program, data.oracle)
+      const oracleData = await oracle.loadData()
+      add(Buffer.from(oracleData.gatewayUri as Uint8Array).toString('utf8').replace(/\0+$/, ''))
+    } catch {
+      // ignore
+    }
+  }
+
+  return urls
+}
+
+async function buildRevealIxWithGatewayFallback(params: {
+  program: Awaited<ReturnType<typeof loadSbProgram>>
+  randomness: {
+    pubkey: PublicKey
+    loadData: () => Promise<{
+      oracle: PublicKey
+      queue: PublicKey
+      authority: PublicKey
+      seedSlothash: Uint8Array | number[]
+      seedSlot: { toNumber: () => number } | number | bigint
+    }>
+  }
+  payer: PublicKey
+  gatewayUrls: string[]
+  rpcUrl: string
+}): Promise<TransactionInstruction> {
+  const sb = await loadSb()
+  const { Gateway } = await import('@switchboard-xyz/common')
+  const { getAssociatedTokenAddressSync } = await import('@solana/spl-token')
+  const bs58 = (await import('bs58')).default
+  const data = await params.randomness.loadData()
+  const seedSlotRaw = data.seedSlot
+  const seedSlot =
+    typeof seedSlotRaw === 'object' && seedSlotRaw != null && 'toNumber' in seedSlotRaw
+      ? seedSlotRaw.toNumber()
+      : Number(seedSlotRaw)
+  if (!Number.isFinite(seedSlot) || seedSlot <= 0) {
+    throw new Error('Randomness not committed yet (missing seed slot)')
+  }
+
+  const revealParams = {
+    randomnessAccount: params.randomness.pubkey,
+    slothash: bs58.encode(Buffer.from(data.seedSlothash)),
+    slot: seedSlot,
+    rpc: params.rpcUrl,
+  }
+
+  let lastErr = 'No gateway URLs available'
+  for (const gatewayUrl of params.gatewayUrls) {
+    try {
+      const gateway = new Gateway(gatewayUrl)
+      const gatewayRevealResponse = await gateway.fetchRandomnessReveal(revealParams)
+      const stats = PublicKey.findProgramAddressSync(
+        [Buffer.from('OracleRandomnessStats'), data.oracle.toBuffer()],
+        params.program.programId
+      )[0]
+      return params.program.instruction.randomnessReveal(
+        {
+          signature: Buffer.from(gatewayRevealResponse.signature, 'base64'),
+          recoveryId: gatewayRevealResponse.recovery_id,
+          value: gatewayRevealResponse.value,
+        },
+        {
+          accounts: {
+            randomness: params.randomness.pubkey,
+            oracle: data.oracle,
+            queue: data.queue,
+            stats,
+            authority: data.authority,
+            payer: params.payer,
+            recentSlothashes: sb.SPL_SYSVAR_SLOT_HASHES_ID,
+            systemProgram: SystemProgram.programId,
+            rewardEscrow: getAssociatedTokenAddressSync(
+              sb.SOL_NATIVE_MINT,
+              params.randomness.pubkey
+            ),
+            tokenProgram: sb.SPL_TOKEN_PROGRAM_ID,
+            associatedTokenProgram: sb.SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID,
+            wrappedSolMint: sb.SOL_NATIVE_MINT,
+            programState: sb.State.keyFromSeed(params.program),
+          },
+        }
+      )
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : 'Gateway reveal failed'
+    }
+  }
+
+  throw new Error(lastErr)
 }
 
 /**
@@ -280,13 +422,25 @@ export async function switchboardRevealRandomness(params: {
     let lastErr = 'Randomness not ready'
     let lastRevealSig = ''
     let attemptIndex = 0
+    let gatewayUrls: string[] | null = null
     while (Date.now() - started < maxWaitMs) {
       try {
         // Re-check each iteration — another worker may have revealed.
         const raced = await readRevealedValue(lastRevealSig)
         if (raced) return raced
 
-        const revealIx = await randomness.revealIx(payer.publicKey)
+        if (!gatewayUrls) {
+          const data = await randomness.loadData()
+          gatewayUrls = await collectRevealGatewayUrls(program, data)
+        }
+
+        const revealIx = await buildRevealIxWithGatewayFallback({
+          program,
+          randomness,
+          payer: payer.publicKey,
+          gatewayUrls,
+          rpcUrl,
+        })
         const revealTx = await sb.asV0Tx({
           connection,
           ixs: [revealIx],
@@ -353,7 +507,7 @@ export async function switchboardRevealRandomness(params: {
     }
 
     const gatewayHint = isSwitchboardGatewayTransientError(lastErr)
-      ? ' (Switchboard oracle gateway flaky — auto-retry will re-commit if this stays down)'
+      ? ` (Switchboard oracle gateway flaky — tried ${gatewayUrls?.length ?? 0} gateways; auto-retry will re-commit if this stays down)`
       : ''
     return {
       ok: false,
