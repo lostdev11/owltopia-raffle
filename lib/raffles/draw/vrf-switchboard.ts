@@ -369,7 +369,7 @@ export async function switchboardRevealRandomness(params: {
   try {
     const sb = await loadSb()
     const connection = getSolanaConnection()
-    const rpcUrl = resolveServerSolanaRpcUrl()
+    const rpcUrl = connection.rpcEndpoint
     const program = await loadSbProgram(connection, payer)
     const bs58 = (await import('bs58')).default
     const rngKp = Keypair.fromSecretKey(bs58.decode(params.randomnessSecretKeyBase58.trim()))
@@ -475,37 +475,42 @@ export async function switchboardRevealRandomness(params: {
         }
 
         // Primary path: SDK revealIx uses the assigned oracle gateway (matches Switchboard docs).
+        let sdkSecpFailure = false
         try {
           const sdkResult = await attemptReveal(await randomness.revealIx(payer.publicKey))
           if (sdkResult) return sdkResult
         } catch (sdkErr) {
           lastErr = sdkErr instanceof Error ? sdkErr.message : 'SDK revealIx failed'
+          sdkSecpFailure = isInvalidVrfSecpSignatureError(lastErr)
         }
 
         // Fallback: try gateways in oracle-first order when SDK path fails (503 / timeout).
-        if (!gatewayUrls) {
-          const data = await randomness.loadData()
-          gatewayUrls = await collectRevealGatewayUrls(program, data)
-        }
+        // Skip on Secp — oracle not ready yet; wrong gateways only produce more Secp failures.
+        if (!sdkSecpFailure) {
+          if (!gatewayUrls) {
+            const data = await randomness.loadData()
+            gatewayUrls = await collectRevealGatewayUrls(program, data)
+          }
 
-        for (const gatewayUrl of gatewayUrls) {
-          try {
-            const gatewayResult = await attemptReveal(
-              await buildRevealIxForGateway({
-                program,
-                randomness,
-                payer: payer.publicKey,
-                gatewayUrl,
-                rpcUrl,
-              })
-            )
-            if (gatewayResult) return gatewayResult
-          } catch (gatewayErr) {
-            const msg = gatewayErr instanceof Error ? gatewayErr.message : 'Gateway reveal failed'
-            lastErr = msg
-            // Wrong gateway signature — try the next URL instead of failing the whole draw.
-            if (isInvalidVrfSecpSignatureError(msg)) continue
-            if (!isSwitchboardGatewayTransientError(msg)) break
+          for (const gatewayUrl of gatewayUrls) {
+            try {
+              const gatewayResult = await attemptReveal(
+                await buildRevealIxForGateway({
+                  program,
+                  randomness,
+                  payer: payer.publicKey,
+                  gatewayUrl,
+                  rpcUrl,
+                })
+              )
+              if (gatewayResult) return gatewayResult
+            } catch (gatewayErr) {
+              const msg = gatewayErr instanceof Error ? gatewayErr.message : 'Gateway reveal failed'
+              lastErr = msg
+              // Wrong gateway signature — try the next URL instead of failing the whole draw.
+              if (isInvalidVrfSecpSignatureError(msg)) continue
+              if (!isSwitchboardGatewayTransientError(msg)) break
+            }
           }
         }
       } catch (e) {
