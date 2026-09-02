@@ -20,6 +20,7 @@ import {
   resolveVrfRevealWaitMs,
   vrfRevealRetryDelayMs,
   isSwitchboardGatewayTransientError,
+  isInvalidVrfSecpSignatureError,
 } from '@/lib/raffles/draw/vrf-retry-policy'
 
 export const VRF_PROVIDER_SWITCHBOARD = 'switchboard' as const
@@ -322,6 +323,9 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
     })
     await connection.confirmTransaction(commitSig, 'confirmed')
 
+    // Oracle needs a moment after commit before reveal signatures validate on-chain.
+    await new Promise((r) => setTimeout(r, 4000))
+
     let seedSlot: number | undefined
     try {
       const data = await randomness.loadData()
@@ -490,6 +494,13 @@ export async function switchboardRevealRandomness(params: {
         lastErr = 'Reveal tx landed but value not readable yet'
       } catch (e) {
         lastErr = e instanceof Error ? e.message : 'Reveal attempt failed'
+        if (isInvalidVrfSecpSignatureError(lastErr)) {
+          return {
+            ok: false,
+            error: lastErr,
+            retryable: true,
+          }
+        }
         // If revealIx fails because oracle was cleared, check whether value is already set.
         try {
           const recovered = await readRevealedValue(lastRevealSig)

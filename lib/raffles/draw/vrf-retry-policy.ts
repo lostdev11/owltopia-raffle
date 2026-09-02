@@ -53,10 +53,27 @@ export function isVrfRevealTimeoutError(error: string | null | undefined): boole
   return /VRF reveal timed out/i.test((error ?? '').trim())
 }
 
+/**
+ * Switchboard RandomnessReveal simulation failure — the committed slothash/signature pair
+ * is no longer valid for this account. Retrying reveal on the same account will never succeed;
+ * abandon and commit fresh randomness against the frozen ticket ledger.
+ */
+export function isInvalidVrfSecpSignatureError(error: string | null | undefined): boolean {
+  const msg = (error ?? '').trim()
+  if (!msg) return false
+  return (
+    /InvalidSecpSignature/i.test(msg) ||
+    /\b0x1780\b/i.test(msg) ||
+    /\bError Number:\s*6016\b/i.test(msg) ||
+    /\bcustom program error:\s*0x1780\b/i.test(msg)
+  )
+}
+
 /** Transient reveal failures that are safe to auto-retry / re-commit. */
 export function isRetryableVrfRevealError(error: string | null | undefined): boolean {
   const msg = (error ?? '').trim()
   if (!msg) return false
+  if (isInvalidVrfSecpSignatureError(msg)) return false
   return (
     isVrfRevealTimeoutError(msg) ||
     isSwitchboardGatewayTransientError(msg) ||
@@ -120,6 +137,9 @@ export function shouldAutoForceNewVrfRequest(params: {
   // Missing secret / hard failures: always re-request.
   if (/Missing VRF account secret/i.test(err)) return true
 
+  // Stale / invalid oracle signature — same account cannot be revealed.
+  if (isInvalidVrfSecpSignatureError(err)) return true
+
   // No error yet and still fresh → resume (another worker may finish reveal).
   if (!err && (age == null || age < staleAfter)) return false
 
@@ -151,6 +171,7 @@ export function resolveAdminVrfForceNewRequest(raffle: {
   if (status === 'failed') {
     if (!err || isRetryableVrfRevealError(err)) return true
     if (/Missing VRF account secret/i.test(err)) return true
+    if (isInvalidVrfSecpSignatureError(err)) return true
     return false
   }
 

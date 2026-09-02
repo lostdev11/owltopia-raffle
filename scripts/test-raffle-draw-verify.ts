@@ -20,6 +20,7 @@ import {
   vrfRequestReachedChain,
   isSwitchboardGatewayTransientError,
   isVrfRevealTimeoutError,
+  isInvalidVrfSecpSignatureError,
   isRetryableVrfRevealError,
   resolveVrfRevealWaitMs,
   vrfRevealRetryDelayMs,
@@ -236,6 +237,28 @@ assert.equal(
     true
   )
   assert.equal(isSwitchboardGatewayTransientError('Account does not exist'), false)
+  assert.equal(
+    isInvalidVrfSecpSignatureError(
+      'VRF reveal timed out after 75000ms: Simulation failed. custom program error: 0x1780. InvalidSecpSignature'
+    ),
+    true
+  )
+  assert.equal(
+    isRetryableVrfRevealError(
+      'VRF reveal timed out after 75000ms: Simulation failed. custom program error: 0x1780. InvalidSecpSignature'
+    ),
+    false
+  )
+  assert.equal(
+    resolveAdminVrfForceNewRequest({
+      draw_vrf_account: 'Rand111111111111111111111111111111111111111',
+      draw_vrf_status: 'failed',
+      draw_vrf_error:
+        'VRF reveal timed out after 75000ms: Simulation failed. Error Code: InvalidSecpSignature. Error Number: 6016.',
+      draw_vrf_requested_at: '2026-08-04T16:59:30.000Z',
+    }),
+    true
+  )
   assert.ok(resolveVrfRevealWaitMs() >= 10_000)
   assert.equal(resolveVrfRevealWaitMs(12_000), 12_000)
   assert.ok(vrfRevealRetryDelayMs({ attemptIndex: 0, lastError: 'status 503' }) >= 4000)
