@@ -247,7 +247,7 @@ assert.equal(
     isRetryableVrfRevealError(
       'VRF reveal timed out after 75000ms: Simulation failed. custom program error: 0x1780. InvalidSecpSignature'
     ),
-    false
+    true
   )
   assert.equal(
     resolveAdminVrfForceNewRequest({
@@ -257,7 +257,7 @@ assert.equal(
         'VRF reveal timed out after 75000ms: Simulation failed. Error Code: InvalidSecpSignature. Error Number: 6016.',
       draw_vrf_requested_at: '2026-08-04T16:59:30.000Z',
     }),
-    true
+    false
   )
   assert.ok(resolveVrfRevealWaitMs() >= 10_000)
   assert.equal(resolveVrfRevealWaitMs(12_000), 12_000)
@@ -265,6 +265,13 @@ assert.equal(
   assert.ok(
     vrfRevealRetryDelayMs({ attemptIndex: 0, lastError: 'Randomness not ready' }) <
       vrfRevealRetryDelayMs({ attemptIndex: 0, lastError: 'status 503' })
+  )
+  assert.equal(
+    vrfRevealRetryDelayMs({
+      attemptIndex: 0,
+      lastError: 'Simulation failed. InvalidSecpSignature. Error Number: 6016',
+    }),
+    2000
   )
 
   const now = Date.parse('2026-08-04T17:00:00.000Z')
@@ -295,6 +302,28 @@ assert.equal(
       drawVrfAccount: 'Rand111111111111111111111111111111111111111',
       drawVrfError: 'Missing VRF account secret for pending request — use admin retry',
       drawVrfRequestedAt: '2026-08-04T16:59:30.000Z',
+      nowMs: now,
+    }),
+    true
+  )
+  assert.equal(
+    shouldAutoForceNewVrfRequest({
+      drawVrfStatus: 'failed',
+      drawVrfAccount: 'Rand111111111111111111111111111111111111111',
+      drawVrfError:
+        'VRF reveal timed out after 75000ms: Simulation failed. InvalidSecpSignature. Error Number: 6016.',
+      drawVrfRequestedAt: '2026-08-04T16:59:30.000Z',
+      nowMs: now,
+    }),
+    false
+  )
+  assert.equal(
+    shouldAutoForceNewVrfRequest({
+      drawVrfStatus: 'failed',
+      drawVrfAccount: 'Rand111111111111111111111111111111111111111',
+      drawVrfError:
+        'VRF reveal timed out after 75000ms: Simulation failed. InvalidSecpSignature. Error Number: 6016.',
+      drawVrfRequestedAt: '2026-08-04T16:56:00.000Z',
       nowMs: now,
     }),
     true

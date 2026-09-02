@@ -24,7 +24,6 @@ import {
 import { resolveVrfDrawLedger } from '@/lib/raffles/draw/vrf-ledger'
 import {
   isRetryableVrfRevealError,
-  isInvalidVrfSecpSignatureError,
   resolveVrfRevealWaitMs,
   shouldAutoForceNewVrfRequest,
   ADMIN_VRF_RECOVERY_WAIT_MS,
@@ -245,16 +244,6 @@ export async function runRaffleVrfFlow(params: {
   const priorError = (raffle.draw_vrf_error ?? '').trim()
   const priorFailedTransient =
     existingStatus === 'failed' && isRetryableVrfRevealError(priorError)
-  const priorSecpInvalid =
-    existingStatus === 'failed' && isInvalidVrfSecpSignatureError(priorError)
-
-  // InvalidSecpSignature means this randomness account cannot be revealed — commit fresh.
-  if (!forceNewRequest && existingAccount && priorSecpInvalid) {
-    console.warn(
-      `[runRaffleVrfFlow] InvalidSecpSignature on ${raffleId}; committing fresh VRF against frozen ledger`
-    )
-    return commitAndReveal({ raffleId, soldCount, ledgerHash, revealWaitMs })
-  }
 
   const canResume =
     !forceNewRequest &&
@@ -318,10 +307,7 @@ export async function runRaffleVrfFlow(params: {
     // Only re-commit in-process when we already knew the prior attempt failed
     // (short resume budget). A first full-budget timeout must return so the next
     // cron/admin call can recover without blowing serverless maxDuration.
-    if (
-      (priorFailedTransient && isRetryableVrfRevealError(reveal.error)) ||
-      isInvalidVrfSecpSignatureError(reveal.error)
-    ) {
+    if (priorFailedTransient && isRetryableVrfRevealError(reveal.error)) {
       console.warn(
         `[runRaffleVrfFlow] prior VRF failure for ${raffleId}; committing fresh VRF after short resume: ${reveal.error}`
       )
