@@ -58,7 +58,14 @@ async function patchVrfFields(
   raffleId: string,
   patch: Record<string, unknown>
 ): Promise<void> {
-  const { error } = await getSupabaseAdmin().from('raffles').update(patch).eq('id', raffleId)
+  let query = getSupabaseAdmin().from('raffles').update(patch).eq('id', raffleId)
+  // Concurrent selectWinner races: a late failed/pending write must not clobber
+  // VRF metadata after another invocation already recorded the winner (OWL #175).
+  const status = typeof patch.draw_vrf_status === 'string' ? patch.draw_vrf_status : ''
+  if (status === 'failed' || status === 'pending') {
+    query = query.is('winner_wallet', null)
+  }
+  const { error } = await query
   if (error) {
     throw new Error(`Failed to update VRF fields: ${error.message}`)
   }

@@ -2238,6 +2238,13 @@ export async function selectWinner(
       }
     : {}
 
+  // Persist fulfilled VRF status with the winner row so a concurrent failed
+  // reveal write cannot leave draw_vrf_status=failed after settlement.
+  const vrfSettleFields =
+    draw.algo === DRAW_ALGO_V3_VRF
+      ? { draw_vrf_status: 'fulfilled' as const, draw_vrf_error: null }
+      : {}
+
   const { data: updatedRaffle, error } = await getSupabaseAdmin()
     .from('raffles')
     .update({
@@ -2251,6 +2258,7 @@ export async function selectWinner(
       creator_payout_amount: creatorPayout,
       settled_at: now,
       ...drawFields,
+      ...vrfSettleFields,
     })
     .eq('id', raffleId)
     .is('winner_wallet', null)

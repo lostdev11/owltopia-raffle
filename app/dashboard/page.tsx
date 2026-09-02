@@ -347,6 +347,16 @@ type DashboardData = {
     refundDepositSource?: 'funds_escrow' | 'treasury' | 'unknown' | null
   }>
   milestoneBonusWins?: MilestoneBonusWinRow[]
+  /**
+   * Ended undrawn raffles still finalizing (server-classified draw vs extension/refund).
+   * Client POSTs /api/raffles/[id]/process-ended for awaiting_draw and polls.
+   */
+  endedFinalizing?: Array<{
+    id: string
+    slug: string
+    title: string
+    kind: 'awaiting_draw' | 'awaiting_extension_or_refund'
+  }>
 }
 
 type NftWinnerDashboardRow = {
@@ -676,6 +686,45 @@ export default function DashboardPage() {
     const id = setInterval(() => setRelativeTimeTick((t) => t + 1), 15_000)
     return () => clearInterval(id)
   }, [data])
+
+  // Ended raffles awaiting VRF/draw: kick the dedicated process-ended endpoint (120s budget)
+  // instead of blocking dashboard GET, then poll until the banner clears (OWL #175).
+  const awaitingDrawIdsKey = (Array.isArray(data?.endedFinalizing) ? data.endedFinalizing : [])
+    .filter((r) => r.kind === 'awaiting_draw')
+    .map((r) => r.id)
+    .sort()
+    .join(',')
+
+  useEffect(() => {
+    if (!awaitingDrawIdsKey) return
+    const drawIds = awaitingDrawIdsKey.split(',').filter(Boolean)
+    if (drawIds.length === 0) return
+
+    let cancelled = false
+    const trigger = async () => {
+      await Promise.allSettled(
+        drawIds.map((id) =>
+          fetch(`/api/raffles/${encodeURIComponent(id)}/process-ended`, {
+            method: 'POST',
+            credentials: 'same-origin',
+          })
+        )
+      )
+      if (!cancelled) void loadDashboard({ silent: true })
+    }
+    void trigger()
+
+    let ticks = 0
+    const iv = setInterval(() => {
+      ticks++
+      void loadDashboard({ silent: true })
+      if (ticks >= 24) clearInterval(iv)
+    }, 5_000)
+    return () => {
+      cancelled = true
+      clearInterval(iv)
+    }
+  }, [awaitingDrawIdsKey, loadDashboard])
 
   // On mobile, delay first dashboard load so wallet has time to stabilize after nav/redirect.
   // If already connected on mount (e.g. returning from wallet), don't delay so connection feels instant.
@@ -2032,7 +2081,7 @@ export default function DashboardPage() {
       !raffleUsesFundsEscrow(x.raffle)
   )
 
-  /** Ended, no winner, status not advanced yet — server should move to extension or refunds on refresh. */
+  /** Ended, no winner, status not advanced yet — server should move to draw, extension, or refunds. */
   const refundWaitRaffles: EntryWithRaffle['raffle'][] = []
   {
     const seen = new Set<string>()
@@ -2052,6 +2101,21 @@ export default function DashboardPage() {
       refundWaitRaffles.push(r)
     }
   }
+
+  const endedFinalizingById = new Map(
+    (Array.isArray(data?.endedFinalizing) ? data.endedFinalizing : []).map((row) => [row.id, row.kind])
+  )
+  const drawWaitRaffles = refundWaitRaffles.filter(
+    (r) => (endedFinalizingById.get(r.id) ?? 'awaiting_draw') === 'awaiting_draw'
+  )
+  const extensionRefundWaitRaffles = refundWaitRaffles.filter(
+    (r) => endedFinalizingById.get(r.id) === 'awaiting_extension_or_refund'
+  )
+  // Include host-only draw waits from API that are not in myEntries (creator did not buy tickets).
+  const drawWaitFromApi = (Array.isArray(data?.endedFinalizing) ? data.endedFinalizing : []).filter(
+    (row) =>
+      row.kind === 'awaiting_draw' && !refundWaitRaffles.some((r) => r.id === row.id)
+  )
 
   const legacyRefundOwedByRaffle = (() => {
     const map = new Map<
@@ -2105,6 +2169,7 @@ export default function DashboardPage() {
     refundableEntries.length > 0 ||
     legacyRefundEligibleEntries.length > 0 ||
     refundWaitRaffles.length > 0 ||
+    drawWaitFromApi.length > 0 ||
     cancelledUnrefundedEntries.length > 0 ||
     offerRefundCandidates.length > 0
 
@@ -2344,11 +2409,90 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            {refundWaitRaffles.length > 0 && (
+            {(drawWaitRaffles.length > 0 || drawWaitFromApi.length > 0) && (
+              <div className="rounded-lg border border-border/60 bg-background/80 p-3 text-sm">
+                <p className="font-medium text-foreground mb-1">Winner draw in progress</p>
+                <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+                  These raffles met their ticket requirements and are selecting a winner (on-chain randomness can take
+                  up to about a minute). This page retries automatically — opening the raffle also continues the draw.
+                </p>
+                <ul className="space-y-2">
+                  {drawWaitRaffles.map((r) => (
+                    <li key={r.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <Link href={`/raffles/${r.slug}`} className="font-medium hover:underline truncate">
+                        {r.title}
+                      </Link>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px] shrink-0"
+                        onClick={() => void loadDashboard({ silent: true })}
+                      >
+                        <RefreshCw className="h-4 w-4 sm:mr-2" />
+                        Refresh dashboard
+                      </Button>
+                    </li>
+                  ))}
+                  {drawWaitFromApi.map((r) => (
+                    <li key={`api-${r.id}`} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <Link href={`/raffles/${r.slug}`} className="font-medium hover:underline truncate">
+                        {r.title}
+                      </Link>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px] shrink-0"
+                        onClick={() => void loadDashboard({ silent: true })}
+                      >
+                        <RefreshCw className="h-4 w-4 sm:mr-2" />
+                        Refresh dashboard
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {extensionRefundWaitRaffles.length > 0 && (
+              <div className="rounded-lg border border-border/60 bg-background/80 p-3 text-sm">
+                <p className="font-medium text-foreground mb-1">Extension or refund is updating</p>
+                <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+                  These raffles passed their end time without enough tickets. Status is moving to a second round or
+                  refunds. Tap refresh — opening the raffle page also updates status.
+                </p>
+                <ul className="space-y-2">
+                  {extensionRefundWaitRaffles.map((r) => (
+                    <li key={r.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <Link href={`/raffles/${r.slug}`} className="font-medium hover:underline truncate">
+                        {r.title}
+                      </Link>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px] shrink-0"
+                        onClick={() => void loadDashboard({ silent: true })}
+                      >
+                        <RefreshCw className="h-4 w-4 sm:mr-2" />
+                        Refresh dashboard
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Fallback when API has not classified yet but client still sees ended undrawn entries */}
+            {refundWaitRaffles.length > 0 &&
+              drawWaitRaffles.length === 0 &&
+              extensionRefundWaitRaffles.length === 0 &&
+              drawWaitFromApi.length === 0 && (
               <div className="rounded-lg border border-border/60 bg-background/80 p-3 text-sm">
                 <p className="font-medium text-foreground mb-1">Draw or refund is updating</p>
                 <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-                  These raffles have passed their end time but are still being finalized (extension or refund state).
+                  These raffles have passed their end time but are still being finalized.
                   Tap refresh — opening the raffle page also updates status.
                 </p>
                 <ul className="space-y-2">
