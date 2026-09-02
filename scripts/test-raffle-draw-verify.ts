@@ -24,6 +24,7 @@ import {
   resolveVrfRevealWaitMs,
   vrfRevealRetryDelayMs,
   shouldAutoForceNewVrfRequest,
+  resolveAdminVrfForceNewRequest,
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
   DRAW_ALGO_V3_VRF,
@@ -275,6 +276,25 @@ assert.equal(
     }),
     true
   )
+
+  assert.equal(
+    resolveAdminVrfForceNewRequest({
+      draw_vrf_account: 'Rand111111111111111111111111111111111111111',
+      draw_vrf_status: 'failed',
+      draw_vrf_error:
+        'VRF reveal timed out after 75000ms: Gateway: fetchRandomnessReveal failed (status 503, code ERR_BAD_RESPONSE)',
+    }),
+    true
+  )
+  assert.equal(
+    resolveAdminVrfForceNewRequest({
+      draw_vrf_account: 'Rand111111111111111111111111111111111111111',
+      draw_vrf_status: 'pending',
+      draw_vrf_error: null,
+    }),
+    false
+  )
+  assert.equal(resolveAdminVrfForceNewRequest({ draw_vrf_account: null }), true)
 }
 
 const v3Draw = performDraw(entries, { algo: DRAW_ALGO_V3_VRF, drawSeed: vrfSeed })

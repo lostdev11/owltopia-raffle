@@ -26,6 +26,7 @@ import {
   isRetryableVrfRevealError,
   resolveVrfRevealWaitMs,
   shouldAutoForceNewVrfRequest,
+  ADMIN_VRF_RECOVERY_WAIT_MS,
 } from '@/lib/raffles/draw/vrf-retry-policy'
 import { DRAW_ALGO_V3_VRF } from '@/lib/raffles/draw/types'
 import type { DrawEntryLike } from '@/lib/raffles/draw/types'
@@ -61,6 +62,63 @@ async function patchVrfFields(
   if (error) {
     throw new Error(`Failed to update VRF fields: ${error.message}`)
   }
+}
+
+async function fulfillRevealedVrf(params: {
+  raffleId: string
+  soldCount: number
+  ledgerHash: string
+  randomnessAccount: string
+  requestTx: string
+  reveal: {
+    revealTx: string
+    drawSeed: string
+  }
+}): Promise<VrfFlowResult> {
+  await deleteRaffleDrawSecret(params.raffleId)
+  await patchVrfFields(params.raffleId, {
+    draw_vrf_status: 'fulfilled',
+    draw_vrf_fulfill_tx: params.reveal.revealTx,
+    draw_vrf_fulfilled_at: new Date().toISOString(),
+    draw_vrf_error: null,
+  })
+  return {
+    status: 'fulfilled',
+    drawSeed: params.reveal.drawSeed,
+    ledgerHash: params.ledgerHash,
+    soldCount: params.soldCount,
+    fulfillTx: params.reveal.revealTx,
+    requestTx: params.requestTx,
+    randomnessAccount: params.randomnessAccount,
+  }
+}
+
+/** Read on-chain state only — gateway 503 after reveal tx is a common false failure. */
+async function tryRecoverRevealedVrf(params: {
+  raffleId: string
+  soldCount: number
+  ledgerHash: string
+  randomnessAccount: string
+  randomnessSecretKeyBase58: string
+  requestTx: string
+  knownRevealTx?: string | null
+  maxWaitMs?: number
+}): Promise<VrfFlowResult | null> {
+  const reveal = await switchboardRevealRandomness({
+    randomnessAccount: params.randomnessAccount,
+    randomnessSecretKeyBase58: params.randomnessSecretKeyBase58,
+    maxWaitMs: params.maxWaitMs ?? ADMIN_VRF_RECOVERY_WAIT_MS,
+    knownRevealTx: params.knownRevealTx,
+  })
+  if (!reveal.ok) return null
+  return fulfillRevealedVrf({
+    raffleId: params.raffleId,
+    soldCount: params.soldCount,
+    ledgerHash: params.ledgerHash,
+    randomnessAccount: params.randomnessAccount,
+    requestTx: params.requestTx,
+    reveal,
+  })
 }
 
 async function commitAndReveal(params: {
@@ -131,23 +189,14 @@ async function commitAndReveal(params: {
     }
   }
 
-  await deleteRaffleDrawSecret(raffleId)
-  await patchVrfFields(raffleId, {
-    draw_vrf_status: 'fulfilled',
-    draw_vrf_fulfill_tx: reveal.revealTx,
-    draw_vrf_fulfilled_at: new Date().toISOString(),
-    draw_vrf_error: null,
-  })
-
-  return {
-    status: 'fulfilled',
-    drawSeed: reveal.drawSeed,
-    ledgerHash,
+  return fulfillRevealedVrf({
+    raffleId,
     soldCount,
-    fulfillTx: reveal.revealTx,
-    requestTx: commit.commitTx,
+    ledgerHash,
     randomnessAccount: commit.randomnessAccount,
-  }
+    requestTx: commit.commitTx,
+    reveal,
+  })
 }
 
 /**
@@ -202,6 +251,25 @@ export async function runRaffleVrfFlow(params: {
     (existingStatus === 'pending' || existingStatus === 'failed')
 
   if (!canResume) {
+    if (
+      existingAccount &&
+      (existingStatus === 'failed' || existingStatus === 'pending')
+    ) {
+      const stored = await getRaffleDrawSecret(raffleId)
+      const secret = parseVrfAccountSecret(stored)
+      if (secret) {
+        const recovered = await tryRecoverRevealedVrf({
+          raffleId,
+          soldCount,
+          ledgerHash,
+          randomnessAccount: existingAccount,
+          randomnessSecretKeyBase58: secret,
+          requestTx: (raffle.draw_vrf_request_tx ?? '').trim(),
+          knownRevealTx: raffle.draw_vrf_fulfill_tx,
+        })
+        if (recovered) return recovered
+      }
+    }
     return commitAndReveal({ raffleId, soldCount, ledgerHash, revealWaitMs })
   }
 
@@ -256,21 +324,12 @@ export async function runRaffleVrfFlow(params: {
     }
   }
 
-  await deleteRaffleDrawSecret(raffleId)
-  await patchVrfFields(raffleId, {
-    draw_vrf_status: 'fulfilled',
-    draw_vrf_fulfill_tx: reveal.revealTx,
-    draw_vrf_fulfilled_at: new Date().toISOString(),
-    draw_vrf_error: null,
-  })
-
-  return {
-    status: 'fulfilled',
-    drawSeed: reveal.drawSeed,
-    ledgerHash,
+  return fulfillRevealedVrf({
+    raffleId,
     soldCount,
-    fulfillTx: reveal.revealTx,
-    requestTx: (raffle.draw_vrf_request_tx ?? '').trim() || '',
+    ledgerHash,
     randomnessAccount: existingAccount,
-  }
+    requestTx: (raffle.draw_vrf_request_tx ?? '').trim(),
+    reveal,
+  })
 }

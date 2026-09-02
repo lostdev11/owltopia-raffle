@@ -16,6 +16,9 @@ export const DEFAULT_VRF_REVEAL_WAIT_MS = 75_000
  */
 export const VRF_STALE_REQUEST_MS = 3 * 60_000
 
+/** Quick on-chain read before admin/cron abandons a prior randomness account. */
+export const ADMIN_VRF_RECOVERY_WAIT_MS = 10_000
+
 export function resolveVrfRevealWaitMs(overrideMs?: number): number {
   if (typeof overrideMs === 'number' && Number.isFinite(overrideMs) && overrideMs > 0) {
     return Math.floor(overrideMs)
@@ -127,4 +130,36 @@ export function shouldAutoForceNewVrfRequest(params: {
   if (age != null && age >= staleAfter * 2) return true
 
   return false
+}
+
+/**
+ * Whether an admin retry should skip resume and request fresh Switchboard randomness.
+ * Always returns false for fresh pending requests so we finish an in-flight reveal first.
+ */
+export function resolveAdminVrfForceNewRequest(raffle: {
+  draw_vrf_account?: string | null
+  draw_vrf_status?: string | null
+  draw_vrf_error?: string | null
+  draw_vrf_requested_at?: string | null
+}): boolean {
+  const hasAccount = Boolean((raffle.draw_vrf_account ?? '').trim())
+  if (!hasAccount) return true
+
+  const status = (raffle.draw_vrf_status ?? '').trim()
+  const err = (raffle.draw_vrf_error ?? '').trim()
+
+  if (status === 'failed') {
+    if (!err || isRetryableVrfRevealError(err)) return true
+    if (/Missing VRF account secret/i.test(err)) return true
+    return false
+  }
+
+  if (status === 'pending') return false
+
+  return shouldAutoForceNewVrfRequest({
+    drawVrfStatus: raffle.draw_vrf_status,
+    drawVrfAccount: raffle.draw_vrf_account,
+    drawVrfError: raffle.draw_vrf_error,
+    drawVrfRequestedAt: raffle.draw_vrf_requested_at,
+  })
 }
