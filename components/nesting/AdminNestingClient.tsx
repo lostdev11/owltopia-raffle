@@ -104,7 +104,9 @@ export function AdminNestingClient() {
   const [claimCatchupMsg, setClaimCatchupMsg] = useState<string | null>(null)
   const [claimCatchupRunning, setClaimCatchupRunning] = useState(false)
 
+  const [forceUnstakeMode, setForceUnstakeMode] = useState<'position' | 'wallet'>('position')
   const [forceUnstakePositionId, setForceUnstakePositionId] = useState('')
+  const [forceUnstakeWallet, setForceUnstakeWallet] = useState('')
   const [forceUnstaking, setForceUnstaking] = useState(false)
   const [forceUnstakeMsg, setForceUnstakeMsg] = useState<string | null>(null)
 
@@ -858,9 +860,86 @@ export function AdminNestingClient() {
     0
 
   const runForceUnstake = async () => {
-    const id = forceUnstakePositionId.trim()
     setForceUnstakeMsg(null)
     setSaveError(null)
+
+    if (forceUnstakeMode === 'wallet') {
+      const wallet = forceUnstakeWallet.trim()
+      if (!wallet) {
+        setSaveError('Paste the holder wallet address to force leave all open nests.')
+        return
+      }
+      if (!isProbableSolanaPubkey(wallet)) {
+        setSaveError('Wallet address does not look like a Solana pubkey.')
+        return
+      }
+
+      setForceUnstaking(true)
+      try {
+        const previewRes = await fetch('/api/admin/staking/unstake-override', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet_address: wallet, preview: true }),
+        })
+        const previewJson = await previewRes.json().catch(() => ({}))
+        if (!previewRes.ok) {
+          setSaveError(
+            typeof previewJson?.error === 'string' ? previewJson.error : 'Could not preview nests'
+          )
+          return
+        }
+        const eligible =
+          typeof previewJson?.eligible_count === 'number'
+            ? previewJson.eligible_count
+            : Array.isArray(previewJson?.candidates)
+              ? previewJson.candidates.length
+              : 0
+        if (eligible <= 0) {
+          setSaveError('No open nests eligible for admin force leave on this wallet.')
+          return
+        }
+        const ok = window.confirm(
+          `Force leave ${eligible} open nest(s) for ${wallet}? This bypasses lock timers and cannot be undone from this panel.`
+        )
+        if (!ok) return
+
+        const res = await fetch('/api/admin/staking/unstake-override', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet_address: wallet, unstake_all: true }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setSaveError(typeof json?.error === 'string' ? json.error : 'Force unstake all failed')
+          return
+        }
+        const closed = Array.isArray(json?.closed) ? json.closed.length : 0
+        const failed = Array.isArray(json?.failed) ? json.failed.length : 0
+        const remaining =
+          typeof json?.remaining_eligible === 'number' ? json.remaining_eligible : 0
+        const failNote =
+          failed > 0
+            ? ` ${failed} failed (re-check wallet diagnostics or retry by position id).`
+            : ''
+        const remainNote =
+          remaining > 0
+            ? ` ${remaining} still eligible — run Force leave all again to continue the batch.`
+            : ''
+        setForceUnstakeMsg(
+          `Closed ${closed} nest(s) for ${typeof json?.wallet === 'string' ? json.wallet : wallet}.${failNote}${remainNote}`
+        )
+        if (remaining === 0 && failed === 0) {
+          setForceUnstakeWallet('')
+        }
+      } finally {
+        setForceUnstaking(false)
+      }
+      return
+    }
+
+    const id = forceUnstakePositionId.trim()
     if (!id) {
       setSaveError('Paste a staking position id (UUID from Supabase or support ticket).')
       return
@@ -1827,7 +1906,7 @@ export function AdminNestingClient() {
       <section className="space-y-4">
         <SectionHeader
           title="Support: force leave nest"
-          description="Runs the same on-chain / DB unstake as the holder’s Leave nest — bypasses lock timer, council vote lock, and global nesting pause. For NFTs, also skips Helius collection grouping when the pool collection_key does not match the asset (uses on-chain owner + asset collection). Use staking_positions.id."
+          description="Runs the same on-chain / DB unstake as the holder’s Leave nest — bypasses lock timer, council vote lock, and global nesting pause. For NFTs, also skips Helius collection grouping when the pool collection_key does not match the asset (uses on-chain owner + asset collection). Close one nest by staking_positions.id, or force leave all eligible open nests for a holder wallet."
         />
         <Card className="rounded-xl border-amber-500/30 bg-amber-500/5">
           <CardHeader>
@@ -1839,31 +1918,89 @@ export function AdminNestingClient() {
           <CardContent className="space-y-4">
             <p className="text-xs text-muted-foreground leading-relaxed">
               For NFT perches with freeze locks, the server signs thaw with your configured freeze authority. For token
-              vaults, tokens return to the holder wallet on record. Confirm the position id matches the user’s open nest
-              before continuing.
+              vaults, tokens return to the holder wallet on record. Use position id for a single nest; use holder wallet
+              to unstake all eligible open nests (up to 25 per run — re-run if more remain).
             </p>
-            <div className="space-y-2">
-              <Label htmlFor="force-unstake-pos">Position id</Label>
-              <Input
-                id="force-unstake-pos"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="e.g. 8f3c2a1b-…"
-                value={forceUnstakePositionId}
-                onChange={(e) => setForceUnstakePositionId(e.target.value)}
-                className="font-mono text-xs min-h-[44px] touch-manipulation"
-              />
+            <div
+              className="grid grid-cols-2 gap-1 rounded-xl border border-white/[0.08] bg-black/25 p-1"
+              role="radiogroup"
+              aria-label="Force leave target"
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked={forceUnstakeMode === 'position'}
+                className={
+                  forceUnstakeMode === 'position'
+                    ? 'min-h-[44px] touch-manipulation rounded-lg bg-amber-500/15 text-amber-100 ring-1 ring-amber-500/40 text-sm font-medium'
+                    : 'min-h-[44px] touch-manipulation rounded-lg text-muted-foreground hover:bg-white/[0.05] text-sm'
+                }
+                onClick={() => {
+                  setForceUnstakeMode('position')
+                  setForceUnstakeMsg(null)
+                }}
+              >
+                Position id
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={forceUnstakeMode === 'wallet'}
+                className={
+                  forceUnstakeMode === 'wallet'
+                    ? 'min-h-[44px] touch-manipulation rounded-lg bg-amber-500/15 text-amber-100 ring-1 ring-amber-500/40 text-sm font-medium'
+                    : 'min-h-[44px] touch-manipulation rounded-lg text-muted-foreground hover:bg-white/[0.05] text-sm'
+                }
+                onClick={() => {
+                  setForceUnstakeMode('wallet')
+                  setForceUnstakeMsg(null)
+                }}
+              >
+                Holder wallet (all)
+              </button>
             </div>
+            {forceUnstakeMode === 'position' ? (
+              <div className="space-y-2">
+                <Label htmlFor="force-unstake-pos">Position id</Label>
+                <Input
+                  id="force-unstake-pos"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="e.g. 8f3c2a1b-…"
+                  value={forceUnstakePositionId}
+                  onChange={(e) => setForceUnstakePositionId(e.target.value)}
+                  className="font-mono text-xs min-h-[44px] touch-manipulation"
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="force-unstake-wallet">Holder wallet</Label>
+                <Input
+                  id="force-unstake-wallet"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="Base58 wallet address"
+                  value={forceUnstakeWallet}
+                  onChange={(e) => setForceUnstakeWallet(e.target.value)}
+                  className="font-mono text-xs min-h-[44px] touch-manipulation"
+                />
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 type="button"
                 variant="destructive"
                 className="min-h-[44px] touch-manipulation"
-                disabled={forceUnstaking || !forceUnstakePositionId.trim()}
+                disabled={
+                  forceUnstaking ||
+                  (forceUnstakeMode === 'position'
+                    ? !forceUnstakePositionId.trim()
+                    : !forceUnstakeWallet.trim())
+                }
                 onClick={() => void runForceUnstake()}
               >
                 {forceUnstaking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Force leave nest
+                {forceUnstakeMode === 'wallet' ? 'Force leave all nests' : 'Force leave nest'}
               </Button>
               {forceUnstakeMsg ? (
                 <p className="text-sm text-muted-foreground max-w-xl">{forceUnstakeMsg}</p>

@@ -28,6 +28,7 @@ import { executeChunkedBatchOwlClaims } from '@/lib/nesting/chunked-claim-all'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { resolveMutationAdapter } from '@/lib/nesting/resolve-adapter'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
+import { executeUnstakeAdminOverrideByWallet } from '@/lib/nesting/admin-unstake-override'
 import {
   assertNestingClaimsAllowed,
   assertNestingOperationsAllowed,
@@ -277,6 +278,21 @@ export async function executeUnstakeAdminOverride(params: { position_id: string 
     wallet: holderWallet,
     positionId: position_id,
     adminRecoveryUnstake: true,
+  })
+}
+
+/**
+ * Full-admin support: force-leave eligible open nests for a holder wallet (oldest first, bounded batch).
+ * Same per-nest path as {@link executeUnstakeAdminOverride}.
+ */
+export async function executeUnstakeAdminOverrideForWallet(params: {
+  wallet_address: string
+  limit?: number
+}) {
+  return executeUnstakeAdminOverrideByWallet({
+    wallet_address: params.wallet_address,
+    limit: params.limit,
+    unstakeOne: (position_id) => executeUnstakeAdminOverride({ position_id }),
   })
 }
 
