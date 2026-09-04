@@ -5,6 +5,7 @@ import { confirmAndOpenPack } from '@/lib/packs/open-engine'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 120
 
 export async function POST(request: NextRequest) {
   try {

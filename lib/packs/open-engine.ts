@@ -135,7 +135,7 @@ export async function startPackOpen(buyerWallet: string): Promise<{
 /**
  * Verify payment signature and run roll → reserve → payout → receipt.
  * Idempotent on payment_signature / completed opens.
- * Seed source: Switchboard VRF when PACK_VRF_ENABLED, else local commit–reveal.
+ * Seed source: Switchboard VRF by default; local commit–reveal when PACK_VRF_ENABLED=false.
  */
 export async function confirmAndOpenPack(input: {
   openId: string

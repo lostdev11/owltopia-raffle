@@ -8,7 +8,7 @@
  * - Target RTP: 80% (EV ≈ 0.08 SOL per open)
  * - OWL wins credit free raffle tickets (default 1 OWL → 1 ticket)
  * - NFT picks: inverse floor-price weights (higher FP = rarer)
- * - Randomness: Switchboard VRF when PACK_VRF_ENABLED (else local commit–reveal)
+ * - Randomness: Switchboard VRF by default (PACK_VRF_ENABLED=false for local commit–reveal)
  */
 
 export const PACKS_PRODUCT_SLUG = 'owl-pack-v1' as const

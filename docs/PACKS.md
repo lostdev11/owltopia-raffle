@@ -54,7 +54,7 @@ Buying stays off until a full admin turns packs on (`pack_vault_config.paused`):
 | Ticket mapping | Default **1 OWL → 1 free raffle ticket credit** |
 | UX | Instant rip (`/packs`) |
 | Odds UI | ME-style **percentages** (category + tier + per-NFT) |
-| Randomness | Switchboard VRF when `PACK_VRF_ENABLED=true` (`owltopia-pack-open-v2-vrf`); else local commit–reveal (`v1`) |
+| Randomness | Switchboard VRF by default (`owltopia-pack-open-v2-vrf`); set `PACK_VRF_ENABLED=false` for local commit–reveal (`v1`) |
 
 ## Jackpot
 
@@ -76,7 +76,7 @@ Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payo
 3. Fund the vault with SOL, OWL, and NFTs. **All pack purchase SOL goes to this wallet**; prize payouts leave from it (house edge stays as residual balance).
 4. Admin → Packs: load wallet NFTs, set floors (0.05+ SOL; grails above 0.5 are allowed), **Deposit & add**. Classic SPL NFTs pack up to **3 per on-chain tx**; Phantom (and other multi-sign wallets) approve **all classic txs in one sheet**. Metaplex Core and compressed still need one approval each; pNFT and frozen/nested assets are not supported. Aim for ~30 NFTs at launch.
 5. Apply migration **227** (`packs_vrf_and_nft_snapshot`).
-6. Optional fairness: set `PACK_VRF_ENABLED=true` (needs `FUNDS_ESCROW_SECRET_KEY` or `PRIZE_ESCROW_SECRET_KEY` for Switchboard fees — same as raffle VRF).
+6. Pack VRF is on by default (`owltopia-pack-open-v2-vrf`). Needs `FUNDS_ESCROW_SECRET_KEY` or `PRIZE_ESCROW_SECRET_KEY` for Switchboard fees — same as raffle VRF. Set `PACK_VRF_ENABLED=false` only to fall back to local commit–reveal.
 7. Run `npm run packs:ev-simulator` before going live; set `owl_sol_price` until EV ≈ 0.08 SOL. Use Admin → **Launch checklist**.
 8. Admin → Packs → set **Restricted live** (testers) or **Public live**, then **Turn packs on** when the vault is funded.
 9. Opens auto-pause when NFT inventory cannot cover the NFT category (solvency guard). Only a full admin can turn them back on.

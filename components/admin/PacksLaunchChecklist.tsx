@@ -76,7 +76,7 @@ export function PacksLaunchChecklist(props: PacksLaunchChecklistProps) {
         : 'VRF off (local commit–reveal)',
       detail: props.vrfEnabled
         ? 'PACK_VRF_ENABLED=true'
-        : 'Set PACK_VRF_ENABLED=true for on-chain randomness',
+        : 'PACK_VRF_ENABLED=false — set true (or unset) for on-chain randomness',
       met: props.vrfEnabled,
     },
     {

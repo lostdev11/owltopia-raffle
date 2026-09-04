@@ -1,7 +1,8 @@
 /**
  * Feature flags for pack open randomness.
  *
- * PACK_VRF_ENABLED=true — pack opens use Switchboard VRF (owltopia-pack-open-v2-vrf).
+ * PACK_VRF_ENABLED — pack opens use Switchboard VRF (owltopia-pack-open-v2-vrf).
+ * Default is on. Set PACK_VRF_ENABLED=false to fall back to local commit–reveal.
  * PACK_VRF_REVEAL_WAIT_MS — optional reveal poll budget (defaults to DRAW_VRF_REVEAL_WAIT_MS / 75s).
  */
 
@@ -9,7 +10,8 @@ import { PACK_OPEN_ALGO_V1, PACK_OPEN_ALGO_V2_VRF } from '@/lib/packs/config'
 
 export function isPackVrfEnabled(): boolean {
   const raw = (process.env.PACK_VRF_ENABLED || '').trim().toLowerCase()
-  return raw === '1' || raw === 'true' || raw === 'yes'
+  if (!raw) return true
+  return raw !== '0' && raw !== 'false' && raw !== 'no' && raw !== 'off'
 }
 
 export function resolvePackOpenAlgo():
