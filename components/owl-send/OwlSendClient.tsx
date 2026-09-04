@@ -125,6 +125,8 @@ import {
   canAccessOwlSendCsv,
   isOwlSendCsvPublicClient,
 } from '@/lib/owl-send/access'
+import { thawOwlSendCoreOwnerFreezes } from '@/lib/owl-send/thaw-core-owner-freeze'
+import { isOwlSendCoreOwnerFreezeError } from '@/lib/owl-send/mpl-core-owner-freeze'
 import { OwlSendLedgerPanel } from '@/components/owl-send/OwlSendLedgerPanel'
 import { OwlSendCsvImport } from '@/components/owl-send/OwlSendCsvImport'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
@@ -584,8 +586,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   }
 
   /**
-   * Server thaw for Gen2 leftover nest locks / CM mint freezes.
-   * Requires SIWS session matching the connected wallet.
+   * Thaw leftover nest locks: MPL Core Owner FreezeDelegate (wallet) and/or Gen2 SPL/CM (server).
+   * Requires SIWS only for the Gen2 server path.
    */
   const thawFrozenMints = useCallback(
     async (
@@ -593,53 +595,98 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       opts?: { silent?: boolean }
     ): Promise<{ ok: boolean; thawedCount: number; error?: string }> => {
       if (!publicKey || mints.length < 1) return { ok: false, thawedCount: 0, error: 'Nothing to thaw.' }
+      const adapter = wallet?.adapter
       setThawing(true)
       if (!opts?.silent) {
         setSessionError(null)
         setSessionNotice(null)
       }
       try {
-        const signedIn = await ensureLedgerSiws()
-        if (!signedIn) {
-          return { ok: false, thawedCount: 0, error: 'Sign in with your wallet to thaw frozen Gen2s.' }
+        let thawedCount = 0
+        const remainingForGen2: string[] = []
+
+        // 1) Core Owner freeze (admin force-leave leftover) — holder wallet only.
+        if (adapter) {
+          const core = await thawOwlSendCoreOwnerFreezes({
+            connection,
+            wallet: adapter,
+            sendTransaction,
+            mints,
+          })
+          thawedCount += core.thawedCount
+          const coreHardError = core.results.find((r) => r.error && !r.skipToGen2)
+          if (coreHardError?.error) {
+            if (!opts?.silent) setSessionError(coreHardError.error)
+            return { ok: false, thawedCount, error: coreHardError.error }
+          }
+          for (const r of core.results) {
+            if (r.skipToGen2) remainingForGen2.push(r.mint)
+          }
+        } else {
+          remainingForGen2.push(...mints)
         }
-        const res = await fetch('/api/owl-send/thaw', {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'content-type': 'application/json',
-            'x-connected-wallet': publicKey.toBase58(),
-          },
-          body: JSON.stringify({ mints }),
-        })
-        const data = (await res.json().catch(() => null)) as {
-          ok?: boolean
-          thawedCount?: number
-          error?: string
-          results?: Array<{ mint: string; ok: boolean; kind: string; error?: string }>
-        } | null
-        if (!res.ok) {
-          const err = data?.error || 'Thaw request failed.'
-          if (!opts?.silent) setSessionError(err)
-          return { ok: false, thawedCount: 0, error: err }
+
+        // 2) Gen2 nest / Candy Machine freeze — server thaw.
+        if (remainingForGen2.length > 0) {
+          const signedIn = await ensureLedgerSiws()
+          if (!signedIn) {
+            if (thawedCount > 0) {
+              // Partial Core success is still useful.
+              if (!opts?.silent) {
+                setSessionNotice(
+                  `Thawed ${thawedCount} Core nest lock${thawedCount === 1 ? '' : 's'}. Sign in to thaw any remaining Gen2 locks.`
+                )
+              }
+              return { ok: true, thawedCount }
+            }
+            return { ok: false, thawedCount: 0, error: 'Sign in with your wallet to thaw frozen Gen2s.' }
+          }
+          const res = await fetch('/api/owl-send/thaw', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'content-type': 'application/json',
+              'x-connected-wallet': publicKey.toBase58(),
+            },
+            body: JSON.stringify({ mints: remainingForGen2 }),
+          })
+          const data = (await res.json().catch(() => null)) as {
+            ok?: boolean
+            thawedCount?: number
+            error?: string
+            results?: Array<{ mint: string; ok: boolean; kind: string; error?: string }>
+          } | null
+          if (!res.ok) {
+            const err = data?.error || 'Thaw request failed.'
+            if (thawedCount < 1 && !opts?.silent) setSessionError(err)
+            return { ok: thawedCount > 0, thawedCount, error: err }
+          }
+          thawedCount += data?.thawedCount ?? 0
+          const activeNest = (data?.results ?? []).find((r) => r.kind === 'active_nest')
+          if (activeNest?.error && !opts?.silent) {
+            setSessionError(activeNest.error)
+          } else if (thawedCount > 0 && !opts?.silent) {
+            setSessionNotice(
+              `Thawed ${thawedCount} lock${thawedCount === 1 ? '' : 's'}. Tap Retry to send.`
+            )
+            setRetryMints([])
+          } else if (!data?.ok && data?.error && thawedCount < 1 && !opts?.silent) {
+            setSessionError(data.error)
+          }
+          return {
+            ok: thawedCount > 0 || data?.ok === true,
+            thawedCount,
+            error: data?.error,
+          }
         }
-        const thawedCount = data?.thawedCount ?? 0
-        const activeNest = (data?.results ?? []).find((r) => r.kind === 'active_nest')
-        if (activeNest?.error && !opts?.silent) {
-          setSessionError(activeNest.error)
-        } else if (data?.ok && thawedCount > 0 && !opts?.silent) {
+
+        if (thawedCount > 0 && !opts?.silent) {
           setSessionNotice(
-            `Thawed ${thawedCount} Gen2 lock${thawedCount === 1 ? '' : 's'}. Reload and Review send again.`
+            `Thawed ${thawedCount} Core nest lock${thawedCount === 1 ? '' : 's'}. Tap Retry to send.`
           )
           setRetryMints([])
-        } else if (!data?.ok && data?.error && !opts?.silent) {
-          setSessionError(data.error)
         }
-        return {
-          ok: data?.ok === true,
-          thawedCount,
-          error: data?.error,
-        }
+        return { ok: thawedCount > 0, thawedCount }
       } catch (e) {
         const err = e instanceof Error ? e.message : 'Thaw failed.'
         if (!opts?.silent) setSessionError(err)
@@ -648,7 +695,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         setThawing(false)
       }
     },
-    [publicKey, ensureLedgerSiws]
+    [publicKey, wallet?.adapter, connection, sendTransaction, ensureLedgerSiws]
   )
 
   const prepareNftSend = async () => {
@@ -2612,8 +2659,11 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                         sessionError || batchProgress[activeBatch]?.error || ''
                       ) ? (
                       <p className="text-[11px] text-amber-100/60">
-                        Only truly nested/frozen Gen2s need Thaw locks or Unnest. Leftover CM
-                        delegates alone are fine and are revoked in the send transaction.
+                        {isOwlSendCoreOwnerFreezeError(
+                          sessionError || batchProgress[activeBatch]?.error || ''
+                        )
+                          ? 'These Metaplex Core NFTs were force-released from nesting but are still Owner-frozen on-chain. Tap Thaw locks (wallet approve), or open Nesting → Thaw leftover nest locks, then Retry.'
+                          : 'Only truly nested/frozen Gen2s need Thaw locks or Unnest. Leftover CM delegates alone are fine and are revoked in the send transaction. Core nest leftovers also use Thaw locks here.'}
                       </p>
                     ) : (
                       <p className="text-[11px] text-amber-100/60">

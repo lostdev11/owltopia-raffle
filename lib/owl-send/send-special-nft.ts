@@ -21,9 +21,15 @@ import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
 import type { OwlSendLine } from '@/lib/owl-send/batch'
 import type { OwlSendBatchResult, OwlSendSendPhase } from '@/lib/owl-send/send-spl-nft-batch'
 import {
+  isDasMplCoreInterface,
   orderedEscrowFallbacks,
   type EscrowFallbackKind,
 } from '@/lib/solana/prize-nft-standard'
+import {
+  OWL_SEND_CORE_OWNER_FREEZE_ERROR,
+  pickOwlSendSpecialNftError,
+} from '@/lib/owl-send/mpl-core-owner-freeze'
+import { readOwlSendCoreOwnerFreeze } from '@/lib/owl-send/mpl-core-owner-freeze-read'
 
 async function sendFeeOnlyTx(params: {
   connection: Connection
@@ -144,7 +150,32 @@ export async function sendOwlSendSpecialNft(params: {
   }
 
   onPhase?.('building')
-  // Freeze/stake is enforced on-chain by Token Metadata / Core / cNFT transfer ix — no soft-block.
+
+  // Admin force-leave leaves Owner FreezeDelegate frozen on-chain. Detect before Core
+  // transfer so we don't fall through to Token Metadata → misleading "Incorrect account owner".
+  if (isDasMplCoreInterface(line.interface) || line.interface == null || line.interface === '') {
+    const freeze = await readOwlSendCoreOwnerFreeze({
+      connection,
+      assetId: mint,
+      // Only skip when DAS clearly said non-Core; unknown/null still probes.
+      interfaceHint: isDasMplCoreInterface(line.interface) ? line.interface : null,
+    })
+    if (freeze.kind === 'owner_frozen') {
+      return {
+        ok: false,
+        error: OWL_SEND_CORE_OWNER_FREEZE_ERROR,
+        failedMints: [mint],
+      }
+    }
+    if (freeze.kind === 'other_frozen') {
+      return {
+        ok: false,
+        error:
+          'This Metaplex Core NFT is still frozen on-chain. Unnest / thaw the lock on Nesting first, then Retry.',
+        failedMints: [mint],
+      }
+    }
+  }
 
   onPhase?.('approving')
 
@@ -171,13 +202,22 @@ export async function sendOwlSendSpecialNft(params: {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       if (msg.trim()) errors.push(`${kind}: ${msg}`)
+      // If Core transfer failed because the asset is still nest-frozen, stop — later
+      // compressed / Token Metadata attempts only add Incorrect-account-owner noise.
+      if (
+        kind === 'mpl_core' &&
+        /frozen|freezedelegate|freeze delegate|noapprovals|0x1a/i.test(msg)
+      ) {
+        break
+      }
     }
   }
 
   // Last resort: if asset already moved somehow, don't charge; otherwise surface error.
   void owner
   void sendFeeOnlyTx
-  const detail = errors.length > 0 ? ` (${errors[errors.length - 1]})` : ''
+  const best = pickOwlSendSpecialNftError(errors)
+  const detail = best ? ` (${best})` : ''
   return {
     ok: false,
     error:

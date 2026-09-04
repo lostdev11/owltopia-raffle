@@ -1,6 +1,7 @@
 import {
   isOwlSendWalletExtensionError,
 } from '@/lib/owl-send/wallet-send-errors'
+import { isOwlSendCoreOwnerFreezeError } from '@/lib/owl-send/mpl-core-owner-freeze'
 
 /**
  * Map a send/preflight error into short Retry-list copy.
@@ -11,11 +12,14 @@ export function owlSendRetryHint(error: string | null | undefined): string {
   if (isOwlSendWalletExtensionError(e)) {
     return 'Open your wallet (Jupiter / Phantom / Solflare), unlock it, refresh this page, reconnect, then retry — the approve popup cannot open while the wallet is unreachable. On Jupiter Mobile use the in-app globe browser.'
   }
+  if (isOwlSendCoreOwnerFreezeError(e)) {
+    return 'Force-released Core NFTs stay Owner-frozen until you thaw. Tap Thaw locks here (or Nesting → Thaw leftover nest locks), approve in your wallet, then Retry.'
+  }
   if (/remove or unnest|the others are fine/i.test(e)) {
     return 'Deselect nested/frozen NFTs (or unnest on Nesting), then retry the rest — no thaw needed for sendable Gen2s.'
   }
-  if (/frozen|Account is frozen|0x11\b|unnest|thaw|mint-locked|mint lock|nested/i.test(e)) {
-    return 'On-chain transfer rejected as frozen. Tap Thaw locks if this is an orphaned Gen2 nest lock, or unnest on Nesting if it is still nested.'
+  if (/frozen|Account is frozen|0x11\b|unnest|thaw|mint-locked|mint lock|nested|freezedelegate/i.test(e)) {
+    return 'On-chain transfer rejected as frozen. Tap Thaw locks for orphaned nest locks (Core Owner freeze or Gen2), or unnest on Nesting if still nested.'
   }
   if (/core|compressed|pnft|transferable spl|could not find|single-nft|alone|separate send|classic spl|token metadata|incorrect program id|incorrectprogramid|bubblegum/i.test(e)) {
     return 'Deselect cNFT / Core / pNFT from this batch and send them alone. Gen2s should stay in the classic multi-send (one approval).'
