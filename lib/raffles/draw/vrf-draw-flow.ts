@@ -30,6 +30,10 @@ import {
 } from '@/lib/raffles/draw/vrf-retry-policy'
 import { DRAW_ALGO_V3_VRF } from '@/lib/raffles/draw/types'
 import type { DrawEntryLike } from '@/lib/raffles/draw/types'
+import {
+  fulfilledVrfResultFromStoredDraw,
+  raffleDrawWinnerAlreadySelected,
+} from '@/lib/raffles/draw/vrf-draw-guards'
 import type { Raffle } from '@/lib/types'
 
 /** Short poll when a prior attempt already failed — mainly catches already-revealed accounts. */
@@ -54,21 +58,61 @@ export type VrfFlowResult =
       randomnessAccount?: string | null
     }
 
+type RaffleDrawLockRow = {
+  winner_wallet: string | null
+  winner_selected_at: string | null
+  draw_seed: string | null
+  draw_ledger_hash: string | null
+  draw_sold_count: number | null
+  draw_vrf_request_tx: string | null
+  draw_vrf_fulfill_tx: string | null
+  draw_vrf_account: string | null
+}
+
+async function loadRaffleDrawLockRow(raffleId: string): Promise<RaffleDrawLockRow | null> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('raffles')
+    .select(
+      'winner_wallet,winner_selected_at,draw_seed,draw_ledger_hash,draw_sold_count,draw_vrf_request_tx,draw_vrf_fulfill_tx,draw_vrf_account'
+    )
+    .eq('id', raffleId)
+    .maybeSingle()
+  if (error) {
+    throw new Error(`Failed to load raffle draw lock state: ${error.message}`)
+  }
+  return (data as RaffleDrawLockRow | null) ?? null
+}
+
+async function isDrawStillOpen(raffleId: string): Promise<boolean> {
+  const row = await loadRaffleDrawLockRow(raffleId)
+  return !raffleDrawWinnerAlreadySelected(row)
+}
+
+/** Only patch VRF columns while the draw is still open (no winner yet). */
 async function patchVrfFields(
   raffleId: string,
   patch: Record<string, unknown>
-): Promise<void> {
-  let query = getSupabaseAdmin().from('raffles').update(patch).eq('id', raffleId)
-  // Concurrent selectWinner races: a late failed/pending write must not clobber
-  // VRF metadata after another invocation already recorded the winner (OWL #175).
-  const status = typeof patch.draw_vrf_status === 'string' ? patch.draw_vrf_status : ''
-  if (status === 'failed' || status === 'pending') {
-    query = query.is('winner_wallet', null)
-  }
-  const { error } = await query
+): Promise<boolean> {
+  // Concurrent selectWinner races: a late write must not clobber VRF metadata
+  // after another invocation already recorded the winner (OWL #175).
+  const { data, error } = await getSupabaseAdmin()
+    .from('raffles')
+    .update(patch)
+    .eq('id', raffleId)
+    .is('winner_wallet', null)
+    .is('winner_selected_at', null)
+    .select('id')
+    .maybeSingle()
   if (error) {
     throw new Error(`Failed to update VRF fields: ${error.message}`)
   }
+  if (!data) {
+    console.warn(
+      `[runRaffleVrfFlow] skipped VRF patch for ${raffleId}: winner already selected`
+    )
+    return false
+  }
+  return true
 }
 
 async function fulfillRevealedVrf(params: {
@@ -83,12 +127,22 @@ async function fulfillRevealedVrf(params: {
   }
 }): Promise<VrfFlowResult> {
   await deleteRaffleDrawSecret(params.raffleId)
-  await patchVrfFields(params.raffleId, {
+  const patched = await patchVrfFields(params.raffleId, {
     draw_vrf_status: 'fulfilled',
     draw_vrf_fulfill_tx: params.reveal.revealTx,
     draw_vrf_fulfilled_at: new Date().toISOString(),
     draw_vrf_error: null,
   })
+  if (!patched) {
+    return {
+      status: 'failed',
+      error: 'Draw already finalized by another worker',
+      ledgerHash: params.ledgerHash,
+      soldCount: params.soldCount,
+      requestTx: params.requestTx,
+      randomnessAccount: params.randomnessAccount,
+    }
+  }
   return {
     status: 'fulfilled',
     drawSeed: params.reveal.drawSeed,
@@ -161,7 +215,7 @@ async function commitAndReveal(params: {
     raffleId,
     encodeVrfAccountSecret(commit.randomnessSecretKeyBase58)
   )
-  await patchVrfFields(raffleId, {
+  const pendingPatched = await patchVrfFields(raffleId, {
     draw_algo: DRAW_ALGO_V3_VRF,
     draw_sold_count: soldCount,
     draw_ledger_hash: ledgerHash,
@@ -174,6 +228,29 @@ async function commitAndReveal(params: {
     draw_vrf_requested_at: new Date().toISOString(),
     draw_vrf_fulfilled_at: null,
   })
+  if (!pendingPatched) {
+    await deleteRaffleDrawSecret(raffleId)
+    return {
+      status: 'failed',
+      error: 'Draw already finalized by another worker',
+      ledgerHash,
+      soldCount,
+      requestTx: commit.commitTx,
+      randomnessAccount: commit.randomnessAccount,
+    }
+  }
+
+  if (!(await isDrawStillOpen(raffleId))) {
+    await deleteRaffleDrawSecret(raffleId)
+    return {
+      status: 'failed',
+      error: 'Draw already finalized by another worker',
+      ledgerHash,
+      soldCount,
+      requestTx: commit.commitTx,
+      randomnessAccount: commit.randomnessAccount,
+    }
+  }
 
   const reveal = await switchboardRevealRandomness({
     randomnessAccount: commit.randomnessAccount,
@@ -218,6 +295,20 @@ export async function runRaffleVrfFlow(params: {
 }): Promise<VrfFlowResult> {
   const { raffle, entries, revealWaitMs } = params
   const raffleId = raffle.id
+
+  const lockRow = await loadRaffleDrawLockRow(raffleId)
+  if (raffleDrawWinnerAlreadySelected(lockRow)) {
+    const stored = fulfilledVrfResultFromStoredDraw(lockRow ?? {})
+    if (stored) return stored
+    return {
+      status: 'failed',
+      error: 'Draw already finalized by another worker',
+      ledgerHash: (lockRow?.draw_ledger_hash ?? '').trim() || '',
+      soldCount: lockRow?.draw_sold_count ?? 0,
+      requestTx: lockRow?.draw_vrf_request_tx ?? null,
+      randomnessAccount: lockRow?.draw_vrf_account ?? null,
+    }
+  }
 
   const autoForce = shouldAutoForceNewVrfRequest({
     drawVrfStatus: raffle.draw_vrf_status,

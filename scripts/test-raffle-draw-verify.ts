@@ -29,6 +29,9 @@ import {
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
   DRAW_ALGO_V3_VRF,
+  raffleDrawWinnerAlreadySelected,
+  isVrfAuditMetadataSuspicious,
+  fulfilledVrfResultFromStoredDraw,
 } from '../lib/raffles/draw'
 
 const entries = [
@@ -462,6 +465,42 @@ async function assertVrfKeypairWallet() {
     assert.equal(kept.soldCount, live.soldCount)
   }
 }
+
+// --- VRF draw concurrency guards ---
+assert.equal(raffleDrawWinnerAlreadySelected({ winner_wallet: null, winner_selected_at: null }), false)
+assert.equal(
+  raffleDrawWinnerAlreadySelected({ winner_wallet: 'Winner1111111111111111111111111111111111111', winner_selected_at: null }),
+  true
+)
+assert.equal(
+  raffleDrawWinnerAlreadySelected({ winner_wallet: null, winner_selected_at: '2026-08-31T22:15:46.676Z' }),
+  true
+)
+assert.equal(
+  isVrfAuditMetadataSuspicious({
+    winner_selected_at: '2026-08-31T22:15:46.676Z',
+    draw_vrf_requested_at: '2026-08-31T22:15:55.289Z',
+  }),
+  true
+)
+assert.equal(
+  isVrfAuditMetadataSuspicious({
+    winner_selected_at: '2026-08-31T22:15:55.289Z',
+    draw_vrf_requested_at: '2026-08-31T22:15:46.676Z',
+  }),
+  false
+)
+const storedVrf = fulfilledVrfResultFromStoredDraw({
+  draw_seed: seedFromVrfHex('aa'.repeat(32)),
+  draw_ledger_hash: ledger.ledgerHash,
+  draw_sold_count: ledger.soldCount,
+  draw_vrf_request_tx: 'ReqTx',
+  draw_vrf_fulfill_tx: 'FulTx',
+  draw_vrf_account: 'VrfAcct',
+})
+assert.ok(storedVrf)
+assert.equal(storedVrf!.status, 'fulfilled')
+assert.equal(storedVrf!.drawSeed, seedFromVrfHex('aa'.repeat(32)))
 
 // --- Switchboard commitIx must receive authority before account exists on-chain ---
 async function assertVrfCommitIxNeedsAuthority() {

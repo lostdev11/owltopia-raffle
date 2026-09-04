@@ -2160,6 +2160,10 @@ export async function selectWinner(
         entries: confirmedEntries,
         forceNewRequest: opts?.forceVrfRetry === true,
       })
+      const afterVrf = await getRaffleById(raffleId)
+      if ((afterVrf?.winner_wallet ?? '').trim()) {
+        return afterVrf!.winner_wallet!.trim()
+      }
       if (vrf.status !== 'fulfilled') {
         console.warn(
           `[selectWinner] VRF not fulfilled for ${raffleId}: ${vrf.status} ${vrf.error || ''}`

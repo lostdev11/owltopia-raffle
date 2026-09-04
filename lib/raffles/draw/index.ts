@@ -74,3 +74,8 @@ export {
   resolveAdminVrfForceNewRequest,
   ADMIN_VRF_RECOVERY_WAIT_MS,
 } from '@/lib/raffles/draw/vrf-retry-policy'
+export {
+  fulfilledVrfResultFromStoredDraw,
+  isVrfAuditMetadataSuspicious,
+  raffleDrawWinnerAlreadySelected,
+} from '@/lib/raffles/draw/vrf-draw-guards'
