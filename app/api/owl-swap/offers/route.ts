@@ -23,7 +23,6 @@ const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 
 function isPubkey(s: string): boolean {
   try {
-    // eslint-disable-next-line no-new
     new PublicKey(s)
     return true
   } catch {

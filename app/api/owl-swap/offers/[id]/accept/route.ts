@@ -32,7 +32,6 @@ type Ctx = { params: Promise<{ id: string }> }
 
 function isPubkey(s: string): boolean {
   try {
-    // eslint-disable-next-line no-new
     new PublicKey(s)
     return true
   } catch {

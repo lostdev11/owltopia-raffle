@@ -42,7 +42,6 @@ function parseSolanaSecretKeyFromEnv(raw: string | undefined): Keypair | null {
     // not JSON
   }
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const bs58 = require('bs58') as { decode: (s: string) => Uint8Array }
     return Keypair.fromSecretKey(bs58.decode(trimmed))
   } catch {

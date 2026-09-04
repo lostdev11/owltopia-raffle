@@ -28,7 +28,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'wallet required' }, { status: 400 })
     }
     try {
-      // eslint-disable-next-line no-new
       new PublicKey(wallet)
     } catch {
       return NextResponse.json({ error: 'Invalid wallet' }, { status: 400 })
