@@ -153,6 +153,9 @@ import {
   isNestingBatchSizeError,
   isNestingWalletUserRejection,
 } from '@/lib/nesting/wallet-error'
+import { sendPreparedVersionedTransactionBase64 } from '@/lib/solana/send-prepared-versioned-tx'
+import type { PreparedMplCoreOwnerThaw } from '@/lib/solana/mpl-core-owner-thaw-prepare'
+import { MPL_CORE_OWNER_THAW_PREPARE_MAX } from '@/lib/solana/mpl-core-owner-thaw-prepare'
 import {
   fetchNestingJson,
   formatNestingApiFetchError,
@@ -235,6 +238,7 @@ export function DashboardNestingClient() {
   const [signInError, setSignInError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [leftoverOwnerThawBusy, setLeftoverOwnerThawBusy] = useState(false)
+  const [leftoverOwnerThawProgress, setLeftoverOwnerThawProgress] = useState<string | null>(null)
   const [successNotice, setSuccessNotice] = useState<{
     message: string
     hint?: string
@@ -2751,17 +2755,98 @@ export function DashboardNestingClient() {
     }
     setActionError(null)
     setLeftoverOwnerThawBusy(true)
-    try {
-      const thawed: string[] = []
-      for (const mint of leftoverOwnerThawMints) {
-        await thawMplCoreOwnerFreezeInWallet({
-          connection,
-          wallet: adapter,
-          assetId: mint,
-          sendTransaction,
+    setLeftoverOwnerThawProgress(null)
+    const thawed: string[] = []
+    const failures: string[] = []
+    const total = leftoverOwnerThawMints.length
+
+    const prepareChunk = async (mints: string[]): Promise<PreparedMplCoreOwnerThaw[] | null> => {
+      try {
+        const res = await fetch(nestingClientApiUrl('/api/me/staking/prepare-owner-thaw'), {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Connected-Wallet': publicKey.toBase58(),
+          },
+          body: JSON.stringify({ mints }),
         })
-        thawed.push(mint)
+        const json = (await res.json().catch(() => ({}))) as {
+          items?: PreparedMplCoreOwnerThaw[]
+          error?: string
+        }
+        if (!res.ok || !Array.isArray(json.items)) return null
+        return json.items
+      } catch {
+        return null
       }
+    }
+
+    const thawOneClient = async (mint: string) => {
+      await thawMplCoreOwnerFreezeInWallet({
+        connection,
+        wallet: adapter,
+        assetId: mint,
+        sendTransaction,
+      })
+    }
+
+    try {
+      for (let i = 0; i < leftoverOwnerThawMints.length; i += MPL_CORE_OWNER_THAW_PREPARE_MAX) {
+        const chunk = leftoverOwnerThawMints.slice(i, i + MPL_CORE_OWNER_THAW_PREPARE_MAX)
+        setLeftoverOwnerThawProgress(
+          `Preparing ${Math.min(i + chunk.length, total)} of ${total}…`
+        )
+        let prepared = await prepareChunk(chunk)
+
+        for (let j = 0; j < chunk.length; j++) {
+          const mint = chunk[j]!
+          const doneCount = thawed.length + failures.length + 1
+          setLeftoverOwnerThawProgress(`Thawing ${doneCount} of ${total}…`)
+
+          const item = prepared?.find((p) => p.mint === mint) ?? null
+          try {
+            if (item?.status === 'skipped') {
+              if (item.reason === 'already_thawed') {
+                thawed.push(mint)
+                continue
+              }
+              failures.push(`${mint.slice(0, 4)}… (${item.reason})`)
+              continue
+            }
+            if (item?.status === 'ready') {
+              await sendPreparedVersionedTransactionBase64({
+                serializedBase64: item.serializedBase64,
+                connection,
+                sendTransaction,
+                blockhash: item.blockhash,
+                lastValidBlockHeight: item.lastValidBlockHeight,
+                failMessagePrefix: 'Thaw would fail on-chain before wallet approval.',
+              })
+              thawed.push(mint)
+              continue
+            }
+            if (item?.status === 'error') {
+              // Fall back to browser RPC path for this mint.
+            }
+
+            // Server prepare unavailable / failed — client path with retries inside thaw helper.
+            await thawOneClient(mint)
+            thawed.push(mint)
+          } catch (e) {
+            if (isNestingWalletUserRejection(e)) {
+              failures.push('Cancelled in wallet')
+              throw e
+            }
+            const msg =
+              formatNestingWalletError(e, wallet?.adapter?.name, 'NFT', 'thaw') ||
+              (e instanceof Error ? e.message : String(e))
+            failures.push(`${mint.slice(0, 4)}…: ${msg}`)
+            // Continue remaining mints — one RPC flake must not strand the other 15.
+          }
+        }
+      }
+
       if (thawed.length > 0) {
         await fetch(nestingClientApiUrl('/api/me/staking/ack-owner-thaw'), {
           method: 'POST',
@@ -2773,20 +2858,68 @@ export function DashboardNestingClient() {
           body: JSON.stringify({ mints: thawed }),
         }).catch(() => null)
       }
-      setSuccessNotice({
-        placement: 'modal',
-        tone: 'success',
-        title: 'Nest locks thawed',
-        message: `Thawed ${thawed.length} leftover nest lock(s). Your NFTs should transfer normally again.`,
-      })
+
+      if (thawed.length > 0 && failures.length === 0) {
+        setSuccessNotice({
+          placement: 'modal',
+          tone: 'success',
+          title: 'Nest locks thawed',
+          message: `Thawed ${thawed.length} leftover nest lock(s). Your NFTs should transfer normally again.`,
+        })
+      } else if (thawed.length > 0) {
+        setSuccessNotice({
+          placement: 'modal',
+          tone: 'info',
+          title: `Thawed ${thawed.length} of ${total}`,
+          message: `Some locks still need another try. Tap Thaw leftover nest locks again for the rest.`,
+          hint: failures.slice(0, 2).join(' · '),
+        })
+        setActionError(
+          `Thawed ${thawed.length}/${total}. Still stuck: ${failures.slice(0, 3).join(' · ')}`
+        )
+      } else {
+        setActionError(
+          failures[0] ||
+            formatNestingWalletError(
+              new Error('Failed to fetch'),
+              wallet?.adapter?.name,
+              'NFT',
+              'thaw'
+            )
+        )
+      }
       await loadPositions()
     } catch (e) {
-      setActionError(
-        formatNestingWalletError(e, wallet?.adapter?.name, 'NFT') ||
-          formatNestingApiFetchError(e, 'generic')
-      )
+      if (isNestingWalletUserRejection(e)) {
+        if (thawed.length > 0) {
+          await fetch(nestingClientApiUrl('/api/me/staking/ack-owner-thaw'), {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Connected-Wallet': publicKey.toBase58(),
+            },
+            body: JSON.stringify({ mints: thawed }),
+          }).catch(() => null)
+          setSuccessNotice({
+            placement: 'modal',
+            tone: 'info',
+            title: `Thawed ${thawed.length} before cancel`,
+            message: 'Approve again to finish the remaining leftover nest locks.',
+          })
+          await loadPositions()
+        } else {
+          setActionError('Transaction cancelled in wallet.')
+        }
+      } else {
+        setActionError(
+          formatNestingWalletError(e, wallet?.adapter?.name, 'NFT', 'thaw') ||
+            formatNestingApiFetchError(e, 'generic')
+        )
+      }
     } finally {
       setLeftoverOwnerThawBusy(false)
+      setLeftoverOwnerThawProgress(null)
     }
   }
 
@@ -3669,7 +3802,7 @@ export function DashboardNestingClient() {
               <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />
             ) : null}
             {leftoverOwnerThawBusy
-              ? 'Thawing…'
+              ? leftoverOwnerThawProgress || 'Thawing…'
               : `Thaw leftover nest locks (${leftoverOwnerThawMints.length})`}
           </Button>
         </div>

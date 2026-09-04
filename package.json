@@ -59,6 +59,7 @@
     "backfill:wallet-win-streaks": "npx --yes tsx --env-file=.env.local scripts/backfill-wallet-win-streaks.ts",
     "test:nesting-batch-size-error": "npx --yes tsx scripts/test-nesting-batch-size-error.ts",
     "test:mpl-core-owner-thaw-plan": "npx --yes tsx scripts/test-mpl-core-owner-thaw-plan.ts",
+    "test:nesting-owner-thaw-rpc": "npx --yes tsx scripts/test-nesting-owner-thaw-rpc.ts",
     "test:admin-unstake-override-wallet": "npx --yes tsx scripts/test-admin-unstake-override-wallet.ts",
     "test:owl-send-batch": "npx --yes tsx scripts/test-owl-send-batch.ts",
     "test:owl-send-resolve-holder": "npx --yes tsx scripts/test-owl-send-resolve-spl-holder.ts",
