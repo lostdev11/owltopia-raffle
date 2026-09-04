@@ -2,8 +2,9 @@
 
 import Image from 'next/image'
 import Link from 'next/link'
-import { CheckCircle2, Coins, ImageIcon, Sparkles, Ticket } from 'lucide-react'
+import { CheckCircle2, ImageIcon, Ticket } from 'lucide-react'
 import type { PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
+import { PACK_OWL_PRIZE_ART, PACK_SOL_PRIZE_ART } from '@/lib/packs/animations'
 import { cn } from '@/lib/utils'
 
 type Props = {
@@ -33,10 +34,26 @@ function PrizeArt({ result }: { result: PackOpenClientResult }) {
     )
   }
   if (result.category === 'sol' || result.category === 'jackpot') {
-    return <Coins className="h-16 w-16 text-[#00FF9C]" aria-hidden />
+    return (
+      <Image
+        src={PACK_SOL_PRIZE_ART}
+        alt={result.prizeLabel}
+        width={398}
+        height={312}
+        className="h-auto w-[62%] object-contain"
+      />
+    )
   }
   if (result.category === 'owl') {
-    return <Sparkles className="h-16 w-16 text-[#00FF9C]" aria-hidden />
+    return (
+      <Image
+        src={PACK_OWL_PRIZE_ART}
+        alt={result.prizeLabel}
+        width={560}
+        height={560}
+        className="h-full w-full object-contain"
+      />
+    )
   }
   return <ImageIcon className="h-16 w-16 text-[#00FF9C]" aria-hidden />
 }
@@ -68,7 +85,7 @@ export function PackPrizeReveal({ result, onRipAgain, className }: Props) {
       </h2>
       <p className="mt-2 text-sm text-white/55">Your reward appears!</p>
 
-      <div className="relative mx-auto mt-6 aspect-[3/4] w-[min(72%,260px)]">
+      <div className="relative mx-auto mt-6 aspect-square w-[min(72%,260px)]">
         <div className="absolute inset-[-12%] rounded-full bg-[radial-gradient(circle,rgba(0,255,156,0.35),transparent_68%)] blur-2xl" />
         <div className="absolute inset-[-6%] rounded-full border border-[#00FF9C]/25 animate-pack-ring-expand" />
         <div

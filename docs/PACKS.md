@@ -16,6 +16,8 @@ Assets (do not rename):
 
 - `/Animations/Pack hover.webm` (transparent, desktop) + `/Animations/Pack hover.webp` (transparent, iOS/WebKit)
 - `/Animations/Pack opening.mp4` — one-shot rip → white portal
+- `/images/owl-token-prize.jpg` — $OWL win reveal art (replaces the sparkle mock)
+- `/images/solana-logo-mark.png` — SOL / jackpot win reveal art (replaces the coins mock)
 
 Config: `lib/packs/animations.ts`. Dev playground (local only): `/dev/pack-opening`. **Admin preview** (production): Admin → Packs → **Preview pack opening**.
 

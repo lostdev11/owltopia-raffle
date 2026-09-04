@@ -22,6 +22,22 @@ export const PACK_ANIMATIONS = {
   opening: '/Animations/Pack%20opening.mp4',
 } as const
 
+/** $OWL prize art shown on pack reveal (replaces the sparkle mock). */
+export const PACK_OWL_PRIZE_ART = '/images/owl-token-prize.jpg'
+
+/** SOL / jackpot prize art shown on pack reveal (replaces the coins mock). */
+export const PACK_SOL_PRIZE_ART = '/images/solana-logo-mark.png'
+
+export function packPrizeArtUrl(
+  category: string,
+  nftImageUrl?: string | null
+): string | null {
+  if (category === 'nft') return nftImageUrl ?? null
+  if (category === 'owl') return PACK_OWL_PRIZE_ART
+  if (category === 'sol' || category === 'jackpot') return PACK_SOL_PRIZE_ART
+  return null
+}
+
 /** Poster while videos buffer */
 export const PACK_ANIMATION_POSTER =
   (typeof process !== 'undefined' &&

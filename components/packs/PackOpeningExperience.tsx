@@ -4,13 +4,16 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { createPortal } from 'react-dom'
 import Image from 'next/image'
 import Link from 'next/link'
-import { CheckCircle2, Coins, ImageIcon, Sparkles, Ticket } from 'lucide-react'
+import { CheckCircle2, ImageIcon, Ticket } from 'lucide-react'
 import type { PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
 import {
   PACK_ANIMATION_POSTER,
   PACK_ANIMATIONS,
+  PACK_OWL_PRIZE_ART,
   PACK_REVEAL_TIMING,
+  PACK_SOL_PRIZE_ART,
   getPackCategoryReveal,
+  packPrizeArtUrl,
 } from '@/lib/packs/animations'
 import { PackHoverClip } from '@/components/packs/PackHoverVideo'
 import { fireMintConfetti } from '@/lib/confetti'
@@ -76,10 +79,28 @@ function PrizeArt({ reward }: { reward: PackOpenClientResult }) {
     )
   }
   if (reward.category === 'sol' || reward.category === 'jackpot') {
-    return <Coins className="h-20 w-20 text-[#00FF9C]" aria-hidden />
+    return (
+      <Image
+        src={PACK_SOL_PRIZE_ART}
+        alt={reward.prizeLabel}
+        width={398}
+        height={312}
+        className="h-auto w-[62%] object-contain"
+        priority
+      />
+    )
   }
   if (reward.category === 'owl') {
-    return <Sparkles className="h-20 w-20 text-[#00FF9C]" aria-hidden />
+    return (
+      <Image
+        src={PACK_OWL_PRIZE_ART}
+        alt={reward.prizeLabel}
+        width={640}
+        height={640}
+        className="h-full w-full object-contain"
+        priority
+      />
+    )
   }
   return <ImageIcon className="h-20 w-20 text-[#00FF9C]" aria-hidden />
 }
@@ -165,7 +186,8 @@ export function PackOpeningExperience({
   // Preload reward image as soon as we have the reward
   useEffect(() => {
     let cancelled = false
-    void preloadRewardImage(reward.nftImageUrl).then(() => {
+    const artUrl = packPrizeArtUrl(reward.category, reward.nftImageUrl)
+    void preloadRewardImage(artUrl).then(() => {
       if (cancelled) return
       rewardReadyRef.current = true
       tryStartReveal()
@@ -179,7 +201,7 @@ export function PackOpeningExperience({
       cancelled = true
       window.clearTimeout(grace)
     }
-  }, [reward.nftImageUrl, tryStartReveal])
+  }, [reward.category, reward.nftImageUrl, tryStartReveal])
 
   // Reduced motion / failed open / whiteTransition entry
   useEffect(() => {
