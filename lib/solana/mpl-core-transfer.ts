@@ -21,6 +21,7 @@ import {
   createNoopUmiForPhantomSafeSend,
 } from '@/lib/solana/phantom-safe-umi-send'
 import { umiSignatureToBase58 } from '@/lib/solana/umi-signature'
+import { withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
 
 interface TransferMplCoreToEscrowArgs {
   connection: Connection
@@ -94,8 +95,11 @@ export async function transferMplCoreToEscrow({
   const newOwner = publicKey(escrowAddress)
   // Mpl Core assets in a collection must pass `collection` for transfer.
   // Otherwise the program throws "Missing collection" (custom error 0x19).
-   
-  const assetAccount: any = await fetchAsset(umi as any, asset)
+  // Browser RPC flakes (NetworkError / Failed to fetch) are common — retry before failing.
+  const assetAccount: any = await withSolanaRpcRetry(
+    () => fetchAsset(umi as any, asset),
+    { retries: 4, baseDelayMs: 700 }
+  )
    
   const maybeCollection: any =
     assetAccount?.updateAuthority?.type === 'Collection'

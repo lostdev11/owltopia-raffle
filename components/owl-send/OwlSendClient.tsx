@@ -104,7 +104,7 @@ import { isOwlSendPacketSizeError } from '@/lib/owl-send/tx-size'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { formatOwlSendFeeSol, getOwlSendFeeSol, getOwlSendFeeSolForDiscount } from '@/lib/owl-send/fee'
 import type { OwlSendHolderRoleName } from '@/lib/owl-send/holder-discount'
-import { sendOwlSendNftBatch } from '@/lib/owl-send/send-batch'
+import { sendOwlSendNftBatch, owlSendLineNeedsSpecialPath } from '@/lib/owl-send/send-batch'
 import {
   buildOwlSendSplNftTransaction,
   type OwlSendSendPhase,
@@ -983,6 +983,15 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     sendCancelledRef.current = false
     setSessionError(null)
     setSuccessPopup(null)
+
+    // Core (and other special) sends build txs via server RPC when signed in — soft SIWS
+    // so browser NetworkError on fetchAsset does not strand multi-approval Core batches.
+    const needsSpecialPrepare = workingBatches
+      .slice(workingIndex)
+      .some((batch) => batch.some((l) => owlSendLineNeedsSpecialPath(l)))
+    if (needsSpecialPrepare) {
+      await ensureLedgerSiws().catch(() => false)
+    }
 
     const remainingForSignAll = workingBatches.slice(workingIndex)
     const useSignAll =
