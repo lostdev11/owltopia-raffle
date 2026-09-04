@@ -27,6 +27,10 @@ import {
   getDiscordRaidRoleId,
 } from '@/lib/discord-raid-role'
 import {
+  buildWinnerDiscordStreakFields,
+  type DiscordWinnerStreakStats,
+} from '@/lib/discord-winner-streak-fields'
+import {
   buildDiscordXTweetMirrorContent,
   MAX_X_POST_TWEET_MIRRORS,
   parseTweetUrlsFromMultiline,
@@ -440,7 +444,7 @@ export async function notifyRaffleWinnerDrawn(
   winnerWallet: string,
   statusAfterDraw: string,
   winnerDiscordUserId?: string | null,
-  winStreak?: { currentStreak: number; totalWins: number } | null
+  streakStats?: DiscordWinnerStreakStats | null
 ): Promise<void> {
   const mainUrl = webhookUrlWinner()
   const entitledPartner = await loadEntitledDiscordPartnerTenant(raffle.discord_partner_tenant_id)
@@ -468,14 +472,7 @@ export async function notifyRaffleWinnerDrawn(
       }
     : { name: 'Winner', value: `\`${shortenWallet(winnerWallet)}\``, inline: true }
 
-  const streakField =
-    winStreak && winStreak.currentStreak >= 2
-      ? {
-          name: 'Win streak',
-          value: `🔥 ${winStreak.currentStreak} wins in a row · ${winStreak.totalWins} total`,
-          inline: true,
-        }
-      : null
+  const streakFields = buildWinnerDiscordStreakFields(streakStats)
 
   const extras: WebhookExtras | undefined = discordSnowflake
     ? {
@@ -491,7 +488,7 @@ export async function notifyRaffleWinnerDrawn(
     color: 0xfee75c,
     fields: [
       winnerField,
-      ...(streakField ? [streakField] : []),
+      ...streakFields,
       { name: 'Prize', value: prizeSummary(raffle), inline: true },
       {
         name: 'Raffle status',
@@ -601,7 +598,7 @@ export async function notifyCommunityGiveawayWinnerDrawn(
   giveaway: Pick<CommunityGiveaway, 'id' | 'title' | 'nft_mint_address' | 'nft_token_id'>,
   winnerWallet: string,
   winnerDiscordUserId?: string | null,
-  winStreak?: { currentStreak: number; totalWins: number } | null
+  streakStats?: DiscordWinnerStreakStats | null
 ): Promise<void> {
   const url = webhookUrlCommunityGiveawayWinner()
   if (!url) {
@@ -628,14 +625,7 @@ export async function notifyCommunityGiveawayWinnerDrawn(
       }
     : { name: 'Winner', value: `\`${shortenWallet(winnerWallet)}\``, inline: true }
 
-  const streakField =
-    winStreak && winStreak.currentStreak >= 2
-      ? {
-          name: 'Win streak',
-          value: `🔥 ${winStreak.currentStreak} wins in a row · ${winStreak.totalWins} total`,
-          inline: true,
-        }
-      : null
+  const streakFields = buildWinnerDiscordStreakFields(streakStats)
 
   const extras: WebhookExtras | undefined = discordSnowflake
     ? {
@@ -653,7 +643,7 @@ export async function notifyCommunityGiveawayWinnerDrawn(
       color: 0xfee75c,
       fields: [
         winnerField,
-        ...(streakField ? [streakField] : []),
+        ...streakFields,
         { name: 'Giveaway', value: pageUrl, inline: false },
       ],
       image: prizeImage ? { url: prizeImage } : undefined,
