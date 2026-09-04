@@ -55,6 +55,7 @@
     "test:siws-ledger-message": "npx --yes tsx scripts/test-siws-ledger-message-size.ts",
     "test:raffle-draw-verify": "npx --yes tsx scripts/test-raffle-draw-verify.ts",
     "test:wallet-streak-logic": "npx --yes tsx scripts/test-wallet-streak-logic.ts",
+    "test:discord-winner-streak-fields": "npx --yes tsx scripts/test-discord-winner-streak-fields.ts",
     "backfill:wallet-win-streaks": "npx --yes tsx --env-file=.env.local scripts/backfill-wallet-win-streaks.ts",
     "test:nesting-batch-size-error": "npx --yes tsx scripts/test-nesting-batch-size-error.ts",
     "test:mpl-core-owner-thaw-plan": "npx --yes tsx scripts/test-mpl-core-owner-thaw-plan.ts",

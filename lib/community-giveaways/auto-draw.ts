@@ -16,15 +16,15 @@ export async function notifyDiscordCommunityGiveawayWinner(
     getDiscordUserIdsByWallets([winnerWallet]),
     import('@/lib/db/wallet-streaks').then(({ getWalletStreaks }) => getWalletStreaks(winnerWallet)),
   ])
-  const winStreak =
-    streaks.winCurrentStreak >= 2
-      ? { currentStreak: streaks.winCurrentStreak, totalWins: streaks.winTotalWins }
-      : null
   await notifyCommunityGiveawayWinnerDrawn(
     giveaway,
     winnerWallet,
     discordMap[winnerWallet] ?? null,
-    winStreak
+    {
+      winCurrentStreak: streaks.winCurrentStreak,
+      winTotalWins: streaks.winTotalWins,
+      participationCurrentStreak: streaks.participationCurrentStreak,
+    }
   )
 }
 

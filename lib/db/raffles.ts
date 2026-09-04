@@ -2330,9 +2330,15 @@ export async function selectWinner(
         .filter((w): w is string => typeof w === 'string' && w.length > 0)
     ),
   ]
-  const { applyRaffleWinStreak } = await import('@/lib/db/wallet-streaks')
+  const { applyRaffleWinStreak, getWalletStreaks } = await import('@/lib/db/wallet-streaks')
   const winStreak = await applyRaffleWinStreak(raffleId, winnerWallet, entrantWallets, now)
-  await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId, winStreak)
+  const streaks = await getWalletStreaks(winnerWallet)
+  const streakStats = {
+    winCurrentStreak: winStreak?.currentStreak ?? streaks.winCurrentStreak,
+    winTotalWins: winStreak?.totalWins ?? streaks.winTotalWins,
+    participationCurrentStreak: streaks.participationCurrentStreak,
+  }
+  await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId, streakStats)
 
   try {
     const { settleUnawardedMilestones } = await import('@/lib/raffles/milestones/settlement')
