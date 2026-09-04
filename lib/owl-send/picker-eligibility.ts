@@ -203,9 +203,9 @@ export function owlSendSkippedFrozenNotice(frozenCount: number, sendableCount: n
       ? 'Skipped 1 nested/frozen NFT'
       : `Skipped ${frozenCount} nested/frozen NFTs`
   if (sendableCount < 1) {
-    return `${skipped} — unnest on Nesting first, then send.`
+    return `${skipped} — thaw locks / unnest on Nesting first, then send.`
   }
-  return `${skipped} — unnest on Nesting to send those. Continuing with the rest.`
+  return `${skipped} — thaw locks / unnest on Nesting to send those. Continuing with the rest.`
 }
 
 export type OwlSendAssetGate =

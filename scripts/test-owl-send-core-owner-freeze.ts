@@ -9,6 +9,8 @@ import {
   isOwlSendMplCoreFreezeTransferError,
   pickOwlSendSpecialNftError,
 } from '../lib/owl-send/mpl-core-owner-freeze'
+import { owlSendLineShouldProbeCoreFreeze } from '../lib/owl-send/find-core-owner-frozen'
+import { buildResumeSkippingFrozenPlan } from '../lib/owl-send/resume'
 import { isOwlSendFrozenTransferError } from '../lib/owl-send/wallet-send-errors'
 import { owlSendRetryHint } from '../lib/owl-send/retry-hint'
 
@@ -48,5 +50,46 @@ assert.equal(
 )
 
 assert.equal(pickOwlSendSpecialNftError([]), null)
+
+// Probe filter: skip compressed / pNFT; probe Core + unknown (send-special-nft parity).
+assert.equal(owlSendLineShouldProbeCoreFreeze({ interface: 'MplCoreAsset' }), true)
+assert.equal(owlSendLineShouldProbeCoreFreeze({ interface: 'V1_NFT' }), false)
+assert.equal(
+  owlSendLineShouldProbeCoreFreeze({ compressed: true, interface: 'V1_NFT' }),
+  false
+)
+assert.equal(owlSendLineShouldProbeCoreFreeze({ interface: 'ProgrammableNFT' }), false)
+assert.equal(owlSendLineShouldProbeCoreFreeze({ interface: null }), true)
+assert.equal(owlSendLineShouldProbeCoreFreeze({}), true)
+
+// Skip-frozen resume: Core Owner freeze failedMints must drop out of Retry plan
+// (this is the screenshot bug — Skip frozen & retry used to replay the same poison mint).
+const resume = buildResumeSkippingFrozenPlan({
+  preparedLines: [
+    { mint: 'frozenCore1', recipient: 'Recv111111111111111111111111111111111111111' },
+    { mint: 'ok2', recipient: 'Recv111111111111111111111111111111111111111' },
+    { mint: 'ok3', recipient: 'Recv111111111111111111111111111111111111111' },
+  ],
+  batches: [
+    [{ mint: 'frozenCore1', recipient: 'Recv111111111111111111111111111111111111111' }],
+    [{ mint: 'ok2', recipient: 'Recv111111111111111111111111111111111111111' }],
+    [{ mint: 'ok3', recipient: 'Recv111111111111111111111111111111111111111' }],
+  ],
+  batchProgress: [
+    { index: 0, status: 'failed' },
+    { index: 1, status: 'pending' },
+    { index: 2, status: 'pending' },
+  ],
+  frozenMints: ['frozenCore1'],
+})
+assert.equal(resume.ok, true)
+if (resume.ok) {
+  assert.equal(resume.skippedFrozen, 1)
+  assert.deepEqual(
+    resume.remaining.map((l) => l.mint),
+    ['ok2', 'ok3']
+  )
+  assert.ok(!resume.remaining.some((l) => l.mint === 'frozenCore1'))
+}
 
 console.log('test-owl-send-core-owner-freeze: ok')

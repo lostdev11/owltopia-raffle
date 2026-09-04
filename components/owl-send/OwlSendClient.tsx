@@ -36,6 +36,7 @@ import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
 import { mergeDasNftsWithOnChainLocks } from '@/lib/owl-send/merge-onchain-nft-locks'
 import { fetchNftLockOverlayByDerivedAtas } from '@/lib/owl-send/overlay-derived-atas'
 import { findFrozenOwlSendMints } from '@/lib/owl-send/attribute-batch-failure'
+import { findOwlSendCoreOwnerFrozenMints } from '@/lib/owl-send/find-core-owner-frozen'
 import {
   gateOwlSendSpecialAssetSelection,
   isOwlSendCompressedNft,
@@ -716,9 +717,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       return
     }
 
-    // Auto-exclude nested/frozen Gen2s so they cannot poison a multi-send batch.
-    // Prefer picker flags, then confirm with a live derived-ATA freeze read (large wallets
-    // used to lose freeze flags when owner-scan RPCs truncated).
+    // Auto-exclude nested/frozen Gen2s AND MPL Core Owner FreezeDelegate leftovers so they
+    // cannot poison a multi-send batch. Prefer picker flags, then live ATA freeze + Core
+    // FreezeDelegate reads (SPL ATA scans miss Core nest locks entirely).
     let { sendable, frozen: frozenSelected } = partitionOwlSendByFrozen(selectedNfts)
     try {
       const liveFrozen = await findFrozenOwlSendMints({
@@ -748,6 +749,34 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       }
     } catch {
       /* keep partition flags */
+    }
+    try {
+      const coreFrozenMints = await findOwlSendCoreOwnerFrozenMints({
+        connection,
+        lines: sendable.map((n) => ({
+          mint: n.mint,
+          compressed: n.compressed,
+          interface: n.interface,
+        })),
+      })
+      if (coreFrozenMints.length > 0) {
+        const coreSet = new Set(coreFrozenMints.map((m) => m.trim()).filter(Boolean))
+        const stillSendable: typeof sendable = []
+        const coreFrozen: typeof frozenSelected = []
+        for (const n of sendable) {
+          if (coreSet.has(n.mint.trim())) coreFrozen.push({ ...n, frozen: true })
+          else stillSendable.push(n)
+        }
+        sendable = stillSendable
+        if (coreFrozen.length > 0) {
+          frozenSelected = [...frozenSelected, ...coreFrozen]
+          setNfts((prev) =>
+            prev.map((n) => (coreSet.has(n.mint) ? { ...n, frozen: true } : n))
+          )
+        }
+      }
+    } catch {
+      /* send path still surfaces Core Owner freeze with Thaw locks */
     }
 
     if (frozenSelected.length > 0) {
@@ -866,14 +895,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     if (!lines?.length) return
 
     // Before every attempt (including Retry): drop nested/frozen so we never replay the
-    // same poison Gen2 batch. Thawed leftover CM delegates stay.
+    // same poison batch. Covers Gen2 SPL freezes AND MPL Core Owner FreezeDelegate leftovers
+    // (admin force-leave / closed nest) — SPL ATA scans miss Core locks entirely.
     try {
-      const frozenInBatch = await findFrozenOwlSendMints({
-        connection,
-        owner: publicKey,
-        lines,
-      })
-      // Also scan the whole remaining plan — frozen mints in later approvals poison Retry loops too.
       const allPendingLines = workingBatches.flatMap((batch, i) => {
         const st = workingProgress[i]?.status
         if (st === 'done') return []
@@ -887,9 +911,24 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               lines: allPendingLines,
             })
           : []
+      const coreFrozenInPlan =
+        allPendingLines.length > 0
+          ? await findOwlSendCoreOwnerFrozenMints({
+              connection,
+              lines: allPendingLines,
+            })
+          : []
       const pickerFrozen = nfts.filter((n) => isWalletNftTransferLocked(n)).map((n) => n.mint)
+      // Known poison from the failed approval card (Core freeze failedMints).
+      const failedFreezeMints = workingProgress.flatMap((b) =>
+        b.status === 'failed' && isOwlSendFrozenTransferError(b.error ?? '')
+          ? (b.failedMints ?? [])
+          : []
+      )
       const frozenSet = new Set(
-        [...frozenInBatch, ...frozenInPlan, ...pickerFrozen].map((m) => m.trim())
+        [...frozenInPlan, ...coreFrozenInPlan, ...pickerFrozen, ...failedFreezeMints]
+          .map((m) => m.trim())
+          .filter(Boolean)
       )
       if (frozenSet.size > 0) {
         const plan = buildResumeSkippingFrozenPlan({
@@ -923,7 +962,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
           setSelectedMints(new Set(workingPrepared.map((l) => l.mint)))
           setRetryMints([...frozenSet])
           setSessionNotice(
-            `Skipped ${plan.skippedFrozen} nested/frozen NFT${plan.skippedFrozen === 1 ? '' : 's'} — sending the rest. Thaw locks / unnest those separately.`
+            `Skipped ${plan.skippedFrozen} nested/frozen NFT${plan.skippedFrozen === 1 ? '' : 's'} (incl. Core nest locks) — sending the rest. Use Thaw locks / Nesting for those separately.`
           )
           setNfts((prev) =>
             prev.map((n) => (frozenSet.has(n.mint) ? { ...n, frozen: true } : n))
@@ -1155,22 +1194,92 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               ? `${sentInChain} approval${sentInChain === 1 ? '' : 's'} already confirmed — this one was split so Retry can finish the rest.`
               : 'Split this approval so the next Retry fits in one Solana transaction.'
           )
-        } else {
-          setBatches(workingBatches)
-          setPreparedLines(workingPrepared)
-          setBatchProgress(
-            workingProgress.map((b) =>
-              b.index === workingIndex
-                ? {
-                    ...b,
-                    status: 'failed' as const,
-                    error: result.error,
-                    failedMints: result.failedMints,
-                  }
-                : b
-            )
-          )
+          setActiveBatch(workingIndex)
+          if (result.failedMints?.length) {
+            setRetryMints((prev) => [...new Set([...prev, ...result.failedMints!])])
+          }
+          setSessionError(result.error)
+          if (sentInChain > 0 && lastSignature) {
+            setSuccessPopup({
+              title:
+                sentInChain === 1
+                  ? 'Partial send — first approval ok'
+                  : `Partial send — ${sentInChain} approvals ok`,
+              detail: 'Remaining approvals were not sent. Tap Retry to continue the rest in one shot.',
+              signature: lastSignature,
+              items: accumulatedItems,
+            })
+          }
+          return
         }
+
+        const failedProgress = workingProgress.map((b) =>
+          b.index === workingIndex
+            ? {
+                ...b,
+                status: 'failed' as const,
+                error: result.error,
+                failedMints: result.failedMints,
+              }
+            : b
+        )
+
+        // Mid-chain: auto-skip nested/frozen (incl. Core Owner FreezeDelegate) and continue
+        // remaining approvals — same outcome as "Skip frozen & retry" without a dead stop.
+        if (isOwlSendFrozenTransferError(result.error)) {
+          const poison = new Set(
+            [...(result.failedMints ?? []), ...lines.map((l) => l.mint)]
+              .map((m) => m.trim())
+              .filter(Boolean)
+          )
+          try {
+            const pendingTail = workingBatches.flatMap((batch, i) => {
+              if (i < workingIndex) return []
+              if (i === workingIndex) return batch
+              const st = failedProgress[i]?.status
+              if (st === 'done') return []
+              return batch
+            })
+            const moreCore = await findOwlSendCoreOwnerFrozenMints({
+              connection,
+              lines: pendingTail,
+            })
+            for (const m of moreCore) poison.add(m)
+          } catch {
+            /* poison from failedMints is enough to unblock this approval */
+          }
+
+          const plan = buildResumeSkippingFrozenPlan({
+            preparedLines: workingPrepared,
+            batches: workingBatches,
+            batchProgress: failedProgress,
+            frozenMints: poison,
+          })
+          if (plan.ok && plan.skippedFrozen > 0) {
+            workingPrepared = plan.remaining
+            workingBatches = plan.batches
+            workingProgress = plan.batchProgress
+            workingIndex = 0
+            setPreparedLines(workingPrepared)
+            setBatches(workingBatches)
+            setBatchProgress(workingProgress)
+            setActiveBatch(0)
+            setSelectedMints(new Set(workingPrepared.map((l) => l.mint)))
+            setRetryMints([...poison])
+            setSessionError(null)
+            setSessionNotice(
+              `Skipped ${plan.skippedFrozen} nested/frozen NFT${plan.skippedFrozen === 1 ? '' : 's'} (incl. Core nest locks) — continuing the rest. Use Thaw locks / Nesting for those separately.`
+            )
+            setNfts((prev) =>
+              prev.map((n) => (poison.has(n.mint) ? { ...n, frozen: true } : n))
+            )
+            continue
+          }
+        }
+
+        setBatches(workingBatches)
+        setPreparedLines(workingPrepared)
+        setBatchProgress(failedProgress)
         setActiveBatch(workingIndex)
         if (result.failedMints?.length) {
           setRetryMints((prev) => [...new Set([...prev, ...result.failedMints!])])
@@ -1378,7 +1487,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     const draft = pendingDraft
 
     // Drop nested/frozen mints from old drafts — restoring them used to replay the same
-    // no-popup failures after Gen2 freeze flags were fixed.
+    // no-popup failures after Gen2 freeze flags were fixed. Include Core Owner freezes.
     let remainingLines = draft.preparedLines
     try {
       const liveFrozen = new Set(
@@ -1390,6 +1499,16 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       )
       for (const n of nfts) {
         if (isWalletNftTransferLocked(n)) liveFrozen.add(n.mint)
+      }
+      try {
+        for (const m of await findOwlSendCoreOwnerFrozenMints({
+          connection,
+          lines: draft.preparedLines,
+        })) {
+          liveFrozen.add(m)
+        }
+      } catch {
+        /* Gen2 + picker flags still apply */
       }
       if (liveFrozen.size > 0) {
         remainingLines = draft.preparedLines.filter((l) => !liveFrozen.has(l.mint.trim()))
@@ -2417,8 +2536,10 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     <CardTitle className="text-base">Confirm send</CardTitle>
                     <CardDescription>
                       {preparedLines?.length} NFT{preparedLines?.length === 1 ? '' : 's'} ·{' '}
-                      {batches.length} wallet approval{batches.length === 1 ? '' : 's'} · confirm
-                      each one so they don’t fire back-to-back
+                      {batches.length} wallet approval{batches.length === 1 ? '' : 's'}
+                      {batches.length > 1
+                        ? ' · one click chains the rest after the first confirm'
+                        : ''}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
