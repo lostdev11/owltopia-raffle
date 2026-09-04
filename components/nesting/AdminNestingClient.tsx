@@ -946,7 +946,7 @@ export function AdminNestingClient() {
             : ''
         const thawNote =
           needsOwnerThaw > 0
-            ? ` ${needsOwnerThaw} NFT(s) still Owner-frozen on-chain — holder must thaw from their wallet (Leave nest / updatePlugin frozen:false).`
+            ? ` ${needsOwnerThaw} NFT(s) still Owner-frozen on-chain — ask the holder to open My nest and use “Thaw leftover nest locks” (or approve updatePlugin frozen:false in their wallet).`
             : ''
         const remainNote =
           remaining > 0
@@ -996,7 +996,7 @@ export function AdminNestingClient() {
       const thawNote = needsOwnerThaw
         ? ` NFT remains Owner-frozen on-chain${
             thawMint ? ` (${thawMint.slice(0, 8)}…)` : ''
-          } — holder must thaw from their wallet.`
+          } — holder should open My nest → “Thaw leftover nest locks”.`
         : ''
       setForceUnstakeMsg(
         holder

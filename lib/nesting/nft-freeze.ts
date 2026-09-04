@@ -491,19 +491,16 @@ export async function thawWalletNftForNesting(params: {
     throw new StakingUserError('Invalid wallet or NFT asset address.', 400)
   }
 
-  const { umi, signer } = await createCoreAuthorityUmi()
-  const { asset, collection } = await fetchCoreAssetAndCollection(
-    umi,
-    params.assetId.trim(),
-    params.collectionMint
-  )
-
-  const delegateAddress = signer.publicKey.toString()
-  const fd = readMplCoreFreezeDelegate(asset)
   const assetId = params.assetId.trim()
+  // Read-only plan first so Owner-authority nests do not require the freeze keypair
+  // (admin DB-close + holder "needs wallet thaw" paths never call thawAsset).
+  const readEndpoint = resolveServerSolanaRpcUrl()
+  const readUmi: any = (createUmi as any)(readEndpoint as any)
+  const readAsset = await fetchCoreAssetOnly(readUmi, assetId)
+  const fd = readMplCoreFreezeDelegate(readAsset)
   const plan = planMplCoreNestThaw({
     freezeDelegate: fd,
-    nestingDelegateAddress: delegateAddress,
+    nestingDelegateAddress: getNestingNftFreezeDelegateAddress(),
     adminRecoveryUnstake: params.adminRecoveryUnstake === true,
   })
 
@@ -529,6 +526,13 @@ export async function thawWalletNftForNesting(params: {
       503
     )
   }
+
+  const { umi, signer } = await createCoreAuthorityUmi()
+  const { asset, collection } = await fetchCoreAssetAndCollection(
+    umi,
+    assetId,
+    params.collectionMint
+  )
 
   try {
     const result = await thawAsset(umi as any, {

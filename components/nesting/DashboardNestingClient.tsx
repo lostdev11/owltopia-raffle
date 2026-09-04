@@ -234,6 +234,7 @@ export function DashboardNestingClient() {
   const [signingIn, setSigningIn] = useState(false)
   const [signInError, setSignInError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [leftoverOwnerThawBusy, setLeftoverOwnerThawBusy] = useState(false)
   const [successNotice, setSuccessNotice] = useState<{
     message: string
     hint?: string
@@ -685,6 +686,19 @@ export function DashboardNestingClient() {
     () => positions.filter((p) => isOpenStakingPosition(p)),
     [positions]
   )
+
+  /** After admin force-leave (or partial thaw), Owner-frozen NFTs may still need a wallet thaw. */
+  const leftoverOwnerThawMints = useMemo(() => {
+    const mints: string[] = []
+    for (const p of positions) {
+      if (p.status !== 'unstaked') continue
+      const ref = (p.external_reference ?? '').trim()
+      if (!ref.startsWith('nft_needs_owner_thaw:')) continue
+      const mint = ref.slice('nft_needs_owner_thaw:'.length).trim()
+      if (mint) mints.push(mint)
+    }
+    return [...new Set(mints)]
+  }, [positions])
 
   /** NFT perches with 2+ open positions render as one grouped card (same pool). */
   const { nftNestGroups, ungroupedOpenPositions } = useMemo(() => {
@@ -2728,6 +2742,54 @@ export function DashboardNestingClient() {
 
   handleStakeRef.current = handleStake
 
+  const handleThawLeftoverOwnerLocks = async () => {
+    if (!publicKey || leftoverOwnerThawMints.length === 0) return
+    const adapter = wallet?.adapter
+    if (!adapter) {
+      setActionError('Connect a wallet to thaw leftover nest locks.')
+      return
+    }
+    setActionError(null)
+    setLeftoverOwnerThawBusy(true)
+    try {
+      const thawed: string[] = []
+      for (const mint of leftoverOwnerThawMints) {
+        await thawMplCoreOwnerFreezeInWallet({
+          connection,
+          wallet: adapter,
+          assetId: mint,
+          sendTransaction,
+        })
+        thawed.push(mint)
+      }
+      if (thawed.length > 0) {
+        await fetch(nestingClientApiUrl('/api/me/staking/ack-owner-thaw'), {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Connected-Wallet': publicKey.toBase58(),
+          },
+          body: JSON.stringify({ mints: thawed }),
+        }).catch(() => null)
+      }
+      setSuccessNotice({
+        placement: 'modal',
+        tone: 'success',
+        title: 'Nest locks thawed',
+        message: `Thawed ${thawed.length} leftover nest lock(s). Your NFTs should transfer normally again.`,
+      })
+      await loadPositions()
+    } catch (e) {
+      setActionError(
+        formatNestingWalletError(e, wallet?.adapter?.name, 'NFT') ||
+          formatNestingApiFetchError(e, 'generic')
+      )
+    } finally {
+      setLeftoverOwnerThawBusy(false)
+    }
+  }
+
   const handleUnstake = async (positionId: string) => {
     if (!publicKey) return
     setActionError(null)
@@ -3582,6 +3644,34 @@ export function DashboardNestingClient() {
             <span className="font-medium text-foreground">Claim all</span> appears once your active nests total{' '}
             <span className="font-medium text-foreground">1+ OWL</span> combined. Finish opening below, then refresh.
           </p>
+        </div>
+      ) : null}
+
+      {leftoverOwnerThawMints.length > 0 ? (
+        <div
+          className="rounded-lg border border-amber-500/40 bg-amber-500/[0.08] px-4 py-3 text-sm text-foreground space-y-3"
+          role="status"
+        >
+          <p className="leading-relaxed">
+            {leftoverOwnerThawMints.length} NFT
+            {leftoverOwnerThawMints.length === 1 ? '' : 's'} still{' '}
+            <span className="font-medium text-foreground">frozen from a closed nest</span>. Approve a
+            quick wallet thaw so they can transfer again.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-[44px] w-full touch-manipulation sm:w-auto"
+            disabled={leftoverOwnerThawBusy || !connected}
+            onClick={() => void handleThawLeftoverOwnerLocks()}
+          >
+            {leftoverOwnerThawBusy ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />
+            ) : null}
+            {leftoverOwnerThawBusy
+              ? 'Thawing…'
+              : `Thaw leftover nest locks (${leftoverOwnerThawMints.length})`}
+          </Button>
         </div>
       ) : null}
 
