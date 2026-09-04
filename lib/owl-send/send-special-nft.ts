@@ -12,6 +12,8 @@ import { transferCompressedNftToEscrow } from '@/lib/solana/cnft-transfer'
 import { transferMplCoreToEscrow } from '@/lib/solana/mpl-core-transfer'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
+import { sendPreparedVersionedTransactionBase64 } from '@/lib/solana/send-prepared-versioned-tx'
+import type { PreparedMplCoreTransfer } from '@/lib/solana/mpl-core-transfer-prepare'
 import { getPlatformFeeTreasuryWalletAddressClient } from '@/lib/solana/platform-fee-treasury-wallet'
 import {
   OWL_SEND_CONFIRM_TIMEOUT_HINT,
@@ -30,6 +32,38 @@ import {
   pickOwlSendSpecialNftError,
 } from '@/lib/owl-send/mpl-core-owner-freeze'
 import { readOwlSendCoreOwnerFreeze } from '@/lib/owl-send/mpl-core-owner-freeze-read'
+import { isOwlSendRpcNetworkError } from '@/lib/owl-send/rpc-network-error'
+
+async function prepareCoreTransferViaServer(params: {
+  ownerWallet: string
+  mint: string
+  recipient: string
+  feeDiscountBps?: number
+}): Promise<PreparedMplCoreTransfer | null> {
+  try {
+    const res = await fetch('/api/owl-send/prepare-core-transfer', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'content-type': 'application/json',
+        'x-connected-wallet': params.ownerWallet,
+      },
+      body: JSON.stringify({
+        mint: params.mint,
+        recipient: params.recipient,
+        feeDiscountBps: params.feeDiscountBps ?? 0,
+      }),
+    })
+    const data = (await res.json().catch(() => null)) as {
+      item?: PreparedMplCoreTransfer
+      error?: string
+    } | null
+    if (!res.ok || !data?.item) return null
+    return data.item
+  } catch {
+    return null
+  }
+}
 
 async function sendFeeOnlyTx(params: {
   connection: Connection
@@ -77,6 +111,8 @@ async function tryFallbackKind(params: {
   recipient: string
   feeLamports: number
   treasury: string | null
+  ownerWallet: string
+  feeDiscountBps?: number
 }): Promise<string> {
   const {
     kind,
@@ -87,6 +123,8 @@ async function tryFallbackKind(params: {
     recipient,
     feeLamports,
     treasury,
+    ownerWallet,
+    feeDiscountBps,
   } = params
   const feeOpts =
     feeLamports > 0 && treasury
@@ -107,6 +145,37 @@ async function tryFallbackKind(params: {
     })
   }
   if (kind === 'mpl_core') {
+    // Prefer server-built transfer (private RPC) — browser fetchAsset often NetworkErrors.
+    const prepared = await prepareCoreTransferViaServer({
+      ownerWallet,
+      mint,
+      recipient,
+      feeDiscountBps,
+    })
+    if (prepared?.status === 'blocked') {
+      if (prepared.reason === 'owner_frozen') {
+        throw new Error(OWL_SEND_CORE_OWNER_FREEZE_ERROR)
+      }
+      if (prepared.reason === 'other_frozen') {
+        throw new Error(
+          'This Metaplex Core NFT is still frozen on-chain. Unnest / thaw the lock on Nesting first, then Retry.'
+        )
+      }
+      if (prepared.reason === 'not_owner') {
+        throw new Error('This NFT is not in the connected wallet.')
+      }
+      // not_core → fall through to client transfer (will fail similarly) then other kinds
+    }
+    if (prepared?.status === 'ready') {
+      return sendPreparedVersionedTransactionBase64({
+        serializedBase64: prepared.serializedBase64,
+        connection,
+        sendTransaction,
+        blockhash: prepared.blockhash,
+        lastValidBlockHeight: prepared.lastValidBlockHeight,
+        failMessagePrefix: 'Core NFT send would fail on-chain before wallet approval.',
+      })
+    }
     return transferMplCoreToEscrow({
       connection,
       wallet: walletAdapter,
@@ -185,38 +254,77 @@ export async function sendOwlSendSpecialNft(params: {
   })
 
   const errors: string[] = []
+  const ownerWallet = owner.toBase58()
   for (const kind of order) {
-    try {
-      const signature = await tryFallbackKind({
-        kind,
-        connection,
-        walletAdapter,
-        sendTransaction,
-        mint,
-        recipient,
-        feeLamports,
-        treasury,
-      })
-      onPhase?.('confirming')
-      return { ok: true, signature, newAtaCount: 0 }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      if (msg.trim()) errors.push(`${kind}: ${msg}`)
-      // If Core transfer failed because the asset is still nest-frozen, stop — later
-      // compressed / Token Metadata attempts only add Incorrect-account-owner noise.
-      if (
-        kind === 'mpl_core' &&
-        /frozen|freezedelegate|freeze delegate|noapprovals|0x1a/i.test(msg)
-      ) {
+    let attempts = kind === 'mpl_core' ? 3 : 1
+    let lastMsg = ''
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        const signature = await tryFallbackKind({
+          kind,
+          connection,
+          walletAdapter,
+          sendTransaction,
+          mint,
+          recipient,
+          feeLamports,
+          treasury,
+          ownerWallet,
+          feeDiscountBps: params.feeDiscountBps,
+        })
+        onPhase?.('confirming')
+        return { ok: true, signature, newAtaCount: 0 }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        lastMsg = msg
+        // Retry Core on transient browser RPC flakes before falling through to TM noise.
+        if (
+          kind === 'mpl_core' &&
+          isOwlSendRpcNetworkError(msg) &&
+          attempt < attempts - 1
+        ) {
+          await new Promise((r) => setTimeout(r, 700 * (attempt + 1)))
+          continue
+        }
+        if (msg.trim()) errors.push(`${kind}: ${msg}`)
+        // If Core transfer failed because the asset is still nest-frozen, stop — later
+        // compressed / Token Metadata attempts only add Incorrect-account-owner noise.
+        if (
+          kind === 'mpl_core' &&
+          /frozen|freezedelegate|freeze delegate|noapprovals|0x1a/i.test(msg)
+        ) {
+          attempts = 0
+          break
+        }
+        // Known Core + RPC death: don't spam compressed/TM with misleading errors.
+        if (
+          kind === 'mpl_core' &&
+          isDasMplCoreInterface(line.interface) &&
+          isOwlSendRpcNetworkError(msg)
+        ) {
+          attempts = 0
+          break
+        }
         break
       }
     }
+    void lastMsg
   }
 
   // Last resort: if asset already moved somehow, don't charge; otherwise surface error.
   void owner
   void sendFeeOnlyTx
   const best = pickOwlSendSpecialNftError(errors)
+  const rpcOnly =
+    errors.length > 0 && errors.every((e) => isOwlSendRpcNetworkError(e))
+  if (rpcOnly || (best && isOwlSendRpcNetworkError(best))) {
+    return {
+      ok: false,
+      error:
+        'Could not reach Solana RPC to prepare this Core NFT send. Tap Retry — Owltopia builds the transfer on the server RPC when you are signed in. If it keeps failing, switch WiFi/mobile data or pause VPN.',
+      failedMints: [mint],
+    }
+  }
   const detail = best ? ` (${best})` : ''
   return {
     ok: false,

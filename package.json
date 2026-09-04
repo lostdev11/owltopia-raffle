@@ -71,6 +71,7 @@
     "test:owl-send-holder-discount": "npx --yes tsx scripts/test-owl-send-holder-discount.ts",
     "test:owl-send-mpl-core-ledger": "npx --yes tsx scripts/test-owl-send-mpl-core-ledger.ts",
     "test:owl-send-core-owner-freeze": "npx --yes tsx scripts/test-owl-send-core-owner-freeze.ts",
+    "test:owl-send-core-send-rpc": "npx --yes tsx scripts/test-owl-send-core-send-rpc.ts",
     "test:owl-send-recover-ledger": "npx --yes tsx scripts/test-owl-send-recover-ledger.ts",
     "test:partner-nest-pool": "npx --yes tsx scripts/test-partner-nest-pool.ts",
     "test:owl-center-launch-slug": "npx --yes tsx scripts/test-owl-center-launch-slug.ts",
