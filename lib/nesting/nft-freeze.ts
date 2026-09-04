@@ -467,13 +467,61 @@ export async function thawWalletNftForNesting(params: {
    */
   adminRecoveryUnstake?: boolean
 }): Promise<{ signature: string | null; tokenAccount: string }> {
-  if (params.adminRecoveryUnstake === true) {
-    await assertMplCoreAssetOwnedByWalletOnChain({
-      assetId: params.assetId,
-      ownerWallet: params.ownerWallet,
-    })
-  } else {
-    await assertAssetOwnedByWalletInCollection(params)
+  // #region agent log
+  try {
+    const fs = await import('fs')
+    fs.appendFileSync(
+      '/opt/cursor/logs/debug.log',
+      JSON.stringify({
+        location: 'nft-freeze.ts:thawWalletNftForNesting:entry',
+        message: 'thaw start',
+        data: {
+          assetId: params.assetId,
+          ownerWallet: params.ownerWallet,
+          adminRecoveryUnstake: params.adminRecoveryUnstake === true,
+          collectionMint: params.collectionMint ?? null,
+        },
+        timestamp: Date.now(),
+        hypothesisId: 'B',
+      }) + '\n'
+    )
+  } catch {
+    /* debug log best-effort */
+  }
+  // #endregion
+
+  try {
+    if (params.adminRecoveryUnstake === true) {
+      await assertMplCoreAssetOwnedByWalletOnChain({
+        assetId: params.assetId,
+        ownerWallet: params.ownerWallet,
+      })
+    } else {
+      await assertAssetOwnedByWalletInCollection(params)
+    }
+  } catch (e) {
+    // #region agent log
+    try {
+      const fs = await import('fs')
+      fs.appendFileSync(
+        '/opt/cursor/logs/debug.log',
+        JSON.stringify({
+          location: 'nft-freeze.ts:thawWalletNftForNesting:ownershipFail',
+          message: 'ownership assert failed',
+          data: {
+            assetId: params.assetId,
+            adminRecoveryUnstake: params.adminRecoveryUnstake === true,
+            error: e instanceof Error ? e.message : String(e),
+          },
+          timestamp: Date.now(),
+          hypothesisId: 'B',
+        }) + '\n'
+      )
+    } catch {
+      /* debug log best-effort */
+    }
+    // #endregion
+    throw e
   }
 
   try {
@@ -483,16 +531,136 @@ export async function thawWalletNftForNesting(params: {
     throw new StakingUserError('Invalid wallet or NFT asset address.', 400)
   }
 
-  const { umi, signer } = await createCoreAuthorityUmi()
-  const { asset, collection } = await fetchCoreAssetAndCollection(umi, params.assetId.trim(), params.collectionMint)
+  let umi: any
+  let signer: any
+  try {
+    ;({ umi, signer } = await createCoreAuthorityUmi())
+  } catch (e) {
+    // #region agent log
+    try {
+      const fs = await import('fs')
+      fs.appendFileSync(
+        '/opt/cursor/logs/debug.log',
+        JSON.stringify({
+          location: 'nft-freeze.ts:thawWalletNftForNesting:authorityFail',
+          message: 'freeze authority keypair failed',
+          data: {
+            assetId: params.assetId,
+            error: e instanceof Error ? e.message : String(e),
+          },
+          timestamp: Date.now(),
+          hypothesisId: 'C',
+        }) + '\n'
+      )
+    } catch {
+      /* debug log best-effort */
+    }
+    // #endregion
+    throw e
+  }
+
+  let asset: any
+  let collection: any
+  try {
+    ;({ asset, collection } = await fetchCoreAssetAndCollection(
+      umi,
+      params.assetId.trim(),
+      params.collectionMint
+    ))
+  } catch (e) {
+    // #region agent log
+    try {
+      const fs = await import('fs')
+      fs.appendFileSync(
+        '/opt/cursor/logs/debug.log',
+        JSON.stringify({
+          location: 'nft-freeze.ts:thawWalletNftForNesting:fetchFail',
+          message: 'fetchCoreAssetAndCollection failed',
+          data: {
+            assetId: params.assetId,
+            error: e instanceof Error ? e.message : String(e),
+          },
+          timestamp: Date.now(),
+          hypothesisId: 'C',
+        }) + '\n'
+      )
+    } catch {
+      /* debug log best-effort */
+    }
+    // #endregion
+    throw e
+  }
+
   const delegateAddress = signer.publicKey.toString()
   const fd = readMplCoreFreezeDelegate(asset)
+  const onChainOwner = assetOwnerAddress(asset)
+
+  // #region agent log
+  try {
+    const fs = await import('fs')
+    fs.appendFileSync(
+      '/opt/cursor/logs/debug.log',
+      JSON.stringify({
+        location: 'nft-freeze.ts:thawWalletNftForNesting:freezeState',
+        message: 'on-chain freeze delegate state',
+        data: {
+          assetId: params.assetId,
+          frozen: fd?.frozen ?? null,
+          authorityType: fd?.authorityType ?? null,
+          authorityAddress: fd?.authorityAddress ?? null,
+          delegateAddress,
+          onChainOwner,
+          ownerMatches: onChainOwner === params.ownerWallet.trim(),
+          hasCollection: Boolean(collection),
+        },
+        timestamp: Date.now(),
+        hypothesisId: 'A',
+      }) + '\n'
+    )
+  } catch {
+    /* debug log best-effort */
+  }
+  // #endregion
 
   if (!fd?.frozen) {
+    // #region agent log
+    try {
+      const fs = await import('fs')
+      fs.appendFileSync(
+        '/opt/cursor/logs/debug.log',
+        JSON.stringify({
+          location: 'nft-freeze.ts:thawWalletNftForNesting:alreadyThawed',
+          message: 'not frozen — DB-only close path',
+          data: { assetId: params.assetId, hasFd: Boolean(fd) },
+          timestamp: Date.now(),
+          hypothesisId: 'D',
+        }) + '\n'
+      )
+    } catch {
+      /* debug log best-effort */
+    }
+    // #endregion
     return { signature: null, tokenAccount: params.assetId.trim() }
   }
 
   if (fd.authorityType === 'Owner') {
+    // #region agent log
+    try {
+      const fs = await import('fs')
+      fs.appendFileSync(
+        '/opt/cursor/logs/debug.log',
+        JSON.stringify({
+          location: 'nft-freeze.ts:thawWalletNftForNesting:ownerAuthority',
+          message: 'Owner freeze authority blocks admin thaw',
+          data: { assetId: params.assetId, frozen: fd.frozen },
+          timestamp: Date.now(),
+          hypothesisId: 'A',
+        }) + '\n'
+      )
+    } catch {
+      /* debug log best-effort */
+    }
+    // #endregion
     throw new StakingUserError(
       'This nest uses a wallet-controlled freeze lock. Close the nest from your wallet so it can thaw the NFT.',
       400
@@ -500,6 +668,28 @@ export async function thawWalletNftForNesting(params: {
   }
 
   if (fd.authorityType !== 'Address' || fd.authorityAddress !== delegateAddress) {
+    // #region agent log
+    try {
+      const fs = await import('fs')
+      fs.appendFileSync(
+        '/opt/cursor/logs/debug.log',
+        JSON.stringify({
+          location: 'nft-freeze.ts:thawWalletNftForNesting:wrongAuthority',
+          message: 'incompatible freeze authority',
+          data: {
+            assetId: params.assetId,
+            authorityType: fd.authorityType,
+            authorityAddress: fd.authorityAddress,
+            delegateAddress,
+          },
+          timestamp: Date.now(),
+          hypothesisId: 'A',
+        }) + '\n'
+      )
+    } catch {
+      /* debug log best-effort */
+    }
+    // #endregion
     throw new StakingUserError(
       'This NFT has a freeze lock that Owltopia cannot thaw automatically. Contact support.',
       503
@@ -512,8 +702,45 @@ export async function thawWalletNftForNesting(params: {
       ...(collection ? { collection } : {}),
       delegate: signer,
     } as any).sendAndConfirm(umi as any)
+    // #region agent log
+    try {
+      const fs = await import('fs')
+      fs.appendFileSync(
+        '/opt/cursor/logs/debug.log',
+        JSON.stringify({
+          location: 'nft-freeze.ts:thawWalletNftForNesting:thawOk',
+          message: 'thawAsset succeeded',
+          data: { assetId: params.assetId, signature: signatureToString(result) },
+          timestamp: Date.now(),
+          hypothesisId: 'C',
+        }) + '\n'
+      )
+    } catch {
+      /* debug log best-effort */
+    }
+    // #endregion
     return { signature: signatureToString(result), tokenAccount: params.assetId.trim() }
   } catch (e) {
+    // #region agent log
+    try {
+      const fs = await import('fs')
+      fs.appendFileSync(
+        '/opt/cursor/logs/debug.log',
+        JSON.stringify({
+          location: 'nft-freeze.ts:thawWalletNftForNesting:thawTxFail',
+          message: 'thawAsset sendAndConfirm failed',
+          data: {
+            assetId: params.assetId,
+            error: e instanceof Error ? e.message : String(e),
+          },
+          timestamp: Date.now(),
+          hypothesisId: 'C',
+        }) + '\n'
+      )
+    } catch {
+      /* debug log best-effort */
+    }
+    // #endregion
     throw new StakingUserError(
       e instanceof Error ? e.message : 'MPL Core thaw delegate failed.',
       503

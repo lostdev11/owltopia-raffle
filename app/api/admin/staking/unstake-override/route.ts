@@ -55,7 +55,44 @@ export async function POST(request: NextRequest) {
         closed: result.closed.length,
         failed: result.failed.length,
         remaining_eligible: result.remaining_eligible,
+        failed_errors: result.failed.map((f) => ({
+          position_id: f.position_id,
+          asset: f.asset_identifier,
+          error: f.error,
+          status: f.status,
+        })),
       })
+
+      // #region agent log
+      try {
+        const fs = await import('fs')
+        fs.appendFileSync(
+          '/opt/cursor/logs/debug.log',
+          JSON.stringify({
+            location: 'unstake-override/route.ts:wallet_unstake_all',
+            message: 'API wallet force-leave response',
+            data: {
+              holder_wallet: result.wallet,
+              closed: result.closed.length,
+              failed: result.failed.length,
+              remaining_eligible: result.remaining_eligible,
+              attempted: result.attempted,
+              eligible_total: result.eligible_total,
+              failed_errors: result.failed.map((f) => ({
+                position_id: f.position_id,
+                asset: f.asset_identifier,
+                error: f.error,
+                status: f.status,
+              })),
+            },
+            timestamp: Date.now(),
+            hypothesisId: 'A',
+          }) + '\n'
+        )
+      } catch {
+        /* debug log best-effort */
+      }
+      // #endregion
 
       return NextResponse.json({
         ...result,

@@ -102,6 +102,35 @@ export async function runAdminOverrideUnstakeBatch(params: {
   const closed: AdminOverrideUnstakeClosed[] = []
   const failed: AdminOverrideUnstakeFailed[] = []
 
+  // #region agent log
+  try {
+    const fs = await import('fs')
+    fs.appendFileSync(
+      '/opt/cursor/logs/debug.log',
+      JSON.stringify({
+        location: 'admin-unstake-override-select.ts:runBatch:entry',
+        message: 'wallet force-leave batch start',
+        data: {
+          wallet: params.wallet,
+          eligibleTotal,
+          limit,
+          batchSize: batch.length,
+          sampleAssets: batch.slice(0, 3).map((c) => ({
+            position_id: c.position_id,
+            pool_id: c.pool_id,
+            asset: c.asset_identifier,
+            status: c.status,
+          })),
+        },
+        timestamp: Date.now(),
+        hypothesisId: 'E',
+      }) + '\n'
+    )
+  } catch {
+    /* debug log best-effort */
+  }
+  // #endregion
+
   for (const candidate of batch) {
     try {
       const { position } = await params.unstakeOne(candidate.position_id)
@@ -112,6 +141,28 @@ export async function runAdminOverrideUnstakeBatch(params: {
           ? 'onchain_token_transfer'
           : 'database_mock',
       })
+      // #region agent log
+      try {
+        const fs = await import('fs')
+        fs.appendFileSync(
+          '/opt/cursor/logs/debug.log',
+          JSON.stringify({
+            location: 'admin-unstake-override-select.ts:runBatch:closed',
+            message: 'position closed',
+            data: {
+              position_id: candidate.position_id,
+              asset: candidate.asset_identifier,
+              pool_id: candidate.pool_id,
+              hasSig: Boolean(position.unstake_signature),
+            },
+            timestamp: Date.now(),
+            hypothesisId: 'E',
+          }) + '\n'
+        )
+      } catch {
+        /* debug log best-effort */
+      }
+      // #endregion
     } catch (e) {
       const message = isStakingUserError(e) ? e.message : safeErrorMessage(e)
       failed.push({
@@ -121,8 +172,61 @@ export async function runAdminOverrideUnstakeBatch(params: {
         error: message,
         status: isStakingUserError(e) ? e.status : undefined,
       })
+      // #region agent log
+      try {
+        const fs = await import('fs')
+        fs.appendFileSync(
+          '/opt/cursor/logs/debug.log',
+          JSON.stringify({
+            location: 'admin-unstake-override-select.ts:runBatch:failed',
+            message: 'position force-leave failed',
+            data: {
+              position_id: candidate.position_id,
+              asset: candidate.asset_identifier,
+              pool_id: candidate.pool_id,
+              error: message,
+              status: isStakingUserError(e) ? e.status : undefined,
+              isStakingUserError: isStakingUserError(e),
+            },
+            timestamp: Date.now(),
+            hypothesisId: 'A',
+          }) + '\n'
+        )
+      } catch {
+        /* debug log best-effort */
+      }
+      // #endregion
     }
   }
+
+  // #region agent log
+  try {
+    const fs = await import('fs')
+    fs.appendFileSync(
+      '/opt/cursor/logs/debug.log',
+      JSON.stringify({
+        location: 'admin-unstake-override-select.ts:runBatch:summary',
+        message: 'wallet force-leave batch done',
+        data: {
+          wallet: params.wallet,
+          closed: closed.length,
+          failed: failed.length,
+          remaining_eligible: Math.max(0, eligibleTotal - closed.length),
+          failedErrors: failed.map((f) => ({
+            position_id: f.position_id,
+            asset: f.asset_identifier,
+            error: f.error,
+            status: f.status,
+          })),
+        },
+        timestamp: Date.now(),
+        hypothesisId: 'A',
+      }) + '\n'
+    )
+  } catch {
+    /* debug log best-effort */
+  }
+  // #endregion
 
   return {
     wallet: params.wallet,
