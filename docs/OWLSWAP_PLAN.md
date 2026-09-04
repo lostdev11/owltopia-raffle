@@ -2,6 +2,10 @@
 
 Sibling to [OwlSend](./OWLSEND_DEV_ANNOUNCEMENT.md). Goal: peer-to-peer NFT trading that is **easier than FoxySwap**, plus a later **token swap** tab, with OwlSend-style clarity (fees, estimate → review → confirm, ledger, holder discounts, mobile-first).
 
+## Implementation status
+
+**Phase 1 admin-only scaffold shipped** — create-offer → share `/owl-swap/o/[code]` → accept, custodial escrow (`OWL_SWAP_ESCROW_SECRET_KEY`), 0.02 SOL taker fee + OwlSend holder discount ladder, classic SPL NFTs (max 5/side), optional SOL sweetener, nav/admin gates. Jupiter token swap and non-admin public launch are not included yet.
+
 **Decisions locked**
 
 | Decision | Choice |

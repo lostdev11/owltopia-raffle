@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import {
+  ArrowLeftRight,
   Bird,
   Gavel,
   Gift,
@@ -121,6 +122,12 @@ export const COMMUNITY_NAV_GROUP: SiteNavGroup = {
       icon: Send,
     },
     {
+      href: '/owl-swap',
+      label: 'OwlSwap',
+      description: 'P2P NFT swaps — 0.02 SOL fee',
+      icon: ArrowLeftRight,
+    },
+    {
       href: '/packs',
       label: 'Owl Packs',
       description: 'Rip packs — every open wins OWL, SOL, or NFT',
@@ -131,6 +138,8 @@ export const COMMUNITY_NAV_GROUP: SiteNavGroup = {
 
 const OWL_SEND_NAV_DESCRIPTION_PUBLIC = 'Send NFTs & tokens — 0.001 SOL fee'
 const OWL_SEND_NAV_DESCRIPTION_PREVIEW = 'Send NFTs & tokens — 0.001 SOL fee (admin preview)'
+const OWL_SWAP_NAV_DESCRIPTION_PUBLIC = 'P2P NFT swaps — 0.02 SOL fee'
+const OWL_SWAP_NAV_DESCRIPTION_PREVIEW = 'P2P NFT swaps — 0.02 SOL fee (admin preview)'
 const OWL_PACKS_NAV_DESCRIPTION_PUBLIC = 'Rip packs — every open wins OWL, SOL, or NFT'
 const OWL_PACKS_NAV_DESCRIPTION_PREVIEW =
   'Rip packs — every open wins OWL, SOL, or NFT (restricted launch)'
@@ -223,6 +232,12 @@ export const ADMIN_NAV_GROUP: SiteNavGroup = {
       icon: Send,
     },
     {
+      href: '/admin/owl-swap',
+      label: 'OwlSwap',
+      description: 'Admin test bench for P2P NFT swaps',
+      icon: ArrowLeftRight,
+    },
+    {
       href: '/admin/packs',
       label: 'Packs',
       description: 'Pack vault, inventory, and pause/unpause',
@@ -243,11 +258,14 @@ export function isPathInNavGroup(pathname: string, group: SiteNavGroup): boolean
   })
 }
 
-/** Hide OwlSend / Owl Packs from Community nav during admin-only preview; label by public gate. */
+/** Hide OwlSend / OwlSwap / Owl Packs from Community nav during admin-only preview; label by public gate. */
 export function filterCommunityNavItems(options: {
   showOwlSend: boolean
   /** When false (admin preview), keep the "(admin preview)" subtitle. */
   owlSendPublic?: boolean
+  showOwlSwap?: boolean
+  /** When false (admin preview), keep the "(admin preview)" subtitle. */
+  owlSwapPublic?: boolean
   showOwlPacks?: boolean
   /** When false (admin preview), keep the "(admin preview)" subtitle. */
   owlPacksPublic?: boolean
@@ -255,10 +273,15 @@ export function filterCommunityNavItems(options: {
   let items = options.showOwlSend
     ? COMMUNITY_NAV_GROUP.items
     : COMMUNITY_NAV_GROUP.items.filter((item) => item.href !== '/owl-send')
+  // Default hidden unless explicitly enabled (admin preview or public), same idea as Packs.
+  if (options.showOwlSwap !== true) {
+    items = items.filter((item) => item.href !== '/owl-swap')
+  }
   if (options.showOwlPacks === false) {
     items = items.filter((item) => item.href !== '/packs')
   }
   const owlSendPublic = options.owlSendPublic === true
+  const owlSwapPublic = options.owlSwapPublic === true
   const owlPacksPublic = options.owlPacksPublic === true
   return items.map((item) => {
     if (item.href === '/owl-send') {
@@ -267,6 +290,14 @@ export function filterCommunityNavItems(options: {
         description: owlSendPublic
           ? OWL_SEND_NAV_DESCRIPTION_PUBLIC
           : OWL_SEND_NAV_DESCRIPTION_PREVIEW,
+      }
+    }
+    if (item.href === '/owl-swap') {
+      return {
+        ...item,
+        description: owlSwapPublic
+          ? OWL_SWAP_NAV_DESCRIPTION_PUBLIC
+          : OWL_SWAP_NAV_DESCRIPTION_PREVIEW,
       }
     }
     if (item.href === '/packs') {
