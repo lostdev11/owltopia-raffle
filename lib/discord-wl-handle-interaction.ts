@@ -1,5 +1,5 @@
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
-import { assertDiscordPartnerCommandAccess } from '@/lib/discord-partner-command-access'
+import { assertDiscordPartnerCommandAccess, assertDiscordWlReadAccess } from '@/lib/discord-partner-command-access'
 import { generateDiscordMarketplaceLinkState } from '@/lib/discord-marketplace-link-state'
 import { getWalletAddressByDiscordUserId } from '@/lib/db/wallet-profiles'
 import {
@@ -163,6 +163,22 @@ async function requirePartner(interaction: DiscordInteraction): Promise<
   const guildId = interaction.guild_id?.trim()
   if (!guildId) return { ok: false, response: ephemeral('Use this command in a server, not DMs.') }
   const access = await assertDiscordPartnerCommandAccess(discordUserId(interaction), guildId)
+  if (!access.ok) return { ok: false, response: ephemeral(access.message) }
+  return { ok: true, wallet: access.wallet, isFounder: access.isFounder }
+}
+
+/** Read-only: Partner Pro / admin, or Manage Server in an entitled partner guild. */
+async function requireWlReadAccess(interaction: DiscordInteraction): Promise<
+  | { ok: true; wallet: string; isFounder: boolean }
+  | { ok: false; response: Record<string, unknown> }
+> {
+  const guildId = interaction.guild_id?.trim()
+  if (!guildId) return { ok: false, response: ephemeral('Use this command in a server, not DMs.') }
+  const access = await assertDiscordWlReadAccess(
+    discordUserId(interaction),
+    guildId,
+    interaction.member?.permissions
+  )
   if (!access.ok) return { ok: false, response: ephemeral(access.message) }
   return { ok: true, wallet: access.wallet, isFounder: access.isFounder }
 }
@@ -509,7 +525,7 @@ async function handleOpenClose(
 }
 
 async function handleStatus(interaction: DiscordInteraction, strOptions: Record<string, string>) {
-  const partner = await requirePartner(interaction)
+  const partner = await requireWlReadAccess(interaction)
   if (!partner.ok) return partner.response
   const campaign = await resolveCampaignFromCommand(interaction, strOptions)
   if (!campaign) return ephemeral('No whitelist spot in this server yet. Run `/owltopia-wl create`.')
@@ -529,7 +545,7 @@ async function handleStatus(interaction: DiscordInteraction, strOptions: Record<
 }
 
 async function handleList(interaction: DiscordInteraction) {
-  const partner = await requirePartner(interaction)
+  const partner = await requireWlReadAccess(interaction)
   if (!partner.ok) return partner.response
   const guildId = interaction.guild_id!.trim()
   const campaigns = await listDiscordWlCampaignsByGuild(guildId)
@@ -550,7 +566,7 @@ async function handleList(interaction: DiscordInteraction) {
 }
 
 async function handleExport(interaction: DiscordInteraction, strOptions: Record<string, string>) {
-  const partner = await requirePartner(interaction)
+  const partner = await requireWlReadAccess(interaction)
   if (!partner.ok) return partner.response
   const campaign = await resolveCampaignFromCommand(interaction, strOptions)
   if (!campaign) return ephemeral('No whitelist spot in this server yet.')
@@ -695,6 +711,7 @@ export async function handleDiscordQueryCommand(interaction: DiscordInteraction)
         '· `/query spots` — all spots in this server',
         '',
         'Same as `/owltopia-wl export`, `status`, and `list`.',
+        'Needs Partner Pro, Owl Vision admin, or **Manage Server** in this partner Discord.',
       ].join('\n')
     )
   }
