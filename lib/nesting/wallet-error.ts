@@ -63,20 +63,26 @@ export function isNestingBatchSizeError(err: unknown): boolean {
   )
 }
 
+export type NestingWalletErrorAction = 'nest' | 'thaw'
+
 /**
- * User-facing copy for nest open / wallet-lock failures (Backpack, Phantom, etc.).
+ * User-facing copy for nest open / wallet-lock / leftover-thaw failures (Backpack, Phantom, etc.).
  */
 export function formatNestingWalletError(
   err: unknown,
   walletName?: string | null,
-  assetSingular = 'NFT'
+  assetSingular = 'NFT',
+  action: NestingWalletErrorAction = 'nest'
 ): string {
   const msg = errorMessage(err)
-  if (!msg && !err) return 'Nest transaction failed'
+  if (!msg && !err) {
+    return action === 'thaw' ? 'Thaw transaction failed' : 'Nest transaction failed'
+  }
 
   const hay = errorHaystack(err)
   const isBackpack = (walletName ?? '').toLowerCase().includes('backpack')
   const asset = assetSingular.trim() || 'NFT'
+  const prepareNoun = action === 'thaw' ? 'thaw' : 'nest'
 
   if (isNestingWalletUserRejection(err)) {
     // Phantom/Solflare + Ledger often emits "Transaction cancelled" even after the user OK'd the device.
@@ -104,8 +110,8 @@ export function formatNestingWalletError(
 
   if (isSolanaRpcRateLimitError(err)) {
     return (
-      'Solana RPC is rate-limited, so your wallet could not load balances or prepare the nest transaction. ' +
-      'Try again in a minute, switch WiFi/mobile data, or ask support to confirm NEXT_PUBLIC_SOLANA_RPC_URL uses a private RPC (Helius, etc.).'
+      `Solana RPC is rate-limited, so your wallet could not load balances or prepare the ${prepareNoun} transaction. ` +
+      'Try again in a minute, switch WiFi/mobile data, or tap Thaw leftover nest locks again — we retry on the site\'s private RPC.'
     )
   }
 
@@ -117,8 +123,10 @@ export function formatNestingWalletError(
     hay.includes('access forbidden')
   ) {
     return (
-      'Could not reach Solana RPC to prepare the nest transaction. Check your connection and try again. ' +
-      'Backpack and other wallets rely on the site RPC for simulation and fees.'
+      `Could not reach Solana RPC to prepare the ${prepareNoun} transaction. ` +
+      (action === 'thaw'
+        ? 'Tap Thaw leftover nest locks again — Owltopia builds thaw txs on the server RPC so your browser does not have to. If it still fails, switch WiFi/mobile data.'
+        : 'Check your connection and try again. Backpack and other wallets rely on the site RPC for simulation and fees.')
     )
   }
 

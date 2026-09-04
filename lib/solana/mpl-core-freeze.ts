@@ -31,6 +31,7 @@ import {
   sendUmiBuilderViaWalletSignAndSend,
   type WalletSendTransactionFn,
 } from '@/lib/solana/send-umi-builder-via-wallet'
+import { withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
 
 type MplCoreFreezeWalletBase = {
   connection: Connection
@@ -371,7 +372,11 @@ export async function thawMplCoreOwnerFreezeInWallet({
   const endpoint = resolveMetaplexClientRpcUrl(connection)
   const umi = createNestLockUmi(endpoint, ownerWallet, wallet)
   const asset = publicKey(mint)
-  const assetAccount: any = await fetchAsset(umi as any, asset)
+  // Browser RPC is flaky (VPN / public endpoints) — retry before surfacing Failed to fetch.
+  const assetAccount: any = await withSolanaRpcRetry(
+    () => fetchAsset(umi as any, asset),
+    { retries: 4, baseDelayMs: 700 }
+  )
 
   if (assetOwnerAddress(assetAccount) !== ownerWallet.trim()) {
     throw new Error('This NFT is not in the connected wallet.')

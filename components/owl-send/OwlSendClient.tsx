@@ -615,13 +615,19 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
             mints,
           })
           thawedCount += core.thawedCount
-          const coreHardError = core.results.find((r) => r.error && !r.skipToGen2)
-          if (coreHardError?.error) {
-            if (!opts?.silent) setSessionError(coreHardError.error)
-            return { ok: false, thawedCount, error: coreHardError.error }
-          }
           for (const r of core.results) {
             if (r.skipToGen2) remainingForGen2.push(r.mint)
+          }
+          const coreHardErrors = core.results.filter((r) => r.error && !r.skipToGen2)
+          if (coreHardErrors.length > 0 && remainingForGen2.length < 1 && core.thawedCount < 1) {
+            const err = coreHardErrors[0]!.error!
+            if (!opts?.silent) setSessionError(err)
+            return { ok: false, thawedCount: 0, error: err }
+          }
+          if (coreHardErrors.length > 0 && !opts?.silent && core.thawedCount > 0) {
+            setSessionNotice(
+              `Thawed ${core.thawedCount} Core nest lock${core.thawedCount === 1 ? '' : 's'}. ${coreHardErrors.length} still need another try (RPC/wallet).`
+            )
           }
         } else {
           remainingForGen2.push(...mints)
