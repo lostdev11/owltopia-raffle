@@ -622,7 +622,7 @@ assert.equal(merged[0]!.name, 'Gen2 #1')
   assert.equal(part.frozen.length, 1)
   assert.equal(part.frozen[0]!.mint, 'nested')
   assert.match(owlSendSkippedFrozenNotice(1, 1), /Continuing with the rest/)
-  assert.match(owlSendSkippedFrozenNotice(2, 0), /unnest on Nesting first/)
+  assert.match(owlSendSkippedFrozenNotice(2, 0), /thaw locks \/ unnest on Nesting first/)
 }
 
 // Failure attribution: only frozen mints land in failedMints
