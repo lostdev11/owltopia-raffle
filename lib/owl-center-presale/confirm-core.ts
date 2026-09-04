@@ -1,5 +1,5 @@
 import type { ParsedTransactionWithMeta } from '@solana/web3.js'
-import { LAMPORTS_PER_SOL } from '@solana/web3.js'
+import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js'
 
 import {
   feePayerMatchesBuyer,
@@ -7,8 +7,8 @@ import {
 } from '@/lib/gen2-presale/verify-payment'
 import { SOL_USD_PRICE_TOLERANCE } from '@/lib/gen2-presale/sol-usd-bounds'
 import {
-  sumOwlCenterTreasuryTransferFromBuyer,
-  verifyOwlCenterTreasuryPayment,
+  sumOwlCenterPresaleSplitFromBuyer,
+  verifyOwlCenterPresaleSplitPayment,
 } from '@/lib/owl-center-presale/verify-payment'
 import { gen2PresaleExplorerTxUrl } from '@/lib/gen2-presale/explorer'
 import { bigintToRpcParam } from '@/lib/gen2-presale/rpc-bigint'
@@ -28,7 +28,6 @@ import {
 } from '@/lib/owl-center-presale/pricing'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
-import { Connection, PublicKey } from '@solana/web3.js'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 export { gen2PresaleExplorerTxUrl as owlCenterPresaleExplorerTxUrl }
@@ -71,38 +70,66 @@ function getVerifiedBreakdownForQuantity(
   qty: number
 ): OwlCenterPriceBreakdown | null {
   const breakdown = computeOwlCenterPurchaseLamports(cfg, qty)
-  const exactOk = verifyOwlCenterTreasuryPayment({
+  const partner = cfg.partnerWallet.toBase58()
+  const feeWallet = cfg.platformFeeWallet.toBase58()
+
+  const exactOk = verifyOwlCenterPresaleSplitPayment({
     parsed,
     buyerWallet: buyerNorm,
-    treasuryWallet: cfg.treasuryWallet.toBase58(),
-    expectLamports: breakdown.treasuryLamports,
+    partnerWallet: partner,
+    platformFeeWallet: feeWallet,
+    expectPartnerLamports: breakdown.partnerLamports,
+    expectPlatformFeeLamports: breakdown.platformFeeLamports,
   })
   if (exactOk) return breakdown
 
   // Allow create→confirm SOL/USD drift within the oracle band; never accept material underpayment.
   const buyer = normalizeSolanaWalletAddress(buyerNorm)
-  const treasury = normalizeSolanaWalletAddress(cfg.treasuryWallet.toBase58())
-  if (!buyer || !treasury || parsed.meta?.err) return null
-  const got = sumOwlCenterTreasuryTransferFromBuyer(parsed, buyer, treasury)
-  if (got <= 0n) return null
+  const partnerNorm = normalizeSolanaWalletAddress(partner)
+  const feeNorm = normalizeSolanaWalletAddress(feeWallet)
+  if (!buyer || !partnerNorm || !feeNorm || parsed.meta?.err) return null
+
+  const got = sumOwlCenterPresaleSplitFromBuyer(parsed, buyer, partnerNorm, feeNorm)
+  if (got.total <= 0n) return null
 
   const expected = breakdown.totalLamports
   const tol = SOL_USD_PRICE_TOLERANCE
   const minAccept = BigInt(Math.max(1, Math.ceil(Number(expected) * (1 - tol))))
   const maxAccept = BigInt(Math.floor(Number(expected) * (1 + tol)))
-  if (got < minAccept || got > maxAccept) return null
+  if (got.total < minAccept || got.total > maxAccept) return null
 
-  const unitSol = Number(got) / qty / LAMPORTS_PER_SOL
-  if (!Number.isFinite(unitSol) || unitSol <= 0) return null
-  const impliedSolUsd = cfg.priceUsdc / unitSol
+  // Prefer proportional split when destinations differ; if same wallet, all attributed to partner.
+  let partnerLamports = got.partner
+  let platformFeeLamports = got.platformFee
+  if (partnerNorm === feeNorm) {
+    const feeShare = breakdown.platformFeeLamports
+    const partnerShare = breakdown.partnerLamports
+    const expectedParts = feeShare + partnerShare
+    if (expectedParts > 0n) {
+      platformFeeLamports = (got.total * feeShare) / expectedParts
+      partnerLamports = got.total - platformFeeLamports
+    } else {
+      partnerLamports = got.total
+      platformFeeLamports = 0n
+    }
+  }
+
+  const unitPartnerSol = Number(partnerLamports) / qty / LAMPORTS_PER_SOL
+  if (!Number.isFinite(unitPartnerSol) || unitPartnerSol <= 0) return null
+  const impliedSolUsd = cfg.priceUsdc / unitPartnerSol
   if (!Number.isFinite(impliedSolUsd) || impliedSolUsd <= 0) return null
 
   return {
     unitPriceUsdc: cfg.priceUsdc,
+    platformFeeUsdcPerSpot: cfg.platformFeeUsdcPerSpot,
     solUsdPrice: impliedSolUsd,
-    unitLamports: got / BigInt(qty),
-    totalLamports: got,
-    treasuryLamports: got,
+    unitPartnerLamports: partnerLamports / BigInt(qty),
+    unitPlatformFeeLamports: platformFeeLamports / BigInt(qty),
+    unitLamports: got.total / BigInt(qty),
+    partnerLamports,
+    platformFeeLamports,
+    totalLamports: got.total,
+    treasuryLamports: partnerLamports,
   }
 }
 
@@ -128,6 +155,10 @@ export async function executeOwlCenterPresaleConfirm(params: {
       httpStatus: 400,
       message: `quantity must be an integer from 1 to ${quantityCap}`,
     }
+  }
+
+  if (params.tenant.approval_status && params.tenant.approval_status !== 'approved') {
+    return { ok: false, httpStatus: 403, code: 'not_approved', message: 'Presale is not available.' }
   }
 
   if (!params.tenant.is_enabled) {
@@ -194,7 +225,7 @@ export async function executeOwlCenterPresaleConfirm(params: {
       ok: false,
       httpStatus: 400,
       code: 'payment_mismatch',
-      message: 'Could not verify treasury payment in this transaction',
+      message: 'Could not verify partner + platform fee payment in this transaction',
     }
   }
 
@@ -210,6 +241,8 @@ export async function executeOwlCenterPresaleConfirm(params: {
     p_tx_signature: params.txSignature,
     p_presale_supply: cfg.presaleSupply,
     p_max_credits_per_wallet: cfg.maxCreditsPerWallet,
+    p_partner_lamports: bigintToRpcParam(breakdown.partnerLamports),
+    p_platform_fee_lamports: bigintToRpcParam(breakdown.platformFeeLamports),
   })
 
   if (rpcError) {

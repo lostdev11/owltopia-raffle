@@ -96,6 +96,7 @@ export function AdminRaffleActions({
   const [fixingMint, setFixingMint] = useState(false)
   const [sendingPrizeToWinner, setSendingPrizeToWinner] = useState(false)
   const [retryingVrf, setRetryingVrf] = useState(false)
+  const [vrfActionMessage, setVrfActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [forceDrawOpen, setForceDrawOpen] = useState(false)
   const [forceDrawing, setForceDrawing] = useState(false)
   const [forceDrawBypassMin, setForceDrawBypassMin] = useState(false)
@@ -286,6 +287,7 @@ export function AdminRaffleActions({
   const [nftFloorInput, setNftFloorInput] = useState('')
   const [nftTicketInput, setNftTicketInput] = useState('')
   const [nftMaxInput, setNftMaxInput] = useState('')
+  const [nftMaxPerWalletInput, setNftMaxPerWalletInput] = useState('')
   const [nftEconomicsConfirm, setNftEconomicsConfirm] = useState(false)
   const [savingNftEconomics, setSavingNftEconomics] = useState(false)
 
@@ -312,6 +314,9 @@ export function AdminRaffleActions({
       r.ticket_price != null && Number.isFinite(r.ticket_price) ? String(r.ticket_price) : ''
     )
     setNftMaxInput(r.max_tickets != null ? String(r.max_tickets) : '')
+    setNftMaxPerWalletInput(
+      r.max_tickets_per_wallet != null ? String(r.max_tickets_per_wallet) : ''
+    )
     setNftEconomicsConfirm(false)
   }, [])
 
@@ -556,6 +561,7 @@ export function AdminRaffleActions({
   const handleRetryVrfDraw = async () => {
     setRetryingVrf(true)
     setMessage(null)
+    setVrfActionMessage(null)
     try {
       const res = await fetch(`/api/admin/raffles/${raffle.id}/retry-vrf-draw`, {
         method: 'POST',
@@ -563,25 +569,26 @@ export function AdminRaffleActions({
       })
       const data = await res.json().catch(() => ({}))
       if (res.ok && data.ok) {
-        setMessage({
-          type: 'success',
-          text: `VRF draw completed. Winner: ${data.winnerWallet ?? 'selected'}`,
-        })
+        const successText = `VRF draw completed. Winner: ${data.winnerWallet ?? 'selected'}`
+        setMessage({ type: 'success', text: successText })
+        setVrfActionMessage({ type: 'success', text: successText })
         router.refresh()
       } else {
-        setMessage({
-          type: 'error',
-          text:
-            typeof data?.error === 'string'
-              ? data.error
-              : 'VRF retry did not complete — check draw status',
-        })
+        const errorText =
+          typeof data?.error === 'string'
+            ? data.error
+            : 'VRF retry did not complete — Switchboard gateway may still be down'
+        setMessage({ type: 'error', text: errorText })
+        setVrfActionMessage({ type: 'error', text: errorText })
+        router.refresh()
       }
     } catch (e) {
-      setMessage({
-        type: 'error',
-        text: e instanceof Error ? e.message : 'VRF retry failed',
-      })
+      const errorText =
+        e instanceof Error
+          ? e.message
+          : 'VRF retry failed — request may have timed out after ~2 minutes'
+      setMessage({ type: 'error', text: errorText })
+      setVrfActionMessage({ type: 'error', text: errorText })
     } finally {
       setRetryingVrf(false)
     }
@@ -844,10 +851,27 @@ export function AdminRaffleActions({
     if (nftMaxInput.trim() !== '') {
       const m = parseInt(nftMaxInput.trim(), 10)
       if (!Number.isFinite(m) || m <= 0) {
-        setMessage({ type: 'error', text: 'Max tickets must be a positive whole number or left empty.' })
+        setMessage({ type: 'error', text: 'Max tickets must be a positive whole number.' })
         return
       }
       payload.max_tickets = m
+    } else if (raffle.max_tickets == null) {
+      setMessage({
+        type: 'error',
+        text: 'Max tickets is required so buyers can see worst-case odds. Set a cap before saving economics.',
+      })
+      return
+    }
+    if (nftMaxPerWalletInput.trim() !== '') {
+      const m = parseInt(nftMaxPerWalletInput.trim(), 10)
+      if (!Number.isFinite(m) || m <= 0) {
+        setMessage({
+          type: 'error',
+          text: 'Max tickets per person must be a positive whole number or left empty.',
+        })
+        return
+      }
+      payload.max_tickets_per_wallet = m
     }
 
     setSavingNftEconomics(true)
@@ -1385,13 +1409,25 @@ export function AdminRaffleActions({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="admin-nft-max">Max tickets (optional)</Label>
+                  <Label htmlFor="admin-nft-max">Max tickets (required if unset)</Label>
                   <Input
                     id="admin-nft-max"
                     inputMode="numeric"
                     value={nftMaxInput}
                     onChange={(e) => setNftMaxInput(e.target.value)}
                     placeholder="Leave empty for unlimited"
+                    className="touch-manipulation min-h-[44px]"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="admin-nft-max-per-wallet">Max tickets per person (optional)</Label>
+                  <Input
+                    id="admin-nft-max-per-wallet"
+                    inputMode="numeric"
+                    value={nftMaxPerWalletInput}
+                    onChange={(e) => setNftMaxPerWalletInput(e.target.value)}
+                    placeholder="Leave empty for no per-person limit"
                     className="touch-manipulation min-h-[44px]"
                     autoComplete="off"
                   />
@@ -1895,17 +1931,48 @@ export function AdminRaffleActions({
                 {raffle.draw_vrf_error && (
                   <p className="text-xs font-mono text-destructive break-all">{raffle.draw_vrf_error}</p>
                 )}
-                <Button
-                  type="button"
-                  className="bg-sky-600 hover:bg-sky-700 touch-manipulation min-h-[44px]"
-                  onClick={() => {
-                    setForceDrawBypassMin(!canDrawNormally)
-                    setForceDrawOpen(true)
-                  }}
-                >
-                  <Dices className="h-4 w-4 mr-2 shrink-0" />
-                  Force draw winner
-                </Button>
+                {vrfActionMessage && (
+                  <p
+                    className={`text-xs break-all ${
+                      vrfActionMessage.type === 'success'
+                        ? 'text-emerald-700 dark:text-emerald-400'
+                        : 'text-destructive'
+                    }`}
+                  >
+                    {vrfActionMessage.text}
+                  </p>
+                )}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Button
+                    type="button"
+                    className="bg-sky-600 hover:bg-sky-700 touch-manipulation min-h-[44px]"
+                    onClick={() => {
+                      setForceDrawBypassMin(!canDrawNormally)
+                      setForceDrawOpen(true)
+                    }}
+                  >
+                    <Dices className="h-4 w-4 mr-2 shrink-0" />
+                    Force draw winner
+                  </Button>
+                  {canRetryVrfDraw && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-amber-500/40 touch-manipulation min-h-[44px]"
+                      disabled={retryingVrf}
+                      onClick={handleRetryVrfDraw}
+                    >
+                      <Dices className="h-4 w-4 mr-2 shrink-0" />
+                      {retryingVrf ? 'Retrying VRF…' : 'Retry VRF only'}
+                    </Button>
+                  )}
+                </div>
+                {canRetryVrfDraw && (
+                  <p className="text-xs text-muted-foreground">
+                    Retry VRF can take up to 2 minutes. It checks on-chain state first, then
+                    requests fresh Switchboard randomness if the gateway is still returning 503.
+                  </p>
+                )}
                 <Dialog open={forceDrawOpen} onOpenChange={setForceDrawOpen}>
                   <DialogContent className="max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
@@ -1985,6 +2052,17 @@ export function AdminRaffleActions({
                 {raffle.draw_vrf_error && (
                   <p className="text-xs font-mono text-destructive break-all">{raffle.draw_vrf_error}</p>
                 )}
+                {vrfActionMessage && (
+                  <p
+                    className={`text-xs break-all ${
+                      vrfActionMessage.type === 'success'
+                        ? 'text-emerald-700 dark:text-emerald-400'
+                        : 'text-destructive'
+                    }`}
+                  >
+                    {vrfActionMessage.text}
+                  </p>
+                )}
                 <Button
                   type="button"
                   className="bg-amber-600 hover:bg-amber-700 touch-manipulation min-h-[44px]"
@@ -1994,6 +2072,9 @@ export function AdminRaffleActions({
                   <Dices className="h-4 w-4 mr-2 shrink-0" />
                   {retryingVrf ? 'Retrying VRF…' : 'Retry VRF draw'}
                 </Button>
+                <p className="text-xs text-muted-foreground">
+                  Can take up to 2 minutes while Switchboard randomness is committed and revealed.
+                </p>
               </div>
             )}
             {canAdminSendPrizeFromEscrow && (

@@ -7,11 +7,13 @@ import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups
 import {
   formatGenOwlRevShareSol,
   formatGenOwlRevShareUsdc,
+  type GenOwlRevShareBucketPreview,
   type GenOwlRevSharePreview,
 } from '@/lib/nesting/gen-owl-rev-share'
 import {
   genOwlRevShareDistributionDetail,
   genOwlRevShareDistributionHeadline,
+  genOwlRevShareShortLabel,
 } from '@/lib/nesting/gen-owl-rev-share-copy'
 import { cn } from '@/lib/utils'
 
@@ -33,6 +35,63 @@ function hasRevShareAmounts(preview: GenOwlRevSharePreview): boolean {
   return (
     (preview.totals.total_sol != null && preview.totals.total_sol > 0) ||
     (preview.totals.total_usdc != null && preview.totals.total_usdc > 0)
+  )
+}
+
+function previewBuckets(preview: GenOwlRevSharePreview): GenOwlRevShareBucketPreview | undefined {
+  return preview.buckets ?? preview.gen1_buckets
+}
+
+function BucketBreakdown({
+  groupKey,
+  buckets,
+}: {
+  groupKey: GenOwlStakingGroupKey
+  buckets: GenOwlRevShareBucketPreview
+}) {
+  const label = genOwlRevShareShortLabel(groupKey)
+  const allCount = buckets.standard_count + buckets.one_of_one_count
+  return (
+    <div className="mt-1 space-y-1 text-foreground/90">
+      {(buckets.standard_count > 0 || buckets.one_of_one_count > 0) &&
+      (buckets.standard_per_nest_sol != null || buckets.standard_per_nest_usdc != null) ? (
+        <p>
+          ~{' '}
+          {buckets.standard_per_nest_sol != null ? (
+            <span className="font-semibold tabular-nums text-theme-prime">
+              {formatGenOwlRevShareSol(buckets.standard_per_nest_sol)} SOL
+            </span>
+          ) : null}
+          {buckets.standard_per_nest_sol != null && buckets.standard_per_nest_usdc != null ? ' · ' : null}
+          {buckets.standard_per_nest_usdc != null ? (
+            <span className="font-semibold tabular-nums text-theme-prime">
+              {formatGenOwlRevShareUsdc(buckets.standard_per_nest_usdc)} USDC
+            </span>
+          ) : null}{' '}
+          per staked {label} owl ({allCount} today · 90% pool)
+        </p>
+      ) : null}
+      {buckets.one_of_one_count > 0 &&
+      (buckets.one_of_one_per_nest_sol != null || buckets.one_of_one_per_nest_usdc != null) ? (
+        <p>
+          ~{' '}
+          {buckets.one_of_one_per_nest_sol != null ? (
+            <span className="font-semibold tabular-nums text-theme-prime">
+              {formatGenOwlRevShareSol(buckets.one_of_one_per_nest_sol)} SOL
+            </span>
+          ) : null}
+          {buckets.one_of_one_per_nest_sol != null && buckets.one_of_one_per_nest_usdc != null
+            ? ' · '
+            : null}
+          {buckets.one_of_one_per_nest_usdc != null ? (
+            <span className="font-semibold tabular-nums text-theme-prime">
+              {formatGenOwlRevShareUsdc(buckets.one_of_one_per_nest_usdc)} USDC
+            </span>
+          ) : null}{' '}
+          per staked {label} 1/1 ({buckets.one_of_one_count} today · 90% + 10% bonus)
+        </p>
+      ) : null}
+    </div>
   )
 }
 
@@ -64,9 +123,8 @@ export function GenOwlRevShareNotice({ groupKey, className, compact = false }: P
 
   if (!preview || !hasRevShareAmounts(preview)) return null
 
-  const perSol = preview.per_nest_sol
-  const perUsdc = preview.per_nest_usdc
   const count = preview.active_nest_count
+  const buckets = previewBuckets(preview)
 
   return (
     <div
@@ -104,70 +162,8 @@ export function GenOwlRevShareNotice({ groupKey, className, compact = false }: P
           </span>
         ) : null}
       </p>
-      {groupKey === 'gen2-owl' && count > 0 && (perSol != null || perUsdc != null) ? (
-        <p className="mt-1 text-foreground/90">
-          ~{' '}
-          {perSol != null ? (
-            <span className="font-semibold tabular-nums text-theme-prime">
-              {formatGenOwlRevShareSol(perSol)} SOL
-            </span>
-          ) : null}
-          {perSol != null && perUsdc != null ? ' · ' : null}
-          {perUsdc != null ? (
-            <span className="font-semibold tabular-nums text-theme-prime">
-              {formatGenOwlRevShareUsdc(perUsdc)} USDC
-            </span>
-          ) : null}{' '}
-          per nested Gen 2 owl ({count} active nest
-          {count === 1 ? '' : 's'} today)
-        </p>
-      ) : groupKey === 'gen1-owl' && preview.gen1_buckets && count > 0 ? (
-        <div className="mt-1 space-y-1 text-foreground/90">
-          {preview.gen1_buckets.standard_count > 0 &&
-          (preview.gen1_buckets.standard_per_nest_sol != null ||
-            preview.gen1_buckets.standard_per_nest_usdc != null) ? (
-            <p>
-              ~{' '}
-              {preview.gen1_buckets.standard_per_nest_sol != null ? (
-                <span className="font-semibold tabular-nums text-theme-prime">
-                  {formatGenOwlRevShareSol(preview.gen1_buckets.standard_per_nest_sol)} SOL
-                </span>
-              ) : null}
-              {preview.gen1_buckets.standard_per_nest_sol != null &&
-              preview.gen1_buckets.standard_per_nest_usdc != null
-                ? ' · '
-                : null}
-              {preview.gen1_buckets.standard_per_nest_usdc != null ? (
-                <span className="font-semibold tabular-nums text-theme-prime">
-                  {formatGenOwlRevShareUsdc(preview.gen1_buckets.standard_per_nest_usdc)} USDC
-                </span>
-              ) : null}{' '}
-              per staked Gen 1 owl ({preview.gen1_buckets.standard_count} today)
-            </p>
-          ) : null}
-          {preview.gen1_buckets.one_of_one_count > 0 &&
-          (preview.gen1_buckets.one_of_one_per_nest_sol != null ||
-            preview.gen1_buckets.one_of_one_per_nest_usdc != null) ? (
-            <p>
-              ~{' '}
-              {preview.gen1_buckets.one_of_one_per_nest_sol != null ? (
-                <span className="font-semibold tabular-nums text-theme-prime">
-                  {formatGenOwlRevShareSol(preview.gen1_buckets.one_of_one_per_nest_sol)} SOL
-                </span>
-              ) : null}
-              {preview.gen1_buckets.one_of_one_per_nest_sol != null &&
-              preview.gen1_buckets.one_of_one_per_nest_usdc != null
-                ? ' · '
-                : null}
-              {preview.gen1_buckets.one_of_one_per_nest_usdc != null ? (
-                <span className="font-semibold tabular-nums text-theme-prime">
-                  {formatGenOwlRevShareUsdc(preview.gen1_buckets.one_of_one_per_nest_usdc)} USDC
-                </span>
-              ) : null}{' '}
-              per staked Gen 1 1/1 ({preview.gen1_buckets.one_of_one_count} today)
-            </p>
-          ) : null}
-        </div>
+      {buckets && count > 0 ? (
+        <BucketBreakdown groupKey={groupKey} buckets={buckets} />
       ) : (
         <p className="mt-1 text-muted-foreground">
           {genOwlRevShareDistributionDetail(groupKey)}
@@ -195,7 +191,8 @@ export function GenOwlRevShareAdminPreview({
   className?: string
 }) {
   const hasTotals = hasRevShareAmounts(preview)
-  const isGen1 = preview.group === 'gen1-owl'
+  const buckets = previewBuckets(preview)
+  const label = genOwlRevShareShortLabel(preview.group)
   return (
     <div className={cn('rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs', className)}>
       <p className="font-medium text-foreground">{preview.label} rev share preview</p>
@@ -203,71 +200,51 @@ export function GenOwlRevShareAdminPreview({
         Active nests: <span className="font-semibold text-foreground">{preview.active_nest_count}</span>
       </p>
       {hasTotals ? (
-        isGen1 && preview.gen1_buckets ? (
+        buckets ? (
           <div className="mt-1 space-y-1 text-muted-foreground leading-relaxed">
             <p>
-              Staked Gen 1 owls ({preview.gen1_buckets.standard_count}):{' '}
-              {preview.gen1_buckets.standard_per_nest_sol != null ? (
+              All staked {label} ({buckets.standard_count + buckets.one_of_one_count}):{' '}
+              {buckets.standard_per_nest_sol != null ? (
                 <span className="font-semibold tabular-nums text-emerald-400">
-                  {formatGenOwlRevShareSol(preview.gen1_buckets.standard_per_nest_sol)} SOL
+                  {formatGenOwlRevShareSol(buckets.standard_per_nest_sol)} SOL
                 </span>
               ) : (
                 <span>— SOL</span>
               )}
               {' · '}
-              {preview.gen1_buckets.standard_per_nest_usdc != null ? (
+              {buckets.standard_per_nest_usdc != null ? (
                 <span className="font-semibold tabular-nums text-emerald-400">
-                  {formatGenOwlRevShareUsdc(preview.gen1_buckets.standard_per_nest_usdc)} USDC
+                  {formatGenOwlRevShareUsdc(buckets.standard_per_nest_usdc)} USDC
                 </span>
               ) : (
                 <span>— USDC</span>
               )}{' '}
-              each (90% pool)
+              each from 90% pool
             </p>
             <p>
-              Staked Gen 1 1/1s ({preview.gen1_buckets.one_of_one_count}):{' '}
-              {preview.gen1_buckets.one_of_one_per_nest_sol != null ? (
+              Staked {label} 1/1s ({buckets.one_of_one_count}):{' '}
+              {buckets.one_of_one_per_nest_sol != null ? (
                 <span className="font-semibold tabular-nums text-emerald-400">
-                  {formatGenOwlRevShareSol(preview.gen1_buckets.one_of_one_per_nest_sol)} SOL
+                  {formatGenOwlRevShareSol(buckets.one_of_one_per_nest_sol)} SOL
                 </span>
               ) : (
                 <span>— SOL</span>
               )}
               {' · '}
-              {preview.gen1_buckets.one_of_one_per_nest_usdc != null ? (
+              {buckets.one_of_one_per_nest_usdc != null ? (
                 <span className="font-semibold tabular-nums text-emerald-400">
-                  {formatGenOwlRevShareUsdc(preview.gen1_buckets.one_of_one_per_nest_usdc)} USDC
+                  {formatGenOwlRevShareUsdc(buckets.one_of_one_per_nest_usdc)} USDC
                 </span>
               ) : (
                 <span>— USDC</span>
               )}{' '}
-              each (10% pool)
+              each (90% share + 10% bonus)
             </p>
           </div>
-        ) : isGen1 ? (
-          <p className="mt-1 text-muted-foreground leading-relaxed">
-            90% pool split evenly across all staked Gen 1 owls · 10% split evenly across staked Gen 1 1/1s
-            {preview.active_nest_count <= 0 ? ' (no active nests yet)' : null}
-          </p>
         ) : (
-          <p className="mt-1 text-muted-foreground">
-            Even split →{' '}
-            {preview.per_nest_sol != null ? (
-              <span className="font-semibold tabular-nums text-emerald-400">
-                {formatGenOwlRevShareSol(preview.per_nest_sol)} SOL
-              </span>
-            ) : (
-              <span>— SOL</span>
-            )}
-            {' · '}
-            {preview.per_nest_usdc != null ? (
-              <span className="font-semibold tabular-nums text-emerald-400">
-                {formatGenOwlRevShareUsdc(preview.per_nest_usdc)} USDC
-              </span>
-            ) : (
-              <span>— USDC</span>
-            )}{' '}
-            per nest
+          <p className="mt-1 text-muted-foreground leading-relaxed">
+            90% pool split evenly across all staked {label} owls · 10% bonus across staked {label} 1/1s
+            (1/1s receive both)
             {preview.active_nest_count <= 0 ? ' (no active nests yet)' : null}
           </p>
         )

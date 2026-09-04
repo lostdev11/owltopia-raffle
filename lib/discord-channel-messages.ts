@@ -335,6 +335,163 @@ export type DiscordChannelEmbed = {
  * POST /channels/{channel.id}/messages with a single embed (REST bot token).
  * Used by free raffle-alert fan-out; does not go through the broadcast worker.
  */
+export async function postDiscordChannelMessagePayload(
+  channelId: string,
+  payload: Record<string, unknown>
+): Promise<DiscordChannelPostResult> {
+  const token = getDiscordBotToken()
+  if (!token) {
+    return { ok: false, code: 'not_configured', message: 'DISCORD_BOT_TOKEN is not set.' }
+  }
+
+  const cid = channelId.trim()
+  if (!cid) {
+    return { ok: false, code: 'api_error', message: 'Invalid channel id.' }
+  }
+
+  let lastError: DiscordChannelPostResult = {
+    ok: false,
+    code: 'api_error',
+    message: 'Could not reach Discord.',
+  }
+
+  for (let attempt = 1; attempt <= MAX_POST_ATTEMPTS; attempt++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+    try {
+      const res = await fetch(`${DISCORD_API}/channels/${cid}/messages`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bot ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          allowed_mentions: { parse: [] },
+          ...payload,
+        }),
+        signal: controller.signal,
+      })
+
+      const text = await res.text().catch(() => '')
+      if (res.ok) {
+        let messageId = ''
+        try {
+          const json = JSON.parse(text) as { id?: string }
+          messageId = json.id ?? ''
+        } catch {
+          messageId = ''
+        }
+        return { ok: true, messageId }
+      }
+
+      if (res.status === 403) {
+        return {
+          ok: false,
+          code: 'forbidden',
+          message:
+            'Bot cannot post in this channel. Check View Channel, Send Messages, and Embed Links.',
+        }
+      }
+
+      const retryable = res.status === 429 || res.status >= 500
+      let retryAfterMs = 0
+      if (res.status === 429) {
+        const header = res.headers.get('retry-after')
+        const parsed = header ? Number.parseFloat(header) : Number.NaN
+        if (Number.isFinite(parsed) && parsed > 0) {
+          retryAfterMs = Math.ceil(parsed * 1000)
+        }
+      }
+
+      console.error('[discord-channel-messages] payload post failed', res.status, text.slice(0, 400))
+      lastError = {
+        ok: false,
+        code: 'api_error',
+        message: `Discord API error (${res.status}).`,
+      }
+
+      if (!retryable || attempt === MAX_POST_ATTEMPTS) return lastError
+      await delay(Math.max(retryAfterMs, 600 * attempt))
+    } catch (err) {
+      console.error('[discord-channel-messages] payload post error', err)
+      lastError = { ok: false, code: 'api_error', message: 'Could not reach Discord.' }
+      if (attempt === MAX_POST_ATTEMPTS) return lastError
+      await delay(600 * attempt)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  return lastError
+}
+
+export async function editDiscordChannelMessage(
+  channelId: string,
+  messageId: string,
+  payload: Record<string, unknown>
+): Promise<DiscordChannelPostResult> {
+  const token = getDiscordBotToken()
+  if (!token) {
+    return { ok: false, code: 'not_configured', message: 'DISCORD_BOT_TOKEN is not set.' }
+  }
+  const cid = channelId.trim()
+  const mid = messageId.trim()
+  if (!cid || !mid) {
+    return { ok: false, code: 'api_error', message: 'Invalid channel or message id.' }
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    const res = await fetch(`${DISCORD_API}/channels/${cid}/messages/${mid}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bot ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+    const text = await res.text().catch(() => '')
+    if (res.ok) return { ok: true, messageId: mid }
+    if (res.status === 404) {
+      return { ok: false, code: 'api_error', message: 'Message not found.' }
+    }
+    if (res.status === 403) {
+      return {
+        ok: false,
+        code: 'forbidden',
+        message: 'Bot cannot edit this message. Check channel permissions.',
+      }
+    }
+    console.error('[discord-channel-messages] edit failed', res.status, text.slice(0, 400))
+    return { ok: false, code: 'api_error', message: `Discord API error (${res.status}).` }
+  } catch (err) {
+    console.error('[discord-channel-messages] edit error', err)
+    return { ok: false, code: 'api_error', message: 'Could not reach Discord.' }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function pinDiscordChannelMessage(channelId: string, messageId: string): Promise<boolean> {
+  const token = getDiscordBotToken()
+  const cid = channelId.trim()
+  const mid = messageId.trim()
+  if (!token || !cid || !mid) return false
+  try {
+    const res = await fetch(`${DISCORD_API}/channels/${cid}/pins/${mid}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bot ${token}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+    return res.ok || res.status === 204
+  } catch {
+    return false
+  }
+}
+
 export async function postDiscordChannelEmbed(
   channelId: string,
   embed: DiscordChannelEmbed,

@@ -16,6 +16,7 @@ import {
 } from '@/lib/nesting/token-stake-transfer'
 import { runGuardedOwlRewardClaim } from '@/lib/nesting/guarded-owl-reward-claim'
 import { thawWalletNftForPool } from '@/lib/nesting/nft-lock-service'
+import { getCoinArtUpgradeRewardMultiplierForAsset } from '@/lib/coin-upgrade/reward-boost'
 
 async function stakeOnChain(input: Parameters<StakingMutationAdapter['stakeIntoPool']>[0]) {
   if (input.pool.asset_type === 'token') {
@@ -60,12 +61,15 @@ async function stakeOnChain(input: Parameters<StakingMutationAdapter['stakeIntoP
       ? null
       : new Date(stakedAt.getTime() + input.pool.lock_period_days * 24 * 60 * 60 * 1000)
 
+  // Art-upgraded Owltopia coins earn boosted OWL (community vote: 1 -> 2 per day).
+  const artUpgradeMultiplier = await getCoinArtUpgradeRewardMultiplierForAsset(input.asset_identifier)
+
   const position = await insertStakingPosition({
     wallet_address: input.wallet,
     pool_id: input.pool.id,
     asset_identifier: input.asset_identifier,
     amount: input.amount,
-    reward_rate_snapshot: Number(input.pool.reward_rate),
+    reward_rate_snapshot: Number(input.pool.reward_rate) * artUpgradeMultiplier,
     reward_rate_unit_snapshot: input.pool.reward_rate_unit,
     reward_token_snapshot: input.pool.reward_token,
     staked_at: stakedAt.toISOString(),
@@ -118,14 +122,24 @@ export const solanaStakingAdapterStub: StakingMutationAdapter = {
       collectionMint: input.adminRecoveryUnstake === true ? null : pool.collection_key,
       adminRecoveryUnstake: input.adminRecoveryUnstake === true,
     })
+    const externalReference =
+      thawed.needsOwnerThaw && thawed.thawMint
+        ? `nft_needs_owner_thaw:${thawed.thawMint}`
+        : `nft_thaw_confirmed:${thawed.tokenAccount}`
     const position = await markPositionUnstaked(input.positionId, input.wallet, {
       unstake_signature: thawed.signature,
       sync_status: 'confirmed',
       last_synced_at: new Date().toISOString(),
       last_transaction_error: null,
-      external_reference: `nft_thaw_confirmed:${thawed.tokenAccount}`,
+      external_reference: externalReference,
     })
-    return { position }
+    const nest_delegate_revoke =
+      thawed.needsOwnerRevoke && thawed.revokeMint
+        ? { mint: thawed.revokeMint }
+        : null
+    const nest_owner_thaw =
+      thawed.needsOwnerThaw && thawed.thawMint ? { mint: thawed.thawMint } : null
+    return { position, nest_delegate_revoke, nest_owner_thaw }
   },
   async claimPositionRewards(input) {
     const row = await getStakingPositionForWallet(input.positionId, input.wallet)

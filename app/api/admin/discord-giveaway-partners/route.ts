@@ -53,10 +53,18 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}))
     const name = typeof body.name === 'string' ? body.name.trim() : ''
     const webhook_url = typeof body.webhook_url === 'string' ? body.webhook_url.trim() : ''
-    if (!name || !webhook_url) {
-      return NextResponse.json({ error: 'name and webhook_url are required' }, { status: 400 })
+    const discord_guild_id =
+      typeof body.discord_guild_id === 'string' ? body.discord_guild_id.trim() : ''
+    if (!name) {
+      return NextResponse.json({ error: 'name is required' }, { status: 400 })
     }
-    if (!isAllowedDiscordIncomingWebhookUrl(webhook_url)) {
+    if (!webhook_url && !discord_guild_id) {
+      return NextResponse.json(
+        { error: 'Provide webhook_url and/or discord_guild_id (guild alone is enough for bot / whitelist).' },
+        { status: 400 }
+      )
+    }
+    if (webhook_url && !isAllowedDiscordIncomingWebhookUrl(webhook_url)) {
       return NextResponse.json(
         { error: 'webhook_url must be a Discord incoming webhook (https://discord.com/api/webhooks/…)' },
         { status: 400 }
@@ -66,12 +74,14 @@ export async function POST(request: NextRequest) {
     const status =
       body.status === 'active' || body.status === 'trial' || body.status === 'suspended'
         ? body.status
-        : 'trial'
+        : discord_guild_id && !webhook_url
+          ? 'active'
+          : 'trial'
 
     const { tenant, apiSecret } = await createDiscordGiveawayPartner({
       name,
-      webhook_url,
-      discord_guild_id: typeof body.discord_guild_id === 'string' ? body.discord_guild_id.trim() : null,
+      webhook_url: webhook_url || null,
+      discord_guild_id: discord_guild_id || null,
       status,
       active_until: typeof body.active_until === 'string' ? body.active_until.trim() : null,
       contact_note: typeof body.contact_note === 'string' ? body.contact_note.trim() : null,

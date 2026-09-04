@@ -35,6 +35,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import {
+  raffleIsSoldOutAwaitingDraw,
+  raffleSoldOutButtonLabel,
+  raffleSoldOutDetailMessage,
+} from '@/lib/raffles/sold-out-copy'
+import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
 import type { Raffle, Entry, OwlVisionScore, PrizeStandard, RaffleOffer, RaffleCurrency, RaffleMilestone } from '@/lib/types'
 import { RaffleMilestonesPanel } from '@/components/RaffleMilestonesPanel'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
@@ -60,6 +66,7 @@ import {
   raffleUsesFundsEscrow,
   hasExhaustedMinThresholdTimeExtensions,
   raffleAllowsAdminFundsEscrowRefund,
+  raffleSecondRoundEnabled,
 } from '@/lib/raffles/ticket-escrow-policy'
 import {
   getThemeAccentBorderStyle,
@@ -98,7 +105,6 @@ import {
   ExternalLink,
   XCircle,
   Loader2,
-  Coins,
   CheckCircle,
   Ticket,
   RefreshCw,
@@ -173,6 +179,7 @@ import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getPartnerPrizeMintForCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { getEscrowPrizeClaimSuccessCopy } from '@/lib/raffles/claim-prize-success-copy'
 import { getRaffleDisplayTitle } from '@/lib/raffles/nft-prize-raffle-title'
+import { buildRafflesHostBrowseHref } from '@/lib/raffles/host-wallet-copy'
 import { ClaimSuccessOverlay } from '@/components/ClaimSuccessOverlay'
 import { extractTransactionSignature } from '@/lib/claims/extract-transaction-signature'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
@@ -315,8 +322,6 @@ export function RaffleDetailClient({
   const [claimPrizePhase, setClaimPrizePhase] = useState<'idle' | 'loading' | 'success'>('idle')
   const [claimPrizeTxSignature, setClaimPrizeTxSignature] = useState<string | null>(null)
   const [claimPrizeAlreadyClaimed, setClaimPrizeAlreadyClaimed] = useState(false)
-  const [claimProceedsLoading, setClaimProceedsLoading] = useState(false)
-  const [claimProceedsError, setClaimProceedsError] = useState<string | null>(null)
   const [claimRefundLoadingEntryId, setClaimRefundLoadingEntryId] = useState<string | null>(null)
   const [isClaimingAllRefunds, setIsClaimingAllRefunds] = useState(false)
   const [claimRefundError, setClaimRefundError] = useState<string | null>(null)
@@ -346,6 +351,7 @@ export function RaffleDetailClient({
   } | null>(null)
   const walletAddress = publicKey?.toBase58() ?? ''
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
+  const hostBrowseHref = buildRafflesHostBrowseHref(creatorWallet)
   const isCreator =
     connected &&
     !!walletAddress &&
@@ -542,10 +548,6 @@ export function RaffleDetailClient({
   const themeColor = isPendingDraft ? '#f59e0b' : (isFuture ? '#ef4444' : (!isActive ? '#3b82f6' : getThemeAccentColor(raffle.theme_accent)))
   const isEndingSoon =
     isActive && endTimeMs - nowMs <= 60 * 60 * 1000 && new Date(raffle.end_time) > serverTime
-  const statusPillLabel = isPendingDraft ? 'Pending' : (isFuture ? 'Upcoming' : isActive ? (isEndingSoon ? 'Ending soon' : 'Live now') : 'Ended')
-  const statusBadgeClass = isPendingDraft
-    ? 'bg-amber-500 hover:bg-amber-600 text-white'
-    : (isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'))
   const timeToEndLabel = isFuture
     ? `Starts ${formatDateTimeLocal(raffle.start_time)}`
     : isActive
@@ -589,6 +591,8 @@ export function RaffleDetailClient({
   // "Refund owed (legacy listing)" after platform payouts until a manual refresh.
   const shouldSyncRaffleEntries =
     isActive ||
+    raffle.status === 'ready_to_draw' ||
+    raffle.status === 'successful_pending_claims' ||
     raffle.status === 'failed_refund_available' ||
     raffle.status === 'pending_min_not_met' ||
     raffle.status === 'cancelled'
@@ -812,6 +816,64 @@ export function RaffleDetailClient({
     router,
   ])
 
+  // Ended / sold-out raffles awaiting draw: background job may take up to ~75s (VRF). Refresh until resolved.
+  const awaitingDrawResolution = useMemo(() => {
+    if (raffle.winner_wallet || raffle.winner_selected_at) return false
+    const status = (raffle.status ?? '').trim().toLowerCase()
+    if (status !== 'live' && status !== 'ready_to_draw' && status !== 'pending_min_not_met') {
+      return false
+    }
+    const vrfStatus = (raffle.draw_vrf_status ?? '').trim()
+    if (vrfStatus === 'pending' || vrfStatus === 'failed') return true
+    return (
+      raffleIsDueForWinnerDraw(raffle, serverTime) ||
+      status === 'ready_to_draw' ||
+      raffleIsSoldOutAwaitingDraw(
+        raffle,
+        raffle.max_tickets != null ? raffle.max_tickets - calculateTicketsSold(entries) : null
+      )
+    )
+  }, [
+    raffle,
+    serverTime,
+    entries,
+    raffle.winner_wallet,
+    raffle.winner_selected_at,
+    raffle.status,
+    raffle.draw_vrf_status,
+    raffle.end_time,
+    raffle.max_tickets,
+  ])
+
+  useEffect(() => {
+    if (!awaitingDrawResolution) return
+
+    let cancelled = false
+    const trigger = async () => {
+      try {
+        await fetch(`/api/raffles/${encodeURIComponent(raffle.id)}/process-ended`, {
+          method: 'POST',
+          credentials: 'same-origin',
+        })
+        if (!cancelled) router.refresh()
+      } catch {
+        /* polling below will retry */
+      }
+    }
+    void trigger()
+
+    let ticks = 0
+    const iv = setInterval(() => {
+      ticks++
+      router.refresh()
+      if (ticks >= 90) clearInterval(iv)
+    }, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(iv)
+    }
+  }, [awaitingDrawResolution, router, raffle.id])
+
   // Real-time updates are now handled by useRealtimeEntries hook
   // No need for separate polling logic - it's built into the hook
 
@@ -826,6 +888,29 @@ export function RaffleDetailClient({
   const availableTickets = raffle.max_tickets 
     ? raffle.max_tickets - totalTicketsSold 
     : null
+  const soldOutLabel = raffleSoldOutButtonLabel(raffle, availableTickets)
+  const soldOutDetailMessage = raffleSoldOutDetailMessage(raffle, availableTickets)
+  const isSoldOutAwaitingDraw = raffleIsSoldOutAwaitingDraw(raffle, availableTickets)
+  const statusPillLabel = isPendingDraft
+    ? 'Pending'
+    : isSoldOutAwaitingDraw
+      ? 'Draw pending'
+      : isFuture
+        ? 'Upcoming'
+        : isActive
+          ? isEndingSoon
+            ? 'Ending soon'
+            : 'Live now'
+          : 'Ended'
+  const statusBadgeClass = isPendingDraft
+    ? 'bg-amber-500 hover:bg-amber-600 text-white'
+    : isSoldOutAwaitingDraw
+      ? 'bg-amber-500 hover:bg-amber-600 text-white'
+      : isFuture
+        ? 'bg-red-500 hover:bg-red-600 text-white'
+        : isActive
+          ? 'bg-green-500 hover:bg-green-600 text-white'
+          : 'bg-blue-500 hover:bg-blue-600 text-white'
 
   // Calculate user's tickets (from confirmed entries only)
   const userTickets = connected && publicKey
@@ -833,6 +918,11 @@ export function RaffleDetailClient({
         .filter(e => e.status === 'confirmed' && e.wallet_address === publicKey.toBase58())
         .reduce((sum, entry) => sum + Number(entry.ticket_quantity ?? 0), 0)
     : 0
+
+  const walletTicketsRemaining =
+    raffle.max_tickets_per_wallet != null
+      ? Math.max(0, Number(raffle.max_tickets_per_wallet) - userTickets)
+      : null
 
   // Pending entries for this wallet that have a tx signature (confirming on-chain)
   const userPendingTickets = connected && publicKey
@@ -1001,6 +1091,8 @@ export function RaffleDetailClient({
     return Array.from(map.entries()).map(([currency, total]) => ({ currency, total }))
   }, [buyerLegacyRefundEntries, raffle.currency])
 
+  const secondRoundEnabled = raffleSecondRoundEnabled(raffle)
+
   /** Ended, no winner, min threshold not met after max extension — matches server finalize rules. */
   const minThresholdRefundRules = useMemo(() => {
     const timeEnded = !isFuture && !isPendingDraft && !isActive
@@ -1025,11 +1117,22 @@ export function RaffleDetailClient({
   const showRefundTerminalButton =
     minThresholdRefundRules && statusAllowsTerminalFinalize && raffleHasUnrefundedConfirmedSales
 
-  /** Per-transaction clamp: raffle cap minus sold, or DB max when raffle has no max_tickets */
-  const maxPurchaseQuantity =
-    availableTickets !== null ? Math.max(0, availableTickets) : MAX_TICKET_QUANTITY_PER_ENTRY
+  /** Per-transaction clamp: raffle cap, per-wallet cap, and DB INT max */
+  const maxPurchaseQuantity = Math.min(
+    availableTickets !== null ? Math.max(0, availableTickets) : MAX_TICKET_QUANTITY_PER_ENTRY,
+    walletTicketsRemaining !== null ? walletTicketsRemaining : MAX_TICKET_QUANTITY_PER_ENTRY,
+    MAX_TICKET_QUANTITY_PER_ENTRY
+  )
 
-  const quantityInputMax = availableTickets !== null ? maxPurchaseQuantity : undefined
+  const quantityInputMax =
+    availableTickets !== null || walletTicketsRemaining !== null
+      ? maxPurchaseQuantity
+      : undefined
+
+  const atWalletTicketLimit =
+    walletTicketsRemaining !== null && walletTicketsRemaining <= 0
+  const ticketsUnavailableToBuy =
+    (availableTickets !== null && availableTickets <= 0) || atWalletTicketLimit
 
   const handlePurchase = async () => {
     if (!connected || !publicKey) {
@@ -1044,6 +1147,17 @@ export function RaffleDetailClient({
 
     if (ticketPaymentCurrency === 'OWL' && !isOwlEnabled()) {
       setError('OWL entry is not enabled yet — mint address pending.')
+      return
+    }
+
+    if (
+      raffle.max_tickets_per_wallet != null &&
+      walletTicketsRemaining !== null &&
+      walletTicketsRemaining <= 0
+    ) {
+      setError(
+        `This raffle limits each wallet to ${raffle.max_tickets_per_wallet} ticket${raffle.max_tickets_per_wallet === 1 ? '' : 's'}. You already hold the maximum.`
+      )
       return
     }
 
@@ -1165,6 +1279,14 @@ export function RaffleDetailClient({
 
   const handleAddToCart = () => {
     setCartAddedHint(false)
+    if (ticketsUnavailableToBuy) {
+      setError(
+        atWalletTicketLimit
+          ? `This raffle limits each wallet to ${raffle.max_tickets_per_wallet} ticket${raffle.max_tickets_per_wallet === 1 ? '' : 's'}.`
+          : 'No tickets available.'
+      )
+      return
+    }
     const res = addCartItem(raffle, ticketQuantity)
     if (!res.ok) {
       setError(res.error)
@@ -2450,40 +2572,6 @@ export function RaffleDetailClient({
     sendCancellationFeeAndGetSignature,
   ])
 
-  const handleClaimProceeds = useCallback(async () => {
-    setClaimProceedsError(null)
-    setActionClaimSuccess(null)
-    setClaimProceedsLoading(true)
-    try {
-      const res = await fetch(`/api/raffles/${raffle.id}/claim-proceeds`, {
-        method: 'POST',
-        credentials: 'include',
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        setClaimProceedsError(
-          typeof (data as { error?: string }).error === 'string'
-            ? (data as { error: string }).error
-            : 'Could not claim proceeds. Sign in on My Dashboard if you are not signed in yet.'
-        )
-        return
-      }
-      const alreadyClaimed = (data as { alreadyClaimed?: boolean }).alreadyClaimed === true
-      presentActionClaimSuccess({
-        tx: extractTransactionSignature(data),
-        heading: alreadyClaimed ? 'Proceeds already claimed' : 'Proceeds claimed!',
-        message: alreadyClaimed
-          ? 'Creator proceeds were already sent to your wallet.'
-          : 'Net ticket proceeds were sent to your wallet.',
-      })
-      router.refresh()
-    } catch (e) {
-      setClaimProceedsError(e instanceof Error ? e.message : 'Request failed')
-    } finally {
-      setClaimProceedsLoading(false)
-    }
-  }, [presentActionClaimSuccess, raffle.id, router])
-
   const handleCreatorClaimPrizeBackFromEscrow = useCallback(async () => {
     setError(null)
     setActionClaimSuccess(null)
@@ -2924,21 +3012,22 @@ export function RaffleDetailClient({
             raffleUsesFundsEscrow(raffle) &&
             !raffle.creator_claimed_at &&
             !!raffle.settled_at?.trim() && (
-              <Button
-                variant="default"
-                size="default"
-                onClick={handleClaimProceeds}
-                disabled={claimProceedsLoading}
-                className="touch-manipulation min-h-[44px] text-sm sm:text-base"
-                title="Claim your net ticket proceeds from funds escrow (platform fee goes to treasury in the same transaction)."
+              <div
+                className="w-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-3 sm:px-4 sm:py-3.5 space-y-1"
+                role="status"
               >
-                {claimProceedsLoading ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Coins className="mr-2 h-4 w-4" />
-                )}
-                Claim proceeds
-              </Button>
+                <p className="text-sm font-medium text-foreground">Ticket proceeds ready</p>
+                <p className="text-sm text-muted-foreground">
+                  Claim your net funds from{' '}
+                  <Link
+                    href="/dashboard?tab=hosting"
+                    className="text-primary font-medium underline underline-offset-2 hover:no-underline"
+                  >
+                    My Dashboard → Hosting
+                  </Link>
+                  .
+                </p>
+              </div>
             )}
         </div>
         {referralEnabled ? (
@@ -3019,11 +3108,6 @@ export function RaffleDetailClient({
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        {claimProceedsError && (
-          <p className="text-sm text-destructive mb-2" role="alert">
-            {claimProceedsError}
-          </p>
-        )}
         {canViewOfferPanel && (
           <Card className="border-primary/25">
             <CardHeader className="pb-2">
@@ -3769,7 +3853,7 @@ export function RaffleDetailClient({
                             <>
                               {raffle.ticket_price.toFixed(4).replace(/\.?0+$/, '')} {raffle.currency}
                               <CurrencyIcon
-                                currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                                currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                                 size={14}
                                 className="inline-block"
                               />
@@ -4016,7 +4100,7 @@ export function RaffleDetailClient({
                       <>
                         {raffle.ticket_price.toFixed(6).replace(/\.?0+$/, '')} {raffle.currency}
                         <CurrencyIcon
-                          currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                          currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                           size={imageSize === 'small' ? 16 : 20}
                           className="inline-block"
                         />
@@ -4046,6 +4130,16 @@ export function RaffleDetailClient({
                   </p>
                 </div>
               )}
+              {raffle.max_tickets_per_wallet != null && (
+                <div>
+                  <p className={classes.labelText + ' text-muted-foreground'}>Max per person</p>
+                  <p className={classes.contentText + ' font-bold'}>
+                    {connected
+                      ? `${userTickets} / ${raffle.max_tickets_per_wallet}`
+                      : raffle.max_tickets_per_wallet}
+                  </p>
+                </div>
+              )}
               <div>
                 <p className={classes.labelText + ' text-muted-foreground'}>Status</p>
                 <div className="mt-3 sm:mt-2 space-y-1">
@@ -4070,6 +4164,15 @@ export function RaffleDetailClient({
                         title={`Minimum ${minTickets} tickets required to draw winner`}
                       >
                         Draw Threshold: {minTickets}
+                      </Badge>
+                    )}
+                    {!secondRoundEnabled && isActive && minTickets != null && minTickets > 0 && (
+                      <Badge
+                        variant="outline"
+                        className="bg-sky-500/20 border-sky-500 text-sky-400 hover:bg-sky-500/30"
+                        title="This raffle does not get an automatic second selling round if the draw goal is missed at the end time."
+                      >
+                        No second round
                       </Badge>
                     )}
                     <RaffleDeadlineExtensionBadge count={raffle.time_extension_count} />
@@ -4106,17 +4209,41 @@ export function RaffleDetailClient({
               </div>
               <div>
                 <p className={classes.labelText + ' text-muted-foreground'}>Created By</p>
-                {creatorDisplayName ? (
-                  <p className={classes.contentText + ' font-semibold'}>{creatorDisplayName}</p>
-                ) : null}
-                <p
-                  className={
-                    (creatorDisplayName ? 'text-sm ' : classes.contentText + ' font-semibold ') +
-                    'font-mono break-all text-foreground/90'
-                  }
-                >
-                  {creatorWallet || 'Unknown'}
-                </p>
+                {creatorDisplayName && hostBrowseHref ? (
+                  <>
+                    <p className={classes.contentText + ' font-semibold'}>
+                      <Link
+                        href={hostBrowseHref}
+                        className="text-primary font-semibold hover:underline underline-offset-2 touch-manipulation"
+                        title="View all raffles by this host"
+                      >
+                        {creatorDisplayName}
+                      </Link>
+                    </p>
+                    <p className="text-sm font-mono break-all text-foreground/90">{creatorWallet}</p>
+                  </>
+                ) : creatorDisplayName ? (
+                  <>
+                    <p className={classes.contentText + ' font-semibold'}>{creatorDisplayName}</p>
+                    <p className="text-sm font-mono break-all text-foreground/90">
+                      {creatorWallet || 'Unknown'}
+                    </p>
+                  </>
+                ) : hostBrowseHref ? (
+                  <p className={classes.contentText + ' font-semibold font-mono break-all'}>
+                    <Link
+                      href={hostBrowseHref}
+                      className="text-primary font-semibold hover:underline underline-offset-2 touch-manipulation font-mono break-all"
+                      title="View all raffles by this host"
+                    >
+                      {creatorWallet}
+                    </Link>
+                  </p>
+                ) : (
+                  <p className={classes.contentText + ' font-semibold font-mono break-all text-foreground/90'}>
+                    Unknown
+                  </p>
+                )}
               </div>
             </div>
 
@@ -4293,9 +4420,10 @@ export function RaffleDetailClient({
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-foreground">Enable ticket refunds</p>
                         <p className="text-sm text-muted-foreground mt-1">
-                          The draw minimum was not met after the extended deadline, but this listing has not switched to
-                          refund mode yet. Tap below to update it—then use Claim refund for each of your entries (connect
-                          the wallet you bought with).
+                          The draw minimum was not met
+                          {secondRoundEnabled ? ' after the extended deadline' : ' when Round 1 ended'}, but this
+                          listing has not switched to refund mode yet. Tap below to update it—then use Claim refund for
+                          each of your entries (connect the wallet you bought with).
                         </p>
                       </div>
                     </div>
@@ -4331,8 +4459,9 @@ export function RaffleDetailClient({
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-foreground">Claim your ticket refund</p>
                         <p className="text-sm text-muted-foreground mt-1">
-                          The minimum was not met after the extension. Claim each confirmed payment back from funds escrow.
-                          On mobile, use Wi‑Fi or stable data if the request fails.
+                          The minimum was not met
+                          {secondRoundEnabled ? ' after the extension' : ' when Round 1 ended'}. Claim each confirmed
+                          payment back from funds escrow. On mobile, use Wi‑Fi or stable data if the request fails.
                         </p>
                       </div>
                     </div>
@@ -4492,6 +4621,7 @@ export function RaffleDetailClient({
                     !dualSolBamboo &&
                     !purchasesBlocked &&
                     (availableTickets === null || availableTickets > 0) &&
+                    !atWalletTicketLimit &&
                     userTickets === 0
                   }
                 />
@@ -4501,7 +4631,7 @@ export function RaffleDetailClient({
                     purchasesBlocked ||
                     isCreator ||
                     isProcessing ||
-                    (availableTickets !== null && availableTickets <= 0)
+                    ticketsUnavailableToBuy
                   }
                   size={classes.buttonSize as any}
                   style={
@@ -4517,7 +4647,9 @@ export function RaffleDetailClient({
                     : isCreator
                     ? 'Your Raffle'
                     : availableTickets !== null && availableTickets <= 0
-                    ? 'Sold Out'
+                    ? soldOutLabel
+                    : atWalletTicketLimit
+                    ? 'Wallet Limit Reached'
                     : isProcessing
                     ? 'Processing...'
                     : 'Enter Raffle'}
@@ -4880,9 +5012,25 @@ export function RaffleDetailClient({
                       : `${raffle.max_tickets} / ${raffle.max_tickets}`}
                   </span>
                 </div>
-                {availableTickets !== null && availableTickets <= 0 && (
+                {availableTickets !== null && availableTickets <= 0 && soldOutDetailMessage && (
                   <p className="text-xs text-destructive mt-1">
-                    All tickets have been sold
+                    {soldOutDetailMessage}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {raffle.max_tickets_per_wallet != null && (
+              <div className="p-3 rounded-lg bg-muted border">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Your wallet limit</span>
+                  <span className="font-semibold">
+                    {userTickets} / {raffle.max_tickets_per_wallet}
+                  </span>
+                </div>
+                {atWalletTicketLimit && (
+                  <p className="text-xs text-destructive mt-1">
+                    You already hold the maximum tickets allowed per wallet for this raffle.
                   </p>
                 )}
               </div>
@@ -4898,12 +5046,18 @@ export function RaffleDetailClient({
                   value={ticketQuantityDisplay}
                   onChange={(e) => handleQuantityChange(e.target.value)}
                   onBlur={handleQuantityBlur}
-                  disabled={availableTickets !== null && availableTickets <= 0}
+                  disabled={ticketsUnavailableToBuy}
                   className="text-base sm:text-sm h-11 sm:h-10"
                 />
               {raffle.max_tickets && availableTickets !== null && availableTickets > 0 && (
                 <p className="text-xs text-muted-foreground">
                   Maximum {availableTickets} ticket{availableTickets !== 1 ? 's' : ''} available
+                </p>
+              )}
+              {walletTicketsRemaining !== null && walletTicketsRemaining > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  You can buy up to {walletTicketsRemaining} more ticket
+                  {walletTicketsRemaining !== 1 ? 's' : ''} on this wallet
                 </p>
               )}
             </div>
@@ -4923,7 +5077,7 @@ export function RaffleDetailClient({
                           : 'border-input bg-background text-muted-foreground hover:bg-muted/60'
                       }`}
                     >
-                      {c === 'BAMBOO' ? 'Bamboo (BAMBOO)' : c}
+                      {c === 'BAMBOO' ? 'Bamboo (BAMBOO)' : c === 'GOATS' ? 'GOATS OF SOLANA (GOATS)' : c}
                     </button>
                   ))}
                 </div>
@@ -4942,7 +5096,8 @@ export function RaffleDetailClient({
                 !dualSolBamboo &&
                 ticketQuantity === 1 &&
                 userTickets === 0 &&
-                (availableTickets === null || availableTickets > 0)
+                (availableTickets === null || availableTickets > 0) &&
+                !atWalletTicketLimit
               }
             />
 
@@ -4951,7 +5106,7 @@ export function RaffleDetailClient({
               <div className="text-xl font-bold flex items-center gap-2">
                 {purchaseAmount.toFixed(6)} {ticketPaymentCurrency}
                 <CurrencyIcon
-                  currency={ticketPaymentCurrency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                  currency={ticketPaymentCurrency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                   size={20}
                   className="inline-block"
                 />
@@ -4999,7 +5154,7 @@ export function RaffleDetailClient({
               variant="secondary"
               onClick={handleAddToCart}
               disabled={
-                (availableTickets !== null && availableTickets <= 0) ||
+                ticketsUnavailableToBuy ||
                 !connected ||
                 isCreator ||
                 isProcessing
@@ -5012,7 +5167,7 @@ export function RaffleDetailClient({
             <Button
               onClick={handlePurchase}
               disabled={
-                (availableTickets !== null && availableTickets <= 0) ||
+                ticketsUnavailableToBuy ||
                 !connected ||
                 isCreator ||
                 isProcessing
@@ -5028,7 +5183,9 @@ export function RaffleDetailClient({
                 : isProcessing
                 ? 'Processing...'
                 : availableTickets !== null && availableTickets <= 0
-                ? 'Sold Out'
+                ? soldOutLabel
+                : atWalletTicketLimit
+                ? 'Wallet Limit Reached'
                 : 'Buy Tickets'}
             </Button>
           </DialogFooter>

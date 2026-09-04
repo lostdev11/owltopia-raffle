@@ -7,14 +7,18 @@ import { Connection } from '@solana/web3.js'
 import bs58 from 'bs58'
 import {
   generateSigner,
+  isSome,
   publicKey,
   signAllTransactions,
+  some,
   transactionBuilder,
+  type Option,
   type Transaction,
   type TransactionBuilder,
 } from '@metaplex-foundation/umi'
 import { toWeb3JsTransaction } from '@metaplex-foundation/umi-web3js-adapters'
 import { setComputeUnitLimit, setComputeUnitPrice } from '@metaplex-foundation/mpl-toolbox'
+import type { DefaultGuardSet, DefaultGuardSetMintArgs } from '@metaplex-foundation/mpl-core-candy-machine'
 
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import { OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS } from '@/lib/owl-center/platform-mint-fee'
@@ -29,7 +33,7 @@ import {
   withMintSessionBudget,
   type MintSessionDeadline,
 } from '@/lib/owl-center/mint-time-budget'
-import { fetchCandyMachine, mintV1 } from '@/lib/solana/core-candy-machine'
+import { fetchCandyMachine, mintV1, safeFetchCandyGuard } from '@/lib/solana/core-candy-machine'
 import {
   getLaunchCandyMachineId,
   getLaunchCollectionMint,
@@ -52,7 +56,36 @@ import { invalidLaunchMintIdReason, validateSolanaPubkeyInput } from '@/lib/sola
 import { walletAdapterIsPhantom } from '@/lib/solana/phantom-sign-and-send-transaction'
 import { assertTransactionSimulatesClean } from '@/lib/solana/phantom-presimulate'
 
+/** mintV1 with Candy Guard comfortably fits in 800k CU (same ceiling as Gen2 mintV2). */
 const MINT_COMPUTE_UNIT_LIMIT = 800_000
+
+function mergeCoreGuardSets(defaults: DefaultGuardSet, group: DefaultGuardSet | null): DefaultGuardSet {
+  if (!group) return defaults
+  const merged: Record<string, Option<unknown>> = { ...(defaults as unknown as Record<string, Option<unknown>>) }
+  for (const [key, value] of Object.entries(group as unknown as Record<string, Option<unknown>>)) {
+    if (isSome(value)) merged[key] = value
+  }
+  return merged as unknown as DefaultGuardSet
+}
+
+function coreGuardMintArgs(guards: DefaultGuardSet): {
+  mintArgs: Partial<DefaultGuardSetMintArgs> | undefined
+  mintPriceLamports: bigint
+} {
+  const mintArgs: Partial<DefaultGuardSetMintArgs> = {}
+  let mintPriceLamports = 0n
+  if (isSome(guards.solPayment)) {
+    mintArgs.solPayment = some({ destination: guards.solPayment.value.destination })
+    mintPriceLamports += BigInt(guards.solPayment.value.lamports.basisPoints)
+  }
+  if (isSome(guards.mintLimit)) {
+    mintArgs.mintLimit = some({ id: guards.mintLimit.value.id })
+  }
+  return {
+    mintArgs: Object.keys(mintArgs).length > 0 ? mintArgs : undefined,
+    mintPriceLamports,
+  }
+}
 
 function mintPriorityFeeMicroLamports(): number {
   const raw = process.env.NEXT_PUBLIC_GEN2_MINT_PRIORITY_FEE_MICROLAMPORTS?.trim()
@@ -82,6 +115,8 @@ export type MintCoreCmParams = {
   prefetchedWalletBalanceLamports?: bigint
   sessionDeadline?: MintSessionDeadline
   onMintProgress?: (current: number, total: number) => void
+  /** Candy Guard group label (`wl` / `pub` / …). Null mints against default guards. */
+  guardGroup?: string | null
 }
 
 export type MintCoreCmResult =
@@ -166,6 +201,30 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
       }
     }
 
+    const candyGuardAccount = await withSolanaRpcRetry(
+      () => safeFetchCandyGuard(umi, cmAccount.mintAuthority),
+      MINT_SOLANA_RPC_RETRY
+    )
+    let groupLabel: string | null = params.guardGroup?.trim() || null
+    let mergedGuards = candyGuardAccount?.guards ?? null
+    if (candyGuardAccount && candyGuardAccount.groups.length > 0) {
+      const wanted = groupLabel || 'pub'
+      const group = candyGuardAccount.groups.find((g) => g.label === wanted)
+      if (!group) {
+        return {
+          ok: false,
+          error: `Mint group "${wanted}" is not on this Candy Guard (available: ${candyGuardAccount.groups.map((g) => g.label).join(', ')}).`,
+        }
+      }
+      groupLabel = group.label
+      mergedGuards = mergeCoreGuardSets(candyGuardAccount.guards, group.guards)
+    } else {
+      groupLabel = null
+    }
+    const { mintArgs, mintPriceLamports } = mergedGuards
+      ? coreGuardMintArgs(mergedGuards)
+      : { mintArgs: undefined, mintPriceLamports: 0n }
+
     let platformFeeLamports = 0n
     if (collectPlatformMintFee) {
       if (!feeQuote.ok) return { ok: false, error: feeQuote.error }
@@ -183,7 +242,7 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
             rpcUrl,
             quantity,
             prefetchedWalletBalanceLamports,
-            0n
+            mintPriceLamports
           ),
         MINT_SOLANA_RPC_RETRY
       )
@@ -216,6 +275,8 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
           candyMachine,
           asset,
           collection,
+          ...(mintArgs ? { mintArgs } : {}),
+          ...(groupLabel ? { group: groupLabel } : {}),
         })
       )
       return { ok: true, builder }

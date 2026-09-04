@@ -1,28 +1,16 @@
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
+import { PARTNER_PRO_SETUP_USD } from '@/lib/config/partner-program-pricing'
 import {
-  createPendingPaymentIntent,
-  findIntentByMemo,
-  getPendingIntentForGuild,
-  isSignatureAlreadyUsed,
-  markIntentConfirmed,
-} from '@/lib/db/discord-partner-payment-intents'
-import {
-  createSlashDiscordPartnerTenant,
-  extendDiscordPartnerActiveDeadline,
   getDiscordGiveawayPartnerByGuildId,
   isPartnerTenantEntitled,
   updateDiscordGiveawayPartner,
 } from '@/lib/db/discord-giveaway-partners'
-import {
-  extractOwlgwMemosFromParsedTx,
-  verifyDiscordPartnerUsdcPayment,
-} from '@/lib/solana/verify-discord-partner-usdc'
+import { getDiscordBotInviteUrl } from '@/lib/discord-bot-invite'
 import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
-import { getSolanaConnection } from '@/lib/solana/connection'
-import { getPartnerProMonthlyQuoteUsdcForDiscordTenant } from '@/lib/db/partner-community-creators-admin'
 import { assertDiscordPartnerCommandAccess } from '@/lib/discord-partner-command-access'
 import { handleDiscordMarketplaceCommand } from '@/lib/discord-marketplace-handle-interaction'
 import { handleDiscordRaffleAlertsCommand } from '@/lib/discord-raffle-alerts-handle-interaction'
+import { handleDiscordQueryCommand, handleDiscordWlCommand } from '@/lib/discord-wl-handle-interaction'
 
 const MANAGE_WEBHOOKS_BIT = 1n << 29n
 
@@ -36,60 +24,26 @@ function ephemeral(content: string) {
   }
 }
 
-/** Catalog Discord Partner Pro renewal (USDC); new guilds without a linked partner quote use this. */
-function discordPartnerStandardPriceUsdc(): number {
-  const raw = process.env.DISCORD_PARTNER_USDC_PRICE?.trim()
-  const n = raw ? parseFloat(raw) : 50
-  return Number.isFinite(n) && n > 0 ? n : 50
-}
-
-async function discordPartnerSubscribePriceUsdc(guildId: string): Promise<number> {
-  const standard = discordPartnerStandardPriceUsdc()
-  const g = guildId.trim()
-  if (!g) return standard
-
-  const tenant = await getDiscordGiveawayPartnerByGuildId(g)
-  if (!tenant) return standard
-
-  const quoted = await getPartnerProMonthlyQuoteUsdcForDiscordTenant(tenant.id)
-  if (quoted != null && quoted > 0) return quoted
-
-  return standard
-}
-
-function discordPartnerSubscriptionDays(): number {
-  const raw = process.env.DISCORD_PARTNER_SUBSCRIPTION_DAYS?.trim()
-  const n = raw ? parseInt(raw, 10) : 30
-  return Number.isFinite(n) && n > 0 ? n : 30
-}
-
-function discordPaymentIntentTtlHours(): number {
-  const raw = process.env.DISCORD_PARTNER_PAYMENT_INTENT_TTL_HOURS?.trim()
-  const n = raw ? parseInt(raw, 10) : 48
-  return Number.isFinite(n) && n > 0 ? n : 48
-}
-
-function treasuryWalletLine(): string {
-  const w =
-    process.env.DISCORD_BOT_USDC_TREASURY_WALLET?.trim() ||
-    process.env.RAFFLE_RECIPIENT_WALLET?.trim() ||
-    ''
-  return w || '(set DISCORD_BOT_USDC_TREASURY_WALLET on the server)'
-}
-
-function botInviteUrl(): string | null {
-  const custom = process.env.DISCORD_BOT_INVITE_URL?.trim()
-  if (custom) return custom
-  const appId = process.env.DISCORD_APPLICATION_ID?.trim()
-  if (!appId) return null
-  // View Channel + Send Messages + Embed Links + Use Application Commands
-  const perms = '2147503104'
-  return `https://discord.com/api/oauth2/authorize?client_id=${encodeURIComponent(appId)}&permissions=${perms}&scope=bot%20applications.commands`
+function partnerProBillingHelp(): string {
+  const base = getSiteBaseUrl()
+  const invite = getDiscordBotInviteUrl()
+  const lines = [
+    `**${PLATFORM_NAME} Partner Pro — one-time setup**`,
+    '',
+    `Partner Pro is a **one-time $${PARTNER_PRO_SETUP_USD} setup** (plus the 2% partner raffle fee).`,
+    '**Monthly Discord USDC renewals are discontinued.** Discord tools (whitelist, webhooks) are included with Partner Pro.',
+    '',
+    'If you already paid Partner Pro: ask Owltopia to link this Discord server in Owl Vision → Partners (wallet + server ID).',
+    `Apply / details: ${base}/partner-program`,
+  ]
+  if (invite) lines.push('', `**Add the bot:** ${invite}`)
+  return lines.join('\n')
 }
 
 type DiscordInteraction = {
   type: number
   guild_id?: string
+  channel_id?: string
   member?: { permissions?: string; user?: { id: string } }
   data?: {
     name?: string
@@ -136,11 +90,16 @@ export async function handleDiscordApplicationCommand(
   if (root === 'owltopia-alerts') {
     return handleDiscordRaffleAlertsCommand(interaction)
   }
+  if (root === 'owltopia-wl') {
+    return handleDiscordWlCommand(interaction)
+  }
+  if (root === 'query') {
+    return handleDiscordQueryCommand(interaction)
+  }
   if (root !== 'owltopia-partner') {
     return ephemeral('Unknown command.')
   }
 
-  const guildName = 'Discord guild' // name not always in interaction; optional upgrade with REST cache
   const { sub, strOptions } = getSubcommandAndOptions(interaction.data)
 
   const access = await assertDiscordPartnerCommandAccess(interaction.member?.user?.id, guildId)
@@ -155,117 +114,19 @@ export async function handleDiscordApplicationCommand(
   }
 
   if (sub === 'subscribe') {
-    const price = await discordPartnerSubscribePriceUsdc(guildId)
-    const days = discordPartnerSubscriptionDays()
-    const ttl = discordPaymentIntentTtlHours()
-    let intent
-    try {
-      intent = await createPendingPaymentIntent({
-        discord_guild_id: guildId,
-        discord_guild_name: guildName,
-        amount_usdc: price,
-        ttlHours: ttl,
-      })
-    } catch (e) {
-      console.error('subscribe intent:', e)
-      return ephemeral(
-        'Could not create a payment session (database error). On the host, set SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) + NEXT_PUBLIC_SUPABASE_URL for the same Supabase project where migration 053 ran, then redeploy.'
-      )
-    }
-
-    const invite = botInviteUrl()
-    const base = getSiteBaseUrl()
-    const lines = [
-      `**${PLATFORM_NAME} — partner subscription**`,
-      '',
-      `**Price:** ${price} USDC (Solana) for **${days} days**`,
-      '',
-      `**Treasury wallet:** \`${treasuryWalletLine()}\``,
-      `**Memo (exact):** \`${intent.memo}\``,
-      '',
-      'Send **exactly** that USDC amount in **one** transaction that includes a **Memo** instruction with the memo above (same transaction as the SPL transfer). Phantom/Solflare: add Memo in advanced, or use a wallet that supports memo + USDC in one tx.',
-      '',
-      `This quote expires: ${intent.expires_at}`,
-      '',
-      `Then run \`/owltopia-partner verify signature:<your_tx_signature>\` in this server.`,
-      '',
-      `Docs base URL: ${base}`,
-    ]
-    if (invite) lines.push('', `**Add the bot:** ${invite}`)
-    return ephemeral(lines.join('\n'))
+    return ephemeral(partnerProBillingHelp())
   }
 
   if (sub === 'verify') {
-    const sig = (strOptions.signature ?? '').trim()
-    if (!sig) return ephemeral('Missing signature.')
-
-    const used = await isSignatureAlreadyUsed(sig)
-    if (used) return ephemeral('That transaction was already used.')
-
-    const connection = getSolanaConnection()
-    const tx = await connection.getParsedTransaction(sig, {
-      maxSupportedTransactionVersion: 0,
-      commitment: 'confirmed',
-    })
-    if (!tx || tx.meta?.err) {
-      return ephemeral('Transaction not found or failed. Check the signature and cluster (mainnet USDC).')
-    }
-
-    const memos = extractOwlgwMemosFromParsedTx(tx)
-    let intent = null
-    for (const m of memos) {
-      const cand = await findIntentByMemo(m)
-      if (cand && cand.discord_guild_id === guildId) {
-        intent = cand
-        break
-      }
-    }
-    if (!intent) {
-      return ephemeral(
-        'No matching pending payment for this server. Run `/owltopia-partner subscribe` first and include memo `OWLGW:…` in your USDC transaction.'
-      )
-    }
-    if (new Date(intent.expires_at).getTime() <= Date.now()) {
-      return ephemeral('That payment quote expired. Run `/owltopia-partner subscribe` again.')
-    }
-
-    const check = await verifyDiscordPartnerUsdcPayment({
-      signature: sig,
-      expectedUsdc: intent.amount_usdc,
-      expectedMemo: intent.memo,
-      parsedTransaction: tx,
-    })
-    if (!check.ok) {
-      return ephemeral(check.error)
-    }
-
-    const days = discordPartnerSubscriptionDays()
-    try {
-      const existing = await getDiscordGiveawayPartnerByGuildId(guildId)
-      let tenantId: string
-      let apiLine = ''
-      if (existing) {
-        const updated = await extendDiscordPartnerActiveDeadline(existing.id, days)
-        if (!updated) return ephemeral('Could not extend subscription (database error).')
-        tenantId = updated.id
-        apiLine = 'Your existing API secret is unchanged. Use `/owltopia-partner status` if needed.'
-      } else {
-        const { tenant, apiSecret } = await createSlashDiscordPartnerTenant({
-          guildId,
-          guildName,
-          subscriptionDays: days,
-        })
-        tenantId = tenant.id
-        apiLine = `**API secret (copy once):** \`${apiSecret}\`\nUse header \`Authorization: Bearer <secret>\` on \`POST ${getSiteBaseUrl()}/api/integrations/discord-giveaway/notify\``
-      }
-      await markIntentConfirmed(intent.id, sig, tenantId)
-      return ephemeral(
-        `**Payment verified.** Subscription extended **${days} days**.\n\n${apiLine}\n\nNext: \`/owltopia-partner webhook url:…\` (Manage Webhooks) so we can post giveaway updates.`
-      )
-    } catch (e) {
-      console.error('verify provision:', e)
-      return ephemeral('Verified on-chain but saving failed. Contact support with your signature.')
-    }
+    return ephemeral(
+      [
+        '**Monthly Discord payment verify is discontinued.**',
+        '',
+        `Partner Pro is a one-time $${PARTNER_PRO_SETUP_USD} setup — no USDC subscribe/verify cycle.`,
+        'If you already paid Partner Pro, ask Owltopia to link this server in **Owl Vision → Partners**.',
+        `Then use \`/owltopia-partner webhook\` / \`/owltopia-wl\` here.`,
+      ].join('\n')
+    )
   }
 
   if (sub === 'webhook') {
@@ -275,10 +136,14 @@ export async function handleDiscordApplicationCommand(
     }
     const partner = await getDiscordGiveawayPartnerByGuildId(guildId)
     if (!partner) {
-      return ephemeral('No partner record for this server. Complete `/owltopia-partner subscribe` and `/verify` first.')
+      return ephemeral(
+        'No partner Discord link for this server yet. Ask Owltopia to link your Partner Pro wallet + server ID in Owl Vision → Partners.'
+      )
     }
     if (!isPartnerTenantEntitled(partner)) {
-      return ephemeral('Subscription is not active. Renew with subscribe + verify.')
+      return ephemeral(
+        'This Discord partner link is suspended. Ask Owltopia support to reactivate it (Partner Pro is one-time — no monthly renew).'
+      )
     }
     const updated = await updateDiscordGiveawayPartner(partner.id, { webhook_url: url })
     if (!updated) return ephemeral('Could not save webhook.')
@@ -292,10 +157,14 @@ export async function handleDiscordApplicationCommand(
     }
     const partner = await getDiscordGiveawayPartnerByGuildId(guildId)
     if (!partner) {
-      return ephemeral('No partner record for this server. Complete `/owltopia-partner subscribe` and `/verify` first.')
+      return ephemeral(
+        'No partner Discord link for this server yet. Ask Owltopia to link your Partner Pro wallet + server ID in Owl Vision → Partners.'
+      )
     }
     if (!isPartnerTenantEntitled(partner)) {
-      return ephemeral('Subscription is not active. Renew with subscribe + verify.')
+      return ephemeral(
+        'This Discord partner link is suspended. Ask Owltopia support to reactivate it (Partner Pro is one-time — no monthly renew).'
+      )
     }
     const field =
       sub === 'webhook-raffle-created'
@@ -312,37 +181,35 @@ export async function handleDiscordApplicationCommand(
 
   if (sub === 'status') {
     let partner
-    let pending
     try {
       partner = await getDiscordGiveawayPartnerByGuildId(guildId)
-      pending = await getPendingIntentForGuild(guildId)
     } catch (e) {
       console.error('status partner query:', e)
       return ephemeral(
         'Could not load status (database error). Set SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) on the server for the Supabase project with tables from migrations 052 and 053, then redeploy.'
       )
     }
-    if (!partner && !pending) {
-      return ephemeral('No partner subscription yet. Use `/owltopia-partner subscribe`.')
+    if (!partner) {
+      return ephemeral(
+        [
+          'No Partner Pro Discord link for this server yet.',
+          'Ask Owltopia to link your wallet + server ID in Owl Vision → Partners (one-time Partner Pro — no monthly subscribe).',
+        ].join('\n')
+      )
     }
-    const lines: string[] = []
-    if (pending) {
-      lines.push(`**Pending quote:** ${pending.amount_usdc} USDC — memo \`${pending.memo}\` — expires ${pending.expires_at}`)
-    }
-    if (partner) {
-      const rwc = partner.raffle_webhook_url_created ? 'set' : '**not set**'
-      const rww = partner.raffle_webhook_url_winner ? 'set' : '**not set**'
-      lines.push(
+    const rwc = partner.raffle_webhook_url_created ? 'set' : '**not set**'
+    const rww = partner.raffle_webhook_url_winner ? 'set' : '**not set**'
+    return ephemeral(
+      [
         `**Partner id:** \`${partner.id}\``,
         `**Status:** ${partner.status}`,
-        `**Active until:** ${partner.active_until ?? '—'}`,
+        `**Billing:** Partner Pro one-time (no monthly Discord renew)`,
         `**Webhook (NFT / API):** ${partner.webhook_url ? 'configured' : '**not set** — run /webhook'}`,
         `**Raffle created channel:** ${rwc} — \`/owltopia-partner webhook-raffle-created\``,
         `**Raffle winner channel:** ${rww} — \`/owltopia-partner webhook-raffle-winner\``,
-        `**Entitled:** ${isPartnerTenantEntitled(partner) ? 'yes' : 'no'}`
-      )
-    }
-    return ephemeral(lines.join('\n'))
+        `**Entitled:** ${isPartnerTenantEntitled(partner) ? 'yes' : 'no'}`,
+      ].join('\n')
+    )
   }
 
   return ephemeral('Unknown subcommand.')

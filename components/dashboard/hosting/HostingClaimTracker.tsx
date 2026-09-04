@@ -7,12 +7,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { formatHostingCurrencyTotals } from './helpers'
 
-type RaffleStub = {
+type HostingClaimListingKind = 'raffle' | 'auction'
+
+type ClaimListingStub = {
   id: string
   slug: string
   title: string
   creator_payout_amount?: number | null
   currency?: string
+  /** Defaults to raffle when omitted (My raffles rows). */
+  listingKind?: HostingClaimListingKind
+}
+
+function listingHref(item: ClaimListingStub): string {
+  return item.listingKind === 'auction' ? `/auctions/${item.slug}` : `/raffles/${item.slug}`
 }
 
 function MetricPill({
@@ -80,13 +88,13 @@ export function HostingClaimTracker({
   readyFee: Record<string, number>
   readyGross: Record<string, number>
   liveSales: { net: Record<string, number>; fee: Record<string, number>; gross: Record<string, number> }
-  pendingClaims: RaffleStub[]
-  awaitingSettlement: RaffleStub[]
+  pendingClaims: ClaimListingStub[]
+  awaitingSettlement: ClaimListingStub[]
   liveEscrowCount: number
-  endedAwaitingDraw: RaffleStub[]
+  endedAwaitingDraw: ClaimListingStub[]
   hasLiveEscrowSales: boolean
   claimProceedsLoadingId: string | null
-  onClaimProceeds: (raffleId: string) => void
+  onClaimProceeds: (listingId: string, listingKind?: HostingClaimListingKind) => void
   onGoOverview: () => void
 }) {
   const showEmpty =
@@ -132,7 +140,7 @@ export function HostingClaimTracker({
               Ready after draw
             </p>
             <p className="text-[11px] text-muted-foreground leading-snug">
-              {pendingClaims.length} settled raffle{pendingClaims.length === 1 ? '' : 's'} — claim sends net to you and
+              {pendingClaims.length} settled listing{pendingClaims.length === 1 ? '' : 's'} — claim sends net to you and
               fee to treasury in one tx.
             </p>
             <div className="grid gap-2 sm:grid-cols-3">
@@ -156,23 +164,30 @@ export function HostingClaimTracker({
         </div>
 
         {pendingClaims.length > 0 && (
-          <HostingCallout tone="emerald" title="Claim now — ticket proceeds">
-            <p>One transaction per raffle. You can also claim from each row under My raffles.</p>
+          <HostingCallout tone="emerald" title="Claim now — proceeds">
+            <p>One transaction per listing. Claim from this list or from each raffle row under My raffles.</p>
             <ul className="space-y-2 !text-sm">
               {pendingClaims.map((r) => {
+                const kind = r.listingKind ?? 'raffle'
                 const payout =
                   r.creator_payout_amount != null && r.currency
                     ? `${Number(r.creator_payout_amount).toFixed(r.currency === 'USDC' ? 2 : 4)} ${r.currency} net`
                     : null
                 return (
                   <li
-                    key={r.id}
+                    key={`${kind}:${r.id}`}
                     className="flex flex-col gap-2 rounded-lg border border-border/40 bg-background/80 p-3 sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="min-w-0">
-                      <Link href={`/raffles/${r.slug}`} className="font-medium text-foreground hover:underline truncate block">
+                      <Link
+                        href={listingHref({ ...r, listingKind: kind })}
+                        className="font-medium text-foreground hover:underline truncate block"
+                      >
                         {r.title}
                       </Link>
+                      <p className="mt-0.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {kind === 'auction' ? 'Auction' : 'Raffle'}
+                      </p>
                       {payout ? <p className="mt-0.5 tabular-nums text-foreground/90">{payout}</p> : null}
                     </div>
                     <Button
@@ -180,7 +195,7 @@ export function HostingClaimTracker({
                       size="sm"
                       className="touch-manipulation min-h-[44px] w-full shrink-0 sm:w-auto"
                       disabled={claimProceedsLoadingId === r.id}
-                      onClick={() => onClaimProceeds(r.id)}
+                      onClick={() => onClaimProceeds(r.id, kind)}
                     >
                       {claimProceedsLoadingId === r.id ? (
                         <>
@@ -263,8 +278,8 @@ export function HostingClaimTracker({
 
         {showEmpty && (
           <p className="text-sm text-muted-foreground rounded-lg border border-dashed border-border/60 p-4 text-center">
-            No active escrow pipeline. When you host funds-escrow raffles, live sales show under “while still live”; after
-            a draw, claim totals appear above.
+            No active escrow pipeline. When you host funds-escrow raffles or auctions, live sales show under “while still
+            live”; after settlement, claim totals appear above.
           </p>
         )}
       </CardContent>

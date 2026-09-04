@@ -1,7 +1,14 @@
 import { supabase } from '@/lib/supabase'
 import { getSupabaseAdmin, getSupabaseForServerRead } from '@/lib/supabase-admin'
-import { parseActivePhases, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
+import { datetimeLocalToIso, parseActivePhases, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
+import { parsePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
 import { parseWalletSplitsFromDb } from '@/lib/owl-center/wallet-splits'
+import { isOpaqueOwlCenterLaunchSlug } from '@/lib/owl-center/launch-slug'
+import {
+  generateUniqueOwlCenterLaunchSlug,
+  recordOwlCenterLaunchSlugAlias,
+  resolveOwlCenterLaunchIdBySlug,
+} from '@/lib/db/owl-center-launch-slug'
 import type {
   OwlCenterFreezeProgress,
   OwlCenterFreezeStatus,
@@ -25,8 +32,10 @@ import type {
  */
 function normalizeTimestamp(raw: unknown): string | null {
   if (raw == null) return null
-  const ms = new Date(String(raw)).getTime()
-  return Number.isFinite(ms) ? new Date(ms).toISOString() : null
+  if (raw instanceof Date) {
+    return Number.isFinite(raw.getTime()) ? raw.toISOString() : null
+  }
+  return datetimeLocalToIso(String(raw))
 }
 
 function parseRevealMode(raw: unknown): OwlCenterRevealMode | null {
@@ -125,6 +134,7 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
     wallet_mint_limit: Number(data.wallet_mint_limit ?? 1),
     magic_eden_url: data.magic_eden_url != null ? String(data.magic_eden_url) : null,
     tensor_url: data.tensor_url != null ? String(data.tensor_url) : null,
+    orbis_url: data.orbis_url != null ? String(data.orbis_url) : null,
     is_featured: Boolean(data.is_featured),
     is_paused: Boolean(data.is_paused),
     launch_deadline_at: normalizeTimestamp(data.launch_deadline_at),
@@ -169,19 +179,39 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
     freeze_authority: data.freeze_authority != null ? String(data.freeze_authority) : null,
     freeze_thawed_at: data.freeze_thawed_at != null ? String(data.freeze_thawed_at) : null,
     freeze_progress: parseFreezeProgress(data.freeze_progress),
+    partner_allowlist_phases: parsePartnerAllowlistPhases(data.partner_allowlist_phases),
   }
 }
 
-export async function getOwlCenterLaunchBySlug(slug: string): Promise<OwlCenterLaunchPublic | null> {
-  const db = getSupabaseForServerRead(supabase)
-  const { data, error } = await db.from('owl_center_launches').select('*').eq('slug', slug).maybeSingle()
-  if (error || !data) {
-    if (process.env.NODE_ENV === 'development') {
+async function fetchLaunchRowById(
+  id: string,
+  admin: boolean
+): Promise<OwlCenterLaunchPublic | null> {
+  const db = admin ? getSupabaseAdmin() : getSupabaseForServerRead(supabase)
+  const { data, error } = await db.from('owl_center_launches').select('*').eq('id', id).maybeSingle()
+  if (error || !data) return null
+  return mapRow(data as Record<string, unknown>)
+}
+
+async function getLaunchBySlugResolved(slug: string, admin: boolean): Promise<OwlCenterLaunchPublic | null> {
+  const clean = slug.trim().toLowerCase()
+  if (!clean) return null
+  const db = admin ? getSupabaseAdmin() : getSupabaseForServerRead(supabase)
+  const { data, error } = await db.from('owl_center_launches').select('*').eq('slug', clean).maybeSingle()
+  if (!error && data) return mapRow(data as Record<string, unknown>)
+
+  const launchId = await resolveOwlCenterLaunchIdBySlug(clean)
+  if (!launchId) {
+    if (!admin && process.env.NODE_ENV === 'development') {
       console.warn('owl_center_launches:', error?.message ?? 'no row')
     }
     return null
   }
-  return mapRow(data as Record<string, unknown>)
+  return fetchLaunchRowById(launchId, admin)
+}
+
+export async function getOwlCenterLaunchBySlug(slug: string): Promise<OwlCenterLaunchPublic | null> {
+  return getLaunchBySlugResolved(slug, false)
 }
 
 /** Admin/service — all launches including draft / pending review. */
@@ -193,7 +223,7 @@ export async function listOwlCenterLaunchesAdmin(): Promise<OwlCenterLaunchPubli
     .order('is_featured', { ascending: false })
     .order('updated_at', { ascending: false })
   if (error || !data) return []
-  return (data as Record<string, unknown>[]).map(mapRow)
+  return Promise.all((data as Record<string, unknown>[]).map((row) => maybePromoteLaunch(mapRow(row))))
 }
 
 export async function listOwlCenterLaunchesPublic(): Promise<OwlCenterLaunchPublic[]> {
@@ -211,17 +241,84 @@ export async function listOwlCenterLaunchesPublic(): Promise<OwlCenterLaunchPubl
 
 /** Admin/service writes — full row including draft if needed. */
 export async function getOwlCenterLaunchBySlugAdmin(slug: string): Promise<OwlCenterLaunchPublic | null> {
+  return getLaunchBySlugResolved(slug, true)
+}
+
+async function retargetDiscordMintFeedSlug(oldSlug: string, newSlug: string): Promise<void> {
+  if (oldSlug === newSlug) return
   const db = getSupabaseAdmin()
-  const { data, error } = await db.from('owl_center_launches').select('*').eq('slug', slug).maybeSingle()
-  if (error || !data) return null
-  return mapRow(data as Record<string, unknown>)
+  const { data, error } = await db
+    .from('owl_center_discord_mint_feed')
+    .select('id, network, status_message_id, last_minted')
+    .eq('launch_slug', oldSlug)
+  if (error || !data?.length) return
+
+  for (const row of data as {
+    id: string
+    network: string
+    status_message_id: string | null
+    last_minted: number
+  }[]) {
+    const nextId = `${newSlug}-${row.network}`
+    await db.from('owl_center_discord_mint_feed').upsert(
+      {
+        id: nextId,
+        launch_slug: newSlug,
+        network: row.network,
+        status_message_id: row.status_message_id,
+        last_minted: row.last_minted,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    )
+    if (row.id !== nextId) {
+      await db.from('owl_center_discord_mint_feed').delete().eq('id', row.id)
+    }
+  }
+}
+
+/**
+ * One-time: replace legacy `sub-<uuid>` mint slugs with a unique collection-name slug.
+ * Old paths are stored as aliases so already-shared links keep working.
+ */
+async function maybePromoteLaunch(launch: OwlCenterLaunchPublic): Promise<OwlCenterLaunchPublic> {
+  if (!isOpaqueOwlCenterLaunchSlug(launch.slug)) return launch
+  return promoteOpaqueOwlCenterLaunchSlug(launch)
+}
+
+export async function promoteOpaqueOwlCenterLaunchSlug(
+  launch: OwlCenterLaunchPublic
+): Promise<OwlCenterLaunchPublic> {
+  if (!isOpaqueOwlCenterLaunchSlug(launch.slug)) return launch
+
+  const nextSlug = await generateUniqueOwlCenterLaunchSlug(launch.name, { excludeLaunchId: launch.id })
+  if (!nextSlug || nextSlug === launch.slug) return launch
+
+  const db = getSupabaseAdmin()
+  await db
+    .from('owl_center_launch_slug_aliases')
+    .delete()
+    .eq('slug', nextSlug)
+    .eq('launch_id', launch.id)
+
+  const aliased = await recordOwlCenterLaunchSlugAlias(launch.id, launch.slug)
+  if (!aliased) return launch
+
+  const updated = await updateOwlCenterLaunchByIdAdmin(launch.id, { slug: nextSlug })
+  if (!updated) {
+    console.warn('promoteOpaqueOwlCenterLaunchSlug: update failed', launch.id, nextSlug)
+    return launch
+  }
+
+  await retargetDiscordMintFeedSlug(launch.slug, nextSlug)
+  return updated
 }
 
 export async function getOwlCenterLaunchByIdAdmin(id: string): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()
   const { data, error } = await db.from('owl_center_launches').select('*').eq('id', id).maybeSingle()
   if (error || !data) return null
-  return mapRow(data as Record<string, unknown>)
+  return maybePromoteLaunch(mapRow(data as Record<string, unknown>))
 }
 
 /** Creator dashboard — launches owned by wallet (includes pending review). */
@@ -235,7 +332,7 @@ export async function listOwlCenterLaunchesByCreatorWallet(
     .eq('creator_wallet', creatorWallet)
     .order('updated_at', { ascending: false })
   if (error || !data) return []
-  return (data as Record<string, unknown>[]).map(mapRow)
+  return Promise.all((data as Record<string, unknown>[]).map((row) => maybePromoteLaunch(mapRow(row))))
 }
 
 export async function updateOwlCenterLaunchAdmin(
@@ -251,6 +348,7 @@ export async function updateOwlCenterLaunchAdmin(
     devnet_collection_mint: string | null
     magic_eden_url: string | null
     tensor_url: string | null
+    orbis_url: string | null
     minted_count: number
     metadata_ready: boolean
     assets_ready: boolean
@@ -291,6 +389,7 @@ export async function updateOwlCenterLaunchByIdAdmin(
     devnet_collection_mint: string | null
     magic_eden_url: string | null
     tensor_url: string | null
+    orbis_url: string | null
     minted_count: number
     metadata_ready: boolean
     assets_ready: boolean
@@ -334,6 +433,9 @@ export async function updateOwlCenterLaunchByIdAdmin(
     freeze_progress: OwlCenterFreezeProgress
     freeze_enabled: boolean
     unfreeze_date: string | null
+    slug: string
+    mint_standard: 'token_metadata' | 'core'
+    partner_allowlist_phases: import('@/lib/owl-center/partner-allowlist-phases').PartnerAllowlistPhase[]
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()

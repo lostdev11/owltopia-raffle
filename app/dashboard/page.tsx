@@ -30,6 +30,7 @@ import {
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { isMobileDevice } from '@/lib/utils'
+import { replaceClientUrl } from '@/lib/client/replace-url'
 import { useVisibilityTick } from '@/lib/hooks/useVisibilityTick'
 import { resolvePublicSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { useConnection } from '@solana/wallet-adapter-react'
@@ -44,12 +45,14 @@ import {
   formatRefundClaimButtonLabel,
 } from '@/lib/raffles/entry-refund-amount'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { raffleWinnerPrizeClaimWindowOpen } from '@/lib/raffles/purchase-window'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import {
   canCreatorClaimPrizeBackFromEscrow,
   needsPayCancellationFeeBeforePrizeReturn,
 } from '@/lib/raffles/creator-prize-return-eligibility'
 import type { CommunityGiveaway, NftGiveaway, Raffle as FullRaffle, RaffleMilestone } from '@/lib/types'
+import type { NftAuction } from '@/lib/auctions/types'
 import {
   formatMilestonePrize,
   milestoneWinnerModeLabel,
@@ -205,12 +208,6 @@ type EntryWithRaffle = {
   referred_by_label?: string | null
 }
 
-function raffleEndedOrCompleted(raffle: { end_time: string; status: string | null }): boolean {
-  if (raffle.status === 'completed') return true
-  const endMs = new Date(raffle.end_time).getTime()
-  return !Number.isNaN(endMs) && endMs <= Date.now()
-}
-
 /** Live / ready listing: cancellation was requested but post-start fee not recorded yet. */
 function needsPayCancellationStraggler(raffle: Raffle): boolean {
   const s = (raffle.status ?? '').toLowerCase()
@@ -236,7 +233,8 @@ function canClaimEscrowPrize(raffle: EntryWithRaffle['raffle'], wallet: string):
   if (!raffle.prize_deposited_at) return false
   if (raffle.prize_returned_at) return false
   if (raffle.nft_transfer_transaction?.trim()) return false
-  if (!raffleEndedOrCompleted(raffle)) return false
+  // Sell-out early draw → successful_pending_claims before original end_time.
+  if (!raffleWinnerPrizeClaimWindowOpen(raffle)) return false
   return true
 }
 
@@ -261,6 +259,7 @@ type DashboardData = {
   wallet: string
   displayName: string | null
   myRaffles: Raffle[]
+  myAuctions?: NftAuction[]
   myEntries: EntryWithRaffle[]
   creatorRevenue: number
   creatorRevenueByCurrency: Record<string, number>
@@ -326,6 +325,14 @@ type DashboardData = {
     eligibleRaffles: Array<{ id: string; slug: string; title: string }>
   } | null
   engagement?: DashboardEngagementPayload
+  streaks?: {
+    winCurrentStreak: number
+    winBestStreak: number
+    winTotalWins: number
+    participationCurrentStreak: number
+    participationBestStreak: number
+    lastParticipationDate: string | null
+  }
   /** Buyout bids placed by this wallet (claim refunds here when expired/superseded). */
   buyoutOffers?: Array<{
     id: string
@@ -340,6 +347,16 @@ type DashboardData = {
     refundDepositSource?: 'funds_escrow' | 'treasury' | 'unknown' | null
   }>
   milestoneBonusWins?: MilestoneBonusWinRow[]
+  /**
+   * Ended undrawn raffles still finalizing (server-classified draw vs extension/refund).
+   * Client POSTs /api/raffles/[id]/process-ended for awaiting_draw and polls.
+   */
+  endedFinalizing?: Array<{
+    id: string
+    slug: string
+    title: string
+    kind: 'awaiting_draw' | 'awaiting_extension_or_refund'
+  }>
 }
 
 type NftWinnerDashboardRow = {
@@ -376,6 +393,33 @@ function aggregateClaimTotalsByCurrency(
     const cur = (r.currency || 'SOL').toUpperCase()
     const raw = field === 'creator_payout_amount' ? r.creator_payout_amount : r.platform_fee_amount
     const v = Number(raw ?? 0)
+    if (!Number.isFinite(v) || v <= 0) continue
+    out[cur] = (out[cur] ?? 0) + v
+  }
+  return out
+}
+
+function aggregateAuctionClaimTotalsByCurrency(
+  auctions: NftAuction[],
+  field: 'creator_payout_amount' | 'platform_fee_amount'
+): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const a of auctions) {
+    const cur = (a.bid_currency || 'SOL').toUpperCase()
+    const raw = field === 'creator_payout_amount' ? a.creator_payout_amount : a.platform_fee_amount
+    const v = Number(raw ?? 0)
+    if (!Number.isFinite(v) || v <= 0) continue
+    out[cur] = (out[cur] ?? 0) + v
+  }
+  return out
+}
+
+function mergeCurrencyTotals(
+  a: Record<string, number>,
+  b: Record<string, number>
+): Record<string, number> {
+  const out: Record<string, number> = { ...a }
+  for (const [cur, v] of Object.entries(b)) {
     if (!Number.isFinite(v) || v <= 0) continue
     out[cur] = (out[cur] ?? 0) + v
   }
@@ -617,7 +661,7 @@ export default function DashboardPage() {
     } else if (err) {
       setDiscordLinkFlash(discordOAuthReturnMessage(err))
     }
-    window.history.replaceState({}, '', '/dashboard')
+    replaceClientUrl('/dashboard')
     void loadDashboard({ silent: true })
   }, [loadDashboard])
 
@@ -642,6 +686,45 @@ export default function DashboardPage() {
     const id = setInterval(() => setRelativeTimeTick((t) => t + 1), 15_000)
     return () => clearInterval(id)
   }, [data])
+
+  // Ended raffles awaiting VRF/draw: kick the dedicated process-ended endpoint (120s budget)
+  // instead of blocking dashboard GET, then poll until the banner clears (OWL #175).
+  const awaitingDrawIdsKey = (Array.isArray(data?.endedFinalizing) ? data.endedFinalizing : [])
+    .filter((r) => r.kind === 'awaiting_draw')
+    .map((r) => r.id)
+    .sort()
+    .join(',')
+
+  useEffect(() => {
+    if (!awaitingDrawIdsKey) return
+    const drawIds = awaitingDrawIdsKey.split(',').filter(Boolean)
+    if (drawIds.length === 0) return
+
+    let cancelled = false
+    const trigger = async () => {
+      await Promise.allSettled(
+        drawIds.map((id) =>
+          fetch(`/api/raffles/${encodeURIComponent(id)}/process-ended`, {
+            method: 'POST',
+            credentials: 'same-origin',
+          })
+        )
+      )
+      if (!cancelled) void loadDashboard({ silent: true })
+    }
+    void trigger()
+
+    let ticks = 0
+    const iv = setInterval(() => {
+      ticks++
+      void loadDashboard({ silent: true })
+      if (ticks >= 24) clearInterval(iv)
+    }, 5_000)
+    return () => {
+      cancelled = true
+      clearInterval(iv)
+    }
+  }, [awaitingDrawIdsKey, loadDashboard])
 
   // On mobile, delay first dashboard load so wallet has time to stabilize after nav/redirect.
   // If already connected on mount (e.g. returning from wallet), don't delay so connection feels instant.
@@ -825,14 +908,20 @@ export default function DashboardPage() {
   )
 
   const handleClaimProceeds = useCallback(
-    async (raffleId: string) => {
-      const raffle =
-        (Array.isArray(data?.myRaffles) ? data.myRaffles : []).find((x) => x.id === raffleId) ?? null
+    async (listingId: string, listingKind: 'raffle' | 'auction' = 'raffle') => {
+      const raffles = Array.isArray(data?.myRaffles) ? data.myRaffles : []
+      const auctions = Array.isArray(data?.myAuctions) ? data.myAuctions : []
+      const raffle = listingKind === 'raffle' ? raffles.find((x) => x.id === listingId) ?? null : null
+      const auction = listingKind === 'auction' ? auctions.find((x) => x.id === listingId) ?? null : null
       setClaimActionError(null)
       setClaimSuccess(null)
-      setClaimProceedsLoadingId(raffleId)
+      setClaimProceedsLoadingId(listingId)
       try {
-        const res = await fetch(`/api/raffles/${raffleId}/claim-proceeds`, {
+        const path =
+          listingKind === 'auction'
+            ? `/api/auctions/${listingId}/claim-proceeds`
+            : `/api/raffles/${listingId}/claim-proceeds`
+        const res = await fetch(path, {
           method: 'POST',
           credentials: 'include',
         })
@@ -846,21 +935,31 @@ export default function DashboardPage() {
           return
         }
         const alreadyClaimed = (json as { alreadyClaimed?: boolean }).alreadyClaimed === true
+        const title =
+          listingKind === 'auction'
+            ? auction?.title ?? 'Auction proceeds'
+            : raffle?.title ?? 'Raffle proceeds'
+        const slug =
+          listingKind === 'auction'
+            ? auction?.slug ?? listingId
+            : raffle?.slug ?? listingId
         presentClaimSuccess({
           tx: extractTransactionSignature(json),
-          title: raffle?.title ?? 'Raffle proceeds',
-          slug: raffle?.slug ?? raffleId,
+          title,
+          slug,
           heading: alreadyClaimed ? 'Proceeds already claimed' : 'Proceeds claimed!',
           message: alreadyClaimed
             ? 'Creator proceeds were already sent to your wallet.'
-            : 'Net ticket proceeds were sent to your wallet.',
+            : listingKind === 'auction'
+              ? 'Net auction proceeds were sent to your wallet.'
+              : 'Net ticket proceeds were sent to your wallet.',
         })
         await loadDashboard({ silent: true })
       } finally {
         setClaimProceedsLoadingId(null)
       }
     },
-    [data?.myRaffles, loadDashboard, presentClaimSuccess]
+    [data?.myAuctions, data?.myRaffles, loadDashboard, presentClaimSuccess]
   )
 
   const handleClaimPrize = useCallback(
@@ -1461,6 +1560,10 @@ export default function DashboardPage() {
   }, [])
 
   const myRafflesForMemo = Array.isArray(data?.myRaffles) ? data.myRaffles : []
+  const myAuctionsForMemo = useMemo(
+    () => (Array.isArray(data?.myAuctions) ? data.myAuctions : []),
+    [data?.myAuctions]
+  )
   const myEntriesForMemo = Array.isArray(data?.myEntries) ? data.myEntries : []
   const walletForMemo = typeof data?.wallet === 'string' ? data.wallet : ''
 
@@ -1474,6 +1577,39 @@ export default function DashboardPage() {
           !!r.settled_at?.trim()
       ),
     [myRafflesForMemo]
+  )
+
+  const pendingAuctionFundClaims = useMemo(
+    () =>
+      myAuctionsForMemo.filter(
+        (a) =>
+          a.status === 'successful_pending_claims' &&
+          !a.creator_claimed_at &&
+          Number(a.creator_payout_amount ?? 0) > 0
+      ),
+    [myAuctionsForMemo]
+  )
+
+  const pendingHostingFundClaims = useMemo(
+    () => [
+      ...pendingCreatorFundClaims.map((r) => ({
+        id: r.id,
+        slug: r.slug,
+        title: r.title,
+        creator_payout_amount: r.creator_payout_amount,
+        currency: r.currency,
+        listingKind: 'raffle' as const,
+      })),
+      ...pendingAuctionFundClaims.map((a) => ({
+        id: a.id,
+        slug: a.slug,
+        title: a.title,
+        creator_payout_amount: a.creator_payout_amount,
+        currency: a.bid_currency,
+        listingKind: 'auction' as const,
+      })),
+    ],
+    [pendingAuctionFundClaims, pendingCreatorFundClaims]
   )
 
   const awaitingSettlementEscrowClaims = useMemo(
@@ -1542,12 +1678,20 @@ export default function DashboardPage() {
   }, [claimTrackerLiveSales])
 
   const claimTrackerReadyNetByCurrency = useMemo(
-    () => aggregateClaimTotalsByCurrency(pendingCreatorFundClaims, 'creator_payout_amount'),
-    [pendingCreatorFundClaims]
+    () =>
+      mergeCurrencyTotals(
+        aggregateClaimTotalsByCurrency(pendingCreatorFundClaims, 'creator_payout_amount'),
+        aggregateAuctionClaimTotalsByCurrency(pendingAuctionFundClaims, 'creator_payout_amount')
+      ),
+    [pendingAuctionFundClaims, pendingCreatorFundClaims]
   )
   const claimTrackerReadyFeeByCurrency = useMemo(
-    () => aggregateClaimTotalsByCurrency(pendingCreatorFundClaims, 'platform_fee_amount'),
-    [pendingCreatorFundClaims]
+    () =>
+      mergeCurrencyTotals(
+        aggregateClaimTotalsByCurrency(pendingCreatorFundClaims, 'platform_fee_amount'),
+        aggregateAuctionClaimTotalsByCurrency(pendingAuctionFundClaims, 'platform_fee_amount')
+      ),
+    [pendingAuctionFundClaims, pendingCreatorFundClaims]
   )
 
   const claimTrackerReadyGrossByCurrency = useMemo(() => {
@@ -1649,7 +1793,7 @@ export default function DashboardPage() {
     ).length
 
     return {
-      creatorProceeds: pendingCreatorFundClaims.length > 0,
+      creatorProceeds: pendingCreatorFundClaims.length > 0 || pendingAuctionFundClaims.length > 0,
       giveaways: giveawayReady > 0,
       community: communityReady > 0,
       nftWins: nftClaimable > 0,
@@ -1675,6 +1819,7 @@ export default function DashboardPage() {
     cryptoPrizeWinRows,
     milestoneBonusWinRows,
     pendingCreatorFundClaims.length,
+    pendingAuctionFundClaims.length,
     walletForMemo,
     entriesFilter,
     raffleSummaries.length,
@@ -1712,14 +1857,18 @@ export default function DashboardPage() {
       ticketsEntered,
       wins: winRaffles.size + milestoneBonusWinRows.length,
       hostedRaffles: myRafflesForMemo.length,
-      pendingClaims: pendingCreatorFundClaims.length,
+      pendingClaims: pendingHostingFundClaims.length,
       prizesToClaim: giveawayReady + communityReady + nftClaimable + cryptoClaimable + milestoneClaimable,
+      winCurrentStreak: data?.streaks?.winCurrentStreak ?? 0,
+      winBestStreak: data?.streaks?.winBestStreak ?? 0,
+      participationCurrentStreak: data?.streaks?.participationCurrentStreak ?? 0,
+      participationBestStreak: data?.streaks?.participationBestStreak ?? 0,
     }
   }, [
     myEntriesForMemo,
     walletForMemo,
     myRafflesForMemo.length,
-    pendingCreatorFundClaims.length,
+    pendingHostingFundClaims.length,
     data,
     nftPrizeDashboardRows,
     cryptoPrizeWinRows,
@@ -1932,7 +2081,7 @@ export default function DashboardPage() {
       !raffleUsesFundsEscrow(x.raffle)
   )
 
-  /** Ended, no winner, status not advanced yet — server should move to extension or refunds on refresh. */
+  /** Ended, no winner, status not advanced yet — server should move to draw, extension, or refunds. */
   const refundWaitRaffles: EntryWithRaffle['raffle'][] = []
   {
     const seen = new Set<string>()
@@ -1952,6 +2101,21 @@ export default function DashboardPage() {
       refundWaitRaffles.push(r)
     }
   }
+
+  const endedFinalizingById = new Map(
+    (Array.isArray(data?.endedFinalizing) ? data.endedFinalizing : []).map((row) => [row.id, row.kind])
+  )
+  const drawWaitRaffles = refundWaitRaffles.filter(
+    (r) => (endedFinalizingById.get(r.id) ?? 'awaiting_draw') === 'awaiting_draw'
+  )
+  const extensionRefundWaitRaffles = refundWaitRaffles.filter(
+    (r) => endedFinalizingById.get(r.id) === 'awaiting_extension_or_refund'
+  )
+  // Include host-only draw waits from API that are not in myEntries (creator did not buy tickets).
+  const drawWaitFromApi = (Array.isArray(data?.endedFinalizing) ? data.endedFinalizing : []).filter(
+    (row) =>
+      row.kind === 'awaiting_draw' && !refundWaitRaffles.some((r) => r.id === row.id)
+  )
 
   const legacyRefundOwedByRaffle = (() => {
     const map = new Map<
@@ -2005,6 +2169,7 @@ export default function DashboardPage() {
     refundableEntries.length > 0 ||
     legacyRefundEligibleEntries.length > 0 ||
     refundWaitRaffles.length > 0 ||
+    drawWaitFromApi.length > 0 ||
     cancelledUnrefundedEntries.length > 0 ||
     offerRefundCandidates.length > 0
 
@@ -2244,11 +2409,90 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            {refundWaitRaffles.length > 0 && (
+            {(drawWaitRaffles.length > 0 || drawWaitFromApi.length > 0) && (
+              <div className="rounded-lg border border-border/60 bg-background/80 p-3 text-sm">
+                <p className="font-medium text-foreground mb-1">Winner draw in progress</p>
+                <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+                  These raffles met their ticket requirements and are selecting a winner (on-chain randomness can take
+                  up to about a minute). This page retries automatically — opening the raffle also continues the draw.
+                </p>
+                <ul className="space-y-2">
+                  {drawWaitRaffles.map((r) => (
+                    <li key={r.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <Link href={`/raffles/${r.slug}`} className="font-medium hover:underline truncate">
+                        {r.title}
+                      </Link>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px] shrink-0"
+                        onClick={() => void loadDashboard({ silent: true })}
+                      >
+                        <RefreshCw className="h-4 w-4 sm:mr-2" />
+                        Refresh dashboard
+                      </Button>
+                    </li>
+                  ))}
+                  {drawWaitFromApi.map((r) => (
+                    <li key={`api-${r.id}`} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <Link href={`/raffles/${r.slug}`} className="font-medium hover:underline truncate">
+                        {r.title}
+                      </Link>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px] shrink-0"
+                        onClick={() => void loadDashboard({ silent: true })}
+                      >
+                        <RefreshCw className="h-4 w-4 sm:mr-2" />
+                        Refresh dashboard
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {extensionRefundWaitRaffles.length > 0 && (
+              <div className="rounded-lg border border-border/60 bg-background/80 p-3 text-sm">
+                <p className="font-medium text-foreground mb-1">Extension or refund is updating</p>
+                <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+                  These raffles passed their end time without enough tickets. Status is moving to a second round or
+                  refunds. Tap refresh — opening the raffle page also updates status.
+                </p>
+                <ul className="space-y-2">
+                  {extensionRefundWaitRaffles.map((r) => (
+                    <li key={r.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <Link href={`/raffles/${r.slug}`} className="font-medium hover:underline truncate">
+                        {r.title}
+                      </Link>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="touch-manipulation min-h-[44px] shrink-0"
+                        onClick={() => void loadDashboard({ silent: true })}
+                      >
+                        <RefreshCw className="h-4 w-4 sm:mr-2" />
+                        Refresh dashboard
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Fallback when API has not classified yet but client still sees ended undrawn entries */}
+            {refundWaitRaffles.length > 0 &&
+              drawWaitRaffles.length === 0 &&
+              extensionRefundWaitRaffles.length === 0 &&
+              drawWaitFromApi.length === 0 && (
               <div className="rounded-lg border border-border/60 bg-background/80 p-3 text-sm">
                 <p className="font-medium text-foreground mb-1">Draw or refund is updating</p>
                 <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-                  These raffles have passed their end time but are still being finalized (extension or refund state).
+                  These raffles have passed their end time but are still being finalized.
                   Tap refresh — opening the raffle page also updates status.
                 </p>
                 <ul className="space-y-2">
@@ -2497,7 +2741,7 @@ export default function DashboardPage() {
             className="min-h-[44px] flex-1 gap-1.5 rounded-lg px-2 text-xs font-medium sm:flex-initial sm:px-4 sm:text-sm"
           >
             Hosting
-            {(pendingCreatorFundClaims.length > 0 || creatorRafflesEndedAwaitingDraw.length > 0) && (
+            {(pendingHostingFundClaims.length > 0 || creatorRafflesEndedAwaitingDraw.length > 0) && (
               <span
                 className="inline-block h-2 w-2 shrink-0 rounded-full bg-emerald-500"
                 aria-hidden
@@ -2787,8 +3031,8 @@ export default function DashboardPage() {
 
         <TabsContent value="hosting" className="mt-0 space-y-6 focus-visible:outline-none">
           <HostingQuickStats
-            hostedCount={myRaffles.length}
-            readyToClaimCount={pendingCreatorFundClaims.length}
+            hostedCount={myRaffles.length + myAuctionsForMemo.length}
+            readyToClaimCount={pendingHostingFundClaims.length}
             awaitingDrawCount={creatorRafflesEndedAwaitingDraw.length}
           />
           <HostingClaimTracker
@@ -2797,7 +3041,7 @@ export default function DashboardPage() {
             readyFee={claimTrackerReadyFeeByCurrency}
             readyGross={claimTrackerReadyGrossByCurrency}
             liveSales={claimTrackerLiveSales}
-            pendingClaims={pendingCreatorFundClaims}
+            pendingClaims={pendingHostingFundClaims}
             awaitingSettlement={awaitingSettlementEscrowClaims}
             liveEscrowCount={liveEscrowRaffles.length}
             endedAwaitingDraw={creatorRafflesEndedAwaitingDraw}
@@ -3679,7 +3923,7 @@ export default function DashboardPage() {
           <details className="mt-2 rounded-lg border border-border/50 bg-background/50 text-sm">
             <summary className="cursor-pointer px-3 py-2 font-medium touch-manipulation">What you can claim here</summary>
             <p className="border-t border-border/40 px-3 py-2 text-xs text-muted-foreground leading-relaxed">
-              Nest SOL/USDC rev share is above this card. Creator ticket proceeds are claimed from the Hosting tab
+              Nest SOL/USDC rev share is above this card. Creator raffle/auction proceeds are claimed from the Hosting tab
               (live claim tracker). This section focuses on prizes you won or giveaways assigned to you.
             </p>
           </details>
@@ -3691,15 +3935,15 @@ export default function DashboardPage() {
             </p>
           )}
           <DashboardCollapsible
-            title="Creator proceeds (your raffles)"
+            title="Creator proceeds (your listings)"
             defaultOpen={winsSectionDefaults.creatorProceeds}
-            description="Ticket sales you host are claimed from the Hosting tab. This section is a quick pointer only."
+            description="Raffle ticket sales and auction proceeds you host are claimed from the Hosting tab. This section is a quick pointer only."
           >
-            {pendingCreatorFundClaims.length > 0 ? (
+            {pendingHostingFundClaims.length > 0 ? (
               <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground">
                 <p>
-                  {pendingCreatorFundClaims.length} raffle
-                  {pendingCreatorFundClaims.length === 1 ? '' : 's'} ready to claim from funds escrow. Claim from the{' '}
+                  {pendingHostingFundClaims.length} listing
+                  {pendingHostingFundClaims.length === 1 ? '' : 's'} ready to claim from funds escrow. Claim from the{' '}
                   <button
                     type="button"
                     className="font-medium text-primary underline-offset-4 hover:underline touch-manipulation"
@@ -4052,8 +4296,8 @@ export default function DashboardPage() {
                       </Link>
                       {prizeState === 'waiting' && (
                         <p className="text-xs text-muted-foreground">
-                          Prize not ready to claim yet (waiting for verified escrow deposit or raffle to finish). Open the
-                          raffle page for status.
+                          Prize not ready to claim yet (waiting for verified escrow deposit). Open the raffle page for
+                          status.
                         </p>
                       )}
                       {prizeState === 'returned' && (

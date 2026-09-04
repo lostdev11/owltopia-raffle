@@ -87,6 +87,20 @@ export async function POST(
           fields: [
             { name: 'Partner', value: partner.name, inline: true },
             { name: 'Requested by', value: `\`${shortWallet(session.wallet)}\``, inline: true },
+            ...(target === 'winner'
+              ? [
+                  {
+                    name: 'Win streak',
+                    value: '🔥 3 wins in a row · 5 total (sample)',
+                    inline: true,
+                  },
+                  {
+                    name: 'Entry streak',
+                    value: '📅 4 days in a row (sample)',
+                    inline: true,
+                  },
+                ]
+              : []),
             { name: 'Tenant id', value: `\`${partner.id}\``, inline: false },
           ],
           timestamp: new Date().toISOString(),

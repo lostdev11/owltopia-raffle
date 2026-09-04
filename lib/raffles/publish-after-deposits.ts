@@ -7,9 +7,13 @@ import {
   raffleModerationListingFeePaid,
   raffleRequiresModerationListingFee,
 } from '@/lib/raffles/creator-moderation-policy'
+import { publicationStatusForStartTime } from '@/lib/raffles/publication-status'
+
+export { publicationStatusForStartTime } from '@/lib/raffles/publication-status'
 
 /**
- * Publish raffle (live + active) once main prize, milestones, and moderation listing fee are verified.
+ * Publish raffle (active + live, or active scheduled draft) once main prize, milestones,
+ * and moderation listing fee are verified.
  */
 export async function maybePublishRaffleAfterDeposits(raffleId: string): Promise<boolean> {
   const raffle = await getRaffleById(raffleId)
@@ -24,6 +28,8 @@ export async function maybePublishRaffleAfterDeposits(raffleId: string): Promise
 
   const milestones = await getMilestonesByRaffleId(raffleId)
   if (milestones.length > 0 && !(await allMilestonesDeposited(raffleId))) return false
+
+  if (raffle.max_tickets == null || raffle.max_tickets <= 0) return false
 
   if (raffleRequiresModerationListingFee(raffle)) return false
   if (
@@ -48,13 +54,16 @@ export async function maybePublishRaffleAfterDeposits(raffleId: string): Promise
     })
   }
 
-  const now = new Date().toISOString()
+  const now = new Date()
+  const status = publicationStatusForStartTime(raffle.start_time, now.getTime())
   await updateRaffle(raffleId, {
     is_active: true,
-    status: 'live',
-    updated_at: now,
+    status,
+    updated_at: now.toISOString(),
   })
 
+  // Community Discord alerts only for live listings (fan-out skips non-live).
+  // Future-dated drafts are announced when promoteDraftRafflesToLive flips them to live.
   const published = await getRaffleById(raffleId)
   if (published) {
     await notifyCommunityDiscordRaffleAlerts(published)

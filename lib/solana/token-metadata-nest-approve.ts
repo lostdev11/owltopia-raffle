@@ -6,6 +6,7 @@
  */
 import {
   createApproveInstruction,
+  createRevokeInstruction,
   getAssociatedTokenAddressSync,
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
@@ -85,6 +86,58 @@ export async function approveTokenMetadataNestDelegatesInWallet(params: {
 
   await assertTransactionSimulatesClean(params.connection, tx, {
     failMessagePrefix: 'Nest approve would fail on-chain before wallet approval.',
+  })
+
+  const signature = await params.sendTransaction(tx, params.connection, {
+    skipPreflight: false,
+    preflightCommitment: 'confirmed',
+    maxRetries: 3,
+  } as SendOptions)
+
+  await params.connection.confirmTransaction(
+    { signature: signature as TransactionSignature, blockhash, lastValidBlockHeight },
+    'confirmed'
+  )
+
+  return signature
+}
+
+/**
+ * Clear leftover Gen 2 nest Approves after thaw (owner-only Revoke).
+ * Soft path: empty mint list → null; wallet reject should not undo an already-closed nest.
+ */
+export async function revokeTokenMetadataNestDelegatesInWallet(params: {
+  connection: Connection
+  wallet: any
+  mintIds: string[]
+  sendTransaction?: WalletSendTransactionFn
+}): Promise<string | null> {
+  assertPhantomUsesWalletSignAndSend({
+    wallet: params.wallet,
+    sendTransaction: params.sendTransaction,
+    action: 'nest revoke',
+  })
+  if (!params.sendTransaction) {
+    throw new Error('Wallet sendTransaction is required to clear nest approvals.')
+  }
+
+  const owner = ownerPubkey(params.wallet)
+  const mints = [...new Set(params.mintIds.map((id) => id.trim()).filter(Boolean))]
+  if (mints.length === 0) return null
+
+  const tx = new Transaction()
+  for (const mintStr of mints) {
+    const mint = new PublicKey(mintStr)
+    const ata = getAssociatedTokenAddressSync(mint, owner, false, TOKEN_PROGRAM_ID)
+    tx.add(createRevokeInstruction(ata, owner, [], TOKEN_PROGRAM_ID))
+  }
+
+  const { blockhash, lastValidBlockHeight } = await params.connection.getLatestBlockhash('confirmed')
+  tx.feePayer = owner
+  tx.recentBlockhash = blockhash
+
+  await assertTransactionSimulatesClean(params.connection, tx, {
+    failMessagePrefix: 'Clearing nest approval would fail on-chain before wallet approval.',
   })
 
   const signature = await params.sendTransaction(tx, params.connection, {

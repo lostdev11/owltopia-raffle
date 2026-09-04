@@ -89,7 +89,7 @@ export default function HowItWorksPage() {
               when it is ready (on-chain claim).
             </li>
             <li id="second-selling-round" className="scroll-mt-24">
-              <strong>Raffle ends</strong> — When the end time is reached, the raffle stops accepting new entries. If a <strong>minimum ticket threshold</strong> is set and it is not met, the end date is usually <strong>extended once</strong> by the same length as the original raffle window (with a 7-day minimum if that length cannot be determined). That extension is a <strong>second selling round</strong> only — no winner is drawn yet, and fairness seeds are not re-rolled. If enough tickets sell in the second round, the draw runs later against the <strong>final</strong> ticket ledger (round 1 + round 2). If the minimum is still not met after that extension (or tickets otherwise do not sell through under the raffle rules), refunds are <strong>automatic from escrow</strong>: buyers claim ticket refunds and creators claim their escrowed NFT back from the{' '}
+              <strong>Raffle ends</strong> — When the end time is reached, the raffle stops accepting new entries (unless it already sold out at its maximum ticket cap — then sales stop earlier and the draw can run once the draw threshold is met). If a <strong>minimum ticket threshold</strong> is set and it is not met, the end date is usually <strong>extended once</strong> by the same length as the original raffle window (with a 7-day minimum if that length cannot be determined) — unless the creator turned <strong>Second round</strong> off at setup, in which case refunds open immediately after Round 1. That extension is a <strong>second selling round</strong> only — no winner is drawn yet, and fairness seeds are not re-rolled. If enough tickets sell in the second round, the draw runs later against the <strong>final</strong> ticket ledger (round 1 + round 2). If the minimum is still not met after that extension (or tickets otherwise do not sell through under the raffle rules), refunds are <strong>automatic from escrow</strong>: buyers claim ticket refunds and creators claim their escrowed NFT back from the{' '}
               <Link href="/dashboard" className="text-green-500 hover:underline">
                 dashboard
               </Link>
@@ -99,7 +99,7 @@ export default function HowItWorksPage() {
               <strong>Winner is selected</strong> — Confirmed tickets are lined up in a public <strong>ticket ledger</strong> (wallets sorted lexicographically; same-wallet tickets combined). New raffles use <strong>commit–reveal</strong> (
               <code className="text-sm">owltopia-draw-v2-commit-reveal</code>): when the raffle is created we publish{' '}
               <code className="text-sm">SHA256(seed)</code> (the commit hash) while keeping the raw seed private. That commit stays the same through a second selling round. At draw time — only when the raffle is actually eligible to pick a winner — we reveal the seed and compute{' '}
-              <code className="text-sm">winnerIndex = SHA256(seed:soldCount) % soldCount</code> over the final ledger. Your chance is proportional to how many confirmed tickets that wallet holds. Anyone can open <strong>Verify draw</strong> before the draw to see the commit hash, and after the draw to check the seed matches the commit, recompute the winner, open the Solscan reveal memo, and download the ticket map (CSV/JSON). Older raffles may use <code className="text-sm">owltopia-draw-v1</code> (seed chosen at draw time) or show as <strong>legacy</strong>. Draw math runs off-chain; payments and the reveal memo are on-chain. Draws run when the raffle has ended, thresholds are satisfied, and (for NFT prizes) the prize is confirmed in escrow — often on a schedule (cron) or when an admin triggers processing. A planned upgrade is on-chain VRF randomness at draw time (still only when a winner is selected, never on a failed round).
+              <code className="text-sm">winnerIndex = SHA256(seed:soldCount) % soldCount</code> over the final ledger. Your chance is proportional to how many confirmed tickets that wallet holds. Anyone can open <strong>Verify draw</strong> before the draw to see the commit hash, and after the draw to check the seed matches the commit, recompute the winner, open the Solscan reveal memo, and download the ticket map (CSV/JSON). Older raffles may use <code className="text-sm">owltopia-draw-v1</code> (seed chosen at draw time) or show as <strong>legacy</strong>. Draw math runs off-chain; payments and the reveal memo are on-chain. Draws run when thresholds are satisfied and (for NFT prizes) the prize is confirmed in escrow — at the scheduled end time, when the maximum ticket cap sells out, or when an admin triggers processing — often on a schedule (cron) as well. A planned upgrade is on-chain VRF randomness at draw time (still only when a winner is selected, never on a failed round).
             </li>
             <li>
               <strong>Prize delivery</strong> — NFT winners claim from escrow as above. For cash or token prizes, settlement depends on raffle setup; creators on funds-escrow raffles typically <strong>claim net proceeds</strong> (after the platform fee) from the dashboard after the draw.
@@ -239,12 +239,12 @@ export default function HowItWorksPage() {
             creators pay <strong>2%</strong> on ticket sales, including when tickets are priced in a partner&apos;s custom SPL (same percentage). Of that fee revenue, <strong>50%</strong> is allocated to holder rev share. Amounts are tracked in <strong>SOL</strong> and <strong>USDC</strong>; the home page shows the next scheduled rev share when the team has published it.
           </p>
           <p className="mb-4">
-            For nested Gen 1 owls, rev share is <strong>not</strong> split evenly across every nest:{' '}
-            <strong>90%</strong> of the Gen 1 pool is divided evenly across all staked Gen 1 owls, and{' '}
-            <strong>10%</strong> is divided evenly across staked Gen 1 1/1s. Gen 2 nest rev share is split evenly
-            across eligible Gen 2 nests. The team deposits SOL/USDC into a <strong>dedicated rev-share pool</strong>{' '}
-            (separate from raffle funds escrow). Nested holders can see projected monthly amounts on Nesting; claims
-            open on the 1st of the month after each period ends (UTC) and pay from that pool.
+            For nested Gen 1 and Gen 2 owls, rev share is <strong>not</strong> split evenly across every nest:{' '}
+            <strong>90%</strong> of each gen&apos;s pool is divided evenly across all staked owls in that gen, and{' '}
+            <strong>10%</strong> is a bonus divided evenly across staked 1/1s — so each nested 1/1 receives both
+            shares. The team deposits SOL/USDC into a <strong>dedicated rev-share pool</strong> (separate from raffle
+            funds escrow). Nested holders can see projected monthly amounts on Nesting; claims open on the 1st of the
+            month after each period ends (UTC) and pay from that pool.
           </p>
         </section>
 

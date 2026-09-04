@@ -42,7 +42,7 @@ export async function buildCollectionMintState(
       .limit(25),
     db
       .from('owl_center_marketplace_readiness')
-      .select('trading_links_active,magic_eden_url,tensor_url,hash_list_text,sellout_prepared_at')
+      .select('trading_links_active,magic_eden_url,tensor_url,orbis_url,hash_list_text,sellout_prepared_at')
       .eq('launch_id', launch.id)
       .maybeSingle(),
     getLaunchPriceLamportsQuotes(launch),
@@ -89,6 +89,7 @@ export async function buildCollectionMintState(
     trading_links_active?: boolean
     magic_eden_url?: string | null
     tensor_url?: string | null
+    orbis_url?: string | null
     hash_list_text?: string | null
     sellout_prepared_at?: string | null
   } | null
@@ -111,6 +112,7 @@ export async function buildCollectionMintState(
       trading_links_active: Boolean(mp?.trading_links_active),
       magic_eden_url: mp?.magic_eden_url?.trim() || launch.magic_eden_url,
       tensor_url: mp?.tensor_url?.trim() || launch.tensor_url,
+      orbis_url: mp?.orbis_url?.trim() || launch.orbis_url,
       hash_list_ready: Boolean(mp?.hash_list_text?.trim()) || recordedMints.length > 0,
       sellout_prepared_at: mp?.sellout_prepared_at ?? null,
       mint_addresses_recorded: recordedMints.length,

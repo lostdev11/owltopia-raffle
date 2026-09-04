@@ -6,7 +6,7 @@ import {
   parseNftFloorPrice,
 } from '@/lib/raffles/nft-raffle-economics'
 
-export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'
+export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'
 
 /**
  * Canonical ticket currency for comparisons and revenue display.
@@ -14,7 +14,7 @@ export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'
  */
 export function normalizeRaffleTicketCurrency(input: string | null | undefined): RaffleCurrency {
   const c = String(input ?? 'SOL').trim().toUpperCase()
-  if (c === 'SOL' || c === 'USDC' || c === 'OWL' || c === 'BAMBOO') return c
+  if (c === 'SOL' || c === 'USDC' || c === 'OWL' || c === 'BAMBOO' || c === 'GOATS') return c
   return 'SOL'
 }
 
@@ -23,6 +23,7 @@ export interface RaffleRevenue {
   sol: number
   owl: number
   bamboo: number
+  goats: number
 }
 
 export interface RaffleProfitInfo {
@@ -125,6 +126,7 @@ export function getRaffleRevenue(entries: Entry[]): RaffleRevenue {
   let sol = 0
   let owl = 0
   let bamboo = 0
+  let goats = 0
   for (const e of confirmed) {
     const amount = Number(e.amount_paid) || 0
     const c = (e.currency || '').toUpperCase()
@@ -132,8 +134,9 @@ export function getRaffleRevenue(entries: Entry[]): RaffleRevenue {
     else if (c === 'SOL') sol += amount
     else if (c === 'OWL') owl += amount
     else if (c === 'BAMBOO') bamboo += amount
+    else if (c === 'GOATS') goats += amount
   }
-  return { usdc, sol, owl, bamboo }
+  return { usdc, sol, owl, bamboo, goats }
 }
 
 /**
@@ -157,14 +160,14 @@ export function getRaffleThreshold(raffle: Raffle): { value: number; currency: R
     if (
       Number.isFinite(amount) &&
       amount > 0 &&
-      (currency === 'SOL' || currency === 'USDC' || currency === 'OWL' || currency === 'BAMBOO')
+      (currency === 'SOL' || currency === 'USDC' || currency === 'OWL' || currency === 'BAMBOO' || currency === 'GOATS')
     ) {
       return { value: amount, currency: currency as RaffleCurrency }
     }
   }
 
   const cur = (raffle.currency || 'SOL').toUpperCase()
-  const currencyOk = cur === 'SOL' || cur === 'USDC' || cur === 'OWL' || cur === 'BAMBOO'
+  const currencyOk = cur === 'SOL' || cur === 'USDC' || cur === 'OWL' || cur === 'BAMBOO' || cur === 'GOATS'
   if (!currencyOk) return null
 
   // 2) NFT: revenue bar tracks draw goal (effective min tickets × ticket) and floor, whichever is higher.
@@ -282,7 +285,7 @@ export type CreateRaffleThresholdCreatorCopy = {
 
 function formatPrizeAmountForCreator(value: number, currencyCode: string): string {
   const c = currencyCode.toUpperCase()
-  if (c === 'SOL' || c === 'USDC' || c === 'OWL' || c === 'BAMBOO') {
+  if (c === 'SOL' || c === 'USDC' || c === 'OWL' || c === 'BAMBOO' || c === 'GOATS') {
     return formatThresholdExplainAmount(value, c as RaffleCurrency)
   }
   const decimals = Number.isInteger(value) ? 0 : 4
@@ -382,6 +385,7 @@ export function revenueInCurrency(revenue: RaffleRevenue, currency: RaffleCurren
     case 'SOL': return revenue.sol
     case 'OWL': return revenue.owl
     case 'BAMBOO': return revenue.bamboo
+    case 'GOATS': return revenue.goats
     default: return 0
   }
 }
@@ -449,7 +453,7 @@ export function getRevShareAmounts(raffle: Raffle, entries: Entry[]): RevShareAm
   const revenue = getRaffleRevenue(entries)
   const th = getRaffleThreshold(raffle)
   const out: RevShareAmounts = { founderSol: 0, founderUsdc: 0, communitySol: 0, communityUsdc: 0 }
-  if (!th || th.currency === 'OWL' || th.currency === 'BAMBOO') return out
+  if (!th || th.currency === 'OWL' || th.currency === 'BAMBOO' || th.currency === 'GOATS') return out
   const revInCur = revenueInCurrency(revenue, th.currency)
   const rRounded = roundForProfitDisplay(revInCur, th.currency)
   const tRounded = roundForProfitDisplay(th.value, th.currency)

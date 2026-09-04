@@ -2,9 +2,23 @@ import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import type { StakingPositionRow } from '@/lib/db/staking-positions'
 
 /** Mutations executed after validation in `lib/nesting/service.ts`. */
+/** Returned after Gen 2 thaw when the holder should clear the leftover SPL Approve. */
+export type NestDelegateRevokeHint = {
+  mint: string
+}
+
+/** Returned when MPL Core freeze remains under Owner authority (holder must thaw in wallet). */
+export type NestOwnerThawHint = {
+  mint: string
+}
+
 export interface StakingMutationAdapter {
   stakeIntoPool(input: StakeIntoPoolInput): Promise<{ position: StakingPositionRow }>
-  unstakePosition(input: UnstakePositionInput): Promise<{ position: StakingPositionRow }>
+  unstakePosition(input: UnstakePositionInput): Promise<{
+    position: StakingPositionRow
+    nest_delegate_revoke?: NestDelegateRevokeHint | null
+    nest_owner_thaw?: NestOwnerThawHint | null
+  }>
   claimPositionRewards(input: ClaimPositionInput): Promise<{
     claimed: number
     claimed_rewards_total: number

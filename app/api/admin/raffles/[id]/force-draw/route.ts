@@ -8,7 +8,7 @@ import {
   calculateTicketsSold,
   getRaffleMinimum,
 } from '@/lib/db/raffles'
-import { raffleUsesDrawVrf, DRAW_ALGO_V3_VRF } from '@/lib/raffles/draw'
+import { raffleUsesDrawVrf, DRAW_ALGO_V3_VRF, resolveAdminVrfForceNewRequest } from '@/lib/raffles/draw'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
 export const dynamic = 'force-dynamic'
@@ -99,23 +99,15 @@ export async function POST(
     const isVrf =
       (raffle.draw_algo ?? '').trim() === DRAW_ALGO_V3_VRF || raffleUsesDrawVrf(raffle)
 
-    // Prefer resuming an existing VRF account (may already be revealed on-chain).
-    // Only force a brand-new Switchboard request when explicitly requested or there is no account.
     const hasVrfAccount = Boolean((raffle.draw_vrf_account ?? '').trim())
-    const forceNewVrf = body.forceNewVrf === true || (isVrf && !hasVrfAccount)
+    const forceNewVrf =
+      body.forceNewVrf === true ||
+      (isVrf && !hasVrfAccount) ||
+      (isVrf && resolveAdminVrfForceNewRequest(raffle))
 
-    let winnerWallet = await selectWinner(raffle.id, forceOverride, {
+    const winnerWallet = await selectWinner(raffle.id, forceOverride, {
       forceVrfRetry: forceNewVrf,
     })
-
-    // Resume path needs the stored randomness secret. If it was lost, fall back to a new VRF request.
-    if (!winnerWallet && isVrf && hasVrfAccount && !forceNewVrf) {
-      const mid = await getRaffleById(raffle.id)
-      const err = (mid?.draw_vrf_error ?? '').trim()
-      if (/Missing VRF account secret/i.test(err)) {
-        winnerWallet = await selectWinner(raffle.id, forceOverride, { forceVrfRetry: true })
-      }
-    }
 
     if (!winnerWallet) {
       const latest = await getRaffleById(raffle.id)
@@ -133,6 +125,7 @@ export async function POST(
           drawVrfError: latest?.draw_vrf_error ?? null,
           drawVrfRequestTx: latest?.draw_vrf_request_tx ?? null,
           drawVrfAccount: latest?.draw_vrf_account ?? null,
+          forcedNewVrf: forceNewVrf,
           ticketsSold,
         },
         { status: 409 }
@@ -152,6 +145,7 @@ export async function POST(
       drawVrfStatus: latest?.draw_vrf_status ?? null,
       drawVrfRequestTx: latest?.draw_vrf_request_tx ?? null,
       drawVrfFulfillTx: latest?.draw_vrf_fulfill_tx ?? null,
+      forcedNewVrf: forceNewVrf,
       message: `Winner selected: ${winnerWallet}`,
     })
   } catch (error) {

@@ -4,6 +4,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { Gen2WlShareButton } from '@/components/owl-center/Gen2WlShareButton'
+import { replaceClientUrl } from '@/lib/client/replace-url'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
 import type { Gen2MintCheckPhasePreview, Gen2MintCheckResponse, OwlCenterPhase } from '@/lib/owl-center/types'
 import { cn } from '@/lib/utils'
@@ -12,9 +13,7 @@ function scrollToSection(id: string) {
   const el = document.getElementById(id)
   if (!el) return
   el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  if (typeof history !== 'undefined' && history.replaceState) {
-    history.replaceState(null, '', `#${id}`)
-  }
+  replaceClientUrl(`#${id}`)
 }
 
 function wlPhaseFromCheck(check: Gen2MintCheckResponse | null): Gen2MintCheckPhasePreview | null {

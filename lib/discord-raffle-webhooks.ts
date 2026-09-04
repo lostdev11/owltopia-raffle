@@ -15,6 +15,7 @@ import type { CommunityGiveaway, Raffle } from '@/lib/types'
 import { resolveNftPrizeImageForDiscordEmbed } from '@/lib/discord-nft-embed-image'
 import { notifyCommunityDiscordRaffleAlerts } from '@/lib/discord-raffle-alert-fanout'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
+import { canonicalRaffleSlug } from '@/lib/raffles/slug-aliases'
 import { isAllowedDiscordIncomingWebhookUrl } from '@/lib/discord-webhook-url'
 import { parseDiscordUserSnowflake } from '@/lib/discord-webhook-user-mentions'
 import { getDiscordUserIdsByWallets } from '@/lib/db/wallet-profiles'
@@ -25,6 +26,10 @@ import {
   formatDiscordRaidRoleMention,
   getDiscordRaidRoleId,
 } from '@/lib/discord-raid-role'
+import {
+  buildWinnerDiscordStreakFields,
+  type DiscordWinnerStreakStats,
+} from '@/lib/discord-winner-streak-fields'
 import {
   buildDiscordXTweetMirrorContent,
   MAX_X_POST_TWEET_MIRRORS,
@@ -110,7 +115,7 @@ function prizeSummary(raffle: Raffle): string {
 
 function rafflePageUrl(raffle: Raffle): string {
   const base = getSiteBaseUrl()
-  return `${base}/raffles/${encodeURIComponent(raffle.slug)}`
+  return `${base}/raffles/${encodeURIComponent(canonicalRaffleSlug(raffle.slug))}`
 }
 
 function communityGiveawayPageUrl(g: Pick<CommunityGiveaway, 'id'>): string {
@@ -438,7 +443,8 @@ export async function notifyRaffleWinnerDrawn(
   raffle: Raffle,
   winnerWallet: string,
   statusAfterDraw: string,
-  winnerDiscordUserId?: string | null
+  winnerDiscordUserId?: string | null,
+  streakStats?: DiscordWinnerStreakStats | null
 ): Promise<void> {
   const mainUrl = webhookUrlWinner()
   const entitledPartner = await loadEntitledDiscordPartnerTenant(raffle.discord_partner_tenant_id)
@@ -466,6 +472,8 @@ export async function notifyRaffleWinnerDrawn(
       }
     : { name: 'Winner', value: `\`${shortenWallet(winnerWallet)}\``, inline: true }
 
+  const streakFields = buildWinnerDiscordStreakFields(streakStats)
+
   const extras: WebhookExtras | undefined = discordSnowflake
     ? {
         content: `Winner ping: <@${discordSnowflake}>`,
@@ -480,6 +488,7 @@ export async function notifyRaffleWinnerDrawn(
     color: 0xfee75c,
     fields: [
       winnerField,
+      ...streakFields,
       { name: 'Prize', value: prizeSummary(raffle), inline: true },
       {
         name: 'Raffle status',
@@ -588,7 +597,8 @@ export async function notifyCommunityGiveawayOpened(
 export async function notifyCommunityGiveawayWinnerDrawn(
   giveaway: Pick<CommunityGiveaway, 'id' | 'title' | 'nft_mint_address' | 'nft_token_id'>,
   winnerWallet: string,
-  winnerDiscordUserId?: string | null
+  winnerDiscordUserId?: string | null,
+  streakStats?: DiscordWinnerStreakStats | null
 ): Promise<void> {
   const url = webhookUrlCommunityGiveawayWinner()
   if (!url) {
@@ -615,6 +625,8 @@ export async function notifyCommunityGiveawayWinnerDrawn(
       }
     : { name: 'Winner', value: `\`${shortenWallet(winnerWallet)}\``, inline: true }
 
+  const streakFields = buildWinnerDiscordStreakFields(streakStats)
+
   const extras: WebhookExtras | undefined = discordSnowflake
     ? {
         content: `Winner ping: <@${discordSnowflake}>`,
@@ -631,6 +643,7 @@ export async function notifyCommunityGiveawayWinnerDrawn(
       color: 0xfee75c,
       fields: [
         winnerField,
+        ...streakFields,
         { name: 'Giveaway', value: pageUrl, inline: false },
       ],
       image: prizeImage ? { url: prizeImage } : undefined,

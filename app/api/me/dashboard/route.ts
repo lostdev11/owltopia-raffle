@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { after } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import {
   getRafflesByCreator,
@@ -6,7 +7,10 @@ import {
   getCreatorLiveEarningsByWallet,
   getCreatorTicketSalesGrossByWallet,
   getLiveFundsEscrowSalesBreakdownByWallet,
+  getRaffleById,
+  getEntriesByRaffleId,
 } from '@/lib/db/raffles'
+import { getAuctionsByCreator } from '@/lib/db/auctions'
 import { getEntriesByWallet, getRefundCandidatesByRaffleIds } from '@/lib/db/entries'
 import { getCreatorFeeTier } from '@/lib/raffles/get-creator-fee-tier'
 import { defaultDisplayNameFromWallet, getWalletProfileForDashboard } from '@/lib/db/wallet-profiles'
@@ -30,6 +34,10 @@ import {
   listBuyoutOffersForBidder,
 } from '@/lib/db/buyout-offers'
 import { processEndedRaffleByIdIfApplicable } from '@/lib/draw-ended-raffles'
+import {
+  classifyEndedNoWinnerRaffle,
+  type EndedFinalizingItem,
+} from '@/lib/raffles/ended-finalizing'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { entryHasOnChainRefundAmount } from '@/lib/raffles/entry-refund-amount'
@@ -37,8 +45,11 @@ import { listOfferRefundCandidatesByWallet } from '@/lib/db/raffle-offers'
 import { listMilestoneBonusWinsForWallet } from '@/lib/db/raffle-milestones'
 import { getDiscordPartnerTenantIdForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
 import { isAdmin as isWalletRegisteredAdmin } from '@/lib/db/admins'
+import { getWalletStreaks } from '@/lib/db/wallet-streaks'
 
 export const dynamic = 'force-dynamic'
+/** Extension/refund finals are fast; draw work is scheduled via after() + client process-ended. */
+export const maxDuration = 60
 
 /** Same filters as {@link processEndedRaffleByIdIfApplicable} — used so hosts see claim UI without buying their own tickets. */
 function isEndedNoWinnerProcessCandidate(
@@ -159,16 +170,74 @@ export async function GET(request: NextRequest) {
       if (isEndedNoWinnerProcessCandidate(r)) endedNoWinnerCandidateIds.add(r.id)
     }
 
+    const endedFinalizing: EndedFinalizingItem[] = []
+    let refreshedAfterFastProcess = false
+
     if (endedNoWinnerCandidateIds.size > 0) {
       for (const raffleId of endedNoWinnerCandidateIds) {
-        await processEndedRaffleByIdIfApplicable(raffleId)
+        try {
+          const raffle = await getRaffleById(raffleId)
+          if (!raffle) continue
+          const entries = await getEntriesByRaffleId(raffleId)
+          const kind = classifyEndedNoWinnerRaffle(raffle, entries)
+          if (!kind) continue
+
+          if (kind === 'awaiting_extension_or_refund') {
+            // Min-threshold extension / terminal refund — usually milliseconds; safe to await.
+            await processEndedRaffleByIdIfApplicable(raffleId)
+            refreshedAfterFastProcess = true
+            const latest = await getRaffleById(raffleId)
+            if (!latest) continue
+            const latestEntries = await getEntriesByRaffleId(raffleId)
+            const still = classifyEndedNoWinnerRaffle(latest, latestEntries)
+            if (still) {
+              endedFinalizing.push({
+                id: latest.id,
+                slug: latest.slug,
+                title: latest.title,
+                kind: still,
+              })
+            }
+            continue
+          }
+
+          // Winner draw (often Switchboard VRF ~75s). Do not block dashboard GET —
+          // OWL #175 sat in "Draw or refund is updating" while inline VRF timed out.
+          after(async () => {
+            try {
+              await processEndedRaffleByIdIfApplicable(raffleId)
+            } catch (e) {
+              console.warn(
+                '[me/dashboard] background draw process:',
+                raffleId,
+                e instanceof Error ? e.message : e
+              )
+            }
+          })
+          endedFinalizing.push({
+            id: raffle.id,
+            slug: raffle.slug,
+            title: raffle.title,
+            kind: 'awaiting_draw',
+          })
+        } catch (e) {
+          console.warn(
+            '[me/dashboard] ended-finalizing classify:',
+            raffleId,
+            e instanceof Error ? e.message : e
+          )
+        }
       }
-      entriesWithRaffles = await getEntriesByWallet(wallet)
-      rafflesForResponse = await getRafflesByCreator(wallet)
+
+      if (refreshedAfterFastProcess) {
+        entriesWithRaffles = await getEntriesByWallet(wallet)
+        rafflesForResponse = await getRafflesByCreator(wallet)
+      }
     }
 
     const [
       raffles,
+      myAuctions,
       settledRevenue,
       liveEarnings,
       grossSales,
@@ -183,8 +252,13 @@ export async function GET(request: NextRequest) {
       buyoutOffers,
       viewerIsSiteAdmin,
       milestoneBonusWins,
+      streaks,
     ] = await Promise.all([
       Promise.resolve(rafflesForResponse),
+      getAuctionsByCreator(wallet).catch((err) => {
+        console.error('getAuctionsByCreator:', err)
+        return []
+      }),
       getCreatorRevenueByWallet(wallet),
       getCreatorLiveEarningsByWallet(wallet),
       getCreatorTicketSalesGrossByWallet(wallet),
@@ -222,6 +296,17 @@ export async function GET(request: NextRequest) {
       listMilestoneBonusWinsForWallet(wallet).catch((err) => {
         console.error('[me/dashboard] milestone bonus wins:', err instanceof Error ? err.message : err)
         return []
+      }),
+      getWalletStreaks(wallet).catch((err) => {
+        console.error('[me/dashboard] wallet streaks:', err instanceof Error ? err.message : err)
+        return {
+          winCurrentStreak: 0,
+          winBestStreak: 0,
+          winTotalWins: 0,
+          participationCurrentStreak: 0,
+          participationBestStreak: 0,
+          lastParticipationDate: null,
+        }
       }),
     ])
 
@@ -346,6 +431,7 @@ export async function GET(request: NextRequest) {
       displayName: walletProfile.displayName,
       discord: walletProfile.discord,
       myRaffles: raffles,
+      myAuctions,
       myEntries: entriesWithRaffles,
       creatorRevenue: creatorRevenueTotal,
       creatorRevenueByCurrency,
@@ -371,9 +457,15 @@ export async function GET(request: NextRequest) {
       referralGrowth: referralProgramActive ? referralGrowth : null,
       buyoutOffers: buyoutOffersWithDepositSource,
       engagement,
+      streaks,
       /** True when session wallet is listed in `admins` (unlock partner hub preview, etc.). */
       viewerIsSiteAdmin,
       milestoneBonusWins,
+      /**
+       * Ended raffles still finalizing: draw (VRF) vs extension/refund.
+       * Dashboard client POSTs process-ended for awaiting_draw and polls.
+       */
+      endedFinalizing,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to load dashboard'

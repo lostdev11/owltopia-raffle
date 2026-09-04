@@ -26,6 +26,7 @@ import { getAdminRole } from '@/lib/db/admins'
 import { getPrizeEscrowPublicKey } from '@/lib/raffles/prize-escrow'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { notifyRaffleCreated } from '@/lib/discord-raffle-webhooks'
+import { sanitizeRaffleSlug, slugifyRaffleTitle } from '@/lib/raffles/slugify'
 import {
   parseNftFloorPrice,
   parseNftTicketPrice,
@@ -33,6 +34,11 @@ import {
   validateNftMaxTickets,
   validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
+import {
+  parseMaxTicketsPerWalletInput,
+  validateMaxTicketsPerWallet,
+} from '@/lib/raffles/max-tickets-per-wallet'
+import { parseRequiredMaxTickets } from '@/lib/raffles/max-tickets'
 import { buildDuplicateNftPrizeConflictBody } from '@/lib/raffles/duplicate-nft-prize-conflict'
 import {
   buildDuplicatePartnerCryptoPrizeConflictBody,
@@ -61,7 +67,10 @@ import { getCreatorModerationCreateContext } from '@/lib/db/creator-moderation'
 import { listingFeeSolForStrikeCount } from '@/lib/raffles/creator-moderation-policy'
 import { getMilestonesByRaffleId, insertRaffleMilestones } from '@/lib/db/raffle-milestones'
 import { BAMBOO_TICKET_CURRENCY, canWalletUseBambooTicketCurrency } from '@/lib/raffles/bamboo-ticket-currency'
+import { GOATS_TICKET_CURRENCY, canWalletUseGoatsTicketCurrency } from '@/lib/raffles/goats-ticket-currency'
 import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
+import { recordPlatformProjectFromCreatedRaffleSafe } from '@/lib/platform-projects/record-from-raffle'
+import { sanitizeLaunchMintPubkey } from '@/lib/solana/validate-pubkey'
 
 /** Same as /api/me/dashboard — client sends the adapter’s pubkey so we can reject stale SIWS sessions after wallet switches. */
 const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
@@ -167,6 +176,14 @@ function coerceThemeAccent(raw: unknown): ThemeAccent {
   return (THEME_ACCENT_VALUES as readonly string[]).includes(s) ? (s as ThemeAccent) : 'prime'
 }
 
+/** Community vote: default ON when omitted (matches legacy automatic Round 2). */
+function parseSecondRoundEnabled(body: Record<string, unknown>): boolean {
+  const raw = body.second_round_enabled ?? body.secondRoundEnabled
+  if (raw === undefined || raw === null) return true
+  if (raw === false || raw === 'false' || raw === 0 || raw === '0') return false
+  return true
+}
+
 /** Wrap a promise with a timeout; rejects with step info so we can return 502 + step */
 async function withTimeout<T>(
   promise: Promise<T>,
@@ -255,15 +272,9 @@ export async function handleCreateRafflePost(
       )
     }
 
-    // Generate slug from title if not provided, or use provided slug
-    let slug = body.slug
-    if (!slug) {
-      // Generate base slug from title
-      slug = body.title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, '')
-    }
+    // Generate slug from title if not provided, or use provided slug.
+    // Always sanitize so client-supplied slugs cannot keep phishing-shaped tokens.
+    let slug = body.slug ? sanitizeRaffleSlug(String(body.slug)) : slugifyRaffleTitle(body.title)
 
     // Ensure slug is unique
     slug = await withTimeout(generateUniqueSlug(slug), SUPABASE_TIMEOUT_MS, 'supabase error')
@@ -308,6 +319,8 @@ export async function handleCreateRafflePost(
     const adminRole = await getAdminRole(walletAddress)
     const canCreateBambooTicketRaffle =
       adminRole !== null || canWalletUseBambooTicketCurrency(walletAddress)
+    const canCreateGoatsTicketRaffle =
+      adminRole !== null || canWalletUseGoatsTicketCurrency(walletAddress)
 
     let promoXHandle: string | null = null
     if (body.promo_x_handle !== undefined && body.promo_x_handle !== null && body.promo_x_handle !== '') {
@@ -324,10 +337,11 @@ export async function handleCreateRafflePost(
       promoXHandle = parsedPromo.value
     }
 
-    // Ticket currency: SOL/USDC for everyone; OWL when configured; Bamboo is supported but permission-gated below.
+    // Ticket currency: SOL/USDC for everyone; OWL when configured; Bamboo/GOATS are supported but permission-gated below.
     const validCurrencies: string[] = ['USDC', 'SOL']
     if (isOwlEnabled()) validCurrencies.push('OWL')
     validCurrencies.push(BAMBOO_TICKET_CURRENCY)
+    validCurrencies.push(GOATS_TICKET_CURRENCY)
     if (requestedCurrency && !validCurrencies.includes(requestedCurrency)) {
       return NextResponse.json(
         { error: `Currency must be one of: ${validCurrencies.join(', ')}` },
@@ -389,14 +403,23 @@ export async function handleCreateRafflePost(
       )
     }
 
-    let maxTickets: number | null = null
-    if (body.max_tickets != null && body.max_tickets !== '') {
-      const parsed =
-        typeof body.max_tickets === 'number' ? body.max_tickets : parseInt(String(body.max_tickets), 10)
-      if (isNaN(parsed) || parsed <= 0) {
-        return NextResponse.json({ error: 'max_tickets must be a positive integer when set.' }, { status: 400 })
+    const parsedMax = parseRequiredMaxTickets(body.max_tickets)
+    if (!parsedMax.ok) {
+      return NextResponse.json({ error: parsedMax.error }, { status: 400 })
+    }
+    const maxTickets = parsedMax.value
+
+    let maxTicketsPerWallet: number | null = null
+    if (body.max_tickets_per_wallet !== undefined) {
+      const parsedPerWallet = parseMaxTicketsPerWalletInput(body.max_tickets_per_wallet)
+      if (!parsedPerWallet.ok) {
+        return NextResponse.json({ error: parsedPerWallet.error }, { status: 400 })
       }
-      maxTickets = parsed
+      const perWalletOk = validateMaxTicketsPerWallet(parsedPerWallet.value, maxTickets)
+      if (!perWalletOk.ok) {
+        return NextResponse.json({ error: perWalletOk.error }, { status: 400 })
+      }
+      maxTicketsPerWallet = perWalletOk.value
     }
 
     const effectiveTicketCurrency = requestedCurrency || 'SOL'
@@ -414,6 +437,15 @@ export async function handleCreateRafflePost(
         {
           error:
             'Bamboo ticket currency is only available to the PNDA Partner Pro creator wallet and platform admins.',
+        },
+        { status: 403 }
+      )
+    }
+    if (effectiveTicketCurrency === GOATS_TICKET_CURRENCY && !canCreateGoatsTicketRaffle) {
+      return NextResponse.json(
+        {
+          error:
+            'GOATS ticket currency is only available to the Goats of Solana Partner Pro creator wallet and platform admins.',
         },
         { status: 403 }
       )
@@ -464,6 +496,7 @@ export async function handleCreateRafflePost(
       }
     }
     const list_on_platform = !requestUnlisted
+    const second_round_enabled = parseSecondRoundEnabled(body)
 
     let raffleData: Omit<Raffle, 'id' | 'created_at' | 'updated_at'>
 
@@ -555,6 +588,7 @@ export async function handleCreateRafflePost(
         prize_currency: prizeCurrency,
         nft_mint_address: null,
         nft_collection_name: null,
+        nft_collection_mint: null,
         nft_token_id: null,
         nft_metadata_uri: null,
         ticket_price: ticketPriceNum,
@@ -565,11 +599,13 @@ export async function handleCreateRafflePost(
         alternate_ticket_currency,
         alternate_ticket_price,
         max_tickets: maxTickets,
+        max_tickets_per_wallet: maxTicketsPerWallet,
         min_tickets: minTickets,
         start_time: startTime,
         end_time: body.end_time,
         original_end_time: body.end_time,
         time_extension_count: 0,
+        second_round_enabled,
         theme_accent: coerceThemeAccent(body.theme_accent),
         edited_after_entries: false,
         created_by: walletAddress,
@@ -624,6 +660,9 @@ export async function handleCreateRafflePost(
         typeof body.nft_token_id === 'string' && body.nft_token_id.trim() ? body.nft_token_id.trim() : null
       if (nftMintAddress) nftMintAddress = normalizePrizeAssetIdForRaffle(nftMintAddress) ?? nftMintAddress
       if (nftTokenId) nftTokenId = normalizePrizeAssetIdForRaffle(nftTokenId) ?? nftTokenId
+      const nftCollectionMintRaw =
+        typeof body.nft_collection_mint === 'string' ? body.nft_collection_mint : ''
+      const nftCollectionMint = sanitizeLaunchMintPubkey(nftCollectionMintRaw)
 
       if (!nftMintAddress && !nftTokenId) {
         return NextResponse.json(
@@ -763,12 +802,13 @@ export async function handleCreateRafflePost(
 
       if (!body.slug) {
         slug = await withTimeout(
-          generateUniqueSlug(
-            canonicalNftTitle
-              .toLowerCase()
-              .replace(/[^a-z0-9]+/g, '-')
-              .replace(/(^-|-$)/g, '')
-          ),
+          generateUniqueSlug(slugifyRaffleTitle(canonicalNftTitle)),
+          SUPABASE_TIMEOUT_MS,
+          'supabase error'
+        )
+      } else {
+        slug = await withTimeout(
+          generateUniqueSlug(sanitizeRaffleSlug(String(body.slug))),
           SUPABASE_TIMEOUT_MS,
           'supabase error'
         )
@@ -788,6 +828,7 @@ export async function handleCreateRafflePost(
         prize_currency: prizeCurrency,
         nft_mint_address: prizeType === 'nft' ? nftMintAddress : null,
         nft_collection_name: prizeType === 'nft' ? (body.nft_collection_name || null) : null,
+        nft_collection_mint: prizeType === 'nft' ? nftCollectionMint : null,
         nft_token_id: prizeType === 'nft' ? nftTokenId : null,
         nft_metadata_uri: prizeType === 'nft' ? (body.nft_metadata_uri || null) : null,
         ticket_price: ticketPriceNum,
@@ -798,11 +839,13 @@ export async function handleCreateRafflePost(
         alternate_ticket_currency,
         alternate_ticket_price,
         max_tickets: maxTickets,
+        max_tickets_per_wallet: maxTicketsPerWallet,
         min_tickets: minTickets,
         start_time: startTime,
         end_time: body.end_time,
         original_end_time: body.end_time,
         time_extension_count: 0,
+        second_round_enabled,
         theme_accent: coerceThemeAccent(body.theme_accent),
         edited_after_entries: false,
         created_by: walletAddress,
@@ -930,6 +973,8 @@ export async function handleCreateRafflePost(
     try {
       const raffle = await withTimeout(createRaffle(raffleData), SUPABASE_TIMEOUT_MS, 'supabase error')
 
+      recordPlatformProjectFromCreatedRaffleSafe(raffle)
+
       if (milestoneValidation.milestones.length > 0) {
         await insertRaffleMilestones(raffle.id, milestoneValidation.milestones)
       }
@@ -1008,6 +1053,28 @@ export async function handleCreateRafflePost(
         {
           error:
             'This accent color needs a quick database update on the server. Try Prime, Midnight, or Dawn for now, or ask an admin to apply migration 093_extend_theme_accent_more.sql.',
+          step,
+        },
+        { status: 503 }
+      )
+    }
+    // Legacy DECIMAL(10,6) ticket_price / amount_paid overflow (max 9999.999999). Migration 216 widens to NUMERIC(38,18).
+    if (/numeric field overflow/i.test(raw) || raw.includes('22003')) {
+      return NextResponse.json(
+        {
+          error:
+            'This ticket price is too large for the current database column. Ask an admin to apply migration 216_widen_ticket_price_amount_paid_precision.sql, then try again.',
+          step,
+        },
+        { status: 503 }
+      )
+    }
+    // App allowlists GOATS/BAMBOO tickets; raffles_currency_check must match (migration 225 / 212).
+    if (/raffles_currency_check/i.test(raw) || /entries_currency_check/i.test(raw)) {
+      return NextResponse.json(
+        {
+          error:
+            'This ticket currency is not enabled in the database yet. Ask an admin to apply migration 225_allow_goats_raffle_currency.sql, then try again.',
           step,
         },
         { status: 503 }

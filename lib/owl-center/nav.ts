@@ -9,7 +9,7 @@ export type OwlCenterNavItem = {
   icon: LucideIcon
   /** Match pathname prefix (e.g. /owl-center/collection/gen2). */
   matchPrefix?: string
-  /** Hidden from public view — generator, launch submit, etc. */
+  /** Hidden from public view — generator, launch submit (admins + approved partners). */
   adminOnly?: boolean
 }
 

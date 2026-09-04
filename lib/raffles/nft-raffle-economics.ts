@@ -123,7 +123,7 @@ export function validateNftMaxTickets(
   if (maxTickets < minTickets) {
     return {
       ok: false,
-      error: `Max tickets must be at least ${minTickets} (the computed draw goal from floor ÷ ticket price), or leave empty for unlimited.`,
+      error: `Max tickets must be at least ${minTickets} (the computed draw goal from floor ÷ ticket price).`,
     }
   }
   return { ok: true }

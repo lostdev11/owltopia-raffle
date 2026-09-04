@@ -113,6 +113,10 @@ Clearing it is an owner action; code alone cannot lift a third-party wallet repu
 2. **Request a dApp review / allowlist** from Phantom (`review@phantom.com`) and Blowfish, referencing the verified domain. Steps in [`PHANTOM_DOMAIN_REVIEW.md`](PHANTOM_DOMAIN_REVIEW.md).
 3. Keep `NEXT_PUBLIC_SITE_URL` and the wallet app identity pointed at that same host so the origin the wallet sees always equals the verified domain.
 
+### OKX Wallet "potential phishing site" interstitial
+
+A different warning: full-page **“You’re visiting a potential phishing site”** with Leave / Continue. That UI is injected by **OKX Wallet**, not by Owltopia and not by Phantom. Public phishing feeds (Phantom blocklist, MetaMask eth-phishing-detect, ScamSniffer, GoPlus) were clean for `owltopia.xyz` when last checked; OKX maintains its own domain DB. Investigation notes and appeal steps: [`OKX_PHISHING_WARNING.md`](OKX_PHISHING_WARNING.md).
+
 ### Key-material hygiene
 
 - `.gitignore` now ignores key material broadly (`*-keypair.json`, `*keypair*.json`, `governance-anchor/keys/*.json`, `*.key`, `id_rsa`) so keypairs cannot be committed by accident.

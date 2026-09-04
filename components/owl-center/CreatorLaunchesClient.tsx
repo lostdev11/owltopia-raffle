@@ -23,6 +23,10 @@ type LaunchRow = {
   symbol: string | null
   status: string
   active_phase: string
+  active_phases?: string[]
+  is_paused?: boolean
+  phase_schedule?: Record<string, string>
+  launch_deadline_at?: string | null
   total_supply: number
   minted_count: number
   wallet_mint_limit: number
@@ -136,7 +140,12 @@ export function CreatorLaunchesClient() {
           ) : null}
           {launches.map((l) => {
             const listingUnlocked = isLaunchMarketplaceListingUnlocked(l)
-            const friendly = friendlyLaunchStatus(l.status, l.active_phase)
+            const friendly = friendlyLaunchStatus(l.status, l.active_phase, {
+              phase_schedule: l.phase_schedule,
+              launch_deadline_at: l.launch_deadline_at,
+              active_phases: l.active_phases,
+              is_paused: l.is_paused,
+            })
             const adminLabels = isAdmin && !previewPartner && !isPartnerPreview
             return (
             <CommandCard key={l.id} label={adminLabels ? `${l.status} · ${l.active_phase}` : friendly.label}>
@@ -144,7 +153,7 @@ export function CreatorLaunchesClient() {
                 <div>
                   <p className="font-display text-xl text-[#F4FBF8]">{l.name}</p>
                   <p className="mt-1 font-mono text-xs leading-relaxed text-[#5C6773]">
-                    {l.symbol ?? '—'} · {l.minted_count}/{l.total_supply} minted · {l.wallet_mint_limit}/wallet/phase
+                    {l.symbol ?? '—'} · {l.minted_count}/{l.total_supply} minted · {l.wallet_mint_limit}/wallet public
                     {adminLabels ? <> · slug {l.slug.slice(0, 12)}…</> : null}
                   </p>
                   {!adminLabels && friendly.hint ? (

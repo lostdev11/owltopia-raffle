@@ -6,6 +6,7 @@ import { bodyHasMintConfigFields, buildMintDetailsPatchFromBody } from '@/lib/ow
 import { datetimeLocalToIso, parsePhaseSchedule } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterPhase, OwlCenterStatus } from '@/lib/owl-center/types'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
+import { syncPublicSimpleCandyGuards } from '@/lib/owl-center/sync-public-simple-guards'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,6 +56,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   }
   if (typeof body.magic_eden_url === 'string') patch.magic_eden_url = body.magic_eden_url.trim() || null
   if (typeof body.tensor_url === 'string') patch.tensor_url = body.tensor_url.trim() || null
+  if (typeof body.orbis_url === 'string') patch.orbis_url = body.orbis_url.trim() || null
   if (body.mint_network === 'devnet' || body.mint_network === 'mainnet') {
     patch.mint_network = body.mint_network
   }
@@ -99,7 +101,14 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   const updated = await updateOwlCenterLaunchByIdAdmin(id, patch)
   if (!updated) return jsonError('Update failed', 500)
 
-  return NextResponse.json({ ok: true, launch: updated })
+  const launchAfterSave = (await getOwlCenterLaunchByIdAdmin(id)) ?? updated
+
+  let guard_sync: Awaited<ReturnType<typeof syncPublicSimpleCandyGuards>> | null = null
+  if (bodyHasMintConfigFields(body) && launchAfterSave.mint_mode === 'public_simple') {
+    guard_sync = await syncPublicSimpleCandyGuards(launchAfterSave)
+  }
+
+  return NextResponse.json({ ok: true, launch: launchAfterSave, guard_sync })
 }
 
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {

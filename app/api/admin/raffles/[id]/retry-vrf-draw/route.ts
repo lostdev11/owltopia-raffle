@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdminSession } from '@/lib/auth-server'
 import { getRaffleById, selectWinner } from '@/lib/db/raffles'
-import { raffleUsesDrawVrf, DRAW_ALGO_V3_VRF } from '@/lib/raffles/draw'
+import {
+  raffleUsesDrawVrf,
+  DRAW_ALGO_V3_VRF,
+  resolveAdminVrfForceNewRequest,
+} from '@/lib/raffles/draw'
 
 export const dynamic = 'force-dynamic'
 /** VRF commit+reveal can take a while on-chain. */
@@ -43,24 +47,36 @@ export async function POST(
       )
     }
 
-    // Prefer resuming an existing account (may already be revealed on-chain after a
-    // gateway timeout). Fall back to a fresh Switchboard commit against the frozen ledger.
-    const hasVrfAccount = Boolean((raffle.draw_vrf_account ?? '').trim())
-    let winnerWallet = await selectWinner(raffle.id, false, {
-      forceVrfRetry: !hasVrfAccount,
-    })
-    if (!winnerWallet && hasVrfAccount) {
-      winnerWallet = await selectWinner(raffle.id, false, { forceVrfRetry: true })
+    const vrfStatus = (raffle.draw_vrf_status ?? '').trim()
+    if (vrfStatus !== 'pending' && vrfStatus !== 'failed') {
+      return NextResponse.json(
+        {
+          error:
+            vrfStatus === 'fulfilled'
+              ? 'VRF already fulfilled — use Force draw if winner selection did not complete'
+              : `VRF is not in a retryable state (status: ${vrfStatus || 'none'})`,
+          drawVrfStatus: vrfStatus || null,
+        },
+        { status: 409 }
+      )
     }
+
+    const forceNewRequest = resolveAdminVrfForceNewRequest(raffle)
+    const winnerWallet = await selectWinner(raffle.id, false, {
+      forceVrfRetry: forceNewRequest,
+    })
     if (!winnerWallet) {
       const latest = await getRaffleById(raffle.id)
       return NextResponse.json(
         {
           ok: false,
-          error: latest?.draw_vrf_error || 'VRF retry did not complete — check draw_vrf_status',
+          error:
+            latest?.draw_vrf_error ||
+            'VRF retry did not complete — Switchboard gateway may still be down; try again in a few minutes',
           drawVrfStatus: latest?.draw_vrf_status ?? null,
           drawVrfRequestTx: latest?.draw_vrf_request_tx ?? null,
           drawVrfAccount: latest?.draw_vrf_account ?? null,
+          forcedNewRequest: forceNewRequest,
         },
         { status: 409 }
       )
@@ -74,6 +90,7 @@ export async function POST(
       drawVrfStatus: latest?.draw_vrf_status ?? null,
       drawVrfRequestTx: latest?.draw_vrf_request_tx ?? null,
       drawVrfFulfillTx: latest?.draw_vrf_fulfill_tx ?? null,
+      forcedNewRequest: forceNewRequest,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Retry VRF failed'

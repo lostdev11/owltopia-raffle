@@ -3,6 +3,7 @@ import {
   getDiscordRaffleAlertSubscription,
   upsertDiscordRaffleAlertSubscription,
 } from '@/lib/db/discord-raffle-alert-subscriptions'
+import { getDiscordBotInviteUrl } from '@/lib/discord-bot-invite'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
 
 const ADMINISTRATOR_BIT = 0x8n
@@ -61,16 +62,6 @@ function memberCanManageAlerts(member: DiscordInteraction['member']): boolean {
   }
 }
 
-function botInviteUrl(): string | null {
-  const custom = process.env.DISCORD_BOT_INVITE_URL?.trim()
-  if (custom) return custom
-  const appId = process.env.DISCORD_APPLICATION_ID?.trim()
-  if (!appId) return null
-  // View Channel + Send Messages + Embed Links + Use Application Commands
-  const perms = '2147503104'
-  return `https://discord.com/api/oauth2/authorize?client_id=${encodeURIComponent(appId)}&permissions=${perms}&scope=bot%20applications.commands`
-}
-
 export async function handleDiscordRaffleAlertsCommand(
   interaction: DiscordInteraction
 ): Promise<Record<string, unknown>> {
@@ -111,7 +102,7 @@ export async function handleDiscordRaffleAlertsCommand(
       )
     }
 
-    const invite = botInviteUrl()
+    const invite = getDiscordBotInviteUrl()
     const lines = [
       `**${PLATFORM_NAME} raffle alerts enabled**`,
       '',

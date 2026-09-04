@@ -21,9 +21,9 @@ import {
   loadZipFromBuffer,
   readZipFileBuffer,
   readZipFileText,
-  rewriteMetadataJson,
   scanSugarZip,
 } from '@/lib/owl-center/asset-upload-zip'
+import { metadataRoyaltyFromLaunch, rewriteMetadataJson, uploadedUriByBasename } from '@/lib/owl-center/metadata-royalty'
 import {
   createIrysUploader,
   ensureIrysFundedForUpload,
@@ -276,6 +276,9 @@ export async function processArweaveUploadBatch(
     progress.uploaded = {}
   }
 
+  const launch = job.launch_id ? await getOwlCenterLaunchByIdAdmin(job.launch_id) : null
+  const royalty = launch ? metadataRoyaltyFromLaunch(launch) : null
+
   const mode = options?.mode ?? 'tick'
   const concurrency = owlCenterAssetUploadConcurrency()
   const chunkSize = owlCenterAssetUploadChunkSize()
@@ -316,6 +319,7 @@ export async function processArweaveUploadBatch(
       if (progress.uploaded[entry.path]) return
 
       let body: Buffer
+      const entryBase = entry.path.replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? ''
       if (entry.kind === 'metadata' && entry.index != null) {
         const pngPath = entry.path.replace(/\.json$/i, '.png')
         const pngBasename = `${entry.index}.png`
@@ -325,7 +329,17 @@ export async function processArweaveUploadBatch(
         if (!imageUri) throw new Error(`PNG not uploaded before metadata index ${entry.index}`)
         const raw = await readZipFileText(zip, entry.path)
         if (!raw) throw new Error(`Missing JSON in ZIP: ${entry.path}`)
-        body = Buffer.from(rewriteMetadataJson(raw, imageUri, pngBasename), 'utf8')
+        body = Buffer.from(rewriteMetadataJson(raw, imageUri, pngBasename, royalty), 'utf8')
+      } else if (entry.kind === 'collection_meta' || entryBase === 'reveal-placeholder.json') {
+        const raw = await readZipFileText(zip, entry.path)
+        if (!raw) throw new Error(`Missing JSON in ZIP: ${entry.path}`)
+        const imageUri =
+          (entryBase === 'reveal-placeholder.json'
+            ? uploadedUriByBasename(progress.uploaded, 'reveal-placeholder.png')
+            : null) ??
+          uploadedUriByBasename(progress.uploaded, 'collection.png') ??
+          uploadedUriByBasename(progress.uploaded, '0.png')
+        body = Buffer.from(rewriteMetadataJson(raw, imageUri, entryBase || 'collection.png', royalty), 'utf8')
       } else {
         const buf = await readZipFileBuffer(zip, entry.path)
         if (!buf) {
@@ -369,10 +383,11 @@ export async function processArweaveUploadBatch(
       }
       if (chunk.length === 0) break
 
-      // Phase 1: images / collection / traits (no inter-file dependency).
-      // Phase 2: metadata JSON (each needs its image URI, present after phase 1).
-      await runWithConcurrency(chunk.filter((e) => e.kind !== 'metadata'), concurrency, uploadEntry)
-      await runWithConcurrency(chunk.filter((e) => e.kind === 'metadata'), concurrency, uploadEntry)
+      // Phase 1: images / collection art / traits (no inter-file dependency).
+      // Phase 2: token + collection metadata JSON (each needs its image URI from phase 1).
+      const needsImageFirst = (e: AssetUploadFileEntry) => e.kind === 'metadata' || e.kind === 'collection_meta'
+      await runWithConcurrency(chunk.filter((e) => !needsImageFirst(e)), concurrency, uploadEntry)
+      await runWithConcurrency(chunk.filter((e) => needsImageFirst(e)), concurrency, uploadEntry)
 
       advanceCursor()
       await updateAssetUploadJob(jobId, { status: 'uploading', upload_progress: progress })

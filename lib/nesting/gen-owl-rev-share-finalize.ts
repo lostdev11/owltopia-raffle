@@ -5,13 +5,11 @@ import {
   type GenOwlRevSharePeriodRow,
 } from '@/lib/db/gen-owl-rev-share-periods'
 import { countActiveGenOwlNestsByGroup } from '@/lib/db/gen-owl-rev-share-stats'
-import {
-  computeEvenRevSharePerNest,
-  computeGen1RevShareBucketAmounts,
-} from '@/lib/nesting/gen-owl-rev-share'
+import { computeGenOwlRevShareBucketAmounts } from '@/lib/nesting/gen-owl-rev-share'
 import {
   countEligibleByGroup,
   countGen1EligibleByRevShareBucket,
+  countGen2EligibleByRevShareBucket,
   listEligibleGenOwlNestsForPeriod,
 } from '@/lib/nesting/gen-owl-rev-share-eligibility'
 import { claimsOpenForPeriod } from '@/lib/nesting/gen-owl-rev-share-month'
@@ -82,12 +80,21 @@ async function computeAndWriteFinalize(period: GenOwlRevSharePeriodRow): Promise
     hasGen2Pool: (Number(period.gen2_total_sol) || 0) > 0 || (Number(period.gen2_total_usdc) || 0) > 0,
   })
 
-  const gen1Buckets = await countGen1EligibleByRevShareBucket(nests)
-  const gen1Amounts = computeGen1RevShareBucketAmounts({
+  const [gen1Buckets, gen2Buckets] = await Promise.all([
+    countGen1EligibleByRevShareBucket(nests),
+    countGen2EligibleByRevShareBucket(nests),
+  ])
+  const gen1Amounts = computeGenOwlRevShareBucketAmounts({
     totalSol: period.gen1_total_sol,
     totalUsdc: period.gen1_total_usdc,
     standardCount: gen1Buckets.standard,
     oneOfOneCount: gen1Buckets.one_of_one,
+  })
+  const gen2Amounts = computeGenOwlRevShareBucketAmounts({
+    totalSol: period.gen2_total_sol,
+    totalUsdc: period.gen2_total_usdc,
+    standardCount: gen2Buckets.standard,
+    oneOfOneCount: gen2Buckets.one_of_one,
   })
 
   return finalizeGenOwlRevSharePeriod({
@@ -96,14 +103,20 @@ async function computeAndWriteFinalize(period: GenOwlRevSharePeriodRow): Promise
     gen2_eligible_count: counts['gen2-owl'],
     gen1_standard_eligible_count: gen1Amounts.standard_count,
     gen1_one_of_one_eligible_count: gen1Amounts.one_of_one_count,
+    gen2_standard_eligible_count: gen2Amounts.standard_count,
+    gen2_one_of_one_eligible_count: gen2Amounts.one_of_one_count,
     gen1_per_nest_sol: gen1Amounts.standard_per_nest_sol,
     gen1_per_nest_usdc: gen1Amounts.standard_per_nest_usdc,
     gen1_standard_per_nest_sol: gen1Amounts.standard_per_nest_sol,
     gen1_standard_per_nest_usdc: gen1Amounts.standard_per_nest_usdc,
     gen1_one_of_one_per_nest_sol: gen1Amounts.one_of_one_per_nest_sol,
     gen1_one_of_one_per_nest_usdc: gen1Amounts.one_of_one_per_nest_usdc,
-    gen2_per_nest_sol: computeEvenRevSharePerNest(period.gen2_total_sol, counts['gen2-owl']),
-    gen2_per_nest_usdc: computeEvenRevSharePerNest(period.gen2_total_usdc, counts['gen2-owl']),
+    gen2_per_nest_sol: gen2Amounts.standard_per_nest_sol,
+    gen2_per_nest_usdc: gen2Amounts.standard_per_nest_usdc,
+    gen2_standard_per_nest_sol: gen2Amounts.standard_per_nest_sol,
+    gen2_standard_per_nest_usdc: gen2Amounts.standard_per_nest_usdc,
+    gen2_one_of_one_per_nest_sol: gen2Amounts.one_of_one_per_nest_sol,
+    gen2_one_of_one_per_nest_usdc: gen2Amounts.one_of_one_per_nest_usdc,
   })
 }
 

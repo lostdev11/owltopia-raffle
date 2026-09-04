@@ -40,6 +40,7 @@ next-env.d.ts
 
 # local-only (solo dev; not for repo)
 .cursor/
+.local/
 supabase-mcp-config.json
 supabase/.temp/
 docs/SECURITY_MINDSET.md

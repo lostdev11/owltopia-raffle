@@ -62,6 +62,14 @@ export interface CommunityGiveawayEntry {
   created_at: string
 }
 
+/** Per-wallet consecutive win stats (raffles + community giveaways). */
+export interface WalletWinStreak {
+  currentStreak: number
+  bestStreak: number
+  totalWins: number
+  lastWinAt: string | null
+}
+
 /** Admin-created giveaway: NFT in prize escrow, one eligible claimant. */
 export interface NftGiveaway {
   id: string
@@ -121,7 +129,7 @@ export type RaffleStatus =
   | null
 
 /** Supported raffle ticket currencies */
-export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'
+export type RaffleCurrency = 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'
 
 export type RaffleOfferStatus = 'pending' | 'accepted' | 'declined' | 'cancelled' | 'expired'
 
@@ -255,6 +263,8 @@ export interface Raffle {
   prize_currency: string | null
   nft_mint_address: string | null
   nft_collection_name: string | null
+  /** On-chain collection mint (DAS grouping). Browse `?collection=` identity. */
+  nft_collection_mint: string | null
   /** Optional X handle (no @) for official Owltopia share copy — e.g. THC_Labz. */
   promo_x_handle: string | null
   nft_token_id: string | null
@@ -269,12 +279,19 @@ export interface Raffle {
   /** Per-ticket price in `alternate_ticket_currency` (null when single-currency tickets). */
   alternate_ticket_price: number | null
   max_tickets: number | null
+  /** Optional confirmed-ticket cap per wallet for this raffle. NULL = unlimited per wallet. */
+  max_tickets_per_wallet: number | null
   min_tickets: number | null
   start_time: string
   end_time: string
   original_end_time: string | null
   /** How many times end_time was extended because min_tickets was not met at deadline (max 1 before terminal). */
   time_extension_count: number
+  /**
+   * When true (default), min-threshold miss at first end extends once (2nd selling round).
+   * When false, refunds open immediately after Round 1 if the draw goal is not met.
+   */
+  second_round_enabled: boolean
   theme_accent: ThemeAccent
   edited_after_entries: boolean
   created_at: string
@@ -340,6 +357,11 @@ export interface Raffle {
   creator_is_holder?: boolean
   /** Enriched at list time: creator wallet is in partner_community_creators (2% fee, spotlight). */
   creator_is_partner?: boolean
+  /**
+   * Client/list enrichment: `wallet_profiles.display_name` for any creator (not partners only).
+   * Used for host filter / browse search. Prefer this over guessing names from titles.
+   */
+  creator_display_name?: string | null
   /**
    * Enriched at list time for partner creators: `wallet_profiles.display_name` when set, else optional
    * `partner_community_creators.display_label`. Used for partner badge copy / accessibility.

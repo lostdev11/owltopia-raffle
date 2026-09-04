@@ -38,6 +38,10 @@ import { getAssetWithProof, mplBubblegum } from '@metaplex-foundation/mpl-bubble
 import { buildBubblegumLeafTransferBuilder } from '@/lib/solana/bubblegum-leaf-transfer'
 import { trySendSplNftViaTokenMetadataFromEscrow } from '@/lib/solana/token-metadata-prize-payout'
 import { umiSignatureToBase58 } from '@/lib/solana/umi-signature'
+import {
+  payoutCompressedFromKeypair,
+  payoutMplCoreFromKeypair,
+} from '@/lib/solana/payout-nft-from-keypair'
 import { tokenRecordAccountExists } from '@/lib/solana/nft-transfer-lock'
 import { fetchAsset, fetchAssetV1, transferV1 } from '@metaplex-foundation/mpl-core'
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
@@ -628,41 +632,7 @@ export async function payoutMplCoreFromEscrowToRecipient(
   if (!keypair) {
     return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
   }
-
-  const endpoint = resolveServerSolanaRpcUrl()
-
-   
-  const umi: any = (createUmi as any)(endpoint as any)
-
-  const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
-  const signer = createSignerFromKeypair(umi, umiKeypair)
-  umi.use(signerIdentity(signer))
-
-  const asset = umiPublicKey(assetMintAddress)
-  const newOwner = umiPublicKey(recipientWallet)
-   
-  const assetAccount: any = await fetchAsset(umi as any, asset)
-   
-  const maybeCollection: any =
-    assetAccount?.updateAuthority?.type === 'Collection'
-      ? assetAccount.updateAuthority.address
-      : undefined
-
-  try {
-     
-    const builder: any = transferV1(umi as any, {
-      asset,
-      newOwner,
-      ...(maybeCollection ? { collection: maybeCollection } : {}),
-    } as any)
-     
-    const result: any = await builder.sendAndConfirm(umi as any)
-    const sig = umiSignatureToBase58(result)
-    return { ok: true, signature: sig }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return { ok: false, error: message }
-  }
+  return payoutMplCoreFromKeypair(keypair, assetMintAddress, recipientWallet)
 }
 
 /**
@@ -672,54 +642,19 @@ export async function payoutCompressedFromEscrowToRecipient(
   assetId: string,
   recipientWallet: string
 ): Promise<{ ok: boolean; signature?: string; error?: string }> {
-  const trimmedAsset = assetId.trim()
-  if (!trimmedAsset) {
-    return { ok: false, error: 'Missing compressed NFT asset id' }
-  }
-
   const keypair = getPrizeEscrowKeypair()
   if (!keypair) {
     return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
   }
-
-  const escrowBase58 = keypair.publicKey.toBase58()
-  const endpoint = resolveServerSolanaRpcUrl()
-
-   
-  const umi: any = (createUmi as any)(endpoint as any).use(dasApi()).use(mplBubblegum())
-
-  const umiKeypair = umi.eddsa.createKeypairFromSecretKey(keypair.secretKey)
-  const signer = createSignerFromKeypair(umi, umiKeypair)
-  umi.use(signerIdentity(signer))
-
-  try {
-     
-    const asset: any = await getAssetWithProof(umi, umiPublicKey(trimmedAsset), { truncateCanopy: true })
-    const leafOwnerStr = asset?.leafOwner ? String(asset.leafOwner) : ''
-    if (leafOwnerStr !== escrowBase58) {
-      return {
-        ok: false,
-        error:
-          'Compressed NFT is not in escrow under this asset id, or the asset is not compressed.',
-      }
+  const result = await payoutCompressedFromKeypair(keypair, assetId, recipientWallet)
+  if (!result.ok && result.error.includes('not held by this wallet')) {
+    return {
+      ok: false,
+      error:
+        'Compressed NFT is not in escrow under this asset id, or the asset is not compressed.',
     }
-
-     
-    const builder: any = await buildBubblegumLeafTransferBuilder(
-      umi,
-      signer,
-      umiPublicKey(escrowBase58),
-      umiPublicKey(recipientWallet.trim()),
-      asset
-    )
-     
-    const result: any = await builder.sendAndConfirm(umi)
-    const sig = umiSignatureToBase58(result)
-    return { ok: true, signature: sig }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return { ok: false, error: message }
   }
+  return result
 }
 
 /** Error from SPL payout when escrow has no Token / Token-2022 ATA for this mint (asset may be Core or compressed). */

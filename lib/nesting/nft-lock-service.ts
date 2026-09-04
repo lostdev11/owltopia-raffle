@@ -350,7 +350,17 @@ export async function thawWalletNftForPool(params: {
   assetId: string
   collectionMint?: string | null
   adminRecoveryUnstake?: boolean
-}): Promise<{ signature: string | null; tokenAccount: string; resolved_standard: ResolvedNftLockStandard }> {
+}): Promise<{
+  signature: string | null
+  tokenAccount: string
+  resolved_standard: ResolvedNftLockStandard
+  /** Gen 2 FreezeDelegatedAccount path: holder should Revoke leftover SPL approve after thaw. */
+  needsOwnerRevoke?: boolean
+  revokeMint?: string
+  /** MPL Core Owner freeze: holder must thaw via wallet (`updatePlugin frozen:false`). */
+  needsOwnerThaw?: boolean
+  thawMint?: string
+}> {
   const resolved = await resolveEffectiveNftLockStandard(params.pool, params.assetId)
   if (resolved === 'database_only') {
     return { signature: null, tokenAccount: params.assetId.trim(), resolved_standard: resolved }
@@ -365,7 +375,13 @@ export async function thawWalletNftForPool(params: {
         mint: params.assetId,
         ownerWallet: params.ownerWallet,
       })
-      return { signature: thawed.signature, tokenAccount: thawed.tokenAccount, resolved_standard: resolved }
+      return {
+        signature: thawed.signature,
+        tokenAccount: thawed.tokenAccount,
+        resolved_standard: resolved,
+        needsOwnerRevoke: thawed.needsOwnerRevoke,
+        revokeMint: thawed.needsOwnerRevoke ? params.assetId.trim() : undefined,
+      }
     }
     const thawed = await thawSplTokenNestAccount({
       mint: params.assetId,
@@ -380,7 +396,13 @@ export async function thawWalletNftForPool(params: {
       params.adminRecoveryUnstake === true ? null : (params.collectionMint ?? params.pool.collection_key),
     adminRecoveryUnstake: params.adminRecoveryUnstake,
   })
-  return { signature: thawed.signature, tokenAccount: thawed.tokenAccount, resolved_standard: resolved }
+  return {
+    signature: thawed.signature,
+    tokenAccount: thawed.tokenAccount,
+    resolved_standard: resolved,
+    needsOwnerThaw: thawed.needsOwnerThaw === true,
+    thawMint: thawed.needsOwnerThaw === true ? params.assetId.trim() : undefined,
+  }
 }
 
 export async function readNestLockEligibilityForPool(params: {

@@ -4,6 +4,7 @@ import { areGenOwlRevShareClaimsEnabled } from '@/lib/db/rev-share-schedule'
 import { listStakingPositionsByWallet } from '@/lib/db/staking-positions'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import { classifyGen1OneOfOneMints } from '@/lib/nesting/gen1-one-of-one'
+import { classifyGen2OneOfOneMints } from '@/lib/nesting/gen2-one-of-one'
 import { isPositionEligibleForRevSharePeriod } from '@/lib/nesting/gen-owl-rev-share-eligibility'
 import { ensureGenOwlRevSharePeriodFinalized } from '@/lib/nesting/gen-owl-rev-share-finalize'
 import {
@@ -13,7 +14,7 @@ import {
   groupKeyForPoolSlug,
   parsePeriodMonth,
 } from '@/lib/nesting/gen-owl-rev-share-month'
-import { resolveGen1PerNestAmounts } from '@/lib/nesting/gen-owl-rev-share'
+import { resolveGen1PerNestAmounts, resolveGen2PerNestAmounts } from '@/lib/nesting/gen-owl-rev-share'
 import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
 import type { GenOwlRevSharePeriodRow } from '@/lib/db/gen-owl-rev-share-periods'
 
@@ -34,13 +35,13 @@ export type GenOwlRevShareClaimableRow = {
 function perNestForGroup(
   period: GenOwlRevSharePeriodRow | null,
   group: GenOwlStakingGroupKey,
-  gen1Bucket: 'standard' | 'one-of-one' | null
+  bucket: 'standard' | 'one-of-one'
 ): { sol: number; usdc: number } {
   if (!period) return { sol: 0, usdc: 0 }
   if (group === 'gen1-owl') {
-    return resolveGen1PerNestAmounts(period, gen1Bucket ?? 'standard')
+    return resolveGen1PerNestAmounts(period, bucket)
   }
-  return { sol: period.gen2_per_nest_sol ?? 0, usdc: period.gen2_per_nest_usdc ?? 0 }
+  return resolveGen2PerNestAmounts(period, bucket)
 }
 
 function periodHasDepositTotals(period: GenOwlRevSharePeriodRow): boolean {
@@ -99,10 +100,13 @@ export async function listGenOwlRevShareClaimableForWallet(
 
   if (openMonths.length === 0) return []
 
-  const gen1Mints = positions
+  const mints = positions
     .map((p) => p.asset_identifier?.trim())
     .filter((m): m is string => Boolean(m))
-  const gen1Classification = await classifyGen1OneOfOneMints(gen1Mints)
+  const [gen1Classification, gen2Classification] = await Promise.all([
+    classifyGen1OneOfOneMints(mints),
+    classifyGen2OneOfOneMints(mints),
+  ])
 
   const rows: GenOwlRevShareClaimableRow[] = []
 
@@ -119,16 +123,11 @@ export async function listGenOwlRevShareClaimableForWallet(
       if (!group) continue
 
       const mint = position.asset_identifier?.trim() ?? null
-      const gen1Bucket =
-        group === 'gen1-owl' && mint
-          ? gen1Classification.get(mint) === 'one-of-one'
-            ? 'one-of-one'
-            : 'standard'
-          : group === 'gen1-owl'
-            ? 'standard'
-            : null
+      const classification = group === 'gen1-owl' ? gen1Classification : gen2Classification
+      const bucket: 'standard' | 'one-of-one' =
+        mint && classification.get(mint) === 'one-of-one' ? 'one-of-one' : 'standard'
 
-      const amounts = perNestForGroup(finalized, group, gen1Bucket)
+      const amounts = perNestForGroup(finalized, group, bucket)
       if (amounts.sol <= 0 && amounts.usdc <= 0) continue
 
       const claimed = await getGenOwlRevShareClaimForPosition(period.period_month, position.id)

@@ -38,7 +38,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     const tenant = await getOwlCenterPresaleTenantBySlug(slug)
-    if (!tenant || !tenant.is_enabled) {
+    if (!tenant || !tenant.is_enabled || tenant.approval_status !== 'approved') {
       return NextResponse.json({ error: 'Presale not found' }, { status: 404 })
     }
     if (!tenant.is_live) {
@@ -118,7 +118,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       connection,
       buyer: buyerPk,
       breakdown,
-      treasury: cfg.treasuryWallet,
+      partnerWallet: cfg.partnerWallet,
+      platformFeeWallet: cfg.platformFeeWallet,
     })
 
     return NextResponse.json({
@@ -129,11 +130,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
         buyerWallet: buyerNorm,
         quantity: qty,
         unitPriceUsdc: breakdown.unitPriceUsdc,
+        platformFeeUsdcPerSpot: breakdown.platformFeeUsdcPerSpot,
         solUsdPriceUsed: breakdown.solUsdPrice,
         unitLamports: breakdown.unitLamports.toString(),
+        unitPartnerLamports: breakdown.unitPartnerLamports.toString(),
+        unitPlatformFeeLamports: breakdown.unitPlatformFeeLamports.toString(),
         totalLamports: breakdown.totalLamports.toString(),
+        partnerLamports: breakdown.partnerLamports.toString(),
+        platformFeeLamports: breakdown.platformFeeLamports.toString(),
         treasuryLamports: breakdown.treasuryLamports.toString(),
-        treasuryWallet: cfg.treasuryWallet.toBase58(),
+        partnerWallet: cfg.partnerWallet.toBase58(),
+        platformFeeWallet: cfg.platformFeeWallet.toBase58(),
       },
     })
   } catch (error) {

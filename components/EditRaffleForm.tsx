@@ -339,7 +339,29 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
 
     setLoading(true)
     const maxTicketsValue = formData.get('max_tickets') as string
+    const maxTicketsPerWalletValue = formData.get('max_tickets_per_wallet') as string
     const rankValue = formData.get('rank') as string
+
+    const parseRequiredMaxForEdit = (
+      raw: string,
+      drawGoal: number | null
+    ): number | null | false => {
+      const trimmed = (raw ?? '').trim()
+      if (!trimmed) {
+        alert('Max tickets is required so buyers can see worst-case odds before entering.')
+        return false
+      }
+      const parsed = parseInt(trimmed, 10)
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        alert('Max tickets must be a positive whole number.')
+        return false
+      }
+      if (drawGoal != null && parsed < drawGoal) {
+        alert(`Max tickets must be at least ${drawGoal} (the draw goal).`)
+        return false
+      }
+      return parsed
+    }
 
     const data: Record<string, unknown> = {
       title: formData.get('title') as string,
@@ -367,7 +389,15 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       }
       data.ticket_price = tp.value
       data.currency = formData.get('currency') as string
-      data.max_tickets = maxTicketsValue ? parseInt(maxTicketsValue, 10) : null
+      const maxParsed = parseRequiredMaxForEdit(maxTicketsValue, nftComputedMin)
+      if (maxParsed === false) {
+        setLoading(false)
+        return
+      }
+      data.max_tickets = maxParsed
+      data.max_tickets_per_wallet = maxTicketsPerWalletValue?.trim()
+        ? parseInt(maxTicketsPerWalletValue.trim(), 10)
+        : null
       data.floor_price = fp.string
       data.sol_domains_hub = solDomainsHubDraft
     } else if (isNonDraftNft) {
@@ -401,11 +431,29 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
         if (maxTicketsValue?.trim()) {
           const parsed = parseInt(maxTicketsValue.trim(), 10)
           if (!Number.isFinite(parsed) || parsed <= 0) {
-            alert('Max tickets must be a positive whole number, or leave empty to keep the current cap.')
+            alert('Max tickets must be a positive whole number.')
+            setLoading(false)
+            return
+          }
+          if (nftComputedMin != null && parsed < nftComputedMin) {
+            alert(`Max tickets must be at least ${nftComputedMin} (the draw goal).`)
             setLoading(false)
             return
           }
           data.max_tickets = parsed
+        } else if (raffle.max_tickets != null) {
+          // Omit field to keep current cap; cannot clear via empty input.
+        }
+        if (maxTicketsPerWalletValue?.trim()) {
+          const parsed = parseInt(maxTicketsPerWalletValue.trim(), 10)
+          if (!Number.isFinite(parsed) || parsed <= 0) {
+            alert(
+              'Max tickets per person must be a positive whole number, or leave empty to keep the current cap.'
+            )
+            setLoading(false)
+            return
+          }
+          data.max_tickets_per_wallet = parsed
         }
       }
     } else {
@@ -413,7 +461,21 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
       const floorPriceValue = formData.get('floor_price') as string
       data.ticket_price = parseFloat(formData.get('ticket_price') as string)
       data.currency = formData.get('currency') as string
-      data.max_tickets = maxTicketsValue ? parseInt(maxTicketsValue, 10) : null
+      const minForMax =
+        minTicketsValue && minTicketsValue.trim()
+          ? parseInt(minTicketsValue.trim(), 10)
+          : raffle.min_tickets
+      const drawGoalForMax =
+        minForMax != null && Number.isFinite(minForMax) && minForMax > 0 ? minForMax : null
+      const maxParsed = parseRequiredMaxForEdit(maxTicketsValue, drawGoalForMax)
+      if (maxParsed === false) {
+        setLoading(false)
+        return
+      }
+      data.max_tickets = maxParsed
+      data.max_tickets_per_wallet = maxTicketsPerWalletValue?.trim()
+        ? parseInt(maxTicketsPerWalletValue.trim(), 10)
+        : null
       data.min_tickets = minTicketsValue ? parseInt(minTicketsValue, 10) : null
       data.floor_price = floorPriceValue && floorPriceValue.trim() ? floorPriceValue.trim() : null
     }
@@ -1587,20 +1649,36 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="max_tickets_nft_live">Max tickets (optional)</Label>
+                      <Label htmlFor="max_tickets_nft_live">Max tickets (required to set cap)</Label>
                       <Input
                         id="max_tickets_nft_live"
                         name="max_tickets"
                         type="number"
                         min={nftComputedMin ?? 1}
                         defaultValue={raffle.max_tickets ?? undefined}
-                        placeholder="Leave empty to keep current (or unlimited)"
+                        placeholder={raffle.max_tickets == null ? 'Required for new listings' : 'Leave empty to keep current cap'}
                         className="min-h-[44px] touch-manipulation"
                         key={raffle.id + String(raffle.max_tickets ?? '')}
                       />
                       <p className="text-xs text-muted-foreground">
-                        If set, must be at least the new draw goal ({nftComputedMin ?? '—'}). Empty leaves the current
-                        cap unchanged.
+                        Cannot be cleared once set. Must be at least the draw goal ({nftComputedMin ?? '—'}). Legacy
+                        unlimited listings may leave empty to keep unlimited.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="max_tickets_per_wallet_nft_live">Max tickets per person (optional)</Label>
+                      <Input
+                        id="max_tickets_per_wallet_nft_live"
+                        name="max_tickets_per_wallet"
+                        type="number"
+                        min={1}
+                        defaultValue={raffle.max_tickets_per_wallet ?? undefined}
+                        placeholder="Leave empty to keep current"
+                        className="min-h-[44px] touch-manipulation"
+                        key={raffle.id + '-pw-' + String(raffle.max_tickets_per_wallet ?? '')}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Caps tickets per wallet. Empty leaves the current per-person cap unchanged.
                       </p>
                     </div>
                     <div className="rounded-md border border-border/80 bg-background/50 px-3 py-2 text-sm text-muted-foreground">
@@ -1641,7 +1719,13 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     </p>
                     <p>
                       <span className="text-foreground font-medium">Max tickets:</span>{' '}
-                      {raffle.max_tickets != null ? raffle.max_tickets : 'Unlimited'}
+                      {raffle.max_tickets != null ? raffle.max_tickets : 'Unlimited (legacy)'}
+                    </p>
+                    <p>
+                      <span className="text-foreground font-medium">Max per person:</span>{' '}
+                      {raffle.max_tickets_per_wallet != null
+                        ? raffle.max_tickets_per_wallet
+                        : 'No limit'}
                     </p>
                     <p className="text-xs pt-1">
                       {adminRole === null
@@ -1731,18 +1815,39 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                     </label>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="max_tickets">Max tickets (optional)</Label>
+                    <Label htmlFor="max_tickets">Max tickets (required)</Label>
                     <Input
                       id="max_tickets"
                       name="max_tickets"
                       type="number"
+                      required
                       min={nftComputedMin ?? 1}
-                      defaultValue={raffle.max_tickets || ''}
-                      placeholder="Leave empty for unlimited"
+                      defaultValue={raffle.max_tickets ?? ''}
+                      placeholder={
+                        nftComputedMin != null
+                          ? `e.g. 200 (min ${nftComputedMin} draw goal)`
+                          : 'e.g. 200'
+                      }
                       className="min-h-[44px] touch-manipulation"
                     />
                     <p className="text-xs text-muted-foreground">
-                      If set, must be at least the draw goal ({nftComputedMin ?? '—'}), or leave empty for unlimited.
+                      Required before publish — enter a cap (not pre-filled). Worst-case odds are 1 ÷ max.
+                      {nftComputedMin != null ? ` Must be at least ${nftComputedMin} (draw goal).` : null}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="max_tickets_per_wallet">Max tickets per person (optional)</Label>
+                    <Input
+                      id="max_tickets_per_wallet"
+                      name="max_tickets_per_wallet"
+                      type="number"
+                      min={1}
+                      defaultValue={raffle.max_tickets_per_wallet || ''}
+                      placeholder="Leave empty for no per-person limit"
+                      className="min-h-[44px] touch-manipulation"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Caps how many tickets one wallet can buy. Leave empty for no personal limit.
                     </p>
                   </div>
                   <div className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">
@@ -1802,18 +1907,40 @@ export function EditRaffleForm({ raffle, entries, owlVisionScore }: EditRaffleFo
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="max_tickets">Max Tickets (optional)</Label>
+                    <Label htmlFor="max_tickets">Max tickets (required)</Label>
                     <Input
                       id="max_tickets"
                       name="max_tickets"
                       type="number"
+                      required
                       min="1"
-                      defaultValue={raffle.max_tickets || ''}
-                      placeholder="Leave empty for unlimited tickets"
+                      defaultValue={raffle.max_tickets ?? ''}
+                      placeholder={
+                        raffle.min_tickets != null
+                          ? `e.g. 200 (min ${raffle.min_tickets} draw goal)`
+                          : 'e.g. 200'
+                      }
                       className="min-h-[44px] touch-manipulation"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Set a limit on the total number of tickets that can be purchased. Leave empty for unlimited.
+                      Required before publish — enter a cap (not pre-filled). Worst-case odds are 1 ÷ max.
+                      {raffle.min_tickets != null ? ` Must be at least ${raffle.min_tickets} (draw goal).` : null}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="max_tickets_per_wallet">Max tickets per person (optional)</Label>
+                    <Input
+                      id="max_tickets_per_wallet"
+                      name="max_tickets_per_wallet"
+                      type="number"
+                      min="1"
+                      defaultValue={raffle.max_tickets_per_wallet || ''}
+                      placeholder="Leave empty for no per-person limit"
+                      className="min-h-[44px] touch-manipulation"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Caps how many tickets one wallet can buy. Leave empty for no personal limit.
                     </p>
                   </div>
 

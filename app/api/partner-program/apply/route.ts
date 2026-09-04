@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { insertPartnerProgramApplication } from '@/lib/db/partner-program-applications'
+import {
+  isPaidPartnerApplyTier,
+  normalizePartnerCommunityHttpsUrl,
+} from '@/lib/partner-program-apply'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
@@ -32,6 +36,7 @@ export async function POST(request: NextRequest) {
     const interested_tier = typeof body.interested_tier === 'string' ? body.interested_tier.trim() : ''
     const details = typeof body.details === 'string' ? body.details.trim() : ''
     const logo_url = typeof body.logo_url === 'string' ? body.logo_url.trim() : ''
+    const community_url_raw = typeof body.community_url === 'string' ? body.community_url.trim() : ''
 
     if (!project_name || project_name.length > 120) {
       return NextResponse.json({ error: 'Project name is required (max 120 chars).' }, { status: 400 })
@@ -52,6 +57,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Logo must be an HTTPS image URL (max 500 chars).' }, { status: 400 })
     }
 
+    let community_url: string | null = null
+    if (isPaidPartnerApplyTier(interested_tier) && community_url_raw) {
+      community_url = normalizePartnerCommunityHttpsUrl(community_url_raw)
+      if (!community_url) {
+        return NextResponse.json(
+          { error: 'Project or Discord link must be an HTTPS URL (max 500 chars).' },
+          { status: 400 }
+        )
+      }
+    }
+
     const row = await insertPartnerProgramApplication({
       project_name,
       contact_name: contact_name || null,
@@ -60,6 +76,7 @@ export async function POST(request: NextRequest) {
       interested_tier,
       details: details || null,
       logo_url: logo_url || null,
+      community_url,
     })
     return NextResponse.json({ ok: true, id: row.id })
   } catch (error) {

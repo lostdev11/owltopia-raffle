@@ -1,0 +1,297 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useWallet } from '@solana/wallet-adapter-react'
+import Link from 'next/link'
+import { ArrowLeft, CheckCircle2, Inbox, Loader2 } from 'lucide-react'
+import { getCachedAdmin, setCachedAdmin } from '@/lib/admin-check-cache'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { WalletConnectButton } from '@/components/WalletConnectButton'
+
+const TRIAGE_STATUS_OPTIONS = ['new', 'contacted'] as const
+type TriageStatus = (typeof TRIAGE_STATUS_OPTIONS)[number]
+
+type PartnerApplication = {
+  id: number
+  project_name: string
+  contact_name: string | null
+  contact_handle: string
+  wallet_address: string
+  interested_tier: string
+  details: string | null
+  logo_url: string | null
+  community_url: string | null
+  status: string
+  approved_at: string | null
+  approved_creator_wallet: string | null
+  created_at: string
+}
+
+export default function AdminPartnerApplicationsPage() {
+  const { connected, publicKey } = useWallet()
+  const wallet = publicKey?.toBase58() ?? ''
+  const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(() => (cachedTrue ? true : null))
+  const [loadingAdmin, setLoadingAdmin] = useState(() => !cachedTrue)
+  const [loadingList, setLoadingList] = useState(false)
+  const [rows, setRows] = useState<PartnerApplication[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [savingId, setSavingId] = useState<number | null>(null)
+  const [lastProvisioned, setLastProvisioned] = useState<{ id: number; wallet: string } | null>(null)
+  const [lastRejectedId, setLastRejectedId] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!connected || !publicKey) {
+      setIsAdmin(false)
+      setLoadingAdmin(false)
+      return
+    }
+    const addr = publicKey.toBase58()
+    if (getCachedAdmin(addr) === true) {
+      setIsAdmin(true)
+      setLoadingAdmin(false)
+      return
+    }
+    setLoadingAdmin(true)
+    fetch(`/api/admin/check?wallet=${encodeURIComponent(addr)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const admin = data?.isAdmin === true
+        const role = admin && data?.role ? data.role : null
+        setCachedAdmin(addr, admin, role)
+        setIsAdmin(admin)
+      })
+      .catch(() => setIsAdmin(false))
+      .finally(() => setLoadingAdmin(false))
+  }, [connected, publicKey])
+
+  useEffect(() => {
+    if (!isAdmin) return
+    setLoadingList(true)
+    setError(null)
+    fetch('/api/admin/partner-applications', { credentials: 'include' })
+      .then((res) => res.json().then((json) => ({ ok: res.ok, json })))
+      .then(({ ok, json }) => {
+        if (!ok) {
+          setError(typeof json?.error === 'string' ? json.error : 'Could not load applications.')
+          return
+        }
+        setRows(Array.isArray(json?.applications) ? json.applications : [])
+      })
+      .catch(() => setError('Could not load applications.'))
+      .finally(() => setLoadingList(false))
+  }, [isAdmin])
+
+  const patchApplication = async (
+    id: number,
+    body: { status?: TriageStatus | 'closed'; approve?: boolean }
+  ) => {
+    setSavingId(id)
+    setError(null)
+    try {
+      const res = await fetch(`/api/admin/partner-applications/${id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string
+        application?: PartnerApplication
+        creator_wallet?: string
+        provisioned?: boolean
+      }
+      if (!res.ok || !json.application) {
+        setError(typeof json.error === 'string' ? json.error : 'Could not update application.')
+        return
+      }
+      setRows((prev) => prev.map((row) => (row.id === id ? { ...row, ...json.application! } : row)))
+      if (json.provisioned && json.creator_wallet) {
+        setLastProvisioned({ id, wallet: json.creator_wallet })
+        setLastRejectedId(null)
+      } else if (json.application.status === 'closed') {
+        setLastRejectedId(id)
+        setLastProvisioned(null)
+      }
+    } catch {
+      setError('Could not update application.')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  if (!connected) {
+    return (
+      <div className="container mx-auto max-w-lg px-4 py-12 text-center">
+        <p className="mb-6 text-muted-foreground">Connect a full-admin wallet to review partner applications.</p>
+        <WalletConnectButton />
+      </div>
+    )
+  }
+
+  if (loadingAdmin || isAdmin === null) {
+    return (
+      <div className="container mx-auto flex justify-center px-4 py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-label="Loading" />
+      </div>
+    )
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="container mx-auto max-w-lg px-4 py-12 text-center">
+        <p className="mb-6 text-muted-foreground">Full Owl Vision access is required.</p>
+        <Button asChild variant="outline" className="min-h-[44px] touch-manipulation">
+          <Link href="/admin">Back to Owl Vision</Link>
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="container mx-auto max-w-5xl px-4 py-8">
+      <Button asChild variant="ghost" size="sm" className="mb-6 min-h-[44px] touch-manipulation">
+        <Link href="/admin/partners">
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Partners hub
+        </Link>
+      </Button>
+
+      <h1 className="mb-2 flex items-center gap-2 text-2xl font-bold sm:text-3xl">
+        <Inbox className="h-7 w-7 shrink-0 text-violet-400" />
+        Partner applications
+      </h1>
+      <p className="mb-6 text-sm text-muted-foreground">
+        Approve to allowlist the wallet as a partner (tier + logo from their answers). Pro and white-label apps may
+        include a Discord or project link. Then use{' '}
+        <Link href="/admin/partners" className="text-primary underline-offset-4 hover:underline">
+          Partners overview
+        </Link>{' '}
+        to link Discord by server ID in one step.
+      </p>
+
+      {lastProvisioned ? (
+        <p className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+          <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+          Application #{lastProvisioned.id} approved — wallet added to partners.{' '}
+          <Link href="/admin/partners/creators" className="font-medium underline-offset-4 hover:underline">
+            View partner creators
+          </Link>
+        </p>
+      ) : null}
+      {lastRejectedId != null ? (
+        <p className="mb-4 rounded-lg border border-border/70 bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          Application #{lastRejectedId} rejected (status set to closed). No partner wallet was added.
+        </p>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Incoming applications</CardTitle>
+          <CardDescription>Newest first</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loadingList ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : error ? (
+            <p className="text-sm text-destructive">{error}</p>
+          ) : rows.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No applications yet.</p>
+          ) : (
+            <ul className="space-y-5 divide-y divide-border/60">
+              {rows.map((row) => (
+                <li key={row.id} className="space-y-2 pt-5 first:pt-0">
+                  <p className="text-sm text-muted-foreground">
+                    #{row.id} · {new Date(row.created_at).toLocaleString()} · status: {row.status}
+                    {row.approved_at
+                      ? ` · approved ${new Date(row.approved_at).toLocaleString()}`
+                      : ''}
+                  </p>
+                  <div className="flex items-center gap-3">
+                    {row.logo_url ? (
+                      <a
+                        href={row.logo_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border/70 bg-muted"
+                        title="Open submitted logo"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={row.logo_url} alt={`${row.project_name} logo`} className="h-full w-full object-contain" />
+                      </a>
+                    ) : null}
+                    <p className="text-base font-medium">{row.project_name}</p>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Contact: {row.contact_name || '—'} ({row.contact_handle})
+                  </p>
+                  <p className="break-all font-mono text-xs text-muted-foreground">{row.wallet_address}</p>
+                  <p className="text-sm">Tier: {row.interested_tier}</p>
+                  {row.community_url ? (
+                    <p className="text-sm">
+                      Link:{' '}
+                      <a
+                        href={row.community_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="break-all text-primary underline-offset-4 hover:underline"
+                      >
+                        {row.community_url}
+                      </a>
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="min-h-[44px] touch-manipulation"
+                      disabled={savingId === row.id || row.status === 'closed'}
+                      onClick={() => void patchApplication(row.id, { approve: true })}
+                    >
+                      {savingId === row.id && row.status !== 'active' && row.status !== 'closed' ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : null}
+                      {row.status === 'active' ? 'Re-approve / refresh' : 'Approve'}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={row.status === 'closed' ? 'default' : 'destructive'}
+                      className="min-h-[44px] touch-manipulation"
+                      disabled={savingId === row.id || row.status === 'closed'}
+                      onClick={() => void patchApplication(row.id, { status: 'closed' })}
+                    >
+                      {row.status === 'closed' ? 'Rejected' : 'Reject'}
+                    </Button>
+                    {TRIAGE_STATUS_OPTIONS.map((status) => (
+                      <Button
+                        key={status}
+                        type="button"
+                        size="sm"
+                        variant={row.status === status ? 'default' : 'outline'}
+                        className="min-h-[40px] touch-manipulation"
+                        disabled={savingId === row.id}
+                        onClick={() => void patchApplication(row.id, { status })}
+                      >
+                        {status}
+                      </Button>
+                    ))}
+                    {row.status === 'active' ? (
+                      <Button asChild size="sm" variant="outline" className="min-h-[40px] touch-manipulation">
+                        <Link href="/admin/partners/creators">Partner creators</Link>
+                      </Button>
+                    ) : null}
+                  </div>
+                  {row.details ? <p className="text-sm text-muted-foreground">{row.details}</p> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}

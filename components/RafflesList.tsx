@@ -210,11 +210,15 @@ export function RafflesList({
   }, [sortedRaffles, isMobile])
 
   // Notify parent when “flex” raffles change: above listed floor when parseable, else composite threshold.
+  const lastTopProfitableRef = useRef<string>('')
   useEffect(() => {
     if (section === 'active' && typeof onTopProfitableChange === 'function') {
       const profitableByFlag = sortedRaffles.filter(
         (item) => item.profitInfo && shouldShowRevenueFlexPublic(item.profitInfo)
       )
+      const key = profitableByFlag.map((item) => item.raffle.id).join(',')
+      if (key === lastTopProfitableRef.current) return
+      lastTopProfitableRef.current = key
       onTopProfitableChange(profitableByFlag)
     }
   }, [section, onTopProfitableChange, sortedRaffles])

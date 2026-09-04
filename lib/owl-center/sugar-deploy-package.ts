@@ -2,7 +2,7 @@ import 'server-only'
 
 import type { AssetUploadProgress } from '@/lib/owl-center/asset-upload-types'
 import type { OwlCenterAssetUploadJob } from '@/lib/owl-center/asset-upload-types'
-import { publicSimpleSugarGuardsConfig } from '@/lib/owl-center/sugar-public-simple-guards'
+import { publicSimpleGuardOptsFromLaunch, publicSimpleSugarGuardsConfig } from '@/lib/owl-center/sugar-public-simple-guards'
 import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import { walletSplitsToMetaplexCreators } from '@/lib/owl-center/wallet-splits'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
@@ -50,6 +50,13 @@ export function buildSugarDeployPackageFromJob(
     | 'seller_fee_basis_points'
     | 'reveal_mode'
     | 'placeholder_metadata_uri'
+    | 'wallet_mint_limit'
+    | 'launch_deadline_at'
+    | 'phase_schedule'
+    | 'creator_wl_enabled'
+    | 'creator_presale_enabled'
+    | 'wl_supply'
+    | 'presale_supply'
   >
 ): SugarDeployPackage {
   const uploaded = job.upload_progress.uploaded ?? {}
@@ -124,7 +131,7 @@ export function buildSugarDeployPackageFromJob(
       uriLength,
       isSequential: false,
     },
-    guards: publicSimpleSugarGuardsConfig(),
+    guards: publicSimpleSugarGuardsConfig(publicSimpleGuardOptsFromLaunch(launch)),
     maxEditionSupply: null,
   }
 

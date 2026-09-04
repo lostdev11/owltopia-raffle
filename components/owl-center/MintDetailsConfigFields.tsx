@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from 'react'
 
-import type { MintDetailsFormValues } from '@/lib/owl-center/launch-mint-config'
+import { applyMintOpensDate, type MintDetailsFormValues } from '@/lib/owl-center/launch-mint-config'
+import { OWL_CENTER_MAX_LAUNCH_SUPPLY } from '@/lib/owl-center/launch-limits'
+import { datetimeLocalToIso, formatMintDate } from '@/lib/owl-center/phase-schedule'
+import {
+  nextPresetForPhases,
+  PARTNER_ALLOWLIST_MAX_PHASES,
+  type PartnerAllowlistPhaseFormRow,
+} from '@/lib/owl-center/partner-allowlist-phases'
 import { formatOwlCenterPlatformMintFeeLabel } from '@/lib/owl-center/platform-mint-fee'
 import { defaultWalletSplitFormRows } from '@/lib/owl-center/wallet-splits'
 import { WalletSplitEditor } from '@/components/owl-center/WalletSplitEditor'
@@ -15,6 +22,10 @@ type Props = {
   defaultWallet?: string
   /** When true, royalty cannot be changed (Candy Machine already deployed). */
   royaltiesLocked?: boolean
+  /** Show editable total supply (creator Manage collection). */
+  showSupplyField?: boolean
+  /** When true, total supply + mint standard/freeze cannot change. */
+  supplyConfigLocked?: boolean
 }
 
 export function MintDetailsConfigFields({
@@ -23,6 +34,8 @@ export function MintDetailsConfigFields({
   compact,
   defaultWallet = '',
   royaltiesLocked = false,
+  showSupplyField = false,
+  supplyConfigLocked = false,
 }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false)
 
@@ -42,10 +55,43 @@ export function MintDetailsConfigFields({
   const set = <K extends keyof MintDetailsFormValues>(key: K, v: MintDetailsFormValues[K]) =>
     onChange({ ...values, [key]: v })
 
+  const simplePublic =
+    !values.presale_enabled && !values.wl_enabled && values.allowlist_phases.length === 0
+  const setMintOpens = (raw: string) => onChange(applyMintOpensDate(values, raw))
+  const mintOpensPreview = values.launch_date.trim()
+    ? formatMintDate(datetimeLocalToIso(values.launch_date))
+    : null
+
   const supply = Number(values.total_supply) || 0
+  const standardLocked = royaltiesLocked || supplyConfigLocked
 
   return (
     <div className="grid gap-4">
+      {showSupplyField ? (
+        <div className="grid gap-3 border border-[#1A222B] bg-[#0F1419]/60 p-4">
+          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
+            Collection supply
+          </p>
+          <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+            Total supply (how many NFTs)
+            <input
+              type="number"
+              min={1}
+              max={OWL_CENTER_MAX_LAUNCH_SUPPLY}
+              disabled={supplyConfigLocked}
+              value={values.total_supply}
+              onChange={(e) => set('total_supply', e.target.value)}
+              className="min-h-[44px] w-36 touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8] disabled:opacity-50"
+            />
+          </label>
+          <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
+            {supplyConfigLocked
+              ? 'Locked after Candy Machine deploy (or once mints exist).'
+              : 'You can change this until the Candy Machine is deployed. Keep it aligned with your staged art count.'}
+          </p>
+        </div>
+      ) : null}
+
       <div className="grid gap-3 border border-[#1A222B] bg-[#0F1419]/60 p-4">
         <p className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
           On-chain standard
@@ -58,6 +104,7 @@ export function MintDetailsConfigFields({
           Mint standard
           <select
             value={values.mint_standard}
+            disabled={standardLocked}
             onChange={(e) => {
               const next = e.target.value === 'token_metadata' ? 'token_metadata' : 'core'
               onChange({
@@ -66,7 +113,7 @@ export function MintDetailsConfigFields({
                 freeze_enabled: next === 'core' ? values.freeze_enabled : false,
               })
             }}
-            className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+            className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8] disabled:opacity-50"
           >
             <option value="core">Metaplex Core (recommended)</option>
             <option value="token_metadata">Token Metadata (legacy)</option>
@@ -76,25 +123,28 @@ export function MintDetailsConfigFields({
           <input
             type="checkbox"
             checked={values.freeze_enabled}
-            disabled={values.mint_standard !== 'core'}
+            disabled={standardLocked || values.mint_standard !== 'core'}
             onChange={(e) => set('freeze_enabled', e.target.checked)}
             className="mt-1 h-4 w-4 shrink-0 touch-manipulation accent-[#00FF9C] disabled:opacity-50"
           />
           <span>
-            Freeze Collection
+            Lock NFTs until trading
             <span className="mt-1 block normal-case tracking-normal text-[#9BA8B4]">
-              Locks transfers until you thaw (Core PermanentFreezeDelegate). Requires Metaplex Core.
+              Minted NFTs cannot be transferred or listed until you later tap{' '}
+              <span className="text-[#E8EEF2]">Enable trading</span> on Manage collection. Checking this locks at
+              mint — it does not unlock. Requires Metaplex Core.
             </span>
           </span>
         </label>
         {values.freeze_enabled ? (
           <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-            Planned unfreeze (optional)
+            Planned unlock date (optional)
             <input
               type="datetime-local"
               value={values.unfreeze_date}
+              disabled={standardLocked}
               onChange={(e) => set('unfreeze_date', e.target.value)}
-              className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+              className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8] disabled:opacity-50"
             />
           </label>
         ) : null}
@@ -149,10 +199,10 @@ export function MintDetailsConfigFields({
 
       <div className="grid gap-3 border border-[#1A222B] bg-[#0F1419]/60 p-4">
         <p className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
-          Per-wallet mint limit
+          Public per-wallet mint limit
         </p>
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-          Max mints per wallet (each phase)
+          Max mints per wallet (public phase)
           <input
             type="number"
             min={1}
@@ -163,8 +213,9 @@ export function MintDetailsConfigFields({
           />
         </label>
         <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
-          Each wallet can mint up to this many NFTs during PUBLIC (and presale / WL when those phases are enabled).
-          Enforced on-chain at confirm time.
+          Each wallet can mint up to this many NFTs during PUBLIC. Allowlist phases set their own
+          per-wallet caps below (Show Advanced). Enforced on-chain via Candy Guard mintLimit —
+          changing this after deploy updates the on-chain cap when you save.
         </p>
       </div>
 
@@ -196,22 +247,34 @@ export function MintDetailsConfigFields({
           <input
             type="datetime-local"
             value={values.launch_date}
-            onChange={(e) => set('launch_date', e.target.value)}
+            onChange={(e) => setMintOpens(e.target.value)}
+            onInput={(e) => setMintOpens(e.currentTarget.value)}
             className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
+          {mintOpensPreview ? (
+            <span className="font-mono text-[10px] normal-case tracking-normal text-[#00C97A]">
+              Saves as {mintOpensPreview}
+            </span>
+          ) : null}
         </label>
+        {simplePublic ? null : (
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
           Public phase starts
           <input
             type="datetime-local"
             value={values.public_start}
-            onChange={(e) => set('public_start', e.target.value)}
+            onChange={(e) => {
+              const public_start = e.target.value
+              onChange(simplePublic ? applyMintOpensDate(values, public_start) : { ...values, public_start })
+            }}
             className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
           <span className="font-mono text-[10px] normal-case tracking-normal text-[#5C6773]">
-            Only needed when presale or whitelist phases run first — leave empty to open straight into public mint.
+            Follows Mint opens when you change that field. Edit this afterward only if public should start later
+            than allowlist or presale.
           </span>
         </label>
+        )}
       </div>
 
       <p className="font-mono text-[10px] text-[#5C6773]">{formatOwlCenterPlatformMintFeeLabel()} applies on top of creator price.</p>
@@ -280,46 +343,182 @@ export function MintDetailsConfigFields({
       <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
         <input
           type="checkbox"
-          checked={values.wl_enabled}
-          onChange={(e) => set('wl_enabled', e.target.checked)}
+          checked={values.allowlist_phases.length > 0 || values.wl_enabled}
+          onChange={(e) => {
+            if (e.target.checked) {
+              const seed =
+                values.allowlist_phases.length > 0
+                  ? values.allowlist_phases
+                  : [
+                      {
+                        key: 'wl',
+                        label: 'Whitelist',
+                        start: values.wl_start,
+                        supply: values.wl_supply,
+                        price: values.wl_price,
+                        price_currency: 'USDC',
+                        wallet_mint_limit: values.wallet_mint_limit || '1',
+                      } satisfies PartnerAllowlistPhaseFormRow,
+                    ]
+              onChange({ ...values, wl_enabled: true, allowlist_phases: seed })
+            } else {
+              onChange({ ...values, wl_enabled: false, allowlist_phases: [], wl_supply: '', wl_start: '', wl_price: '' })
+            }
+          }}
           className="h-4 w-4 accent-[#00FF9C]"
         />
-        Whitelist phase
+        Allowlist phases (Team / OG / WL / …)
       </label>
-      {values.wl_enabled ? (
-        <div className="grid gap-4 border border-[#1A222B] bg-[#0F1419]/60 p-4 sm:grid-cols-2">
-          <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-            WL supply
-            <input
-              type="number"
-              min={1}
-              max={supply || undefined}
-              value={values.wl_supply}
-              onChange={(e) => set('wl_supply', e.target.value)}
-              className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-            />
-          </label>
-          <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
-            Whitelist price (USDC)
-            <input
-              type="number"
-              step="any"
-              min={0}
-              value={values.wl_price}
-              onChange={(e) => set('wl_price', e.target.value)}
-              placeholder="30"
-              className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-            />
-          </label>
-          <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
-            Whitelist phase starts
-            <input
-              type="datetime-local"
-              value={values.wl_start}
-              onChange={(e) => set('wl_start', e.target.value)}
-              className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
-            />
-          </label>
+      {values.allowlist_phases.length > 0 || values.wl_enabled ? (
+        <div className="grid gap-4 border border-[#1A222B] bg-[#0F1419]/60 p-4">
+          <p className="text-xs leading-relaxed text-[#9BA8B4]">
+            Add up to {PARTNER_ALLOWLIST_MAX_PHASES} sequential lists before public. Each phase needs a start time;
+            the next phase (or Public start) ends the previous window. After saving, paste wallets per phase in
+            Whitelist · Wallets below.
+          </p>
+          {values.allowlist_phases.map((phase, idx) => (
+            <div key={`${phase.key}-${idx}`} className="grid gap-3 border border-[#1A222B] bg-[#0A0E12]/80 p-3 sm:grid-cols-2">
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
+                Phase name
+                <input
+                  value={phase.label}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = { ...phase, label: e.target.value }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                />
+              </label>
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                Supply (hard cap)
+                <input
+                  type="number"
+                  min={1}
+                  max={supply || undefined}
+                  value={phase.supply}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = { ...phase, supply: e.target.value }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                />
+              </label>
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                Currency
+                <select
+                  value={phase.price_currency === 'SOL' ? 'SOL' : 'USDC'}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = {
+                      ...phase,
+                      price_currency: e.target.value === 'SOL' ? 'SOL' : 'USDC',
+                    }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                >
+                  <option value="USDC">USDC (pay in SOL · live rate)</option>
+                  <option value="SOL">SOL (fixed)</option>
+                </select>
+              </label>
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                {phase.price_currency === 'SOL' ? 'Price (SOL)' : 'Price (USDC)'}
+                <input
+                  type="number"
+                  step="any"
+                  min={0}
+                  value={phase.price}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = { ...phase, price: e.target.value }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  placeholder={phase.price_currency === 'SOL' ? '0.12' : '9'}
+                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                />
+              </label>
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                Max per wallet
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={phase.wallet_mint_limit ?? ''}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = { ...phase, wallet_mint_limit: e.target.value }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  placeholder={values.wallet_mint_limit || '1'}
+                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                />
+              </label>
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
+                Phase starts
+                <input
+                  type="datetime-local"
+                  value={phase.start}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = { ...phase, start: e.target.value }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                />
+              </label>
+              <div className="sm:col-span-2">
+                <button
+                  type="button"
+                  className="font-mono text-[10px] uppercase tracking-widest text-[#FF9C9C] underline-offset-2 hover:underline"
+                  onClick={() => {
+                    const next = values.allowlist_phases.filter((_, i) => i !== idx)
+                    onChange({
+                      ...values,
+                      allowlist_phases: next,
+                      wl_enabled: next.length > 0,
+                    })
+                  }}
+                >
+                  Remove phase
+                </button>
+              </div>
+            </div>
+          ))}
+          {values.allowlist_phases.length < PARTNER_ALLOWLIST_MAX_PHASES ? (
+            <button
+              type="button"
+              className="min-h-[44px] border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-[#00FF9C]"
+              onClick={() => {
+                const preset = nextPresetForPhases(values.allowlist_phases)
+                onChange({
+                  ...values,
+                  wl_enabled: true,
+                  allowlist_phases: [
+                    ...values.allowlist_phases,
+                    {
+                      key: preset.key,
+                      label: preset.label,
+                      start: '',
+                      supply: '',
+                      price: '',
+                      price_currency: 'USDC',
+                      wallet_mint_limit: values.wallet_mint_limit || '1',
+                    },
+                  ],
+                })
+              }}
+            >
+              + Add phase (Team / OG / WL …)
+            </button>
+          ) : null}
+          <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
+            Set Public start above so the last allowlist window ends when public mint opens. Phase supply is a hard
+            cap (mints stop for that phase when used). Max per wallet defaults Spots per wallet when you paste lists
+            below; leave blank to inherit the public per-wallet limit. Price currency: USDC is re-quoted to SOL as the
+            market moves; SOL stays fixed on-chain (same as public SOL mint).
+          </p>
         </div>
       ) : null}
         </>

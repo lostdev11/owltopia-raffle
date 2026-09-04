@@ -4,18 +4,18 @@
  */
 export const OWLTOPIA_PARTNER_SLASH_COMMAND = {
   name: 'owltopia-partner',
-  description: 'Owltopia paid Discord giveaway bridge (Solana USDC + webhooks)',
+  description: 'Owltopia Partner Pro Discord tools (webhooks + status)',
   type: 1,
   dm_permission: false,
   options: [
     {
       name: 'subscribe',
-      description: 'Get Solana USDC payment instructions for this server',
+      description: 'Partner Pro billing info (one-time setup — monthly Discord renewals discontinued)',
       type: 1,
     },
     {
       name: 'verify',
-      description: 'Verify USDC payment using the Solana transaction signature',
+      description: 'Legacy monthly USDC verify (discontinued — Partner Pro is one-time)',
       type: 1,
       options: [
         {
@@ -67,7 +67,7 @@ export const OWLTOPIA_PARTNER_SLASH_COMMAND = {
     },
     {
       name: 'status',
-      description: 'Show subscription, webhook, and API status for this server',
+      description: 'Show partner Discord link, webhook, and API status for this server',
       type: 1,
     },
   ],
@@ -302,8 +302,174 @@ export const OWLTOPIA_ALERTS_SLASH_COMMAND = {
   ],
 } as const
 
+export const OWLTOPIA_WL_SLASH_COMMAND = {
+  name: 'owltopia-wl',
+  description: 'Collect Solana whitelist wallets in this server (Partner Pro)',
+  type: 1,
+  dm_permission: false,
+  options: [
+    {
+      name: 'setup',
+      description: 'Step-by-step checklist for your first whitelist spot',
+      type: 1,
+    },
+    {
+      name: 'create',
+      description: 'Open a new whitelist collection spot in a channel',
+      type: 1,
+      options: [
+        { name: 'name', description: 'Shown on the embed (e.g. OG Whitelist)', type: 3, required: true },
+        {
+          name: 'phase',
+          description: 'Allowlist phase (default: Whitelist)',
+          type: 3,
+          required: false,
+          choices: [
+            { name: 'Team', value: 'team' },
+            { name: 'OG', value: 'og' },
+            { name: 'Whitelist', value: 'wl' },
+            { name: 'WL 2', value: 'wl2' },
+            { name: 'WL 3', value: 'wl3' },
+          ],
+        },
+        {
+          name: 'channel',
+          description: 'Channel for the Submit wallet button (defaults to here)',
+          type: 7,
+          required: false,
+          channel_types: [0, 5],
+        },
+        {
+          name: 'max',
+          description: 'Optional cap (auto-closes when full)',
+          type: 4,
+          required: false,
+          min_value: 1,
+        },
+        {
+          name: 'spots',
+          description: 'Mint spots per wallet when pushed to Owl Center (default 1)',
+          type: 4,
+          required: false,
+          min_value: 1,
+          max_value: 50,
+        },
+        {
+          name: 'role',
+          description: 'Require this Discord role to press Submit wallet (role gate)',
+          type: 8,
+          required: false,
+        },
+        {
+          name: 'launch',
+          description: 'Owl Center collection slug or id (optional)',
+          type: 3,
+          required: false,
+        },
+      ],
+    },
+    {
+      name: 'set-role',
+      description: 'Require a Discord role to submit (or clear the gate) on an existing whitelist spot',
+      type: 1,
+      options: [
+        {
+          name: 'role',
+          description: 'Role required to submit — omit or leave empty to clear the gate',
+          type: 8,
+          required: false,
+        },
+        { name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false },
+        {
+          name: 'clear',
+          description: 'Set true to remove the role gate',
+          type: 5,
+          required: false,
+        },
+      ],
+    },
+    {
+      name: 'open',
+      description: 'Post or turn the Submit wallet button back on',
+      type: 1,
+      options: [{ name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false }],
+    },
+    {
+      name: 'close',
+      description: 'Stop new submissions (you can reopen later)',
+      type: 1,
+      options: [{ name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false }],
+    },
+    {
+      name: 'status',
+      description: 'How many wallets registered and whether it’s open',
+      type: 1,
+      options: [{ name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false }],
+    },
+    {
+      name: 'list',
+      description: 'All whitelist spots in this server',
+      type: 1,
+    },
+    {
+      name: 'export',
+      description: 'Download wallet list (link to dashboard CSV)',
+      type: 1,
+      options: [{ name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false }],
+    },
+    {
+      name: 'push',
+      description: 'Send wallets to your Owl Center mint list',
+      type: 1,
+      options: [
+        { name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false },
+        { name: 'launch', description: 'Owl Center collection slug or id', type: 3, required: false },
+      ],
+    },
+    {
+      name: 'remove',
+      description: 'Remove a wallet or Discord member from a spot',
+      type: 1,
+      options: [
+        { name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false },
+        { name: 'wallet', description: 'Solana wallet to remove', type: 3, required: false },
+        { name: 'member', description: 'Discord member to remove', type: 6, required: false },
+      ],
+    },
+  ],
+} as const
+
+/** Read-only alias for `/owltopia-wl` status, list, and export (mintlist lookup). */
+export const OWLTOPIA_QUERY_SLASH_COMMAND = {
+  name: 'query',
+  description: 'Look up whitelist spots and mint lists (Partner Pro)',
+  type: 1,
+  dm_permission: false,
+  options: [
+    {
+      name: 'mintlist',
+      description: 'Wallets registered on a whitelist spot (same as /owltopia-wl export)',
+      type: 1,
+      options: [{ name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false }],
+    },
+    {
+      name: 'status',
+      description: 'Spot status — open/closed, count, linked collection',
+      type: 1,
+      options: [{ name: 'spot', description: 'Spot name or id (defaults to this channel)', type: 3, required: false }],
+    },
+    {
+      name: 'spots',
+      description: 'All whitelist spots in this server (same as /owltopia-wl list)',
+      type: 1,
+    },
+  ],
+} as const
+
 export const ALL_DISCORD_SLASH_COMMANDS = [
   OWLTOPIA_PARTNER_SLASH_COMMAND,
   OWLTOPIA_SHOP_SLASH_COMMAND,
   OWLTOPIA_ALERTS_SLASH_COMMAND,
+  OWLTOPIA_WL_SLASH_COMMAND,
+  OWLTOPIA_QUERY_SLASH_COMMAND,
 ] as const

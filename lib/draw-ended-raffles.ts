@@ -15,11 +15,12 @@ import {
   updateRaffle,
   getRaffleMinimum,
 } from '@/lib/db/raffles'
-import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
+import { hasExhaustedMinThresholdTimeExtensions, raffleSecondRoundEnabled } from '@/lib/raffles/ticket-escrow-policy'
 import { buildMinThresholdMissExtensionPatch } from '@/lib/raffles/min-threshold-extension'
 import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold-terminal'
-import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
+import { isRaffleEligibleForWinnerSelection } from '@/lib/raffles/sell-out-eligibility'
+import { raffleRequiresPrizeEscrowForDraw } from '@/lib/raffles/visibility'
 import type { Raffle } from '@/lib/types'
 
 export type DrawResult = {
@@ -49,8 +50,7 @@ export async function processEndedRaffleByIdIfApplicable(raffleId: string): Prom
   }
   // ready_to_draw is due even if end_time was pushed into the future after a failed draw.
   if (!raffleIsDueForWinnerDraw(raffle)) return null
-  const needsPrizeEscrow =
-    (raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)) && !raffle.prize_deposited_at
+  const needsPrizeEscrow = raffleRequiresPrizeEscrowForDraw(raffle) && !raffle.prize_deposited_at
   if (needsPrizeEscrow) return null
   return processOneEndedRaffle(raffle)
 }
@@ -58,20 +58,22 @@ export async function processEndedRaffleByIdIfApplicable(raffleId: string): Prom
 export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult> {
   try {
     const entries = await getEntriesByRaffleId(raffle.id)
-    const canDraw = canSelectWinner(raffle, entries)
+    const canDraw = isRaffleEligibleForWinnerSelection(raffle, entries)
 
     // If {@link canSelectWinner} is false (min not hit, or no sales when there's no drawable min),
     // extend once then terminal refund state — do not force `ready_to_draw` while still undrawable.
     if (!canDraw) {
       if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
         await finalizeMinThresholdTerminalFailure(raffle.id)
+        const refundReason = raffleSecondRoundEnabled(raffle)
+          ? 'Minimum was not met after the deadline extension. Ticket buyers can claim refunds; the escrowed prize is returned to the creator when the on-chain transfer succeeds.'
+          : 'Minimum was not met when Round 1 ended (second round disabled). Ticket buyers can claim refunds; the escrowed prize is returned to the creator when the on-chain transfer succeeds.'
         return {
           raffleId: raffle.id,
           raffleTitle: raffle.title,
           success: false,
           winnerWallet: null,
-          error:
-            'Minimum was not met after the deadline extension. Ticket buyers can claim refunds; the escrowed prize is returned to the creator when the on-chain transfer succeeds.',
+          error: refundReason,
         }
       }
       // Threshold not met (or zero sales): second selling round — extend once by the original raffle duration.

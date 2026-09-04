@@ -6,6 +6,7 @@ import { OwlCenterHubQuickLinks, OwlCenterSubmitHint } from '@/components/owl-ce
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { listOwlCenterLaunchesPublic } from '@/lib/db/owl-center-launch'
 import { getGen2PresaleSoldOutForDisplay } from '@/lib/gen2-presale/owl-center-presale-status'
+import { OWL_CENTER_COLLECTION_CARD_GRID } from '@/lib/owl-center/layout'
 import { PLATFORM_NAME } from '@/lib/site-config'
 
 export const metadata: Metadata = {
@@ -48,7 +49,7 @@ export default async function OwlCenterHomePage() {
 
       <section className="mb-16">
         <h2 className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">Live mints</h2>
-        <div className="mt-6 grid gap-6 md:grid-cols-2">
+        <div className={`mt-6 ${OWL_CENTER_COLLECTION_CARD_GRID}`}>
           {liveMints.length ? (
             liveMints.map((l) => (
               <CollectionCard key={l.id} launch={l} presaleSoldOut={l.slug === 'gen2' ? presaleSoldOut : false} />
@@ -66,7 +67,7 @@ export default async function OwlCenterHomePage() {
 
       <section className="mb-16">
         <h2 className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">Recently sold out</h2>
-        <div className="mt-6 grid gap-6 md:grid-cols-2">
+        <div className={`mt-6 ${OWL_CENTER_COLLECTION_CARD_GRID}`}>
           {soldOut.length ? (
             soldOut.map((l) => (
               <CollectionCard key={l.id} launch={l} presaleSoldOut={l.slug === 'gen2' ? presaleSoldOut : false} />
@@ -79,7 +80,7 @@ export default async function OwlCenterHomePage() {
 
       <section>
         <h2 className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">Trading active</h2>
-        <div className="mt-6 grid gap-6 md:grid-cols-2">
+        <div className={`mt-6 ${OWL_CENTER_COLLECTION_CARD_GRID}`}>
           {trading.length ? (
             trading.map((l) => (
               <CollectionCard key={l.id} launch={l} presaleSoldOut={l.slug === 'gen2' ? presaleSoldOut : false} />

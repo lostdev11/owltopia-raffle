@@ -1,6 +1,14 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
-import { extractMintedNftMintsFromTx } from '@/lib/owl-center/parse-mint-tx-nfts'
 import type { OwlMintNetwork } from '@/lib/solana/network'
+
+async function mintsFromTx(txSignature: string, network: OwlMintNetwork): Promise<string[]> {
+  try {
+    const { extractMintedNftMintsFromTx } = await import('@/lib/owl-center/parse-mint-tx-nfts')
+    return await extractMintedNftMintsFromTx(txSignature, network)
+  } catch {
+    return []
+  }
+}
 
 /** Collect unique minted NFT addresses from owl_center_mint_events for a launch. */
 export async function collectMintedNftMintsForLaunch(launchId: string): Promise<string[]> {
@@ -39,7 +47,7 @@ export async function collectMintedNftMintsForLaunch(launchId: string): Promise<
     if (!mints.length && r.tx_signature?.trim()) {
       const net: OwlMintNetwork = r.network === 'devnet' ? 'devnet' : 'mainnet'
       try {
-        mints = await extractMintedNftMintsFromTx(r.tx_signature.trim(), net)
+        mints = await mintsFromTx(r.tx_signature.trim(), net)
       } catch {
         mints = []
       }
@@ -104,7 +112,7 @@ export async function collectMintedNftMintsForWallets(
 
     if (!mints.length && r.tx_signature?.trim()) {
       try {
-        mints = await extractMintedNftMintsFromTx(r.tx_signature.trim(), network)
+        mints = await mintsFromTx(r.tx_signature.trim(), network)
       } catch {
         mints = []
       }

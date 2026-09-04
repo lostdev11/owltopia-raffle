@@ -1,4 +1,9 @@
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
+import {
+  partnerAllowlistEarliestStart,
+  resolveEffectiveAllowlistStartsAt,
+  resolveEffectivePartnerAllowlistPhases,
+} from '@/lib/owl-center/partner-allowlist-phases'
 import type { OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 
 /** Phases that can appear on a mint schedule (excludes SOLD_OUT). */
@@ -73,7 +78,9 @@ export type MintCountdownInfo = {
 
 function parseIsoMs(iso: string | null | undefined): number | null {
   if (!iso?.trim()) return null
-  const ms = new Date(iso).getTime()
+  const normalized = datetimeLocalToIso(iso)
+  if (!normalized) return null
+  const ms = Date.parse(normalized)
   return Number.isFinite(ms) ? ms : null
 }
 
@@ -90,20 +97,31 @@ export function parsePhaseSchedule(raw: unknown): OwlCenterPhaseSchedule {
   return out
 }
 
+export type PhaseStartsAtLaunch = Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule'> &
+  Partial<
+    Pick<
+      OwlCenterLaunchPublic,
+      'partner_allowlist_phases' | 'creator_wl_enabled' | 'wl_supply' | 'wl_price_usdc'
+    >
+  >
+
 /** When a phase opens: explicit schedule entry, else mint kickoff for AIRDROP only. */
-export function getPhaseStartsAt(
-  launch: Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule'>,
-  phase: OwlCenterPhase
-): string | null {
+export function getPhaseStartsAt(launch: PhaseStartsAtLaunch, phase: OwlCenterPhase): string | null {
+  if (phase === 'WHITELIST') {
+    const earliest = partnerAllowlistEarliestStart(resolveEffectivePartnerAllowlistPhases(launch))
+    if (earliest) return earliest
+  }
   const scheduled = launch.phase_schedule?.[phase]
-  if (scheduled) return scheduled
+  if (scheduled) {
+    if (phase === 'WHITELIST') return resolveEffectiveAllowlistStartsAt(scheduled, launch)
+    return scheduled
+  }
   if (phase === 'AIRDROP' && launch.launch_deadline_at) return launch.launch_deadline_at
   return null
 }
 
 export function isPhaseOpenBySchedule(
-  launch: Pick<OwlCenterLaunchPublic, 'launch_deadline_at' | 'phase_schedule'> &
-    Partial<Pick<OwlCenterLaunchPublic, 'active_phases'>>,
+  launch: PhaseStartsAtLaunch & Partial<Pick<OwlCenterLaunchPublic, 'active_phases'>>,
   phase: OwlCenterPhase,
   nowMs: number = Date.now()
 ): boolean {
@@ -114,6 +132,123 @@ export function isPhaseOpenBySchedule(
   const startMs = parseIsoMs(startsAt)
   if (startMs == null) return true
   return nowMs >= startMs
+}
+
+export type PublicSimpleMintWindowLaunch = Pick<
+  OwlCenterLaunchPublic,
+  | 'launch_deadline_at'
+  | 'phase_schedule'
+  | 'creator_wl_enabled'
+  | 'creator_presale_enabled'
+  | 'wl_supply'
+  | 'presale_supply'
+>
+
+/**
+ * True when the launch has presale/WL configured ahead of PUBLIC.
+ * public_simple collections still mint only in PUBLIC — those earlier phases must finish
+ * (or PUBLIC must have its own start) before the mint button opens.
+ */
+export function launchHasQueuedMintPhases(launch: PublicSimpleMintWindowLaunch): boolean {
+  return (
+    Boolean(launch.creator_wl_enabled) ||
+    (launch.wl_supply ?? 0) > 0 ||
+    Boolean(launch.creator_presale_enabled) ||
+    (launch.presale_supply ?? 0) > 0
+  )
+}
+
+function laterIso(a: string, b: string): string {
+  const aMs = parseIsoMs(a)
+  const bMs = parseIsoMs(b)
+  if (aMs == null) return b
+  if (bMs == null) return a
+  return aMs >= bMs ? a : b
+}
+
+/**
+ * When PUBLIC mint is allowed for a public_simple launch.
+ * - Presale/WL: explicit PUBLIC start, floored by mint-opens (kickoff) when both exist
+ * - Straight public mint: Mint opens (kickoff) is the date — so moving it back takes effect
+ *   even if a leftover PUBLIC timestamp is later
+ * - Presale/WL configured and PUBLIC has no start → null (not scheduled; must not open)
+ */
+export function getPublicSimpleMintOpensAt(launch: PublicSimpleMintWindowLaunch): string | null {
+  const publicStart = launch.phase_schedule?.PUBLIC ?? null
+  const kickoff = launch.launch_deadline_at ?? null
+  if (launchHasQueuedMintPhases(launch)) {
+    if (publicStart && kickoff) return laterIso(publicStart, kickoff)
+    if (publicStart) return publicStart
+    return null
+  }
+  return kickoff ?? publicStart
+}
+
+export function isPublicSimpleMintOpen(
+  launch: PublicSimpleMintWindowLaunch,
+  nowMs: number = Date.now()
+): boolean {
+  const opensAt = getPublicSimpleMintOpensAt(launch)
+  if (!opensAt) return !launchHasQueuedMintPhases(launch)
+  const startMs = parseIsoMs(opensAt)
+  if (startMs == null) return !launchHasQueuedMintPhases(launch)
+  return nowMs >= startMs
+}
+
+export type PublicSimpleMintClosedInfo = {
+  reason: string
+  opensAt: string | null
+}
+
+/** Copy for the mint console when PUBLIC is not live yet. */
+export function publicSimpleMintClosedInfo(
+  launch: PublicSimpleMintWindowLaunch,
+  nowMs: number = Date.now()
+): PublicSimpleMintClosedInfo | null {
+  if (isPublicSimpleMintOpen(launch, nowMs)) return null
+
+  const opensAt = getPublicSimpleMintOpensAt(launch)
+  if (opensAt) {
+    const publicStart = launch.phase_schedule?.PUBLIC
+    const kickoff = launch.launch_deadline_at
+    const opensMs = parseIsoMs(opensAt)
+    const label =
+      publicStart && parseIsoMs(publicStart) === opensMs
+        ? 'Public mint'
+        : kickoff && parseIsoMs(kickoff) === opensMs
+          ? 'Mint'
+          : 'Public mint'
+    return { reason: `${label} opens ${formatMintDate(opensAt)}`, opensAt }
+  }
+
+  const wlStart = launch.phase_schedule?.WHITELIST ?? null
+  if (wlStart) {
+    const wlMs = parseIsoMs(wlStart)
+    if (wlMs != null && nowMs < wlMs) {
+      return { reason: `Whitelist opens ${formatMintDate(wlStart)}`, opensAt: wlStart }
+    }
+  }
+  const presaleStart = launch.phase_schedule?.PRESALE ?? null
+  if (presaleStart) {
+    const presaleMs = parseIsoMs(presaleStart)
+    if (presaleMs != null && nowMs < presaleMs) {
+      return { reason: `Presale opens ${formatMintDate(presaleStart)}`, opensAt: presaleStart }
+    }
+  }
+  return { reason: 'Public mint is not scheduled yet — set a public start date', opensAt: null }
+}
+
+/**
+ * On-chain Candy Guard startDate. Far-future when earlier phases exist but PUBLIC has no start,
+ * so the CM cannot be minted against until the creator actually schedules public.
+ */
+export const PUBLIC_SIMPLE_UNSCHEDULED_START_ISO = '2099-01-01T00:00:00.000Z'
+
+export function resolvePublicSimpleGuardStartDateIso(launch: PublicSimpleMintWindowLaunch): string | null {
+  const opensAt = getPublicSimpleMintOpensAt(launch)
+  if (opensAt) return opensAt
+  if (launchHasQueuedMintPhases(launch)) return PUBLIC_SIMPLE_UNSCHEDULED_START_ISO
+  return null
 }
 
 /**
@@ -189,13 +324,52 @@ export function formatPhaseStartShort(iso: string | null | undefined): string | 
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
-/** Convert `<input type="datetime-local">` value to ISO (local → UTC). */
+const DATETIME_LOCAL_RE =
+  /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/
+
+function parseAbsoluteIso(trimmed: string): string | null {
+  const candidates = [trimmed]
+  // `...+00` (no minutes) is invalid in some engines; `...+00:00` is not.
+  if (/[+-]\d{2}$/.test(trimmed)) candidates.push(`${trimmed}:00`)
+  for (const s of candidates) {
+    const d = new Date(s)
+    if (!Number.isNaN(d.getTime())) return d.toISOString()
+  }
+  return null
+}
+
+/**
+ * Convert `<input type="datetime-local">` value to ISO (local → UTC).
+ * Also passes through already-absolute timestamps (Z / offset) so a browser
+ * payload is not re-interpreted as local on the UTC server.
+ *
+ * `new Date("YYYY-MM-DDTHH:mm")` is Invalid Date in Safari (seconds required),
+ * which used to drop mint dates on save. Parse local components explicitly.
+ */
 export function datetimeLocalToIso(local: string): string | null {
   const trimmed = local.trim()
   if (!trimmed) return null
-  const d = new Date(trimmed)
-  if (Number.isNaN(d.getTime())) return null
-  return d.toISOString()
+
+  if (/[zZ]$/.test(trimmed) || /[+-]\d{2}(?::?\d{2})?$/.test(trimmed)) {
+    return parseAbsoluteIso(trimmed)
+  }
+
+  const m = trimmed.match(DATETIME_LOCAL_RE)
+  if (m) {
+    const ms = Number((m[7] ?? '0').padEnd(3, '0').slice(0, 3))
+    const d = new Date(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      Number(m[4]),
+      Number(m[5]),
+      Number(m[6] ?? 0),
+      ms
+    )
+    return Number.isNaN(d.getTime()) ? null : d.toISOString()
+  }
+
+  return parseAbsoluteIso(trimmed)
 }
 
 /** Format ISO for datetime-local input in local timezone. */

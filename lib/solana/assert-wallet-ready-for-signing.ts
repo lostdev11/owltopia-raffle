@@ -32,8 +32,13 @@ export async function assertWalletReadyForSigning(params: {
   publicKey: PublicKey | null
   walletAdapter: WalletAdapter | null
   connection?: Connection
+  /**
+   * Skip getLatestBlockhash — useful on the create/deposit hot path where the send
+   * itself fetches a blockhash and an extra confirmed RPC round-trip delays the wallet popup.
+   */
+  skipRpcProbe?: boolean
 }): Promise<void> {
-  const { connected, publicKey, walletAdapter, connection } = params
+  const { connected, publicKey, walletAdapter, connection, skipRpcProbe } = params
 
   if (!connected || !publicKey) {
     throw new Error(
@@ -44,8 +49,6 @@ export async function assertWalletReadyForSigning(params: {
   if (!walletAdapter) {
     throw new Error('Your wallet adapter is not ready. Refresh the page and reconnect your wallet.')
   }
-
-  const walletName = String(walletAdapter.name || 'wallet')
 
   if (adapterIsPhantom(walletAdapter)) {
     const provider = getPhantomInjectedProviderForPublicKey(publicKey)
@@ -70,7 +73,7 @@ export async function assertWalletReadyForSigning(params: {
     }
   }
 
-  if (connection) {
+  if (connection && !skipRpcProbe) {
     try {
       await connection.getLatestBlockhash('confirmed')
     } catch (err) {

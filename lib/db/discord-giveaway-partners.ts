@@ -69,6 +69,8 @@ export async function findPartnerTenantByApiSecret(
 
 export function isPartnerTenantEntitled(t: DiscordGiveawayPartnerTenant): boolean {
   if (t.status === 'suspended') return false
+  // Partner Pro is one-time setup; active tenants do not expire on active_until.
+  if (t.status === 'active') return true
   if (!t.active_until) return true
   const until = new Date(t.active_until).getTime()
   return Number.isFinite(until) && until > Date.now()
@@ -126,7 +128,8 @@ export async function getDiscordGiveawayPartnerById(
 
 export type CreateDiscordGiveawayPartnerInput = {
   name: string
-  webhook_url: string
+  /** Optional — whitelist / bot commands only need guild id; webhooks can be set later. */
+  webhook_url?: string | null
   discord_guild_id?: string | null
   status?: DiscordGiveawayPartnerTenant['status']
   active_until?: string | null
@@ -139,12 +142,14 @@ export async function createDiscordGiveawayPartner(
 ): Promise<{ tenant: DiscordGiveawayPartnerTenant; apiSecret: string }> {
   const apiSecret = generatePartnerApiSecret()
   const api_secret_hash = hashPartnerApiSecret(apiSecret)
+  const webhook =
+    typeof input.webhook_url === 'string' && input.webhook_url.trim() ? input.webhook_url.trim() : null
 
   const { data, error } = await getSupabaseAdmin()
     .from('discord_giveaway_partner_tenants')
     .insert({
       name: input.name.trim(),
-      webhook_url: input.webhook_url.trim(),
+      webhook_url: webhook,
       raffle_webhook_url_created: null,
       raffle_webhook_url_winner: null,
       discord_guild_id: input.discord_guild_id?.trim() || null,

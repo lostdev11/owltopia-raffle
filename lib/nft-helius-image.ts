@@ -319,7 +319,10 @@ async function heliusGetAssetBatch(
         jsonrpc: '2.0',
         id: 'nft-image-batch',
         method: 'getAssetBatch',
-        params: { ids },
+        params: {
+          ids,
+          displayOptions: { showCollectionMetadata: true, showUnverifiedCollections: true },
+        },
       }),
       cache: 'no-store',
       signal: controller.signal,

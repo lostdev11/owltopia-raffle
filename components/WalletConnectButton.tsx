@@ -30,6 +30,7 @@ import {
   redirectToBackpackBrowser,
 } from '@/lib/utils'
 import { ConnectedWalletBalances } from '@/components/ConnectedWalletBalances'
+import { replaceClientUrl } from '@/lib/client/replace-url'
 
 const MOBILE_REDIRECT_GUARD_KEY = 'mobile_wallet_redirect_in_flight'
 const MOBILE_REDIRECT_GUARD_WINDOW_MS = 5000
@@ -404,6 +405,9 @@ export function WalletConnectButton() {
     const isMobile = isMobileDevice()
     if (!isMobile) return
 
+    let cleanUrlTimeout: number | null = null
+    let visibilityCheckTimeout: number | null = null
+
     // Check URL for deep link callback parameters and clean them up
     const checkUrlParams = () => {
       const urlParams = new URLSearchParams(window.location.search)
@@ -486,9 +490,10 @@ export function WalletConnectButton() {
         }
         const cleanDelay = 1000
         if (!connecting) {
-          setTimeout(() => {
-            const cleanUrl = window.location.pathname
-            window.history.replaceState({}, '', cleanUrl)
+          if (cleanUrlTimeout != null) window.clearTimeout(cleanUrlTimeout)
+          cleanUrlTimeout = window.setTimeout(() => {
+            cleanUrlTimeout = null
+            replaceClientUrl(window.location.pathname)
           }, cleanDelay)
         }
       }
@@ -498,7 +503,11 @@ export function WalletConnectButton() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         // Small delay to allow page to fully load
-        setTimeout(checkUrlParams, 300)
+        if (visibilityCheckTimeout != null) window.clearTimeout(visibilityCheckTimeout)
+        visibilityCheckTimeout = window.setTimeout(() => {
+          visibilityCheckTimeout = null
+          checkUrlParams()
+        }, 300)
       }
     }
 
@@ -508,6 +517,8 @@ export function WalletConnectButton() {
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
+      if (cleanUrlTimeout != null) window.clearTimeout(cleanUrlTimeout)
+      if (visibilityCheckTimeout != null) window.clearTimeout(visibilityCheckTimeout)
     }
   }, [mounted, connecting])
 
@@ -518,7 +529,7 @@ export function WalletConnectButton() {
     const hashParams = new URLSearchParams(window.location.hash.substring(1))
     const hasSolflareCallback = urlParams.has('data') || urlParams.has('nonce') || hashParams.has('data') || hashParams.has('nonce')
     if (hasSolflareCallback) {
-      window.history.replaceState({}, '', window.location.pathname)
+      replaceClientUrl(window.location.pathname)
     }
   }, [mounted, connected])
 

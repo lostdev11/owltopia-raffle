@@ -7,7 +7,9 @@ import {
   PublicKey,
   Connection,
   Transaction,
+  TransactionInstruction,
   VersionedTransaction,
+  SystemProgram,
 } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
@@ -18,6 +20,7 @@ import {
   resolveVrfRevealWaitMs,
   vrfRevealRetryDelayMs,
   isSwitchboardGatewayTransientError,
+  isInvalidVrfSecpSignatureError,
 } from '@/lib/raffles/draw/vrf-retry-policy'
 
 export const VRF_PROVIDER_SWITCHBOARD = 'switchboard' as const
@@ -95,6 +98,136 @@ export function keypairWallet(payer: Keypair) {
 async function loadSbProgram(connection: Connection, payer: Keypair) {
   const sb = await loadSb()
   return sb.AnchorUtils.loadProgramFromConnection(connection, keypairWallet(payer))
+}
+
+function normalizeGatewayUrl(raw: string | null | undefined): string | null {
+  const trimmed = (raw ?? '').trim().replace(/\/$/, '')
+  return trimmed || null
+}
+
+/** Collect gateway URLs for reveal fallback. Assigned oracle gateway MUST be first (SDK behavior). */
+async function collectRevealGatewayUrls(
+  program: Awaited<ReturnType<typeof loadSbProgram>>,
+  data: {
+    oracle: PublicKey
+    queue: PublicKey
+    gatewayUri?: Uint8Array | number[] | Buffer | null
+  }
+): Promise<string[]> {
+  const sb = await loadSb()
+  const { CrossbarClient } = await import('@switchboard-xyz/common')
+  const urls: string[] = []
+  const seen = new Set<string>()
+  const add = (raw: string | null | undefined) => {
+    const normalized = normalizeGatewayUrl(raw)
+    if (!normalized || seen.has(normalized)) return
+    seen.add(normalized)
+    urls.push(normalized)
+  }
+
+  // 1. Assigned oracle gateway — signatures must match this oracle (Switchboard SDK default).
+  try {
+    const oracle = new sb.Oracle(program, data.oracle)
+    const oracleData = await oracle.loadData()
+    add(Buffer.from(oracleData.gatewayUri as Uint8Array).toString('utf8').replace(/\0+$/, ''))
+  } catch {
+    // ignore
+  }
+
+  if (data.gatewayUri) {
+    add(Buffer.from(data.gatewayUri).toString('utf8').replace(/\0+$/, ''))
+  }
+
+  // 2. Queue's latest gateway from Crossbar.
+  try {
+    const queue = new sb.Queue(program, data.queue)
+    const crossbar = CrossbarClient.default()
+    const gateway = await queue.fetchGatewayByLatestVersion(crossbar)
+    add(gateway.gatewayUrl)
+  } catch {
+    // ignore
+  }
+
+  // 3. Other Crossbar gateways — only when the assigned oracle gateway is 503/unreachable.
+  try {
+    const crossbar = CrossbarClient.default()
+    const network = isDevnetRpc(resolveServerSolanaRpcUrl()) ? 'devnet' : 'mainnet'
+    const fromCrossbar = await crossbar.fetchGateways(network)
+    for (const gateway of fromCrossbar) add(gateway)
+  } catch {
+    // ignore
+  }
+
+  return urls
+}
+
+async function buildRevealIxForGateway(params: {
+  program: Awaited<ReturnType<typeof loadSbProgram>>
+  randomness: {
+    pubkey: PublicKey
+    loadData: () => Promise<{
+      oracle: PublicKey
+      queue: PublicKey
+      authority: PublicKey
+      seedSlothash: Uint8Array | number[]
+      seedSlot: { toNumber: () => number } | number | bigint
+    }>
+  }
+  payer: PublicKey
+  gatewayUrl: string
+  rpcUrl: string
+}): Promise<TransactionInstruction> {
+  const sb = await loadSb()
+  const { Gateway } = await import('@switchboard-xyz/common')
+  const { getAssociatedTokenAddressSync } = await import('@solana/spl-token')
+  const bs58 = (await import('bs58')).default
+  const data = await params.randomness.loadData()
+  const seedSlotRaw = data.seedSlot
+  const seedSlot =
+    typeof seedSlotRaw === 'object' && seedSlotRaw != null && 'toNumber' in seedSlotRaw
+      ? seedSlotRaw.toNumber()
+      : Number(seedSlotRaw)
+  if (!Number.isFinite(seedSlot) || seedSlot <= 0) {
+    throw new Error('Randomness not committed yet (missing seed slot)')
+  }
+
+  const revealParams = {
+    randomnessAccount: params.randomness.pubkey,
+    slothash: bs58.encode(Buffer.from(data.seedSlothash)),
+    slot: seedSlot,
+    rpc: params.rpcUrl,
+  }
+
+  const gateway = new Gateway(params.gatewayUrl)
+  const gatewayRevealResponse = await gateway.fetchRandomnessReveal(revealParams)
+  const stats = PublicKey.findProgramAddressSync(
+    [Buffer.from('OracleRandomnessStats'), data.oracle.toBuffer()],
+    params.program.programId
+  )[0]
+  return params.program.instruction.randomnessReveal(
+    {
+      signature: Buffer.from(gatewayRevealResponse.signature, 'base64'),
+      recoveryId: gatewayRevealResponse.recovery_id,
+      value: gatewayRevealResponse.value,
+    },
+    {
+      accounts: {
+        randomness: params.randomness.pubkey,
+        oracle: data.oracle,
+        queue: data.queue,
+        stats,
+        authority: data.authority,
+        payer: params.payer,
+        recentSlothashes: sb.SPL_SYSVAR_SLOT_HASHES_ID,
+        systemProgram: SystemProgram.programId,
+        rewardEscrow: getAssociatedTokenAddressSync(sb.SOL_NATIVE_MINT, params.randomness.pubkey),
+        tokenProgram: sb.SPL_TOKEN_PROGRAM_ID,
+        associatedTokenProgram: sb.SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID,
+        wrappedSolMint: sb.SOL_NATIVE_MINT,
+        programState: sb.State.keyFromSeed(params.program),
+      },
+    }
+  )
 }
 
 /**
@@ -180,6 +313,9 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
     })
     await connection.confirmTransaction(commitSig, 'confirmed')
 
+    // Oracle needs a moment after commit before reveal signatures validate on-chain.
+    await new Promise((r) => setTimeout(r, 4000))
+
     let seedSlot: number | undefined
     try {
       const data = await randomness.loadData()
@@ -233,7 +369,7 @@ export async function switchboardRevealRandomness(params: {
   try {
     const sb = await loadSb()
     const connection = getSolanaConnection()
-    const rpcUrl = resolveServerSolanaRpcUrl()
+    const rpcUrl = connection.rpcEndpoint
     const program = await loadSbProgram(connection, payer)
     const bs58 = (await import('bs58')).default
     const rngKp = Keypair.fromSecretKey(bs58.decode(params.randomnessSecretKeyBase58.trim()))
@@ -280,60 +416,103 @@ export async function switchboardRevealRandomness(params: {
     let lastErr = 'Randomness not ready'
     let lastRevealSig = ''
     let attemptIndex = 0
+    let gatewayUrls: string[] | null = null
     while (Date.now() - started < maxWaitMs) {
       try {
         // Re-check each iteration — another worker may have revealed.
         const raced = await readRevealedValue(lastRevealSig)
         if (raced) return raced
 
-        const revealIx = await randomness.revealIx(payer.publicKey)
-        const revealTx = await sb.asV0Tx({
-          connection,
-          ixs: [revealIx],
-          signers: [payer],
-          computeUnitPrice: 75_000,
-          computeUnitLimitMultiple: 1.3,
-        })
-        const revealSig = await connection.sendTransaction(revealTx, {
-          skipPreflight: false,
-          preflightCommitment: 'processed',
-          maxRetries: 3,
-        })
-        await connection.confirmTransaction(revealSig, 'confirmed')
-        lastRevealSig = revealSig
-
-        // Prefer on-chain account data. inspectSolanaRandomness often throws
-        // "Invalid account discriminator" after reveal (oracle field cleared).
-        const fromChain = await readRevealedValue(revealSig)
-        if (fromChain) return fromChain
-
-        try {
-          const inspected = await sb.inspectSolanaRandomness({
-            randomnessId: accountPk,
-            solanaRPCUrl: rpcUrl,
+        const attemptReveal = async (
+          revealIx: TransactionInstruction
+        ): Promise<SwitchboardVrfRevealResult | null> => {
+          const revealTx = await sb.asV0Tx({
+            connection,
+            ixs: [revealIx],
+            signers: [payer],
+            computeUnitPrice: 75_000,
+            computeUnitLimitMultiple: 1.3,
           })
-          const valueHex =
-            (inspected as { state?: { valueHex?: string } })?.state?.valueHex ||
-            (inspected as { valueHex?: string })?.valueHex ||
-            ''
-          if (valueHex) {
-            return {
-              ok: true,
-              provider: VRF_PROVIDER_SWITCHBOARD,
-              randomnessAccount: accountPk.toBase58(),
-              revealTx: revealSig,
-              valueHex,
-              drawSeed: seedFromVrfHex(valueHex),
+          const revealSig = await connection.sendTransaction(revealTx, {
+            skipPreflight: false,
+            preflightCommitment: 'processed',
+            maxRetries: 3,
+          })
+          await connection.confirmTransaction(revealSig, 'confirmed')
+          lastRevealSig = revealSig
+
+          const fromChain = await readRevealedValue(revealSig)
+          if (fromChain) return fromChain
+
+          try {
+            const inspected = await sb.inspectSolanaRandomness({
+              randomnessId: accountPk,
+              solanaRPCUrl: rpcUrl,
+            })
+            const valueHex =
+              (inspected as { state?: { valueHex?: string } })?.state?.valueHex ||
+              (inspected as { valueHex?: string })?.valueHex ||
+              ''
+            if (valueHex) {
+              return {
+                ok: true,
+                provider: VRF_PROVIDER_SWITCHBOARD,
+                randomnessAccount: accountPk.toBase58(),
+                revealTx: revealSig,
+                valueHex,
+                drawSeed: seedFromVrfHex(valueHex),
+              }
             }
+          } catch (inspectErr) {
+            lastErr =
+              inspectErr instanceof Error
+                ? `inspect failed after reveal: ${inspectErr.message}`
+                : 'inspect failed after reveal'
           }
-        } catch (inspectErr) {
-          lastErr =
-            inspectErr instanceof Error
-              ? `inspect failed after reveal: ${inspectErr.message}`
-              : 'inspect failed after reveal'
+
+          lastErr = 'Reveal tx landed but value not readable yet'
+          return null
         }
 
-        lastErr = 'Reveal tx landed but value not readable yet'
+        // Primary path: SDK revealIx uses the assigned oracle gateway (matches Switchboard docs).
+        let sdkSecpFailure = false
+        try {
+          const sdkResult = await attemptReveal(await randomness.revealIx(payer.publicKey))
+          if (sdkResult) return sdkResult
+        } catch (sdkErr) {
+          lastErr = sdkErr instanceof Error ? sdkErr.message : 'SDK revealIx failed'
+          sdkSecpFailure = isInvalidVrfSecpSignatureError(lastErr)
+        }
+
+        // Fallback: try gateways in oracle-first order when SDK path fails (503 / timeout).
+        // Skip on Secp — oracle not ready yet; wrong gateways only produce more Secp failures.
+        if (!sdkSecpFailure) {
+          if (!gatewayUrls) {
+            const data = await randomness.loadData()
+            gatewayUrls = await collectRevealGatewayUrls(program, data)
+          }
+
+          for (const gatewayUrl of gatewayUrls) {
+            try {
+              const gatewayResult = await attemptReveal(
+                await buildRevealIxForGateway({
+                  program,
+                  randomness,
+                  payer: payer.publicKey,
+                  gatewayUrl,
+                  rpcUrl,
+                })
+              )
+              if (gatewayResult) return gatewayResult
+            } catch (gatewayErr) {
+              const msg = gatewayErr instanceof Error ? gatewayErr.message : 'Gateway reveal failed'
+              lastErr = msg
+              // Wrong gateway signature — try the next URL instead of failing the whole draw.
+              if (isInvalidVrfSecpSignatureError(msg)) continue
+              if (!isSwitchboardGatewayTransientError(msg)) break
+            }
+          }
+        }
       } catch (e) {
         lastErr = e instanceof Error ? e.message : 'Reveal attempt failed'
         // If revealIx fails because oracle was cleared, check whether value is already set.
@@ -353,7 +532,7 @@ export async function switchboardRevealRandomness(params: {
     }
 
     const gatewayHint = isSwitchboardGatewayTransientError(lastErr)
-      ? ' (Switchboard oracle gateway flaky — auto-retry will re-commit if this stays down)'
+      ? ` (Switchboard oracle gateway flaky — tried ${gatewayUrls?.length ?? 0} gateways; auto-retry will re-commit if this stays down)`
       : ''
     return {
       ok: false,

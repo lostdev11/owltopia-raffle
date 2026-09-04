@@ -26,7 +26,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
 
     const tenant = await getOwlCenterPresaleTenantBySlug(slug)
-    if (!tenant || !tenant.is_enabled) {
+    if (!tenant || !tenant.is_enabled || tenant.approval_status === 'rejected') {
+      return NextResponse.json({ error: 'Presale not found' }, { status: 404 })
+    }
+    if (tenant.approval_status === 'pending') {
       return NextResponse.json({ error: 'Presale not found' }, { status: 404 })
     }
 
@@ -46,6 +49,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
       unitLamports: quote ? quote.unitLamports.toString() : null,
       solUsdPrice: quote?.solUsdPrice ?? null,
       soldSyncUnavailable,
+      unitPartnerLamports: quote ? quote.unitPartnerLamports.toString() : null,
+      unitPlatformFeeLamports: quote ? quote.unitPlatformFeeLamports.toString() : null,
+      platformFeeUsdcPerSpot: quote?.platformFeeUsdcPerSpot,
     })
 
     return NextResponse.json(payload)

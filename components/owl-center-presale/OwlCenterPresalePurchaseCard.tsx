@@ -193,7 +193,7 @@ export function OwlCenterPresalePurchaseCard({
     >
       <h2 className="text-lg font-bold text-[#EAFBF4]">Buy presale spots</h2>
       <p className="mt-1 text-sm" style={{ color: muted }}>
-        ${unitPriceUsdc} USD in SOL per spot. Pay from your connected wallet on mobile or desktop.
+        ${unitPriceUsdc} USD spot + ${stats?.platform_fee_usdc_per_spot ?? 1} Owltopia fee per spot (paid in SOL).
       </p>
 
       {!connected ? (
@@ -236,9 +236,15 @@ export function OwlCenterPresalePurchaseCard({
             </Button>
           </div>
           {totalLamportsDisplay && (
-            <p className="mt-3 text-center text-sm font-semibold tabular-nums" style={{ color: primary }}>
-              ≈ {totalLamportsDisplay} SOL total
-            </p>
+            <div className="mt-3 space-y-1 text-center text-sm" style={{ color: muted }}>
+              <p className="font-semibold tabular-nums" style={{ color: primary }}>
+                ≈ {totalLamportsDisplay} SOL total
+              </p>
+              <p className="text-xs">
+                Includes ${((stats?.platform_fee_usdc_per_spot ?? 1) * qty).toFixed(0)} platform fee (
+                {qty} × ${stats?.platform_fee_usdc_per_spot ?? 1})
+              </p>
+            </div>
           )}
           <Button
             type="button"

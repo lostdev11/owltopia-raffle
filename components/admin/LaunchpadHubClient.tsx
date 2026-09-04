@@ -19,10 +19,16 @@ const QUICK_LINKS = [
   { href: '/admin/owl-center/gen2#wl-upload', label: 'Upload WL wallets', hint: 'Bulk add collab whitelist' },
   { href: '/admin/owl-center/gen2', label: 'Gen2 console', hint: 'Phases, schedule, CM, WL' },
   { href: '/admin/gen2-presale', label: 'Gen2 presale', hint: 'Credits, gifts, purchases' },
+  { href: '/admin/owl-center-presale', label: 'Partner presales', hint: 'Approve, gift, go-live' },
   { href: '/owl-center/generator', label: 'Generator', hint: 'Traits & Sugar export' },
   { href: '/owl-center/launch', label: 'Review queue', hint: 'Creator submissions' },
   { href: '/admin/owl-center/partners', label: 'Partners', hint: 'Approve launchpad wallets' },
   { href: '/admin/owl-center/marketplaces', label: 'Marketplaces', hint: 'ME / Tensor readiness' },
+  {
+    href: '/admin/coin-upgrade',
+    label: 'Coin art upgrade',
+    hint: 'ZIP → Irys → catalog (Owltopia Coins)',
+  },
 ] as const
 
 export function LaunchpadHubClient() {

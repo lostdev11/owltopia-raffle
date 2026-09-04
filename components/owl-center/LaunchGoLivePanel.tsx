@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { OwlCenterSaveNotice } from '@/components/owl-center/OwlCenterSaveNotice'
 import { StatusBadge } from '@/components/owl-center/StatusBadge'
 import type { LaunchGoLiveAssessment } from '@/lib/owl-center/launch-go-live'
 import type { OwlCenterAssetPackage, OwlCenterMarketplaceReadiness } from '@/lib/owl-center/asset-types'
@@ -83,8 +84,8 @@ export function LaunchGoLivePanel({
       }
       setMsg(
         j.already_live
-          ? 'Launch is already live on the public mint console.'
-          : 'Approved — collection is live. Public mint page is open below.'
+          ? 'Saved. Launch is already live on the public mint console.'
+          : 'Saved. Collection is live. Public mint page is open below.'
       )
       if (j.public_mint_href) setPublicMintHref(j.public_mint_href)
       onPromoted?.()
@@ -159,8 +160,10 @@ export function LaunchGoLivePanel({
         )}
       </div>
 
-      {err ? <p className="mt-3 font-mono text-xs text-[#FF9C9C]">{err}</p> : null}
-      {msg ? <p className="mt-3 font-mono text-xs text-[#00FF9C]">{msg}</p> : null}
+      <div className="mt-3 space-y-2">
+        <OwlCenterSaveNotice tone="error" message={err} />
+        <OwlCenterSaveNotice message={msg} />
+      </div>
     </CommandCard>
   )
 }

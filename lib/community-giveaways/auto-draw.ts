@@ -12,8 +12,20 @@ export async function notifyDiscordCommunityGiveawayWinner(
   giveaway: CommunityGiveaway,
   winnerWallet: string
 ): Promise<void> {
-  const discordMap = await getDiscordUserIdsByWallets([winnerWallet])
-  await notifyCommunityGiveawayWinnerDrawn(giveaway, winnerWallet, discordMap[winnerWallet] ?? null)
+  const [discordMap, streaks] = await Promise.all([
+    getDiscordUserIdsByWallets([winnerWallet]),
+    import('@/lib/db/wallet-streaks').then(({ getWalletStreaks }) => getWalletStreaks(winnerWallet)),
+  ])
+  await notifyCommunityGiveawayWinnerDrawn(
+    giveaway,
+    winnerWallet,
+    discordMap[winnerWallet] ?? null,
+    {
+      winCurrentStreak: streaks.winCurrentStreak,
+      winTotalWins: streaks.winTotalWins,
+      participationCurrentStreak: streaks.participationCurrentStreak,
+    }
+  )
 }
 
 export type CommunityGiveawayAutoDrawResult = {

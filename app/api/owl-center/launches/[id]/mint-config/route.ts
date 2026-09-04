@@ -4,8 +4,10 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { requireLaunchMintEditorSession } from '@/lib/owl-center/creator-access'
 import { buildMintDetailsPatchFromBody, bodyHasMintConfigFields } from '@/lib/owl-center/launch-mint-config-patch'
 import { syncLaunchHubCoverImage } from '@/lib/owl-center/launch-cover-image'
+import { getAssetPackageByLaunchId, upsertAssetPackageForLaunch } from '@/lib/db/owl-center-asset-package'
 import { getOwlCenterLaunchByIdAdmin, updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
+import { syncPublicSimpleCandyGuards } from '@/lib/owl-center/sync-public-simple-guards'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,6 +15,37 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
+}
+
+async function safeGuardSync(updated: Awaited<ReturnType<typeof getOwlCenterLaunchByIdAdmin>>) {
+  if (!updated || updated.mint_mode !== 'public_simple') return { guard_sync: null, warning: null as string | null }
+  try {
+    return { guard_sync: await syncPublicSimpleCandyGuards(updated), warning: null as string | null }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    console.error('creator mint-config guard sync failed', message)
+    return {
+      guard_sync: { ok: false as const, error: message },
+      warning: `Candy Guard sync failed: ${message}`,
+    }
+  }
+}
+
+async function safeWriteActivityLog(entry: {
+  launch_id: string
+  message: string
+  event_type: string
+}) {
+  try {
+    const db = getSupabaseAdmin()
+    const { error } = await db.from('owl_center_activity_logs').insert(entry)
+    if (error) throw error
+    return null
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    console.error('creator mint-config activity log failed', message)
+    return `Activity log write failed: ${message}`
+  }
 }
 
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -63,7 +96,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     const patch = buildMintDetailsPatchFromBody(body, launch)
     if ('error' in patch) return jsonError(patch.error, 400)
     hasMintFields = true
-    updated = (await updateOwlCenterLaunchByIdAdmin(id, patch)) ?? launch
+    const savedRow = await updateOwlCenterLaunchByIdAdmin(id, patch)
+    if (!savedRow) return jsonError('Update failed', 500)
+    updated = (await getOwlCenterLaunchByIdAdmin(id)) ?? savedRow
   }
 
   if (coverRaw !== undefined) {
@@ -77,8 +112,25 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   if (!updated) return jsonError('Update failed', 500)
   if (!hasMintFields && coverRaw === undefined) return jsonError('No fields to update', 400)
 
-  const db = getSupabaseAdmin()
-  await db.from('owl_center_activity_logs').insert({
+  const warnings: string[] = []
+  const { guard_sync, warning: guardWarning } = hasMintFields
+    ? await safeGuardSync(updated)
+    : { guard_sync: null, warning: null as string | null }
+  if (guardWarning) warnings.push(guardWarning)
+  if (hasMintFields && updated.total_supply !== launch.total_supply) {
+    try {
+      const existing = await getAssetPackageByLaunchId(id)
+      if (existing) {
+        await upsertAssetPackageForLaunch(id, { expected_supply: updated.total_supply })
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      console.error('creator mint-config asset package sync failed', message)
+      warnings.push(`Asset package sync failed: ${message}`)
+    }
+  }
+
+  const logWarning = await safeWriteActivityLog({
     launch_id: id,
     message:
       coverRaw !== undefined && !hasMintFields
@@ -88,6 +140,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
           : 'Mint details updated (creator)',
     event_type: 'system',
   })
+  if (logWarning) warnings.push(logWarning)
 
-  return NextResponse.json({ ok: true, launch: updated })
+  return NextResponse.json({ ok: true, launch: updated, guard_sync, warnings })
 }

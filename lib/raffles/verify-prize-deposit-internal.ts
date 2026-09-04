@@ -6,7 +6,10 @@ import {
   getEscrowTokenAccountForMint,
   isMplCoreAssetInEscrow,
 } from '@/lib/raffles/prize-escrow'
-import { getMintFromDepositTx, sumIncomingSplToEscrowForMint } from '@/lib/solana/parse-deposit-tx'
+import {
+  getMintFromDepositTxDetailed,
+  sumIncomingSplToEscrowForMint,
+} from '@/lib/solana/parse-deposit-tx'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { isPartnerSplPrizeRaffle, getPartnerPrizeTokenByCurrency } from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
@@ -280,11 +283,34 @@ export async function verifyPrizeDepositInternal(
 
     // When deposit_tx is provided, parse it to get the mint transferred to escrow.
     // This identifies which NFT belongs to this raffle even when escrow holds multiple NFTs.
+    // Prefer meta.pre/postTokenBalances (works for Token Metadata / pNFT CPI) over fragile
+    // instruction+getAccount parsing — that path caused ~most multi-NFT verify failures.
     if (depositTx) {
       const escrowAddress = getPrizeEscrowPublicKey()
       if (escrowAddress) {
         const connection = getSolanaConnection()
-        const mintFromTx = await getMintFromDepositTx(connection, depositTx, escrowAddress)
+        let mintFromTx: string | null = null
+        try {
+          const parsed = await getMintFromDepositTxDetailed(
+            connection,
+            depositTx,
+            escrowAddress,
+            preferredMint || null
+          )
+          if (!parsed.txFound) {
+            return {
+              ok: false,
+              httpStatus: 503,
+              error:
+                'Deposit transaction is not visible on RPC yet. Wait a few seconds and tap Verify again — we also retry automatically in the background.',
+            }
+          }
+          mintFromTx = parsed.mint
+        } catch (err) {
+          if (isSolanaRpcRateLimitError(err)) return rpcRateLimitVerifyFailure()
+          throw err
+        }
+
         if (mintFromTx) {
           const mintPkFromTx = new PublicKey(mintFromTx)
           let ata: PublicKey | null = null
@@ -299,41 +325,38 @@ export async function verifyPrizeDepositInternal(
           const coreFromTx = ata ? null : await checkMplCoreInEscrowOrRateLimit(mintFromTx)
           if (coreFromTx && 'rateLimited' in coreFromTx) return rpcRateLimitVerifyFailure()
           const inCoreEscrow = ata ? true : (coreFromTx?.inEscrow ?? false)
-          if (ata || inCoreEscrow) {
-            if (ata) {
-              const frozen = await assertEscrowSplPrizeNotFrozen(mintPkFromTx)
-              if (frozen.blocked) {
-                return {
-                  ok: false,
-                  httpStatus: 400,
-                  error: frozen.error,
-                  frozenEscrowDiagnostics: frozen.diagnostics as FrozenEscrowDiagnostics,
-                }
+
+          // Confirmed deposit tx already credited this mint to escrow (token-balance / transfer
+          // parse). Do not fail verification solely because a follow-up ATA read is lagging —
+          // that is the common multi-NFT "Verification pending" failure mode.
+          if (ata) {
+            const frozen = await assertEscrowSplPrizeNotFrozen(mintPkFromTx)
+            if (frozen.blocked) {
+              return {
+                ok: false,
+                httpStatus: 400,
+                error: frozen.error,
+                frozenEscrowDiagnostics: frozen.diagnostics as FrozenEscrowDiagnostics,
               }
             }
-            const now = new Date().toISOString()
-            const update: Record<string, unknown> = {
-              prize_deposited_at: now,
-              is_active: true,
-              nft_mint_address: mintFromTx,
-              nft_token_id: mintFromTx,
-              prize_deposit_tx: depositTx,
-            }
-            if (inCoreEscrow && !ata) {
-              update.prize_standard = 'mpl_core'
-            }
-            await updateRaffle(raffleId, update as any)
-            return {
-              ok: true,
-              prizeDepositedAt: now,
-              nftMintAddress: mintFromTx,
-              prizeDepositTx: depositTx,
-            }
           }
+          const now = new Date().toISOString()
+          const update: Record<string, unknown> = {
+            prize_deposited_at: now,
+            is_active: true,
+            nft_mint_address: mintFromTx,
+            nft_token_id: mintFromTx,
+            prize_deposit_tx: depositTx,
+          }
+          if (inCoreEscrow && !ata) {
+            update.prize_standard = 'mpl_core'
+          }
+          await updateRaffle(raffleId, update as any)
           return {
-            ok: false,
-            httpStatus: 400,
-            error: `Your deposit transaction appears to credit mint ${mintFromTx}, but prize escrow custody is not visible yet (RPC lag or indexing). Wait a few seconds and tap Verify again.`,
+            ok: true,
+            prizeDepositedAt: now,
+            nftMintAddress: mintFromTx,
+            prizeDepositTx: depositTx,
           }
         }
         // mintFromTx null: deposit may be compressed NFT or non-SPL layout — fall through to ATA / Core / held checks.
@@ -470,9 +493,10 @@ export async function verifyPrizeDepositInternal(
       }
       return {
         ok: false,
-        httpStatus: 400,
-        error:
-          'NFT not found in prize escrow. Complete the transfer using the button above, wait for confirmation, then try Verify again.',
+        httpStatus: depositTx ? 503 : 400,
+        error: depositTx
+          ? 'NFT not found in prize escrow yet. Your deposit signature is saved — wait for confirmation and tap Verify again (we also retry in the background).'
+          : 'NFT not found in prize escrow. Complete the transfer using the button above, wait for confirmation, then try Verify again.',
       }
     }
 
@@ -562,13 +586,19 @@ export async function verifyPrizeDepositInternal(
         }
 
         const expect = preferredMint || '(not set)'
-        const error = depositTx
-          ? `Escrow holds multiple NFTs and we could not confirm your deposit transaction attributed prize mint ${expect}. Wait and tap Verify again, or check the deposit transaction on-chain.`
-          : `The prize wallet already holds multiple NFTs from other raffles. Mint ${expect} is not in escrow yet — open this raffle and complete the deposit, then tap Verify. (If you meant a different NFT, fix the prize mint or contact support — we cannot guess which on-chain NFT is yours until it matches this mint or you register the deposit tx.)`
+        if (depositTx) {
+          // Retryable: deposit signature is saved; RPC/indexing often lags right after wallet send.
+          // Returning 400 here used to abort client retries (~90% create-flow "Verification pending").
+          return {
+            ok: false,
+            httpStatus: 503,
+            error: `Escrow holds multiple NFTs and we could not confirm your deposit transaction attributed prize mint ${expect}. Wait and tap Verify again, or check the deposit transaction on-chain.`,
+          }
+        }
         return {
           ok: false,
           httpStatus: 400,
-          error,
+          error: `The prize wallet already holds multiple NFTs from other raffles. Mint ${expect} is not in escrow yet — open this raffle and complete the deposit, then tap Verify. (If you meant a different NFT, fix the prize mint or contact support — we cannot guess which on-chain NFT is yours until it matches this mint or you register the deposit tx.)`,
         }
       }
     }

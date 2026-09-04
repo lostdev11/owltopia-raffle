@@ -10,7 +10,13 @@ import { MintQuantityInput, parseMintQuantityText } from '@/components/owl-cente
 import { MintSuccessOverlay } from '@/components/owl-center/MintSuccessOverlay'
 import { TradingButtons } from '@/components/owl-center/TradingButtons'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
-import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
+import {
+  formatPartnerMintConsolePriceBits,
+  resolvePartnerMintConsolePhase,
+} from '@/lib/owl-center/partner-mint-phase-schedule'
+import { publicSimpleMintGuardGroupLabel } from '@/lib/owl-center/public-simple-guard-plan'
+import { isLaunchWhitelistWindowOpen } from '@/lib/owl-center/launch-wl-window'
+import { isPublicSimpleMintOpen } from '@/lib/owl-center/phase-schedule'
 import { postCollectionConfirmMintWithRetry } from '@/lib/owl-center/confirm-mint-client'
 import { finalizeMintSessionOptimistic } from '@/lib/owl-center/mint-finalize-client'
 import { recordMintSessionConfirms } from '@/lib/owl-center/mint-session'
@@ -119,7 +125,12 @@ export function CollectionMintPanel({
 
   const trading = launch.active_phase === 'TRADING_ACTIVE'
   const soldOut = launch.active_phase === 'SOLD_OUT' || remaining <= 0
-  const mintClosed = trading || soldOut || mintControls.disabled
+  const waitingForSchedule =
+    elig?.mint_window_open === false ||
+    (elig?.mint_window_open !== true &&
+      !isPublicSimpleMintOpen(launch) &&
+      !isLaunchWhitelistWindowOpen(launch))
+  const mintClosed = trading || soldOut || mintControls.disabled || waitingForSchedule
 
   const dismissSuccess = useCallback(() => {
     setStep('idle')
@@ -225,6 +236,11 @@ export function CollectionMintPanel({
       setStep('error')
       return
     }
+    if (elig.mint_window_open === false) {
+      setErr(elig.reason ?? 'Mint is not open yet')
+      setStep('error')
+      return
+    }
     if (!cmConfigured) {
       setErr('Candy Machine not configured — admin must set CM + collection mint')
       setStep('error')
@@ -237,6 +253,8 @@ export function CollectionMintPanel({
     try {
       setStep('preparing_mint')
       setMintProgress({ current: 0, total: n, phase: 'chain' })
+      const guardGroup = publicSimpleMintGuardGroupLabel(launch, elig.active_allowlist_key)
+      const mintPhase = elig.active_allowlist_key ? 'WHITELIST' : 'PUBLIC'
       const minted = await raceMintSessionBudget(
         outerDeadline,
         launch.mint_standard === 'core'
@@ -248,6 +266,7 @@ export function CollectionMintPanel({
               launch,
               mintNetwork,
               sessionDeadline,
+              guardGroup,
               collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
               platformFeeLamports:
                 elig?.platform_mint_fee_lamports_estimate != null
@@ -267,7 +286,8 @@ export function CollectionMintPanel({
               candyMachineId: getLaunchCandyMachineId(launch, mintNetwork),
               collectionMint: getLaunchCollectionMint(launch, mintNetwork),
               quantity: n,
-              phase: 'PUBLIC',
+              phase: mintPhase,
+              guardGroupOverride: guardGroup,
               launch,
               mintNetwork,
               sessionDeadline,
@@ -348,8 +368,18 @@ export function CollectionMintPanel({
     }
   }
 
-  const priceLabel = formatPhasePriceSolOrFree(elig?.unit_lamports_estimate ?? null, {
-    paid: launch.public_price_usdc != null && launch.public_price_usdc > 0,
+  const consolePhase = useMemo(
+    () => resolvePartnerMintConsolePhase(launch, Date.now(), elig?.active_allowlist_key),
+    [launch, elig?.active_allowlist_key]
+  )
+  const quotingConsolePhase =
+    consolePhase != null &&
+    ((Boolean(elig?.active_allowlist_key) && elig?.active_allowlist_key === consolePhase.key) ||
+      (consolePhase.kind === 'public' && !elig?.active_allowlist_key))
+  const phaseName = consolePhase?.label ?? elig?.active_allowlist_label ?? 'Public'
+  const priceBits = formatPartnerMintConsolePriceBits(consolePhase, {
+    liveSolLamports: elig?.unit_lamports_estimate,
+    quotingThisPhase: quotingConsolePhase,
   })
   const platformFeeLabel =
     elig?.platform_mint_fee_label ??
@@ -377,7 +407,11 @@ export function CollectionMintPanel({
   if (trading) {
     return (
       <CommandCard label="TRADE // marketplaces">
-        <TradingButtons magicEdenUrl={launch.magic_eden_url} tensorUrl={launch.tensor_url} />
+        <TradingButtons
+          orbisUrl={launch.orbis_url}
+          magicEdenUrl={launch.magic_eden_url}
+          tensorUrl={launch.tensor_url}
+        />
       </CommandCard>
     )
   }
@@ -394,10 +428,15 @@ export function CollectionMintPanel({
         explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}
         onClose={dismissSuccess}
       />
-      <CommandCard label={`MINT // public · ${mintNetwork}`}>
+      <CommandCard label={`MINT // ${phaseName.toLowerCase()} · ${mintNetwork}`}>
       <div className="space-y-4">
         <p className="break-words font-mono text-xs leading-relaxed text-[#9BA8B4]">
-          {priceLabel} · {platformFeeLabel} · limit {launch.wallet_mint_limit}/wallet/phase
+          {phaseName}
+          {priceBits ? ` · ${priceBits}` : ''}
+          {' · '}
+          {platformFeeLabel}
+          {' · '}
+          limit {elig?.wallet_mint_limit ?? launch.wallet_mint_limit}/wallet
           {elig && connected ? ` · you: ${elig.wallet_minted}/${elig.wallet_mint_limit}` : ''} · {remaining}{' '}
           remaining
         </p>
@@ -409,6 +448,8 @@ export function CollectionMintPanel({
 
         {soldOut ? (
           <p className="font-mono text-sm text-[#00FF9C]">SOLD OUT</p>
+        ) : waitingForSchedule ? (
+          <p className="text-sm text-[#C5D0D8]">{elig?.reason ?? 'Mint is not open yet'}</p>
         ) : mintClosed ? (
           <p className="text-sm text-[#9BA8B4]">{elig?.reason ?? 'Mint unavailable'}</p>
         ) : (

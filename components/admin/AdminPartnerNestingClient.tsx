@@ -84,7 +84,7 @@ export function AdminPartnerNestingClient() {
     setLoadingList(true)
     setListError(null)
     try {
-      const res = await fetch('/api/admin/partner-nesting', { credentials: 'include', cache: 'no-store' })
+      const res = await fetch('/api/admin/partners/nesting', { credentials: 'include', cache: 'no-store' })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
         setListError(typeof json?.error === 'string' ? json.error : 'Failed to load partner nesting data')
@@ -122,7 +122,7 @@ export function AdminPartnerNestingClient() {
     setSaveOk(null)
     setNextSteps([])
     try {
-      const res = await fetch('/api/admin/partner-nesting', {
+      const res = await fetch('/api/admin/partners/nesting', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -187,9 +187,9 @@ export function AdminPartnerNestingClient() {
   return (
     <div className="container mx-auto max-w-4xl py-8 px-4 space-y-8">
       <Button asChild variant="ghost" size="sm" className="touch-manipulation min-h-[44px]">
-        <Link href="/admin">
+        <Link href="/admin/partners">
           <ArrowLeft className="h-4 w-4 mr-2" />
-          Owl Vision
+          Partners hub
         </Link>
       </Button>
 
@@ -201,11 +201,11 @@ export function AdminPartnerNestingClient() {
         <p className="text-muted-foreground text-sm max-w-2xl">
           Add a partner&apos;s NFT <strong className="text-foreground">collection address</strong> to open a stake
           perch on Owl Nesting. Partners must already be on the{' '}
-          <Link href="/admin/partner-creators" className="text-primary underline-offset-4 hover:underline">
+          <Link href="/admin/partners/creators" className="text-primary underline-offset-4 hover:underline">
             partner creators
           </Link>{' '}
           allowlist (2% raffle fee tier). Self-serve requests land in{' '}
-          <Link href="/admin/partner-nest-applications" className="text-primary underline-offset-4 hover:underline">
+          <Link href="/admin/partners/nest-applications" className="text-primary underline-offset-4 hover:underline">
             Partner Nesting requests
           </Link>
           . For first-party Owltopia perches use{' '}
@@ -231,7 +231,7 @@ export function AdminPartnerNestingClient() {
           {activePartners.length === 0 && !loadingList ? (
             <p className="text-sm text-amber-600 dark:text-amber-400">
               No active partner creators yet.{' '}
-              <Link href="/admin/partner-creators" className="underline underline-offset-4">
+              <Link href="/admin/partners/creators" className="underline underline-offset-4">
                 Allowlist a partner wallet
               </Link>{' '}
               first.

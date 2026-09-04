@@ -70,6 +70,8 @@ type PendingClaimLedgerSync = {
 }
 import { PositionCard } from '@/components/nesting/PositionCard'
 import { NftPerchGroupedNestCard } from '@/components/nesting/NftPerchGroupedNestCard'
+import { CoinArtUpgradePanel } from '@/components/nesting/CoinArtUpgradePanel'
+import { CoinArtUpgradeGlobalProgress } from '@/components/coin-upgrade/CoinArtUpgradeGlobalProgress'
 import { nestingNftAssetLabels } from '@/lib/nesting/gen1-staking-pools'
 import {
   buildNestingPerchDisplayList,
@@ -139,9 +141,11 @@ import {
   capNftStakeAssetIds,
   chunkNftFreezeAssetIds,
   NESTING_NFT_STAKE_MAX_PER_RUN,
+  thawMplCoreOwnerFreezeInWallet,
 } from '@/lib/solana/mpl-core-freeze'
 import {
   approveTokenMetadataNestDelegatesInWallet,
+  revokeTokenMetadataNestDelegatesInWallet,
 } from '@/lib/solana/token-metadata-nest-approve'
 import { isNestingStakeFlowError, NestingStakeFlowError } from '@/lib/nesting/errors'
 import {
@@ -230,6 +234,7 @@ export function DashboardNestingClient() {
   const [signingIn, setSigningIn] = useState(false)
   const [signInError, setSignInError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [leftoverOwnerThawBusy, setLeftoverOwnerThawBusy] = useState(false)
   const [successNotice, setSuccessNotice] = useState<{
     message: string
     hint?: string
@@ -538,7 +543,7 @@ export function DashboardNestingClient() {
   useEffect(() => {
     if (typeof window === 'undefined') return
     const hash = window.location.hash.replace(/^#/, '')
-    if (hash !== 'nesting-claims' && hash !== 'nesting-claim-all-banner') return
+    if (hash !== 'nesting-claims' && hash !== 'nesting-claim-all-banner' && hash !== 'coin-art-upgrade') return
     const t = window.setTimeout(() => {
       document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, 120)
@@ -681,6 +686,19 @@ export function DashboardNestingClient() {
     () => positions.filter((p) => isOpenStakingPosition(p)),
     [positions]
   )
+
+  /** After admin force-leave (or partial thaw), Owner-frozen NFTs may still need a wallet thaw. */
+  const leftoverOwnerThawMints = useMemo(() => {
+    const mints: string[] = []
+    for (const p of positions) {
+      if (p.status !== 'unstaked') continue
+      const ref = (p.external_reference ?? '').trim()
+      if (!ref.startsWith('nft_needs_owner_thaw:')) continue
+      const mint = ref.slice('nft_needs_owner_thaw:'.length).trim()
+      if (mint) mints.push(mint)
+    }
+    return [...new Set(mints)]
+  }, [positions])
 
   /** NFT perches with 2+ open positions render as one grouped card (same pool). */
   const { nftNestGroups, ungroupedOpenPositions } = useMemo(() => {
@@ -1857,6 +1875,22 @@ export function DashboardNestingClient() {
     [connection, publicKey, wallet, sendTransaction]
   )
 
+  const sendTokenMetadataNestRevoke = useCallback(
+    async (mintIds: string[]): Promise<string | null> => {
+      const adapter = wallet?.adapter
+      if (!adapter || !publicKey) {
+        throw new Error('Connect your wallet first.')
+      }
+      return revokeTokenMetadataNestDelegatesInWallet({
+        connection,
+        wallet: adapter,
+        mintIds,
+        sendTransaction,
+      })
+    },
+    [connection, publicKey, wallet, sendTransaction]
+  )
+
   const chunkNestPlatformFee = useCallback(
     (nestCount: number): { treasury: string; lamports: number } | null => {
       if (!platformFeeActive || !platformFeeTxConfig || nestCount <= 0) return null
@@ -2708,6 +2742,54 @@ export function DashboardNestingClient() {
 
   handleStakeRef.current = handleStake
 
+  const handleThawLeftoverOwnerLocks = async () => {
+    if (!publicKey || leftoverOwnerThawMints.length === 0) return
+    const adapter = wallet?.adapter
+    if (!adapter) {
+      setActionError('Connect a wallet to thaw leftover nest locks.')
+      return
+    }
+    setActionError(null)
+    setLeftoverOwnerThawBusy(true)
+    try {
+      const thawed: string[] = []
+      for (const mint of leftoverOwnerThawMints) {
+        await thawMplCoreOwnerFreezeInWallet({
+          connection,
+          wallet: adapter,
+          assetId: mint,
+          sendTransaction,
+        })
+        thawed.push(mint)
+      }
+      if (thawed.length > 0) {
+        await fetch(nestingClientApiUrl('/api/me/staking/ack-owner-thaw'), {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Connected-Wallet': publicKey.toBase58(),
+          },
+          body: JSON.stringify({ mints: thawed }),
+        }).catch(() => null)
+      }
+      setSuccessNotice({
+        placement: 'modal',
+        tone: 'success',
+        title: 'Nest locks thawed',
+        message: `Thawed ${thawed.length} leftover nest lock(s). Your NFTs should transfer normally again.`,
+      })
+      await loadPositions()
+    } catch (e) {
+      setActionError(
+        formatNestingWalletError(e, wallet?.adapter?.name, 'NFT') ||
+          formatNestingApiFetchError(e, 'generic')
+      )
+    } finally {
+      setLeftoverOwnerThawBusy(false)
+    }
+  }
+
   const handleUnstake = async (positionId: string) => {
     if (!publicKey) return
     setActionError(null)
@@ -2723,19 +2805,64 @@ export function DashboardNestingClient() {
             // the user does not think another wallet approval is pending and re-pay the fee.
             setPosSubPhase(positionId, 'unstake', 'submitting')
           }
-          const res = await fetch(nestingClientApiUrl('/api/me/staking/unstake'), {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Connected-Wallet': publicKey.toBase58(),
-            },
-            body: JSON.stringify({
-              position_id: positionId,
-              ...(platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}),
-            }),
-          })
-          const json = (await res.json().catch(() => ({}))) as { error?: string }
+
+          const postUnstake = async () => {
+            const res = await fetch(nestingClientApiUrl('/api/me/staking/unstake'), {
+              method: 'POST',
+              credentials: 'include',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Connected-Wallet': publicKey.toBase58(),
+              },
+              body: JSON.stringify({
+                position_id: positionId,
+                ...(platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}),
+              }),
+            })
+            const json = (await res.json().catch(() => ({}))) as {
+              error?: string
+              code?: string
+              mint?: string
+              needs_owner_thaw?: boolean
+              execution?: { nest_delegate_revoke?: { mint?: string } | null }
+            }
+            return { res, json }
+          }
+
+          let { res, json } = await postUnstake()
+
+          // Owner-authority FreezeDelegate: server cannot thaw — holder signs updatePlugin(frozen:false).
+          if (
+            !res.ok &&
+            (json.code === 'needs_owner_thaw' ||
+              json.needs_owner_thaw === true ||
+              (typeof json.error === 'string' &&
+                json.error.toLowerCase().includes('wallet-controlled freeze')))
+          ) {
+            const adapter = wallet?.adapter
+            const positionAsset =
+              typeof json.mint === 'string' && json.mint.trim()
+                ? json.mint.trim()
+                : positions.find((p) => p.id === positionId)?.asset_identifier?.trim() || ''
+            if (!adapter || !positionAsset) {
+              setActionError(
+                typeof json.error === 'string'
+                  ? json.error
+                  : 'Approve a wallet thaw for this NFT, then try Leave nest again.'
+              )
+              throw new Error('unstake')
+            }
+            setPosSubPhase(positionId, 'unstake', 'awaiting_wallet_signature')
+            await thawMplCoreOwnerFreezeInWallet({
+              connection,
+              wallet: adapter,
+              assetId: positionAsset,
+              sendTransaction,
+            })
+            setPosSubPhase(positionId, 'unstake', 'submitting')
+            ;({ res, json } = await postUnstake())
+          }
+
           if (!res.ok) {
             const err =
               res.status === 501
@@ -2747,6 +2874,25 @@ export function DashboardNestingClient() {
                   : 'Unstake failed'
             setActionError(err)
             throw new Error('unstake')
+          }
+
+          const revokeMint = json.execution?.nest_delegate_revoke?.mint?.trim()
+          if (revokeMint) {
+            try {
+              setPosSubPhase(positionId, 'unstake', 'awaiting_wallet_signature')
+              await sendTokenMetadataNestRevoke([revokeMint])
+            } catch (revokeErr) {
+              // Nest is already closed on Owltopia; leftover Approve is optional cleanup.
+              console.warn('[nesting] nest delegate revoke after unstake', revokeErr)
+              setSuccessNotice({
+                placement: 'modal',
+                tone: 'info',
+                title: 'Nest closed',
+                message:
+                  'Your nest is closed. Your wallet may still show a leftover nest Approve on that owl.',
+                hint: 'Approve Revoke if your wallet asks, or it will clear the next time you nest and leave that owl.',
+              })
+            }
           }
         },
         afterSuccess: async () => {
@@ -3469,6 +3615,9 @@ export function DashboardNestingClient() {
         </Button>
       </div>
 
+      <CoinArtUpgradeGlobalProgress compact hideCta />
+      <CoinArtUpgradePanel />
+
       <NestingClaimsSection
         connected={connected}
         needsSignIn={needsSignIn}
@@ -3495,6 +3644,34 @@ export function DashboardNestingClient() {
             <span className="font-medium text-foreground">Claim all</span> appears once your active nests total{' '}
             <span className="font-medium text-foreground">1+ OWL</span> combined. Finish opening below, then refresh.
           </p>
+        </div>
+      ) : null}
+
+      {leftoverOwnerThawMints.length > 0 ? (
+        <div
+          className="rounded-lg border border-amber-500/40 bg-amber-500/[0.08] px-4 py-3 text-sm text-foreground space-y-3"
+          role="status"
+        >
+          <p className="leading-relaxed">
+            {leftoverOwnerThawMints.length} NFT
+            {leftoverOwnerThawMints.length === 1 ? '' : 's'} still{' '}
+            <span className="font-medium text-foreground">frozen from a closed nest</span>. Approve a
+            quick wallet thaw so they can transfer again.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-[44px] w-full touch-manipulation sm:w-auto"
+            disabled={leftoverOwnerThawBusy || !connected}
+            onClick={() => void handleThawLeftoverOwnerLocks()}
+          >
+            {leftoverOwnerThawBusy ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />
+            ) : null}
+            {leftoverOwnerThawBusy
+              ? 'Thawing…'
+              : `Thaw leftover nest locks (${leftoverOwnerThawMints.length})`}
+          </Button>
         </div>
       ) : null}
 

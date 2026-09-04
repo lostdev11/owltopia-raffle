@@ -10,6 +10,11 @@ import { formatOwlSendFeeSol } from '@/lib/owl-send/fee'
 import { LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { useSiwsSession } from '@/hooks/use-siws-session'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
+import {
+  describeInvalidSolanaTxSignatureInput,
+  isValidSolanaTxSignatureBase58,
+  normalizeDepositTxSignatureInput,
+} from '@/lib/raffles/verify-prize-deposit-client'
 import { cn } from '@/lib/utils'
 
 /** Collapse control appears once the ledger has this many rows. */
@@ -51,6 +56,11 @@ export function OwlSendLedgerPanel({ wallet, refreshKey = 0 }: Props) {
   const [expanded, setExpanded] = useState(true)
   /** When expanded and list is long, whether to show every row. */
   const [showAll, setShowAll] = useState(false)
+  const [recoverOpen, setRecoverOpen] = useState(false)
+  const [recoverSig, setRecoverSig] = useState('')
+  const [recovering, setRecovering] = useState(false)
+  const [recoverError, setRecoverError] = useState<string | null>(null)
+  const [recoverNotice, setRecoverNotice] = useState<string | null>(null)
   const didAutoCollapse = useRef(false)
 
   const signedInAsWallet =
@@ -97,6 +107,46 @@ export function OwlSendLedgerPanel({ wallet, refreshKey = 0 }: Props) {
   useEffect(() => {
     void load()
   }, [load, refreshKey])
+
+  const recoverSend = useCallback(async () => {
+    if (!wallet || !signedInAsWallet) return
+    const txSignature = normalizeDepositTxSignatureInput(recoverSig)
+    const invalidReason = describeInvalidSolanaTxSignatureInput(recoverSig)
+    if (!isValidSolanaTxSignatureBase58(txSignature)) {
+      setRecoverError(invalidReason || 'Paste a transaction signature (or Solscan tx URL).')
+      return
+    }
+    setRecovering(true)
+    setRecoverError(null)
+    setRecoverNotice(null)
+    try {
+      const res = await fetch('/api/owl-send/ledger/recover', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-connected-wallet': wallet,
+        },
+        body: JSON.stringify({ txSignature }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        setRecoverError(typeof data?.error === 'string' ? data.error : 'Could not recover send')
+        return
+      }
+      setRecoverSig('')
+      setRecoverNotice(
+        data?.duplicate
+          ? 'That send was already in your ledger.'
+          : 'Send recovered and added to your ledger.'
+      )
+      await load()
+    } catch {
+      setRecoverError('Could not recover send')
+    } finally {
+      setRecovering(false)
+    }
+  }, [wallet, signedInAsWallet, recoverSig, load])
 
   // First time the list crosses the threshold, collapse so the send UI stays usable on mobile.
   useEffect(() => {
@@ -304,6 +354,68 @@ export function OwlSendLedgerPanel({ wallet, refreshKey = 0 }: Props) {
                   Show fewer
                 </Button>
               ) : null}
+
+              <div className="border-t border-white/10 pt-3">
+                <button
+                  type="button"
+                  className="flex min-h-[44px] w-full items-center justify-between gap-2 touch-manipulation text-left text-sm text-muted-foreground"
+                  aria-expanded={recoverOpen}
+                  onClick={() => setRecoverOpen((v) => !v)}
+                >
+                  Missing a send?
+                  <ChevronDown
+                    className={cn(
+                      'h-4 w-4 shrink-0 transition-transform',
+                      recoverOpen && 'rotate-180'
+                    )}
+                  />
+                </button>
+                {recoverOpen ? (
+                  <div className="mt-2 space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Paste the Solscan URL or full signature for an OwlSend from this wallet (e.g. MPL
+                      Core). If Discord split the sig, paste the Solscan link.
+                    </p>
+                    <textarea
+                      value={recoverSig}
+                      onChange={(e) => {
+                        setRecoverSig(e.target.value)
+                        setRecoverError(null)
+                        setRecoverNotice(null)
+                      }}
+                      placeholder="Transaction signature or Solscan URL"
+                      aria-label="OwlSend transaction signature"
+                      rows={3}
+                      className="min-h-[88px] w-full resize-y touch-manipulation rounded-shape-md border border-white/10 bg-black/40 px-3 py-2 font-mono text-xs leading-relaxed break-all text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      disabled={recovering}
+                      inputMode="text"
+                    />
+                    {recoverError ? <p className="text-sm text-red-300">{recoverError}</p> : null}
+                    {recoverNotice ? (
+                      <p className="text-sm text-emerald-300/90">{recoverNotice}</p>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="min-h-[44px] w-full touch-manipulation sm:w-auto"
+                      disabled={recovering || recoverSig.trim().length < 32}
+                      onClick={() => void recoverSend()}
+                    >
+                      {recovering ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Recovering…
+                        </>
+                      ) : (
+                        'Recover send'
+                      )}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
             </>
           ) : null}
         </CardContent>

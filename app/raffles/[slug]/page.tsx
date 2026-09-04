@@ -1,15 +1,6 @@
 import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
-import {
-  getRaffleBySlug,
-  getEntriesByRaffleId,
-  selectWinner,
-  isRaffleEligibleToDraw,
-  canSelectWinner,
-  getRaffleMinimum,
-} from '@/lib/db/raffles'
-import { hasExhaustedMinThresholdTimeExtensions } from '@/lib/raffles/ticket-escrow-policy'
-import { buildMinThresholdMissExtensionPatch } from '@/lib/raffles/min-threshold-extension'
+import { getRaffleBySlug, getEntriesByRaffleId } from '@/lib/db/raffles'
 import { enrichRafflesWithCreatorHolder } from '@/lib/raffles/enrich-raffles-with-holder'
 import { getMilestonesByRaffleId } from '@/lib/db/raffle-milestones'
 import { calculateOwlVisionScore } from '@/lib/owl-vision'
@@ -20,15 +11,16 @@ import { getReferralSummaryForWallet } from '@/lib/db/referrals'
 import { isReferralProgramEnabled } from '@/lib/referrals/config'
 import { raffleSupportsReferralProgram } from '@/lib/referrals/program'
 import { Suspense } from 'react'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { PLATFORM_NAME, getSiteBaseUrl } from '@/lib/site-config'
 import { resolveRaffleShareOgImage } from '@/lib/resolve-raffle-share-og-image'
 import { lookupOrbisNftUrl } from '@/lib/nft-marketplace-orbis'
 import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
-import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
+import { scheduleRaffleDrawOnVisit } from '@/lib/raffles/schedule-raffle-draw-on-visit'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
+import { canonicalRaffleSlug, raffleSlugNeedsRedirect } from '@/lib/raffles/slug-aliases'
 // Force dynamic rendering to prevent caching stale data
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -50,7 +42,8 @@ export async function generateMetadata({
   const description =
     raffle.description?.replace(/\s+/g, ' ').trim().slice(0, 200) ||
     `Enter the raffle for ${raffle.title}. Trusted raffles with full transparency.`
-  const canonicalUrl = `${SITE_URL}/raffles/${raffle.slug}`
+  const publicSlug = canonicalRaffleSlug(raffle.slug)
+  const canonicalUrl = `${SITE_URL}/raffles/${publicSlug}`
   const ogImage = resolveRaffleShareOgImage(raffle)
 
   const linkOnly = raffle.list_on_platform === false
@@ -89,10 +82,21 @@ export default async function RaffleDetailPage({
   params: Promise<{ slug: string }>
 }) {
   const { slug } = await params
-  let raffle = await getRaffleBySlug(slug)
+  const redirectTo = raffleSlugNeedsRedirect(slug)
+  if (redirectTo) {
+    redirect(`/raffles/${encodeURIComponent(redirectTo)}`)
+  }
+
+  const raffle = await getRaffleBySlug(slug)
   
   if (!raffle) {
     notFound()
+  }
+
+  // If DB still has a deprecated slug, bounce to the canonical public path.
+  const canonical = canonicalRaffleSlug(raffle.slug)
+  if (canonical !== slug) {
+    redirect(`/raffles/${encodeURIComponent(canonical)}`)
   }
 
   // Pending NFT raffles should only be visible to admins and the raffle creator.
@@ -104,82 +108,9 @@ export default async function RaffleDetailPage({
     notFound()
   }
 
-  // Check if raffle has ended and doesn't have a winner yet.
-  // ready_to_draw is due even if end_time was pushed into the future after a failed VRF.
-  const now = new Date()
-  const hasEnded = raffleIsDueForWinnerDraw(raffle, now)
-  const hasNoWinner = !raffle.winner_wallet && !raffle.winner_selected_at
-  // Match `/api/cron/draw-ended-raffles`: draw by status, not `is_active` alone (that flag is mainly for ticket sales).
-  // NFT raffles must have prize in escrow before a draw, same as `getEndedRafflesWithoutWinner`.
-  const mayAutoDraw =
-    (raffle.status === 'live' ||
-      raffle.status === 'ready_to_draw' ||
-      raffle.status === 'pending_min_not_met') &&
-    !(raffle.prize_type === 'nft' && !raffle.prize_deposited_at)
-
-  if (hasEnded && hasNoWinner && mayAutoDraw) {
-    try {
-      // Get entries to check eligibility
-      const entries = await getEntriesByRaffleId(raffle.id)
-      const { updateRaffle } = await import('@/lib/db/raffles')
-
-      // Check if raffle can have a winner selected (threshold met and at least one confirmed ticket)
-      const canDraw = canSelectWinner(raffle, entries)
-
-      if (canDraw) {
-        // Automatically select a winner based on ticket quantities
-        const winnerWallet = await selectWinner(raffle.id)
-        
-        if (winnerWallet) {
-          // Refresh raffle data to get updated winner information
-          raffle = await getRaffleBySlug(slug)
-          if (!raffle) {
-            notFound()
-          }
-        }
-      } else {
-        // Ticket threshold (min_tickets) not met: one extension, then failed_refund + NFT return
-        const hasMinTickets = getRaffleMinimum(raffle) != null
-        const meetsMinTickets = hasMinTickets ? isRaffleEligibleToDraw(raffle, entries) : false
-
-        if (hasMinTickets && !meetsMinTickets) {
-          if (hasExhaustedMinThresholdTimeExtensions(raffle)) {
-            const { finalizeMinThresholdTerminalFailure } = await import(
-              '@/lib/raffles/min-threshold-terminal'
-            )
-            await finalizeMinThresholdTerminalFailure(raffle.id)
-            raffle = await getRaffleBySlug(slug)
-            if (!raffle) {
-              notFound()
-            }
-          } else {
-            await updateRaffle(raffle.id, buildMinThresholdMissExtensionPatch(raffle))
-
-            raffle = await getRaffleBySlug(slug)
-            if (!raffle) {
-              notFound()
-            }
-          }
-        } else if (!hasMinTickets) {
-          if (raffle.status !== 'ready_to_draw') {
-            await updateRaffle(raffle.id, { status: 'ready_to_draw' })
-            raffle = await getRaffleBySlug(slug)
-            if (!raffle) {
-              notFound()
-            }
-          }
-        }
-      }
-    } catch (error) {
-      // Log error but don't fail the page - winner selection can be retried
-      console.error('Error auto-selecting winner for raffle:', error)
-    }
-  }
-
-  // Ensure raffle is not null before proceeding
-  if (!raffle) {
-    notFound()
-  }
+  // Draw / min-threshold processing runs after the response (see scheduleRaffleDrawOnVisit).
+  // Blocking selectWinner() during SSR left ended undrawn raffles stuck on "Loading raffles..." for up to ~75s (VRF).
+  scheduleRaffleDrawOnVisit(raffle)
 
   const entries = await getEntriesByRaffleId(raffle.id)
   const milestones = await getMilestonesByRaffleId(raffle.id)

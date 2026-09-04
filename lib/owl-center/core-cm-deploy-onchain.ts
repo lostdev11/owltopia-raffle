@@ -8,12 +8,15 @@ import {
   generateSigner,
   publicKey,
   signerIdentity,
-  sol,
   some,
   type Umi,
 } from '@metaplex-foundation/umi'
 
-import { publicSimpleCandyGuardGuards } from '@/lib/owl-center/sugar-public-simple-guards'
+import {
+  publicSimpleCandyGuardUmiGroupsFromPlan,
+  publicSimpleCandyGuardUmiGuardsFromPlan,
+} from '@/lib/owl-center/sugar-public-simple-guards'
+import { buildPublicSimpleGuardPlan } from '@/lib/owl-center/public-simple-guard-plan'
 import { launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
 import { walletSplitsToMetaplexCreators } from '@/lib/owl-center/wallet-splits'
 import {
@@ -51,6 +54,19 @@ export type OnchainCoreDeployInput = {
     | 'mint_network'
     | 'seller_fee_basis_points'
     | 'freeze_enabled'
+    | 'wallet_mint_limit'
+    | 'launch_deadline_at'
+    | 'phase_schedule'
+    | 'creator_wl_enabled'
+    | 'creator_presale_enabled'
+    | 'wl_supply'
+    | 'presale_supply'
+    | 'treasury_wallet'
+    | 'public_price_usdc'
+    | 'creator_mint_price'
+    | 'creator_mint_currency'
+    | 'partner_allowlist_phases'
+    | 'wl_price_usdc'
   >
   configLines: SugarDeployConfigLine[]
   collectionMetadataUri: string
@@ -82,7 +98,7 @@ export function createIrysDeployerCoreUmi(network: 'mainnet' | 'devnet'): Umi {
 }
 
 /**
- * Deploy Core collection + Core Candy Machine + botTax guard for public_simple launches.
+ * Deploy Core collection + Core Candy Machine with botTax, per-wallet mintLimit, and optional startDate.
  * Optional PermanentFreezeDelegate when freeze_enabled (thaw authority = deployer).
  */
 export async function deployPublicSimpleCoreCandyMachineOnchain(
@@ -152,7 +168,9 @@ export async function deployPublicSimpleCoreCandyMachineOnchain(
       plugins,
     }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
 
-    const botTax = publicSimpleCandyGuardGuards().botTax
+    const planned = await buildPublicSimpleGuardPlan(launch)
+    if (!planned.ok) return { ok: false, error: planned.error }
+
     const createIx = await create(umi, {
       candyMachine,
       collection: collection.publicKey,
@@ -166,9 +184,8 @@ export async function deployPublicSimpleCoreCandyMachineOnchain(
         uriLength: maxUriLength(configLines),
         isSequential: false,
       }),
-      guards: {
-        botTax: some({ lamports: sol(0.001), lastInstruction: botTax.lastInstruction }),
-      },
+      guards: publicSimpleCandyGuardUmiGuardsFromPlan(planned.plan),
+      groups: publicSimpleCandyGuardUmiGroupsFromPlan(planned.plan),
     })
     await createIx.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
 

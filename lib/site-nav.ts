@@ -6,11 +6,13 @@ import {
   HeartHandshake,
   Landmark,
   LayoutDashboard,
+  Package,
   Plus,
   Rocket,
   Send,
   Settings,
   ShoppingCart,
+  Sparkles,
   Ticket,
   Trophy,
 } from 'lucide-react'
@@ -118,11 +120,20 @@ export const COMMUNITY_NAV_GROUP: SiteNavGroup = {
       description: 'Send NFTs & tokens — 0.001 SOL fee',
       icon: Send,
     },
+    {
+      href: '/packs',
+      label: 'Owl Packs',
+      description: 'Rip packs — every open wins OWL, SOL, or NFT',
+      icon: Package,
+    },
   ],
 }
 
 const OWL_SEND_NAV_DESCRIPTION_PUBLIC = 'Send NFTs & tokens — 0.001 SOL fee'
 const OWL_SEND_NAV_DESCRIPTION_PREVIEW = 'Send NFTs & tokens — 0.001 SOL fee (admin preview)'
+const OWL_PACKS_NAV_DESCRIPTION_PUBLIC = 'Rip packs — every open wins OWL, SOL, or NFT'
+const OWL_PACKS_NAV_DESCRIPTION_PREVIEW =
+  'Rip packs — every open wins OWL, SOL, or NFT (restricted launch)'
 
 export const OWLS_NAV_GROUP: SiteNavGroup = {
   id: 'owls',
@@ -150,6 +161,24 @@ export const NESTING_NAV_ITEM: SiteNavItem = {
   label: 'Nesting',
   description: 'Stake owls and NFTs to earn OWL',
   icon: Bird,
+}
+
+/** My nest → coin art upgrade panel (optional paid URI update + boosted rewards). */
+export const COIN_ART_UPGRADE_NAV_ITEM: SiteNavItem = {
+  href: '/dashboard/nesting#coin-art-upgrade',
+  label: 'Coin art upgrade',
+  description: 'Upgrade Owltopia coin art on Nesting',
+  icon: Sparkles,
+}
+
+export const NESTING_NAV_GROUP: SiteNavGroup = {
+  id: 'nesting',
+  label: 'Nesting',
+  menuAriaLabel: 'Nesting and coin art upgrade',
+  mobileSectionLabel: 'Nesting',
+  triggerIcon: Bird,
+  iconAccentClass: 'text-violet-400/90',
+  items: [NESTING_NAV_ITEM, COIN_ART_UPGRADE_NAV_ITEM],
 }
 
 export const DASHBOARD_NAV_ITEM: SiteNavItem = {
@@ -193,33 +222,62 @@ export const ADMIN_NAV_GROUP: SiteNavGroup = {
       description: 'Admin test bench for NFT/token sends',
       icon: Send,
     },
+    {
+      href: '/admin/packs',
+      label: 'Packs',
+      description: 'Pack vault, inventory, and pause/unpause',
+      icon: Package,
+    },
   ],
 }
 
-export function isPathInNavGroup(pathname: string, group: SiteNavGroup): boolean {
-  return group.items.some(
-    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
-  )
+export function navItemPathname(href: string): string {
+  const base = href.split('#')[0]?.trim()
+  return base || href
 }
 
-/** Hide OwlSend from Community nav during admin-only preview; label by public gate. */
+export function isPathInNavGroup(pathname: string, group: SiteNavGroup): boolean {
+  return group.items.some((item) => {
+    const base = navItemPathname(item.href)
+    return pathname === base || pathname.startsWith(`${base}/`)
+  })
+}
+
+/** Hide OwlSend / Owl Packs from Community nav during admin-only preview; label by public gate. */
 export function filterCommunityNavItems(options: {
   showOwlSend: boolean
   /** When false (admin preview), keep the "(admin preview)" subtitle. */
   owlSendPublic?: boolean
+  showOwlPacks?: boolean
+  /** When false (admin preview), keep the "(admin preview)" subtitle. */
+  owlPacksPublic?: boolean
 }): SiteNavItem[] {
-  const items = options.showOwlSend
+  let items = options.showOwlSend
     ? COMMUNITY_NAV_GROUP.items
     : COMMUNITY_NAV_GROUP.items.filter((item) => item.href !== '/owl-send')
+  if (options.showOwlPacks === false) {
+    items = items.filter((item) => item.href !== '/packs')
+  }
   const owlSendPublic = options.owlSendPublic === true
+  const owlPacksPublic = options.owlPacksPublic === true
   return items.map((item) => {
-    if (item.href !== '/owl-send') return item
-    return {
-      ...item,
-      description: owlSendPublic
-        ? OWL_SEND_NAV_DESCRIPTION_PUBLIC
-        : OWL_SEND_NAV_DESCRIPTION_PREVIEW,
+    if (item.href === '/owl-send') {
+      return {
+        ...item,
+        description: owlSendPublic
+          ? OWL_SEND_NAV_DESCRIPTION_PUBLIC
+          : OWL_SEND_NAV_DESCRIPTION_PREVIEW,
+      }
     }
+    if (item.href === '/packs') {
+      return {
+        ...item,
+        description: owlPacksPublic
+          ? OWL_PACKS_NAV_DESCRIPTION_PUBLIC
+          : OWL_PACKS_NAV_DESCRIPTION_PREVIEW,
+      }
+    }
+    return item
   })
 }
 

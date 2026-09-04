@@ -149,6 +149,24 @@ export async function countLiveAuctionsForCreator(wallet: string): Promise<numbe
   return count ?? 0
 }
 
+/** Auctions created by this wallet (newest first). Empty on DB errors. */
+export async function getAuctionsByCreator(wallet: string): Promise<NftAuction[]> {
+  const normalized = typeof wallet === 'string' ? wallet.trim() : ''
+  if (!normalized) return []
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
+    .from('nft_auctions')
+    .select('*')
+    .eq('creator_wallet', normalized)
+    .order('created_at', { ascending: false })
+    .limit(100)
+  if (error) {
+    console.error('getAuctionsByCreator:', error.message)
+    return []
+  }
+  return (data || []).map((r) => normalizeAuction(r as Record<string, unknown>))
+}
+
 export async function insertAuction(params: {
   slug: string
   title: string

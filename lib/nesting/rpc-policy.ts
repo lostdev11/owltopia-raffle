@@ -15,6 +15,12 @@
 /** Max rows processed in one admin reconcile call (one RPC per row with a signature). */
 export const NESTING_RECONCILE_MAX_BATCH = 25
 
+/**
+ * Max nests closed in one admin “force leave all” (wallet) request.
+ * Each nest may thaw / vault-return on-chain — keep bounded for serverless time limits.
+ */
+export const NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH = 25
+
 /** Max active nests to on-chain lock-check per wallet diagnostics / support playbook (one RPC each). */
 export const NESTING_DIAGNOSTIC_MAX_ACTIVE_LOCK_CHECKS = 8
 

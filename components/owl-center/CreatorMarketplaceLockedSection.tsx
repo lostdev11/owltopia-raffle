@@ -28,11 +28,15 @@ const AUTOMATED_STEPS: Step[] = [
 
 const MANUAL_STEPS: Step[] = [
   {
-    label: 'Submit hash list on Magic Eden',
+    label: 'List collection on Orbis',
+    detail: 'Open Orbis List Your Collection, paste your collection mint, verify as update authority.',
+  },
+  {
+    label: 'Submit hash list on Magic Eden (optional)',
     detail: 'Creator Hub — ME has no public auto-upload API, so this step is manual.',
   },
   {
-    label: 'Verify on Tensor',
+    label: 'Verify on Tensor (optional)',
     detail: 'Confirm your collection mint in Tensor creator tools.',
   },
   {
@@ -101,7 +105,7 @@ export function CreatorMarketplaceLockedSection({
     <>
       <p className="mb-4 text-sm leading-relaxed text-[#C5D0D8]">
         Secondary listing is a <strong className="font-normal text-[#EAFBF4]">post–sell-out</strong> step. Owl Center
-        automates what it can; Magic Eden and Tensor still require one-time manual verification.
+        automates what it can; Orbis (primary), Magic Eden, and Tensor still require one-time manual verification.
       </p>
 
       <ProgressBar progress={progress} />

@@ -20,13 +20,18 @@ import {
   vrfRequestReachedChain,
   isSwitchboardGatewayTransientError,
   isVrfRevealTimeoutError,
+  isInvalidVrfSecpSignatureError,
   isRetryableVrfRevealError,
   resolveVrfRevealWaitMs,
   vrfRevealRetryDelayMs,
   shouldAutoForceNewVrfRequest,
+  resolveAdminVrfForceNewRequest,
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
   DRAW_ALGO_V3_VRF,
+  raffleDrawWinnerAlreadySelected,
+  isVrfAuditMetadataSuspicious,
+  fulfilledVrfResultFromStoredDraw,
 } from '../lib/raffles/draw'
 
 const entries = [
@@ -235,12 +240,41 @@ assert.equal(
     true
   )
   assert.equal(isSwitchboardGatewayTransientError('Account does not exist'), false)
+  assert.equal(
+    isInvalidVrfSecpSignatureError(
+      'VRF reveal timed out after 75000ms: Simulation failed. custom program error: 0x1780. InvalidSecpSignature'
+    ),
+    true
+  )
+  assert.equal(
+    isRetryableVrfRevealError(
+      'VRF reveal timed out after 75000ms: Simulation failed. custom program error: 0x1780. InvalidSecpSignature'
+    ),
+    true
+  )
+  assert.equal(
+    resolveAdminVrfForceNewRequest({
+      draw_vrf_account: 'Rand111111111111111111111111111111111111111',
+      draw_vrf_status: 'failed',
+      draw_vrf_error:
+        'VRF reveal timed out after 75000ms: Simulation failed. Error Code: InvalidSecpSignature. Error Number: 6016.',
+      draw_vrf_requested_at: '2026-08-04T16:59:30.000Z',
+    }),
+    false
+  )
   assert.ok(resolveVrfRevealWaitMs() >= 10_000)
   assert.equal(resolveVrfRevealWaitMs(12_000), 12_000)
   assert.ok(vrfRevealRetryDelayMs({ attemptIndex: 0, lastError: 'status 503' }) >= 4000)
   assert.ok(
     vrfRevealRetryDelayMs({ attemptIndex: 0, lastError: 'Randomness not ready' }) <
       vrfRevealRetryDelayMs({ attemptIndex: 0, lastError: 'status 503' })
+  )
+  assert.equal(
+    vrfRevealRetryDelayMs({
+      attemptIndex: 0,
+      lastError: 'Simulation failed. InvalidSecpSignature. Error Number: 6016',
+    }),
+    2000
   )
 
   const now = Date.parse('2026-08-04T17:00:00.000Z')
@@ -275,6 +309,47 @@ assert.equal(
     }),
     true
   )
+  assert.equal(
+    shouldAutoForceNewVrfRequest({
+      drawVrfStatus: 'failed',
+      drawVrfAccount: 'Rand111111111111111111111111111111111111111',
+      drawVrfError:
+        'VRF reveal timed out after 75000ms: Simulation failed. InvalidSecpSignature. Error Number: 6016.',
+      drawVrfRequestedAt: '2026-08-04T16:59:30.000Z',
+      nowMs: now,
+    }),
+    false
+  )
+  assert.equal(
+    shouldAutoForceNewVrfRequest({
+      drawVrfStatus: 'failed',
+      drawVrfAccount: 'Rand111111111111111111111111111111111111111',
+      drawVrfError:
+        'VRF reveal timed out after 75000ms: Simulation failed. InvalidSecpSignature. Error Number: 6016.',
+      drawVrfRequestedAt: '2026-08-04T16:56:00.000Z',
+      nowMs: now,
+    }),
+    true
+  )
+
+  assert.equal(
+    resolveAdminVrfForceNewRequest({
+      draw_vrf_account: 'Rand111111111111111111111111111111111111111',
+      draw_vrf_status: 'failed',
+      draw_vrf_error:
+        'VRF reveal timed out after 75000ms: Gateway: fetchRandomnessReveal failed (status 503, code ERR_BAD_RESPONSE)',
+    }),
+    true
+  )
+  assert.equal(
+    resolveAdminVrfForceNewRequest({
+      draw_vrf_account: 'Rand111111111111111111111111111111111111111',
+      draw_vrf_status: 'pending',
+      draw_vrf_error: null,
+    }),
+    false
+  )
+  assert.equal(resolveAdminVrfForceNewRequest({ draw_vrf_account: null }), true)
 }
 
 const v3Draw = performDraw(entries, { algo: DRAW_ALGO_V3_VRF, drawSeed: vrfSeed })
@@ -390,6 +465,42 @@ async function assertVrfKeypairWallet() {
     assert.equal(kept.soldCount, live.soldCount)
   }
 }
+
+// --- VRF draw concurrency guards ---
+assert.equal(raffleDrawWinnerAlreadySelected({ winner_wallet: null, winner_selected_at: null }), false)
+assert.equal(
+  raffleDrawWinnerAlreadySelected({ winner_wallet: 'Winner1111111111111111111111111111111111111', winner_selected_at: null }),
+  true
+)
+assert.equal(
+  raffleDrawWinnerAlreadySelected({ winner_wallet: null, winner_selected_at: '2026-08-31T22:15:46.676Z' }),
+  true
+)
+assert.equal(
+  isVrfAuditMetadataSuspicious({
+    winner_selected_at: '2026-08-31T22:15:46.676Z',
+    draw_vrf_requested_at: '2026-08-31T22:15:55.289Z',
+  }),
+  true
+)
+assert.equal(
+  isVrfAuditMetadataSuspicious({
+    winner_selected_at: '2026-08-31T22:15:55.289Z',
+    draw_vrf_requested_at: '2026-08-31T22:15:46.676Z',
+  }),
+  false
+)
+const storedVrf = fulfilledVrfResultFromStoredDraw({
+  draw_seed: seedFromVrfHex('aa'.repeat(32)),
+  draw_ledger_hash: ledger.ledgerHash,
+  draw_sold_count: ledger.soldCount,
+  draw_vrf_request_tx: 'ReqTx',
+  draw_vrf_fulfill_tx: 'FulTx',
+  draw_vrf_account: 'VrfAcct',
+})
+assert.ok(storedVrf)
+assert.equal(storedVrf!.status, 'fulfilled')
+assert.equal(storedVrf!.drawSeed, seedFromVrfHex('aa'.repeat(32)))
 
 // --- Switchboard commitIx must receive authority before account exists on-chain ---
 async function assertVrfCommitIxNeedsAuthority() {

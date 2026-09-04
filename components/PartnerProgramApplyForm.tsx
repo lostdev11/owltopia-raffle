@@ -1,12 +1,18 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { ImagePlus, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { PARTNER_PRO_SETUP_USD } from '@/lib/config/partner-program-pricing'
+import {
+  isPaidPartnerApplyTier,
+  parsePartnerApplyTier,
+  type PartnerApplyTier,
+} from '@/lib/partner-program-apply'
 
 type TierOption = {
   id: '$0_partner' | 'partner_pro' | 'white_label'
@@ -23,6 +29,8 @@ const TIERS: TierOption[] = [
 ]
 
 export function PartnerProgramApplyForm() {
+  const searchParams = useSearchParams()
+  const tierFromUrl = parsePartnerApplyTier(searchParams.get('tier'))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState(false)
@@ -31,10 +39,16 @@ export function PartnerProgramApplyForm() {
     contact_name: '',
     contact_handle: '',
     wallet_address: '',
-    interested_tier: '$0_partner',
+    interested_tier: (tierFromUrl ?? '$0_partner') as PartnerApplyTier,
     details: '',
     logo_url: '',
+    community_url: '',
   })
+
+  useEffect(() => {
+    if (!tierFromUrl) return
+    setForm((s) => (s.interested_tier === tierFromUrl ? s : { ...s, interested_tier: tierFromUrl }))
+  }, [tierFromUrl])
   const logoInputRef = useRef<HTMLInputElement>(null)
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoError, setLogoError] = useState<string | null>(null)
@@ -69,7 +83,10 @@ export function PartnerProgramApplyForm() {
       const res = await fetch('/api/partner-program/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          community_url: isPaidPartnerApplyTier(form.interested_tier) ? form.community_url : '',
+        }),
       })
       const json = (await res.json().catch(() => ({}))) as { error?: string }
       if (!res.ok) {
@@ -82,9 +99,10 @@ export function PartnerProgramApplyForm() {
         contact_name: '',
         contact_handle: '',
         wallet_address: '',
-        interested_tier: '$0_partner',
+        interested_tier: tierFromUrl ?? '$0_partner',
         details: '',
         logo_url: '',
+        community_url: '',
       })
     } catch {
       setError('Could not submit application.')
@@ -144,7 +162,11 @@ export function PartnerProgramApplyForm() {
           <select
             id="partner-tier"
             value={form.interested_tier}
-            onChange={(e) => setForm((s) => ({ ...s, interested_tier: e.target.value }))}
+            onChange={(e) => {
+              const next = parsePartnerApplyTier(e.target.value)
+              if (!next) return
+              setForm((s) => ({ ...s, interested_tier: next }))
+            }}
             className="flex min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-background px-3 py-2 text-sm"
           >
             {TIERS.map((t) => (
@@ -167,7 +189,33 @@ export function PartnerProgramApplyForm() {
               page.
             </p>
           ) : null}
+          {form.interested_tier === 'white_label' ? (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              White-label is quoted after a short technical discovery. Include your Discord invite or site below so we can
+              scope branding, Discord tools, and whitelist collection.
+            </p>
+          ) : null}
         </div>
+        {isPaidPartnerApplyTier(form.interested_tier) ? (
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor="partner-community-url">Project or Discord invite link (optional)</Label>
+            <Input
+              id="partner-community-url"
+              type="text"
+              inputMode="url"
+              value={form.community_url}
+              onChange={(e) => setForm((s) => ({ ...s, community_url: e.target.value }))}
+              maxLength={500}
+              placeholder="https://discord.gg/… or https://yoursite.xyz"
+              className="min-h-[44px] touch-manipulation"
+              autoComplete="url"
+            />
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              HTTPS Discord invite or project site. We use this when linking Partner Pro Discord tools and whitelist
+              collection.
+            </p>
+          </div>
+        ) : null}
         <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor="partner-logo">Community logo (optional)</Label>
           <div className="flex items-start gap-3">

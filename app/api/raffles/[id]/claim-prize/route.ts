@@ -14,6 +14,7 @@ import {
   transferPartnerSplPrizeToWinner,
 } from '@/lib/raffles/prize-escrow'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import { raffleWinnerPrizeClaimWindowOpen } from '@/lib/raffles/purchase-window'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
 export const dynamic = 'force-dynamic'
@@ -64,12 +65,13 @@ export async function POST(
       )
     }
 
-    // Allow claim once the draw window has ended, even if status was not yet updated to `completed`.
-    const endMs = new Date(raffle.end_time).getTime()
-    const ended = !Number.isNaN(endMs) && endMs <= Date.now()
-    if (raffle.status !== 'completed' && !ended) {
+    // After draw (incl. sell-out early draw → successful_pending_claims) or scheduled end.
+    if (!raffleWinnerPrizeClaimWindowOpen(raffle)) {
       return NextResponse.json(
-        { error: 'Prize can only be claimed after the raffle has ended' },
+        {
+          error:
+            'Prize can only be claimed after the winner is drawn (or the scheduled raffle end time).',
+        },
         { status: 400 }
       )
     }

@@ -24,13 +24,16 @@ import {
   COMMUNITY_NAV_GROUP,
   CREATE_RAFFLE_NAV_ITEM,
   DASHBOARD_NAV_ITEM,
+  NESTING_NAV_GROUP,
   NESTING_NAV_ITEM,
   OWLS_NAV_GROUP,
   filterAdminNavItems,
   filterCommunityNavItems,
+  isPathInNavGroup,
   type SiteNavGroup,
 } from '@/lib/site-nav'
 import { isOwlSendPublicClient } from '@/lib/owl-send/access'
+import { isPacksEnvKillSwitchClient, isPacksPublicClient } from '@/lib/packs/access'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 
@@ -47,6 +50,9 @@ export function Header() {
   )
   /** SIWS session wallet is admin — shows Owl Vision even if the wallet adapter is disconnected (common on mobile). */
   const [adminSessionActive, setAdminSessionActive] = useState<boolean | null>(null)
+  /** DB launch mode public (or env hint). */
+  const [packsPublicLive, setPacksPublicLive] = useState(() => isPacksPublicClient())
+  const [packsTester, setPacksTester] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -106,6 +112,51 @@ export function Header() {
     return () => { cancelled = true }
   }, [connected, publicKey, visibilityTick])
 
+  useEffect(() => {
+    if (isPacksEnvKillSwitchClient()) {
+      setPacksPublicLive(false)
+      return
+    }
+    let cancelled = false
+    fetch('/api/packs/public-settings', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled || data === undefined) return
+        setPacksPublicLive(data?.isPublic === true)
+      })
+      .catch(() => {
+        /* keep prior hint */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [visibilityTick])
+
+  useEffect(() => {
+    if (packsPublicLive || !connected || !publicKey) {
+      setPacksTester(false)
+      return
+    }
+    const addr = publicKey.toBase58()
+    let cancelled = false
+    fetch(`/api/packs/access-check?wallet=${encodeURIComponent(addr)}`, {
+      credentials: 'include',
+      cache: 'no-store',
+    })
+      .then((res) => (res.ok ? res.json() : undefined))
+      .then((data) => {
+        if (cancelled || data === undefined) return
+        setPacksTester(data?.isTester === true)
+        if (data?.isPublic === true) setPacksPublicLive(true)
+      })
+      .catch(() => {
+        /* keep prior */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connected, publicKey, packsPublicLive, visibilityTick])
+
   // Full admins see Owl Vision (connected wallet in admins table, or SIWS session from /admin).
   const showOwlVision = isAdmin === true || adminSessionActive === true
 
@@ -123,15 +174,19 @@ export function Header() {
 
   const owlSendPublic = isOwlSendPublicClient()
   const showOwlSendNav = owlSendPublic || showOwlVision
+  const packsPublic = packsPublicLive
+  const showOwlPacksNav = packsPublic || showOwlVision || packsTester
   const communityNavGroup = useMemo<SiteNavGroup>(
     () => ({
       ...COMMUNITY_NAV_GROUP,
       items: filterCommunityNavItems({
         showOwlSend: showOwlSendNav,
         owlSendPublic,
+        showOwlPacks: showOwlPacksNav,
+        owlPacksPublic: packsPublic,
       }),
     }),
-    [owlSendPublic, showOwlSendNav]
+    [owlSendPublic, showOwlSendNav, packsPublic, showOwlPacksNav]
   )
 
   const mobileNavGroups = useMemo(
@@ -149,10 +204,8 @@ export function Header() {
   const CreateRaffleIcon = CREATE_RAFFLE_NAV_ITEM.icon
 
   const nestingActive =
-    pathname === NESTING_NAV_ITEM.href ||
-    pathname.startsWith(`${NESTING_NAV_ITEM.href}/`) ||
+    isPathInNavGroup(pathname, NESTING_NAV_GROUP) ||
     pathname.startsWith('/dashboard/nesting')
-  const NestingIcon = NESTING_NAV_ITEM.icon
 
   return (
     <header className="w-full bg-black border-b border-green-500/20 text-white">
@@ -170,16 +223,10 @@ export function Header() {
               <HeaderRafflesMenuDesktop buttonClassName={desktopNavButtonClass} />
               <HeaderNavGroupMenuDesktop group={communityNavGroup} buttonClassName={desktopNavButtonClass} />
               <HeaderNavGroupMenuDesktop group={OWLS_NAV_GROUP} buttonClassName={desktopNavButtonClass} />
-              <Link href={NESTING_NAV_ITEM.href}>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(desktopNavButtonClass, nestingActive && 'bg-white/10 text-white')}
-                >
-                  <NestingIcon className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4 text-violet-400/90" />
-                  <span className="hidden sm:inline">{NESTING_NAV_ITEM.label}</span>
-                </Button>
-              </Link>
+              <HeaderNavGroupMenuDesktop
+                group={NESTING_NAV_GROUP}
+                buttonClassName={cn(desktopNavButtonClass, nestingActive && 'bg-white/10 text-white')}
+              />
               {connected && (
                 <Link href={DASHBOARD_NAV_ITEM.href}>
                   <Button
@@ -237,24 +284,11 @@ export function Header() {
           </DialogHeader>
           <nav className="flex flex-col p-2 pb-6 max-h-[min(85vh,32rem)] overflow-y-auto overscroll-contain">
             <div className="mb-2 border-b border-green-500/20 pb-2">
-              <Link
-                href={NESTING_NAV_ITEM.href}
-                onClick={() => setMobileMenuOpen(false)}
-                className={cn(
-                  'flex gap-3 px-4 py-3 rounded-lg min-h-[48px] touch-manipulation hover:bg-white/10 active:bg-white/15',
-                  nestingActive && 'bg-white/10'
-                )}
-              >
-                <NestingIcon className="h-5 w-5 shrink-0 text-violet-400/90" aria-hidden />
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium">{NESTING_NAV_ITEM.label}</span>
-                  {NESTING_NAV_ITEM.description ? (
-                    <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">
-                      {NESTING_NAV_ITEM.description}
-                    </span>
-                  ) : null}
-                </span>
-              </Link>
+              <HeaderNavGroupMenuMobile
+                group={NESTING_NAV_GROUP}
+                onNavigate={() => setMobileMenuOpen(false)}
+                showBorder={false}
+              />
             </div>
             <HeaderRafflesMenuMobile onNavigate={() => setMobileMenuOpen(false)} />
             {mobileNavGroups.map((group, index) => (

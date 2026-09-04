@@ -6,6 +6,12 @@
     "app/api/cron/owl-center-asset-upload/route.ts": {
       "memory": 3009
     },
+    "app/api/admin/coin-upgrade/art/upload-job/process/route.ts": {
+      "memory": 3009
+    },
+    "app/api/cron/coin-upgrade-art-upload/route.ts": {
+      "memory": 3009
+    },
     "app/api/owl-center/generator/stage/process/route.ts": {
       "memory": 3009
     }
@@ -50,6 +56,18 @@
     {
       "path": "/api/cron/end-nft-auctions",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/coin-upgrade-repair",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/public-simple-sync-guards",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/coin-upgrade-art-upload",
+      "schedule": "*/2 * * * *"
     }
   ]
 }

@@ -35,6 +35,14 @@ export class InsufficientTicketsError extends Error {
   }
 }
 
+/** Thrown when confirm RPCs raise wallet_ticket_limit (per-wallet max). */
+export class WalletTicketLimitError extends Error {
+  constructor(message = 'Would exceed maximum tickets per wallet for this raffle') {
+    super(message)
+    this.name = 'WalletTicketLimitError'
+  }
+}
+
 /** Thrown when confirm_entry_with_tx RPC raises invalid_state. */
 export class ConfirmEntryInvalidStateError extends Error {
   constructor(message = 'Invalid entry state for confirmation') {
@@ -109,6 +117,7 @@ export interface ConfirmEntryWithTxResult {
 function mapRpcError(message: string): never {
   if (message.includes('tx_already_used')) throw new TxAlreadyUsedError()
   if (message.includes('insufficient_tickets')) throw new InsufficientTicketsError()
+  if (message.includes('wallet_ticket_limit')) throw new WalletTicketLimitError()
   if (message.includes('batch_empty')) throw new ConfirmEntryInvalidStateError(message)
   if (message.includes('invalid_state')) throw new ConfirmEntryInvalidStateError(message)
   if (message.includes('invalid_token')) throw new ConfirmEntryInvalidStateError(message)
@@ -169,7 +178,50 @@ export async function confirmEntryWithTx(
     throw new Error('Invalid response from confirm_entry_with_tx')
   }
 
-  return { success: true, entry: row.entry as Entry }
+  const result = { success: true as const, entry: row.entry as Entry }
+  await runAfterEntryConfirmHooks(raffleId)
+  const confirmed = row.entry as Entry
+  if (confirmed.status === 'confirmed') {
+    const { recordParticipationStreakOnEntry } = await import('@/lib/db/wallet-streaks')
+    await recordParticipationStreakOnEntry(confirmed.wallet_address, confirmed.verified_at)
+  }
+  return result
+}
+
+/** Side effects after a confirmed ticket (milestones handled by callers; sell-out draw here). */
+export async function runAfterEntryConfirmHooks(raffleId: string): Promise<void> {
+  try {
+    const { maybeTriggerDrawOnSellOut } = await import('@/lib/raffles/sell-out-draw')
+    const result = await maybeTriggerDrawOnSellOut(raffleId)
+    if (result.triggered && !result.draw.success && result.draw.error) {
+      console.info('[afterEntryConfirm] sell-out draw:', {
+        raffleId,
+        error: result.draw.error,
+      })
+    }
+  } catch (err) {
+    console.error('[afterEntryConfirm] sell-out draw failed:', err)
+  }
+}
+
+async function runAfterEntryConfirmHooksForEntryIds(entryIds: readonly string[]): Promise<void> {
+  const uniqueIds = [...new Set(entryIds.map((id) => id.trim()).filter(Boolean))]
+  if (uniqueIds.length === 0) return
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('entries')
+    .select('raffle_id')
+    .in('id', uniqueIds)
+
+  if (error) {
+    console.error('[afterEntryConfirm] load raffle ids:', error.message)
+    return
+  }
+
+  const raffleIds = [...new Set((data ?? []).map((row) => row.raffle_id).filter(Boolean))]
+  for (const raffleId of raffleIds) {
+    await runAfterEntryConfirmHooks(String(raffleId))
+  }
 }
 
 /** One Solana signature confirms every cart row — single DB txn (migration 090). */
@@ -201,6 +253,20 @@ export async function confirmCartBatchWithTx(
     throw new Error('Invalid response from confirm_cart_batch_with_tx')
   }
 
+  await runAfterEntryConfirmHooksForEntryIds(uniqueSorted)
+  const { recordParticipationStreakOnEntry } = await import('@/lib/db/wallet-streaks')
+  const { data: confirmedRows } = await getSupabaseAdmin()
+    .from('entries')
+    .select('wallet_address, verified_at')
+    .in('id', uniqueSorted)
+    .eq('status', 'confirmed')
+  const seenWallets = new Set<string>()
+  for (const row of confirmedRows ?? []) {
+    const wallet = String(row.wallet_address ?? '').trim()
+    if (!wallet || seenWallets.has(wallet)) continue
+    seenWallets.add(wallet)
+    await recordParticipationStreakOnEntry(wallet, row.verified_at as string | null)
+  }
   return { success: true, entryIds: uniqueSorted }
 }
 
@@ -584,7 +650,13 @@ export async function updateEntryStatus(
       return null
     }
 
-    return data as Entry
+    const entry = data as Entry
+    if (status === 'confirmed' && entry?.wallet_address) {
+      const { recordParticipationStreakOnEntry } = await import('@/lib/db/wallet-streaks')
+      await recordParticipationStreakOnEntry(entry.wallet_address, entry.verified_at)
+    }
+
+    return entry
   }, { maxRetries: 2 })
 }
 
@@ -843,6 +915,9 @@ export interface RaffleInfoForEntry {
   prize_deposited_at?: string | null
   prize_returned_at?: string | null
   prize_standard?: string | null
+  /** Prize art for list thumbs (already selected in getEntriesByWallet). */
+  image_url?: string | null
+  image_fallback_url?: string | null
 }
 
 export interface EntryWithRaffle {

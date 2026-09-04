@@ -26,8 +26,12 @@ import {
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
+import { isRaffleEligibleForWinnerSelection } from '@/lib/raffles/sell-out-eligibility'
+import { raffleRequiresPrizeEscrowForDraw } from '@/lib/raffles/visibility'
 import { normalizePrizeAssetIdForRaffle } from '@/lib/solana/normalize-wallet'
 import { getSupabasePublishableKey, getSupabaseSecretKey } from '@/lib/supabase-env'
+import { raffleSlugStorageCandidates } from '@/lib/raffles/slug-aliases'
+import { sanitizeRaffleSlug } from '@/lib/raffles/slugify'
 import {
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
@@ -114,7 +118,7 @@ async function checkNftMigrationApplied(): Promise<boolean> {
 
 /** After `image_url` / optional `image_fallback_url` (migrations 036, 038, 040 tail). */
 const RAFFLE_TAIL_CORE =
-  ',prize_amount,prize_currency,ticket_price,currency,alternate_ticket_currency,alternate_ticket_price,max_tickets,min_tickets,start_time,end_time,original_end_time,time_extension_count,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx'
+  ',prize_amount,prize_currency,ticket_price,currency,alternate_ticket_currency,alternate_ticket_price,max_tickets,max_tickets_per_wallet,min_tickets,start_time,end_time,original_end_time,time_extension_count,second_round_enabled,theme_accent,edited_after_entries,created_at,updated_at,created_by,is_active,winner_wallet,winner_selected_at,status,nft_transfer_transaction,nft_claim_locked_at,nft_claim_locked_wallet,creator_wallet,fee_bps_applied,fee_tier_reason,platform_fee_amount,creator_payout_amount,settled_at,rank,floor_price,prize_deposited_at,prize_deposit_tx'
 
 /** Funds-escrow + creator claim (migration 044). Included in minimal select so fallback queries still populate dashboard claim tracker. */
 const RAFFLE_TAIL_FUNDS_ESCROW =
@@ -138,6 +142,9 @@ const RAFFLE_DRAW_VRF_SUFFIX =
 
 const NFT_COLUMN_SUFFIX =
   ',prize_type,nft_mint_address,nft_collection_name,nft_token_id,nft_metadata_uri,prize_standard'
+
+/** Migration 218: collection mint for project index / browse filter. */
+const NFT_COLLECTION_MINT_SUFFIX = ',nft_collection_mint'
 
 function raffleSelectPrefix(includeImageFallback: boolean): string {
   const fb = includeImageFallback ? ',image_fallback_url' : ''
@@ -176,6 +183,11 @@ let discordPartnerTenantColumnCache: { applied: boolean; checked: boolean } = {
 }
 
 let promoXHandleColumnCache: { applied: boolean; checked: boolean } = {
+  applied: false,
+  checked: false,
+}
+
+let nftCollectionMintColumnCache: { applied: boolean; checked: boolean } = {
   applied: false,
   checked: false,
 }
@@ -258,6 +270,25 @@ async function checkPromoXHandleColumnApplied(): Promise<boolean> {
   }
 }
 
+async function checkNftCollectionMintColumnApplied(): Promise<boolean> {
+  if (nftCollectionMintColumnCache.checked) {
+    return nftCollectionMintColumnCache.applied
+  }
+  try {
+    const { error } = await getSupabaseForRead()
+      .from('raffles')
+      .select('id,nft_collection_mint')
+      .limit(1)
+    const applied = !error
+    nftCollectionMintColumnCache = { applied, checked: true }
+    return applied
+  } catch (err) {
+    console.warn('Could not check nft_collection_mint column:', err)
+    nftCollectionMintColumnCache = { applied: false, checked: true }
+    return false
+  }
+}
+
 async function checkDrawRevealColumnsApplied(): Promise<boolean> {
   if (drawRevealColumnCache.checked) {
     return drawRevealColumnCache.applied
@@ -317,7 +348,10 @@ async function checkDrawVrfColumnsApplied(): Promise<boolean> {
   }
 }
 
-const FULL_RAFFLE_COLUMNS = getBaseRaffleColumnsCore(true) + NFT_COLUMN_SUFFIX
+const FULL_RAFFLE_COLUMNS =
+  getBaseRaffleColumnsCore(true) + NFT_COLUMN_SUFFIX + NFT_COLLECTION_MINT_SUFFIX
+/** REST fallback when migration 218 (`nft_collection_mint`) is not applied yet. */
+const RAFFLE_SELECT_NO_COLLECTION_MINT = getBaseRaffleColumnsCore(true) + NFT_COLUMN_SUFFIX
 
 /**
  * Get all columns including NFT columns if migration is applied.
@@ -331,6 +365,7 @@ async function getRaffleColumns(): Promise<string> {
   const hasImageFallback = await checkImageFallbackColumnApplied()
   const hasDiscordTenant = await checkDiscordPartnerTenantColumnApplied()
   const hasPromoXHandle = await checkPromoXHandleColumnApplied()
+  const hasNftCollectionMint = await checkNftCollectionMintColumnApplied()
   const hasDrawReveal = await checkDrawRevealColumnsApplied()
   const hasDrawCommit = await checkDrawCommitColumnsApplied()
   const hasDrawVrf = await checkDrawVrfColumnsApplied()
@@ -341,7 +376,9 @@ async function getRaffleColumns(): Promise<string> {
     (hasDrawReveal ? RAFFLE_DRAW_REVEAL_SUFFIX : '') +
     (hasDrawCommit ? RAFFLE_DRAW_COMMIT_SUFFIX : '') +
     (hasDrawVrf ? RAFFLE_DRAW_VRF_SUFFIX : '')
-  raffleColumnsCache = hasNftSupport ? base + NFT_COLUMN_SUFFIX : base
+  raffleColumnsCache =
+    (hasNftSupport ? base + NFT_COLUMN_SUFFIX : base) +
+    (hasNftSupport && hasNftCollectionMint ? NFT_COLLECTION_MINT_SUFFIX : '')
   return raffleColumnsCache
 }
 
@@ -433,6 +470,7 @@ function normalizeBaseRowToRaffle(row: Record<string, unknown>): Raffle {
     prize_type: 'crypto' as const,
     nft_mint_address: null,
     nft_collection_name: null,
+    nft_collection_mint: null,
     nft_token_id: null,
     nft_metadata_uri: null,
     list_on_platform: true,
@@ -575,6 +613,22 @@ export async function getRafflesViaRest(
       try {
         return await withRetry(
           async () =>
+            fetchRafflesViaRestRaw(
+              baseUrl,
+              apiKey,
+              activeOnly,
+              RAFFLE_SELECT_NO_COLLECTION_MINT,
+              perAttemptMs,
+              includeDraft
+            ),
+          { maxRetries, initialDelayMs: 600 }
+        )
+      } catch (mintErr) {
+        const mintMsg = (mintErr as Error)?.message ?? ''
+        if (!isColumnOrSchemaError(mintMsg)) throw mintErr
+      try {
+        return await withRetry(
+          async () =>
             fetchRafflesViaRestRaw(baseUrl, apiKey, activeOnly, RAFFLE_SELECT_NO_IMG_FB, perAttemptMs, includeDraft),
           { maxRetries, initialDelayMs: 600 }
         )
@@ -593,6 +647,7 @@ export async function getRafflesViaRest(
             ),
           { maxRetries, initialDelayMs: 600 }
         )
+      }
       }
     }
   }
@@ -709,6 +764,7 @@ export async function getRaffles(
           prize_type: 'crypto' as const,
           nft_mint_address: null,
           nft_collection_name: null,
+          nft_collection_mint: null,
           nft_token_id: null,
           nft_metadata_uri: null,
         })) as Raffle[]
@@ -768,6 +824,7 @@ export async function getAdminPendingCancellationRaffles(): Promise<GetRafflesRe
           prize_type: 'crypto' as const,
           nft_mint_address: null,
           nft_collection_name: null,
+          nft_collection_mint: null,
           nft_token_id: null,
           nft_metadata_uri: null,
         })) as Raffle[]
@@ -787,6 +844,16 @@ export async function getAdminPendingCancellationRaffles(): Promise<GetRafflesRe
 }
 
 export async function getRaffleBySlug(slug: string) {
+  const candidates = raffleSlugStorageCandidates(slug)
+  for (const candidate of candidates) {
+    const found = await getRaffleBySlugExact(candidate)
+    if (found) return found
+  }
+  return null
+}
+
+/** Exact slug match only (no alias resolution). */
+async function getRaffleBySlugExact(slug: string) {
   return withRetry(async () => {
     const client = getSupabaseForRead()
     const columns = await getRaffleColumns()
@@ -831,6 +898,7 @@ export async function getRaffleBySlug(slug: string) {
         prize_type: 'crypto',
         nft_mint_address: null,
         nft_collection_name: null,
+        nft_collection_mint: null,
         nft_token_id: null,
         nft_metadata_uri: null,
       }
@@ -884,6 +952,7 @@ export async function getRaffleById(id: string) {
         prize_type: 'crypto',
         nft_mint_address: null,
         nft_collection_name: null,
+        nft_collection_mint: null,
         nft_token_id: null,
         nft_metadata_uri: null,
       }
@@ -958,6 +1027,7 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
     prize_standard: (row.prize_standard as any) ?? null,
     nft_mint_address: (row.nft_mint_address as string | null) ?? null,
     nft_collection_name: (row.nft_collection_name as string | null) ?? null,
+    nft_collection_mint: (row.nft_collection_mint as string | null) ?? null,
     promo_x_handle: (row.promo_x_handle as string | null) ?? null,
     nft_token_id: (row.nft_token_id as string | null) ?? null,
     nft_metadata_uri: (row.nft_metadata_uri as string | null) ?? null,
@@ -988,7 +1058,17 @@ function normalizeRaffleRow(row: Record<string, unknown>): Raffle {
       const n = Number(row.alternate_ticket_price)
       return Number.isFinite(n) && n > 0 ? n : null
     })(),
+    max_tickets_per_wallet: (() => {
+      if (row.max_tickets_per_wallet == null || row.max_tickets_per_wallet === '') return null
+      const n = Number(row.max_tickets_per_wallet)
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : null
+    })(),
     time_extension_count,
+    second_round_enabled: (() => {
+      const raw = (row as { second_round_enabled?: unknown }).second_round_enabled
+      if (raw === undefined || raw === null) return true
+      return raw === true || raw === 'true' || raw === 1
+    })(),
     draw_algo: (row.draw_algo as string | null | undefined) ?? null,
     draw_seed: (row.draw_seed as string | null | undefined) ?? null,
     draw_commit_hash: (row.draw_commit_hash as string | null | undefined) ?? null,
@@ -1066,6 +1146,7 @@ export async function getRafflesByCreator(walletAddress: string): Promise<Raffle
         prize_type: 'crypto',
         nft_mint_address: null,
         nft_collection_name: null,
+        nft_collection_mint: null,
         nft_token_id: null,
         nft_metadata_uri: null,
       }))
@@ -1370,10 +1451,11 @@ export async function getEntriesByRaffleId(raffleId: string) {
  * If the slug already exists, appends a number (e.g., "my-raffle-2")
  */
 export async function generateUniqueSlug(baseSlug: string): Promise<string> {
-  let slug = baseSlug
+  const cleaned = sanitizeRaffleSlug(baseSlug)
+  let slug = cleaned
   let counter = 1
   
-  // Check if slug exists, and if so, append a number
+  // Check if slug exists (including slug-alias targets), and if so, append a number
   while (true) {
     const existing = await getRaffleBySlug(slug)
     
@@ -1384,12 +1466,12 @@ export async function generateUniqueSlug(baseSlug: string): Promise<string> {
     
     // Slug exists, try with a number appended
     counter++
-    slug = `${baseSlug}-${counter}`
+    slug = `${cleaned}-${counter}`
     
     // Safety check to prevent infinite loops
     if (counter > 1000) {
       // Fallback to timestamp-based slug
-      slug = `${baseSlug}-${Date.now()}`
+      slug = `${cleaned}-${Date.now()}`
       break
     }
   }
@@ -1592,11 +1674,13 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     alternate_ticket_currency: raffle.alternate_ticket_currency ?? null,
     alternate_ticket_price: raffle.alternate_ticket_price ?? null,
     max_tickets: raffle.max_tickets,
+    max_tickets_per_wallet: raffle.max_tickets_per_wallet ?? null,
     min_tickets: raffle.min_tickets,
     start_time: raffle.start_time,
     end_time: raffle.end_time,
     original_end_time: raffle.original_end_time,
     time_extension_count: raffle.time_extension_count ?? 0,
+    second_round_enabled: raffle.second_round_enabled !== false,
     theme_accent: raffle.theme_accent,
     edited_after_entries: raffle.edited_after_entries,
     created_by: raffle.created_by,
@@ -1628,6 +1712,9 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
       : null
     insertData.nft_collection_name = raffle.nft_collection_name
     insertData.nft_metadata_uri = raffle.nft_metadata_uri
+    if ((await checkNftCollectionMintColumnApplied()) && raffle.nft_collection_mint) {
+      insertData.nft_collection_mint = raffle.nft_collection_mint
+    }
   }
 
   // Include optional metadata and settlement fields
@@ -1718,13 +1805,13 @@ export async function createRaffle(raffle: Omit<Raffle, 'id' | 'created_at' | 'u
     
     // Provide helpful error message if NFT columns are missing
     if (error.message?.includes('nft_collection_name') || 
+        error.message?.includes('nft_collection_mint') ||
         error.message?.includes('nft_mint_address') ||
         error.message?.includes('nft_token_id') ||
         error.message?.includes('nft_metadata_uri') ||
         error.message?.includes('schema cache')) {
       throw new Error(
-        `Database migration missing: The NFT support migration (006_add_nft_support.sql) has not been applied to your database. ` +
-        `Please run the migration to add NFT support columns to the raffles table.`
+        `Database migration missing: NFT columns are not on raffles yet. Apply 006_add_nft_support.sql and 218_platform_projects.sql.`
       )
     }
     
@@ -1832,6 +1919,9 @@ export async function updateRaffle(
   }
   if (!(await checkPromoXHandleColumnApplied()) && 'promo_x_handle' in payload) {
     delete payload.promo_x_handle
+  }
+  if (!(await checkNftCollectionMintColumnApplied()) && 'nft_collection_mint' in payload) {
+    delete payload.nft_collection_mint
   }
 
   const { data, error } = await getSupabaseAdmin()
@@ -2042,8 +2132,8 @@ export async function selectWinner(
     return null
   }
 
-  // Draw eligibility: {@link canSelectWinner} (ticket threshold / ≥1 ticket when no min). No separate 7-day gate.
-  if (!forceOverride && !canSelectWinner(raffle, entries)) {
+  // Draw eligibility: threshold met, or sold out at max (legacy caps below computed min still draw).
+  if (!forceOverride && !isRaffleEligibleForWinnerSelection(raffle, entries)) {
     if (!isRaffleEligibleToDraw(raffle, entries)) {
       console.warn(`Raffle ${raffleId} does not meet minimum ticket requirements`)
     } else {
@@ -2070,6 +2160,10 @@ export async function selectWinner(
         entries: confirmedEntries,
         forceNewRequest: opts?.forceVrfRetry === true,
       })
+      const afterVrf = await getRaffleById(raffleId)
+      if ((afterVrf?.winner_wallet ?? '').trim()) {
+        return afterVrf!.winner_wallet!.trim()
+      }
       if (vrf.status !== 'fulfilled') {
         console.warn(
           `[selectWinner] VRF not fulfilled for ${raffleId}: ${vrf.status} ${vrf.error || ''}`
@@ -2148,6 +2242,13 @@ export async function selectWinner(
       }
     : {}
 
+  // Persist fulfilled VRF status with the winner row so a concurrent failed
+  // reveal write cannot leave draw_vrf_status=failed after settlement.
+  const vrfSettleFields =
+    draw.algo === DRAW_ALGO_V3_VRF
+      ? { draw_vrf_status: 'fulfilled' as const, draw_vrf_error: null }
+      : {}
+
   const { data: updatedRaffle, error } = await getSupabaseAdmin()
     .from('raffles')
     .update({
@@ -2161,6 +2262,7 @@ export async function selectWinner(
       creator_payout_amount: creatorPayout,
       settled_at: now,
       ...drawFields,
+      ...vrfSettleFields,
     })
     .eq('id', raffleId)
     .is('winner_wallet', null)
@@ -2221,7 +2323,22 @@ export async function selectWinner(
   }
 
   const winnerDiscordId = await discordUserIdForWinnerWallet(winnerWallet)
-  await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId)
+  const entrantWallets = [
+    ...new Set(
+      confirmedEntries
+        .map((e) => e.wallet_address?.trim())
+        .filter((w): w is string => typeof w === 'string' && w.length > 0)
+    ),
+  ]
+  const { applyRaffleWinStreak, getWalletStreaks } = await import('@/lib/db/wallet-streaks')
+  const winStreak = await applyRaffleWinStreak(raffleId, winnerWallet, entrantWallets, now)
+  const streaks = await getWalletStreaks(winnerWallet)
+  const streakStats = {
+    winCurrentStreak: winStreak?.currentStreak ?? streaks.winCurrentStreak,
+    winTotalWins: winStreak?.totalWins ?? streaks.winTotalWins,
+    participationCurrentStreak: streaks.participationCurrentStreak,
+  }
+  await notifyRaffleWinnerDrawn(raffle, winnerWallet, drawStatus, winnerDiscordId, streakStats)
 
   try {
     const { settleUnawardedMilestones } = await import('@/lib/raffles/milestones/settlement')
@@ -2283,6 +2400,7 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
       prize_type: 'crypto' as const,
       nft_mint_address: null,
       nft_collection_name: null,
+      nft_collection_mint: null,
       nft_token_id: null,
       nft_metadata_uri: null,
     })) as Raffle[]
@@ -2294,7 +2412,7 @@ export async function getEndedRafflesWithoutWinner(): Promise<Raffle[]> {
   const filteredRaffles = raffles.filter(raffle => {
     if (!raffleIsDueForWinnerDraw(raffle, now)) return false
     const prizeEscrowPending =
-      (raffle.prize_type === 'nft' || isPartnerSplPrizeRaffle(raffle)) && !raffle.prize_deposited_at
+      raffleRequiresPrizeEscrowForDraw(raffle) && !raffle.prize_deposited_at
     if (prizeEscrowPending) return false
     return true
   })

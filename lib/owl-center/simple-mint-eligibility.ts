@@ -1,8 +1,20 @@
 import { Connection, PublicKey } from '@solana/web3.js'
 
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
+import { getLaunchWlWallet, sumLaunchWlPhaseUsedMints } from '@/lib/db/owl-center-launch-wl-wallets'
+import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
+import { launchScheduledPublicReason } from '@/lib/owl-center/launch-mint-open'
+import { resolvePartnerMintUnitPrice, publicSimpleSolMintLamports } from '@/lib/owl-center/partner-mint-phase-schedule'
+import { resolvePartnerPhaseWalletMintLimit } from '@/lib/owl-center/partner-allowlist-phases'
+import {
+  formatAllowlistOpensReason,
+  getLaunchActiveAllowlistPhase,
+  isLaunchWaitingForWhitelist,
+  isLaunchWhitelistWindowOpen,
+} from '@/lib/owl-center/launch-wl-window'
 import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/lib/owl-center/mint-policy'
+import { publicSimpleMintClosedInfo, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import { OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS, isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
@@ -19,7 +31,11 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { invalidLaunchMintIdReason } from '@/lib/solana/validate-pubkey'
 
-async function walletPublicMintCount(launchId: string, wallet: string): Promise<number> {
+async function walletPublicMintCount(
+  launchId: string,
+  wallet: string,
+  network: 'mainnet' | 'devnet'
+): Promise<number> {
   const db = getSupabaseAdmin()
   const { data } = await db
     .from('owl_center_mint_events')
@@ -27,6 +43,7 @@ async function walletPublicMintCount(launchId: string, wallet: string): Promise<
     .eq('launch_id', launchId)
     .eq('wallet_address', wallet)
     .eq('phase', 'PUBLIC')
+    .eq('network', network)
   return (data ?? []).reduce((sum, row) => sum + Number((row as { quantity: number }).quantity ?? 0), 0)
 }
 
@@ -59,11 +76,36 @@ export async function buildSimpleMintEligibility(
     onChainRemaining != null ? Math.min(dbRemaining, onChainRemaining) : dbRemaining
   const onChainSoldOut = onChainRemaining === 0 && dbRemaining > 0
   const wallet = walletRaw?.trim() ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
-  const wallet_minted = wallet ? await walletPublicMintCount(launch.id, wallet) : 0
-  const walletRemaining = Math.max(0, launch.wallet_mint_limit - wallet_minted)
+  const wallet_minted = wallet ? await walletPublicMintCount(launch.id, wallet, mint_network) : 0
+  const allowlistOpen = isLaunchWhitelistWindowOpen(launch)
+  const activeAllowlistPhase = allowlistOpen ? getLaunchActiveAllowlistPhase(launch) : null
+  const effectiveWalletLimit = allowlistOpen
+    ? resolvePartnerPhaseWalletMintLimit(activeAllowlistPhase, launch.wallet_mint_limit)
+    : Math.max(1, Math.floor(Number(launch.wallet_mint_limit) || 1))
+  // During allowlist, per-wallet progress is WL used_mints (below); public uses mint_events count.
+  const walletRemainingPublic = Math.max(0, effectiveWalletLimit - wallet_minted)
+  const scheduleClosed = publicSimpleMintClosedInfo(launch)
+  const mint_window_open = allowlistOpen || scheduleClosed == null
 
   const prices_lamports = await getLaunchPriceLamportsQuotes(launch)
-  const unit_lamports_estimate = prices_lamports.public
+  const unitPrice = resolvePartnerMintUnitPrice(launch)
+  const price_usdc = unitPrice.price_usdc
+  let unit_lamports_estimate: string | null = prices_lamports.public
+  if (unitPrice.from_allowlist) {
+    if (unitPrice.price_sol != null && unitPrice.price_sol > 0) {
+      unit_lamports_estimate = String(Math.round(unitPrice.price_sol * 1_000_000_000))
+    } else if (price_usdc != null && price_usdc > 0) {
+      const q = await getOptionalLamportsQuoteForUsdc(price_usdc)
+      unit_lamports_estimate = q ? q.unitLamports.toString() : null
+    } else {
+      // Free allowlist phase (price 0 or unset treated as free for quote).
+      unit_lamports_estimate = null
+    }
+  } else if (unitPrice.price_sol != null) {
+    unit_lamports_estimate = publicSimpleSolMintLamports(launch)
+  } else if (price_usdc != null && price_usdc <= 0) {
+    unit_lamports_estimate = null
+  }
   const platformFeeQuote = platformFeeEnabled ? await resolveOwlCenterPlatformMintFeeLamports() : null
   const platform_mint_fee_lamports_estimate =
     platformFeeQuote?.ok === true ? platformFeeQuote.lamports.toString() : null
@@ -71,6 +113,7 @@ export async function buildSimpleMintEligibility(
   let reason: string | null = null
   let is_eligible = false
   let max_mintable = 0
+  let reported_wallet_minted = wallet_minted
   let wallet_sol_balance_lamports: string | null = null
   let mint_sol_needed_lamports: string | null = null
 
@@ -84,7 +127,14 @@ export async function buildSimpleMintEligibility(
   }
 
   if (platformFeeEnabled && platformFeeQuote?.ok === true) {
-    mint_sol_needed_lamports = String(platformFeeQuote.lamports + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS)
+    const priceLamports = unit_lamports_estimate != null ? BigInt(unit_lamports_estimate) : 0n
+    mint_sol_needed_lamports = String(
+      platformFeeQuote.lamports + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS + priceLamports
+    )
+  } else if (unit_lamports_estimate != null) {
+    mint_sol_needed_lamports = String(
+      OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS + BigInt(unit_lamports_estimate)
+    )
   }
 
   const prefetchedBalance =
@@ -108,12 +158,59 @@ export async function buildSimpleMintEligibility(
       : 'Sold out'
   } else if (launch.active_phase !== 'PUBLIC') {
     reason = `Mint opens during PUBLIC phase (current: ${launch.active_phase})`
+  } else if (isLaunchWaitingForWhitelist(launch)) {
+    reason = formatAllowlistOpensReason(launch)
+  } else if (!isLaunchWhitelistWindowOpen(launch) && scheduleClosed) {
+    reason = scheduleClosed.reason
+  } else if (!isLaunchWhitelistWindowOpen(launch) && !isPhaseOpenBySchedule(launch, 'PUBLIC')) {
+    // No early allowlist window — honor scheduled PUBLIC open (#110).
+    reason = launchScheduledPublicReason(launch) ?? 'Public mint is not open yet'
   } else if (!wallet) {
     reason = 'Connect wallet to mint'
-  } else if (walletRemaining <= 0) {
-    reason = `Wallet limit reached (${launch.wallet_mint_limit} per wallet)`
+  } else if (!allowlistOpen && walletRemainingPublic <= 0) {
+    reason = `Wallet limit reached (${effectiveWalletLimit} per wallet)`
   } else {
-    max_mintable = Math.min(walletRemaining, remaining)
+    max_mintable = Math.min(allowlistOpen ? effectiveWalletLimit : walletRemainingPublic, remaining)
+
+    if (allowlistOpen) {
+      const activePhase = activeAllowlistPhase
+      const phaseKey = activePhase?.key ?? 'wl'
+      const phaseSupply = Math.max(0, Math.floor(Number(activePhase?.supply ?? 0) || 0))
+      const phaseUsed = await sumLaunchWlPhaseUsedMints(launch.id, phaseKey)
+      const phaseRemaining = phaseSupply > 0 ? Math.max(0, phaseSupply - phaseUsed) : 0
+
+      if (phaseSupply < 1) {
+        max_mintable = 0
+        reason = activePhase
+          ? `${activePhase.label} supply is not set — creator must set phase supply in Mint details`
+          : 'Allowlist phase supply is not set'
+      } else if (phaseRemaining <= 0) {
+        max_mintable = 0
+        reason = `${activePhase?.label ?? 'Allowlist'} phase is sold out (${phaseUsed}/${phaseSupply})`
+      } else {
+        const wlRow = await getLaunchWlWallet(launch.id, wallet, phaseKey)
+        if (!wlRow) {
+          max_mintable = 0
+          reason = activePhase
+            ? `Wallet is not on the ${activePhase.label} list`
+            : 'Wallet is not on this collection whitelist'
+        } else {
+          reported_wallet_minted = wlRow.used_mints
+          const phaseWalletRemaining = Math.max(0, effectiveWalletLimit - wlRow.used_mints)
+          const wlRemaining = Math.max(0, wlRow.allowed_mints - wlRow.used_mints)
+          if (phaseWalletRemaining <= 0) {
+            max_mintable = 0
+            reason = `Wallet limit reached (${effectiveWalletLimit} per wallet for ${activePhase?.label ?? 'this phase'})`
+          } else if (wlRemaining <= 0) {
+            max_mintable = 0
+            reason = `${activePhase?.label ?? 'Whitelist'} mint allocation exhausted`
+          } else {
+            max_mintable = Math.min(max_mintable, wlRemaining, phaseWalletRemaining, phaseRemaining)
+          }
+        }
+      }
+    }
+
     is_eligible = max_mintable > 0
     if (is_eligible && platformFeeEnabled && wallet && platformFeeQuote?.ok) {
       const feeBal = await assertOwlCenterPlatformMintFeeSolBalance(
@@ -122,7 +219,8 @@ export async function buildSimpleMintEligibility(
         platformFeeQuote.lamports,
         getLaunchSolanaRpcUrl(mint_network),
         1,
-        prefetchedBalance
+        prefetchedBalance,
+        unit_lamports_estimate != null ? BigInt(unit_lamports_estimate) : 0n
       )
       if (!feeBal.ok) {
         is_eligible = false
@@ -140,11 +238,14 @@ export async function buildSimpleMintEligibility(
     is_eligible,
     max_mintable,
     reason,
-    wallet_minted,
-    wallet_mint_limit: launch.wallet_mint_limit,
+    wallet_minted: reported_wallet_minted,
+    wallet_mint_limit: effectiveWalletLimit,
     unit_lamports_estimate,
     sol_usd_price: null,
-    price_usdc: launch.public_price_usdc,
+    price_usdc,
+    price_sol: unitPrice.price_sol,
+    active_allowlist_key: unitPrice.allowlist_key,
+    active_allowlist_label: unitPrice.allowlist_label,
     platform_mint_fee_usdc: owlCenterPlatformMintFeeUsd(),
     platform_mint_fee_lamports_estimate,
     platform_mint_fee_label: formatOwlCenterPlatformMintFeeSolLabel(
@@ -155,5 +256,7 @@ export async function buildSimpleMintEligibility(
     platform_treasury_wallet,
     mint_network,
     mint_operational,
+    mint_window_open,
+    phase_starts_at: scheduleClosed?.opensAt ?? null,
   }
 }

@@ -24,6 +24,11 @@ import {
   validateNftMaxTickets,
   validateNftMinTicketsNotOverCap,
 } from '@/lib/raffles/nft-raffle-economics'
+import {
+  parseMaxTicketsPerWalletInput,
+  validateMaxTicketsPerWallet,
+} from '@/lib/raffles/max-tickets-per-wallet'
+import { parseMaxTicketsUpdateInput } from '@/lib/raffles/max-tickets'
 import { isOwlEnabled } from '@/lib/tokens'
 import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
 import { getSolanaReadConnection } from '@/lib/solana/connection'
@@ -556,17 +561,38 @@ export async function PATCH(
 
     // Parse max_tickets safely
     let maxTickets: number | null = null
-    if (body.max_tickets != null && body.max_tickets !== '') {
-      const parsed = typeof body.max_tickets === 'number' 
-        ? body.max_tickets 
-        : parseInt(String(body.max_tickets), 10)
-      if (!isNaN(parsed) && parsed > 0) {
-        maxTickets = parsed
-      } else if (body.max_tickets !== null && body.max_tickets !== '') {
-        return NextResponse.json(
-          { error: 'max_tickets must be a positive number' },
-          { status: 400 }
-        )
+    if (body.max_tickets !== undefined) {
+      const parsedMax = parseMaxTicketsUpdateInput(body.max_tickets)
+      if (!parsedMax.ok) {
+        return NextResponse.json({ error: parsedMax.error }, { status: 400 })
+      }
+      maxTickets = parsedMax.value
+    }
+
+    let maxTicketsPerWallet: number | null | undefined = undefined
+    if (body.max_tickets_per_wallet !== undefined) {
+      const parsedPerWallet = parseMaxTicketsPerWalletInput(body.max_tickets_per_wallet)
+      if (!parsedPerWallet.ok) {
+        return NextResponse.json({ error: parsedPerWallet.error }, { status: 400 })
+      }
+      const effectiveMaxForPerWallet =
+        body.max_tickets !== undefined ? maxTickets : existingRaffle.max_tickets
+      const perWalletOk = validateMaxTicketsPerWallet(
+        parsedPerWallet.value,
+        effectiveMaxForPerWallet
+      )
+      if (!perWalletOk.ok) {
+        return NextResponse.json({ error: perWalletOk.error }, { status: 400 })
+      }
+      maxTicketsPerWallet = perWalletOk.value
+    } else if (body.max_tickets !== undefined && existingRaffle.max_tickets_per_wallet != null) {
+      // Global max tightened/cleared — keep per-wallet valid against the new max.
+      const perWalletOk = validateMaxTicketsPerWallet(
+        existingRaffle.max_tickets_per_wallet,
+        maxTickets
+      )
+      if (!perWalletOk.ok) {
+        return NextResponse.json({ error: perWalletOk.error }, { status: 400 })
       }
     }
 
@@ -684,6 +710,8 @@ export async function PATCH(
             ? body.currency.trim().toUpperCase()
             : body.currency,
       max_tickets: body.max_tickets !== undefined ? maxTickets : undefined,
+      max_tickets_per_wallet:
+        body.max_tickets_per_wallet !== undefined ? maxTicketsPerWallet : undefined,
       min_tickets: minTicketsInBody ? minTickets : undefined,
       start_time: body.start_time,
       end_time: body.end_time,
@@ -784,12 +812,13 @@ export async function PATCH(
             body.floor_price !== undefined ||
             body.ticket_price !== undefined ||
             body.max_tickets !== undefined ||
+            body.max_tickets_per_wallet !== undefined ||
             (body.currency !== undefined && String(body.currency ?? '').trim() !== '')
           if (!touched) {
             return NextResponse.json(
               {
                 error:
-                  'Provide at least one of: min_tickets, floor_price, ticket_price, max_tickets, or currency.',
+                  'Provide at least one of: min_tickets, floor_price, ticket_price, max_tickets, max_tickets_per_wallet, or currency.',
               },
               { status: 400 }
             )
@@ -841,21 +870,29 @@ export async function PATCH(
 
           let nextMaxTickets: number | null = existingRaffle.max_tickets
           if (body.max_tickets !== undefined) {
-            if (body.max_tickets === null || body.max_tickets === '') {
-              nextMaxTickets = null
-            } else {
-              const parsed =
-                typeof body.max_tickets === 'number'
-                  ? body.max_tickets
-                  : parseInt(String(body.max_tickets), 10)
-              if (isNaN(parsed) || parsed <= 0) {
-                return NextResponse.json(
-                  { error: 'max_tickets must be a positive integer when set' },
-                  { status: 400 }
-                )
-              }
-              nextMaxTickets = parsed
+            const parsedMax = parseMaxTicketsUpdateInput(body.max_tickets)
+            if (!parsedMax.ok) {
+              return NextResponse.json({ error: parsedMax.error }, { status: 400 })
             }
+            nextMaxTickets = parsedMax.value
+          }
+
+          let nextMaxTicketsPerWallet: number | null = existingRaffle.max_tickets_per_wallet
+          if (body.max_tickets_per_wallet !== undefined) {
+            if (body.max_tickets_per_wallet === null || body.max_tickets_per_wallet === '') {
+              nextMaxTicketsPerWallet = null
+            } else {
+              const parsedPerWallet = parseMaxTicketsPerWalletInput(body.max_tickets_per_wallet)
+              if (!parsedPerWallet.ok) {
+                return NextResponse.json({ error: parsedPerWallet.error }, { status: 400 })
+              }
+              nextMaxTicketsPerWallet = parsedPerWallet.value
+            }
+          }
+
+          const perWalletOk = validateMaxTicketsPerWallet(nextMaxTicketsPerWallet, nextMaxTickets)
+          if (!perWalletOk.ok) {
+            return NextResponse.json({ error: perWalletOk.error }, { status: 400 })
           }
 
           const maxOk = validateNftMaxTickets(nextMaxTickets, effectiveMinForMax)
@@ -880,6 +917,7 @@ export async function PATCH(
           updates.ticket_price = tp.value
           updates.min_tickets = nextMinTickets
           updates.max_tickets = nextMaxTickets
+          updates.max_tickets_per_wallet = nextMaxTicketsPerWallet
 
           console.info('[NFT economics admin override]', {
             raffleId,
@@ -888,12 +926,14 @@ export async function PATCH(
             floor_price: fp.string,
             ticket_price: tp.value,
             max_tickets: nextMaxTickets,
+            max_tickets_per_wallet: nextMaxTicketsPerWallet,
           })
         } else {
           updates.floor_price = existingRaffle.floor_price
           updates.ticket_price = existingRaffle.ticket_price
           updates.min_tickets = existingRaffle.min_tickets
           updates.max_tickets = existingRaffle.max_tickets
+          updates.max_tickets_per_wallet = existingRaffle.max_tickets_per_wallet
           updates.currency = existingRaffle.currency
         }
       } else {

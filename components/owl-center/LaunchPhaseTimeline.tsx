@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils'
 import { launchConfiguredTimelinePhases, resolveLaunchTimelineIndex } from '@/lib/owl-center/launch-phases'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
-import { formatPhaseStartShort, getPhaseStartsAt } from '@/lib/owl-center/phase-schedule'
+import { formatPhaseStartShort, getPhaseStartsAt, isPublicSimpleMintOpen } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
 
 const DEFAULT_ORDER: OwlCenterPhase[] = ['AIRDROP', 'PRESALE', 'PRESALE_OVERAGE', 'WHITELIST', 'PUBLIC', 'TRADING_ACTIVE']
@@ -12,12 +12,16 @@ type Props = {
     OwlCenterLaunchPublic,
     | 'launch_deadline_at'
     | 'phase_schedule'
+    | 'partner_allowlist_phases'
     | 'airdrop_supply'
     | 'creator_presale_enabled'
     | 'presale_supply'
     | 'presale_overage_supply'
     | 'wl_supply'
+    | 'wl_price_usdc'
     | 'public_supply'
+    | 'mint_mode'
+    | 'creator_wl_enabled'
   >
   /** Phase where the connected wallet can mint right now. */
   userMintPhase?: OwlCenterPhase | null
@@ -29,17 +33,26 @@ export function LaunchPhaseTimeline({ active, launch, userMintPhase = null, user
   const phases = launch ? launchConfiguredTimelinePhases(launch) : DEFAULT_ORDER
   const idx = resolveLaunchTimelineIndex(phases, active)
   const reservedSet = new Set(userReservedPhases)
+  const publicSimple = launch?.mint_mode === 'public_simple'
+  const publicSimpleOpen = publicSimple && launch ? isPublicSimpleMintOpen(launch) : true
 
   return (
     <div className="min-w-0 overflow-x-clip">
       <ol className="flex min-w-0 flex-wrap gap-2 md:gap-0 md:divide-x md:divide-[#1A222B]">
         {phases.map((p, i) => {
-          const done = idx > i || active === 'SOLD_OUT'
-          const current = active === p || (active === 'SOLD_OUT' && p === 'PUBLIC')
+          const startMs = launch ? Date.parse(getPhaseStartsAt(launch, p) ?? '') : NaN
+          const scheduledFuture = Number.isFinite(startMs) && startMs > Date.now()
+          const done =
+            !scheduledFuture &&
+            (publicSimple ? publicSimpleOpen && (idx > i || active === 'SOLD_OUT') : idx > i || active === 'SOLD_OUT')
+          const current = publicSimple
+            ? p === 'PUBLIC' && publicSimpleOpen && (active === 'PUBLIC' || active === 'SOLD_OUT')
+            : active === p || (active === 'SOLD_OUT' && p === 'PUBLIC')
           const isUserMint = userMintPhase === p
           const isUserReserved = reservedSet.has(p) && !current && !isUserMint
           const startsAt = launch ? getPhaseStartsAt(launch, p) : null
           const startLabel = formatPhaseStartShort(startsAt)
+          const upcoming = !done && !current && (scheduledFuture || (publicSimple && p === 'PUBLIC' && !publicSimpleOpen))
 
           return (
             <li
@@ -66,6 +79,8 @@ export function LaunchPhaseTimeline({ active, launch, userMintPhase = null, user
                 <span className="mt-0.5 text-[8px] font-bold normal-case tracking-wider text-[#7D8A93]">
                   Your allocation
                 </span>
+              ) : upcoming ? (
+                <span className="mt-0.5 text-[8px] font-bold normal-case tracking-wider text-[#7D8A93]">Upcoming</span>
               ) : null}
             </li>
           )

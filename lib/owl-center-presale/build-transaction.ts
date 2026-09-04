@@ -8,21 +8,50 @@ export type BuiltOwlCenterPresaleTransaction = {
   lastValidBlockHeight: number
 }
 
+/**
+ * Builds buyer payment: spot proceeds → partner, platform fee → Owltopia treasury.
+ * When platform fee is 0, only the partner transfer is included.
+ */
 export async function buildOwlCenterPresalePaymentTransaction(params: {
   connection: Connection
   buyer: PublicKey
   breakdown: OwlCenterPriceBreakdown
-  treasury: PublicKey
+  partnerWallet: PublicKey
+  platformFeeWallet: PublicKey
 }): Promise<BuiltOwlCenterPresaleTransaction> {
-  const { connection, buyer, breakdown, treasury } = params
+  const { connection, buyer, breakdown, partnerWallet, platformFeeWallet } = params
 
-  const ix = SystemProgram.transfer({
-    fromPubkey: buyer,
-    toPubkey: treasury,
-    lamports: Number(breakdown.treasuryLamports),
-  })
+  if (breakdown.partnerLamports <= 0n) {
+    throw new Error('Partner proceeds must be positive')
+  }
 
-  const tx = new Transaction().add(ix)
+  const tx = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: buyer,
+      toPubkey: partnerWallet,
+      lamports: Number(breakdown.partnerLamports),
+    })
+  )
+
+  if (breakdown.platformFeeLamports > 0n) {
+    if (partnerWallet.equals(platformFeeWallet)) {
+      // Same destination — combine into one transfer to avoid zero-ix / double-send quirks.
+      tx.instructions[0] = SystemProgram.transfer({
+        fromPubkey: buyer,
+        toPubkey: partnerWallet,
+        lamports: Number(breakdown.totalLamports),
+      })
+    } else {
+      tx.add(
+        SystemProgram.transfer({
+          fromPubkey: buyer,
+          toPubkey: platformFeeWallet,
+          lamports: Number(breakdown.platformFeeLamports),
+        })
+      )
+    }
+  }
+
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
   tx.recentBlockhash = blockhash
   tx.feePayer = buyer

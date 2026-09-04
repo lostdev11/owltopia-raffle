@@ -17,6 +17,7 @@ import { CreatorModerationBuyerWarning } from '@/components/CreatorModerationBuy
 import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
 import { getPartnerPrizeTokenByCurrency } from '@/lib/partner-prize-tokens'
+import { raffleSoldOutButtonLabel } from '@/lib/raffles/sold-out-copy'
 import type { Raffle, Entry } from '@/lib/types'
 import { formatRaffleTicketPriceSummary, raffleAcceptsSolAndBambooTickets } from '@/lib/raffles/dual-ticket-payment'
 import {
@@ -415,6 +416,7 @@ export function RaffleCard({
   const availableTickets = raffle.max_tickets 
     ? raffle.max_tickets - totalTicketsSold 
     : null
+  const soldOutLabel = raffleSoldOutButtonLabel(raffle, availableTickets)
   const maxPurchaseQuantity =
     availableTickets !== null ? Math.max(0, availableTickets) : MAX_TICKET_QUANTITY_PER_ENTRY
 
@@ -765,7 +767,7 @@ export function RaffleCard({
                     <>
                       {raffle.ticket_price} {raffle.currency}
                       <CurrencyIcon
-                        currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                        currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                         size={12}
                         className="inline-block"
                       />
@@ -997,7 +999,7 @@ export function RaffleCard({
                         <>
                           {raffle.ticket_price} {raffle.currency}
                           <CurrencyIcon
-                            currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                            currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                             size={16}
                             className="inline-block flex-shrink-0"
                           />
@@ -1107,7 +1109,7 @@ export function RaffleCard({
                         <>
                           {raffle.ticket_price} {raffle.currency}
                           <CurrencyIcon
-                            currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO'}
+                            currency={raffle.currency as 'SOL' | 'USDC' | 'OWL' | 'BAMBOO' | 'GOATS'}
                             size={16}
                             className="inline-block"
                           />
@@ -1194,7 +1196,7 @@ export function RaffleCard({
                       onClick={handleToggleQuickBuy}
                       disabled={!isActive || isFuture || purchasesBlocked || viewerIsCreator || (availableTickets !== null && availableTickets <= 0)}
                     >
-                      {isFuture ? 'Starts Soon' : (isActive ? (purchasesBlocked ? 'Purchases Blocked' : viewerIsCreator ? 'Your Raffle' : availableTickets !== null && availableTickets <= 0 ? 'Sold Out' : 'Enter Raffle') : 'View Details')}
+                      {isFuture ? 'Starts Soon' : (isActive ? (purchasesBlocked ? 'Purchases Blocked' : viewerIsCreator ? 'Your Raffle' : availableTickets !== null && availableTickets <= 0 ? soldOutLabel : 'Enter Raffle') : 'View Details')}
                     </Button>
                     <Button
                       type="button"

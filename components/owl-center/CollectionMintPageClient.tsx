@@ -10,7 +10,9 @@ import { CollectionMintPanel } from '@/components/owl-center/CollectionMintPanel
 import { CollectionSoldOutPanel } from '@/components/owl-center/CollectionSoldOutPanel'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { LaunchPhaseTimeline } from '@/components/owl-center/LaunchPhaseTimeline'
+import { MintCountdown } from '@/components/owl-center/MintCountdown'
 import { MintAllocationBar } from '@/components/owl-center/MintAllocationBar'
+import { PartnerMintPhaseSchedule } from '@/components/owl-center/PartnerMintPhaseSchedule'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { PhaseBadge } from '@/components/owl-center/PhaseBadge'
 import { StatPanel } from '@/components/owl-center/StatPanel'
@@ -21,6 +23,7 @@ import { useOwlCenterView } from '@/components/owl-center/OwlCenterViewProvider'
 import { useSiwsSession } from '@/hooks/use-siws-session'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
+import { launchPublicPhaseBadgeLabel } from '@/lib/owl-center/launch-mint-open'
 import type { CollectionMintStateResponse } from '@/lib/owl-center/types'
 
 export function CollectionMintPageClient({ slug, launchName }: { slug: string; launchName: string }) {
@@ -78,7 +81,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
   const { launch, supply, mint_controls, marketplace, terminal, mint_network, presale_pool, minted_mints } = state
   const trading = launch.active_phase === 'TRADING_ACTIVE'
   const soldOut = launch.active_phase === 'SOLD_OUT' || supply.remaining <= 0
-  const userMintPhase = connected && elig?.is_eligible ? launch.active_phase : null
+  const userMintPhase = connected && elig?.is_eligible && elig.mint_window_open !== false ? launch.active_phase : null
   const canEditMintSettings =
     isOwlCenterAdmin ||
     (!!sessionWallet &&
@@ -93,14 +96,14 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
     >
       <div className="mb-6 flex flex-wrap items-center gap-2">
         <StatusBadge status={launch.status} />
-        <PhaseBadge phase={launch.active_phase} />
+        <PhaseBadge phase={launch.active_phase} overrideLabel={launchPublicPhaseBadgeLabel(launch)} />
         <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">{mint_network}</span>
       </div>
 
       {canEditMintSettings ? (
         <p className="mb-6 break-words rounded border border-[#1A222B] bg-[#0F1419]/80 px-4 py-3 font-mono text-xs leading-relaxed text-[#9BA8B4]">
           Per-wallet cap:{' '}
-          <span className="text-[#E8EEF2]">{launch.wallet_mint_limit} max per phase</span>
+          <span className="text-[#E8EEF2]">{launch.wallet_mint_limit} max (public)</span>
           {' · '}
           <Link href={`/owl-center/my-launches/${launch.id}/mint-details`} className="text-[#00FF9C] hover:underline">
             Edit mint settings
@@ -134,6 +137,11 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
             </div>
           ) : null}
           <LaunchPhaseTimeline active={launch.active_phase} launch={launch} userMintPhase={userMintPhase} />
+          <MintCountdown launch={launch} />
+          <PartnerMintPhaseSchedule
+            launch={launch}
+            liveUnitLamports={elig?.unit_lamports_estimate}
+          />
           <CollectionMintPanel
             slug={slug}
             launch={launch}
@@ -148,6 +156,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
               launch={launch}
               mintCount={marketplace.mint_addresses_recorded}
               hashListReady={marketplace.hash_list_ready}
+              orbisUrl={marketplace.orbis_url}
               magicEdenUrl={marketplace.magic_eden_url}
               tensorUrl={marketplace.tensor_url}
               tradingActive={trading || marketplace.trading_links_active}
@@ -157,6 +166,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
             <CommandCard label="MARKETPLACES">
               <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">Trade on secondary</p>
               <TradingButtons
+                orbisUrl={marketplace.orbis_url ?? launch.orbis_url}
                 magicEdenUrl={marketplace.magic_eden_url ?? launch.magic_eden_url}
                 tensorUrl={marketplace.tensor_url ?? launch.tensor_url}
               />

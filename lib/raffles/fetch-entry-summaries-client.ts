@@ -50,6 +50,7 @@ export async function fetchEntrySummariesByRaffleIdsClient(
           usdc: Number(s.revenue?.usdc) || 0,
           owl: Number(s.revenue?.owl) || 0,
           bamboo: Number(s.revenue?.bamboo) || 0,
+          goats: Number(s.revenue?.goats) || 0,
         },
         viewerConfirmedTickets: Number(s.viewerConfirmedTickets) || 0,
       })

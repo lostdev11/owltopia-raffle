@@ -43,7 +43,11 @@ export async function POST(request: NextRequest) {
       gen1_standard_per_nest_sol: period.gen1_standard_per_nest_sol,
       gen1_one_of_one_per_nest_sol: period.gen1_one_of_one_per_nest_sol,
       gen2_eligible_count: period.gen2_eligible_count,
+      gen2_standard_eligible_count: period.gen2_standard_eligible_count,
+      gen2_one_of_one_eligible_count: period.gen2_one_of_one_eligible_count,
       gen2_per_nest_sol: period.gen2_per_nest_sol,
+      gen2_standard_per_nest_sol: period.gen2_standard_per_nest_sol,
+      gen2_one_of_one_per_nest_sol: period.gen2_one_of_one_per_nest_sol,
       finalized_at: period.finalized_at,
     })
   } catch (e) {

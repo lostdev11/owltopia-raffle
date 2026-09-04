@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { NestingHero } from '@/components/nesting/NestingHero'
+import { CoinArtUpgradeGlobalProgress } from '@/components/coin-upgrade/CoinArtUpgradeGlobalProgress'
 import { NestingGlobalOwlNestProgress } from '@/components/nesting/NestingGlobalOwlNestProgress'
 import { NestingGlobalGenOwlNestProgress } from '@/components/nesting/NestingGlobalGenOwlNestProgress'
 import type { OwlNest365PublicStats } from '@/lib/nesting/owl-nest-365-stats'
@@ -212,6 +213,8 @@ export function NestingLandingClient({
 
       <NestingHero />
 
+      <CoinArtUpgradeGlobalProgress />
+
       <section id="perches" className="scroll-mt-24">
         <SectionHeader
           title="Open perches"
@@ -359,7 +362,11 @@ export function NestingLandingClient({
             },
             {
               q: 'What am I approving when I nest?',
-              a: 'A freeze on each selected owl so it stays in your wallet but cannot trade for the nest period. Owls are not transferred. Phantom often still lists this as “Approve to transfer” — that is their label for the freeze step, not sending the NFT away. Jupiter can look scarier for the same step. On My nest, expand “What you are approving” for a short walkthrough. If you are not on owltopia.xyz, cancel.',
+              a: 'A freeze on each selected owl so it stays in your wallet but cannot trade for the nest period. Owls are not transferred. Jupiter often says a wallet “can spend tokens from your wallet” — that is their scary label for the nest freeze Approve on that one NFT, not a blank check on your SOL or other tokens. Phantom often lists the same step as “Approve to transfer.” Disconnecting the site ends the browser session; the freeze stays until you leave the nest. On My nest, read the short note under Confirm nest. If you are not on owltopia.xyz, cancel.',
+            },
+            {
+              q: 'Why does Jupiter say a wallet can spend tokens from my wallet?',
+              a: 'Gen 2 nesting uses a one-NFT Approve so Owltopia can freeze that owl in your wallet. Wallets describe Approve as “spend.” It only applies to the selected owl (amount 1), not your whole balance. After you leave the nest we ask you to clear that Approve so the warning goes away.',
             },
             {
               q: 'Why do you ask me to sign a message on the dashboard?',

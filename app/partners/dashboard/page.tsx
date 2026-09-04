@@ -28,6 +28,8 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { isMobileDevice } from '@/lib/utils'
 import { PLATFORM_NAME } from '@/lib/site-config'
 import { PartnerNestingRequestCard } from '@/components/partners/PartnerNestingRequestCard'
+import { PartnerPresaleManagerCard } from '@/components/partners/PartnerPresaleManagerCard'
+import { PartnerDiscordWlCampaignsCard } from '@/components/partners/PartnerDiscordWlCampaignsCard'
 
 const MOBILE_401_RETRY_DELAY_MS = 800
 
@@ -608,6 +610,8 @@ export default function PartnerHostDashboardPage() {
 
       <PartnerNestingRequestCard />
 
+      <PartnerPresaleManagerCard cardClassName={CARD_SURFACE} />
+
       {data.creatorRefundRaffles.length > 0 && (
         <Card className={`${CARD_SURFACE} mb-6 border-amber-500/35 bg-amber-500/[0.06]`}>
           <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
@@ -947,7 +951,7 @@ export default function PartnerHostDashboardPage() {
           ) : adminPreviewMode ? (
             <p className="text-sm leading-relaxed text-muted-foreground">
               No tenant on this wallet row. Manage allowlisted creators in{' '}
-              <Link href="/admin/partner-creators" className="font-medium text-primary underline-offset-2 hover:underline">
+              <Link href="/admin/partners/creators" className="font-medium text-primary underline-offset-2 hover:underline">
                 partner creators
               </Link>
               .
@@ -955,7 +959,7 @@ export default function PartnerHostDashboardPage() {
           ) : (
             <p className="text-sm leading-relaxed text-muted-foreground">
               Not linked yet. Ask the team to set a tenant in{' '}
-              <Link href="/admin/partner-creators" className="font-medium text-primary underline-offset-2 hover:underline">
+              <Link href="/admin/partners/creators" className="font-medium text-primary underline-offset-2 hover:underline">
                 partner creators
               </Link>{' '}
               or use Discord <code className="rounded bg-muted/60 px-1 font-mono text-xs">/owltopia-partner</code> after
@@ -964,6 +968,8 @@ export default function PartnerHostDashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      <PartnerDiscordWlCampaignsCard />
 
       <Card className={CARD_SURFACE}>
         <CardHeader className="border-b border-border/50 pb-4">

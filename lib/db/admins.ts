@@ -66,8 +66,9 @@ export async function getAdminRole(walletAddress: string): Promise<AdminRole | n
       if (error.code === 'PGRST116') {
         return null
       }
+      // Do not treat connectivity / RLS / 5xx as "not an admin" — callers would hard-deny.
       console.error('Error checking admin role:', error.message || 'Unknown error')
-      return null
+      throw new Error(error.message || 'Admin role lookup failed')
     }
 
     return parseAdminRole(data?.role)

@@ -11,12 +11,13 @@ import { getStakingPositionForWallet } from '@/lib/db/staking-positions'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { classifyGen1OneOfOneMints } from '@/lib/nesting/gen1-one-of-one'
+import { classifyGen2OneOfOneMints } from '@/lib/nesting/gen2-one-of-one'
 import { isPositionEligibleForRevSharePeriod } from '@/lib/nesting/gen-owl-rev-share-eligibility'
 import { ensureGenOwlRevSharePeriodFinalized } from '@/lib/nesting/gen-owl-rev-share-finalize'
 import { listGenOwlRevShareClaimableForWallet } from '@/lib/nesting/gen-owl-rev-share-claimable'
 import { claimsOpenForPeriod, groupKeyForPoolSlug } from '@/lib/nesting/gen-owl-rev-share-month'
 import { payoutGenOwlRevShareClaim } from '@/lib/nesting/gen-owl-rev-share-payout'
-import { resolveGen1PerNestAmounts } from '@/lib/nesting/gen-owl-rev-share'
+import { resolveGen1PerNestAmounts, resolveGen2PerNestAmounts } from '@/lib/nesting/gen-owl-rev-share'
 import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
 import { areGenOwlRevShareClaimsEnabled } from '@/lib/db/rev-share-schedule'
 import {
@@ -29,14 +30,14 @@ async function perNestAmountsForPosition(
   group: GenOwlStakingGroupKey,
   assetIdentifier: string | null
 ): Promise<{ sol: number; usdc: number }> {
+  const mint = assetIdentifier?.trim()
   if (group === 'gen2-owl') {
-    return {
-      sol: period.gen2_per_nest_sol ?? 0,
-      usdc: period.gen2_per_nest_usdc ?? 0,
-    }
+    if (!mint) return resolveGen2PerNestAmounts(period, 'standard')
+    const classification = await classifyGen2OneOfOneMints([mint])
+    const bucket = classification.get(mint) === 'one-of-one' ? 'one-of-one' : 'standard'
+    return resolveGen2PerNestAmounts(period, bucket)
   }
 
-  const mint = assetIdentifier?.trim()
   if (!mint) {
     return resolveGen1PerNestAmounts(period, 'standard')
   }

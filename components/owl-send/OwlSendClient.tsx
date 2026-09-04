@@ -77,10 +77,12 @@ import {
   type OwlSendTokenScatterLine,
 } from '@/lib/owl-send/batch'
 import {
+  applyPartialOwlSendBatchSuccess,
   buildResumeRemainingPlan,
   buildResumeSkippingFrozenPlan,
   collectSentMintsFromBatches,
   collectSentMintsFromLedger,
+  splitOversizedOwlSendBatch,
 } from '@/lib/owl-send/resume'
 import {
   clearOwlSendNftDraft,
@@ -97,11 +99,25 @@ import {
   type OwlSendMode,
 } from '@/lib/owl-send/constants'
 import { owlSendNftSendButtonLabel } from '@/lib/owl-send/send-button-label'
+import { isOwlSendPacketSizeError } from '@/lib/owl-send/tx-size'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
 import { formatOwlSendFeeSol, getOwlSendFeeSol, getOwlSendFeeSolForDiscount } from '@/lib/owl-send/fee'
 import type { OwlSendHolderRoleName } from '@/lib/owl-send/holder-discount'
 import { sendOwlSendNftBatch } from '@/lib/owl-send/send-batch'
-import type { OwlSendSendPhase } from '@/lib/owl-send/send-spl-nft-batch'
+import {
+  buildOwlSendSplNftTransaction,
+  type OwlSendSendPhase,
+} from '@/lib/owl-send/send-spl-nft-batch'
+import {
+  owlSendBatchesCanSignAll,
+  sendOwlSendSignedBatchGroup,
+  walletSupportsOwlSendSignAll,
+} from '@/lib/owl-send/sign-all'
+import {
+  OWL_SEND_BUILD_TIMEOUT_HINT,
+  OWL_SEND_BUILD_TIMEOUT_MS,
+  withOwlSendTimeout,
+} from '@/lib/owl-send/confirm'
 import { sendOwlSendTokenLines, sendOwlSendTokensToOne } from '@/lib/owl-send/send-tokens'
 import { recordOwlSendLedger } from '@/lib/owl-send/record-ledger'
 import { useOwlSendAdminAccess } from '@/lib/owl-send/use-owl-send-admin-access'
@@ -109,6 +125,8 @@ import {
   canAccessOwlSendCsv,
   isOwlSendCsvPublicClient,
 } from '@/lib/owl-send/access'
+import { thawOwlSendCoreOwnerFreezes } from '@/lib/owl-send/thaw-core-owner-freeze'
+import { isOwlSendCoreOwnerFreezeError } from '@/lib/owl-send/mpl-core-owner-freeze'
 import { OwlSendLedgerPanel } from '@/components/owl-send/OwlSendLedgerPanel'
 import { OwlSendCsvImport } from '@/components/owl-send/OwlSendCsvImport'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
@@ -454,6 +472,14 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setRandomizeScatter(next)
   }
 
+  const nftApprovalSize = useMemo(() => {
+    const unique =
+      mode === 'scatter'
+        ? new Set(activeScatterRecipients.filter(Boolean)).size || 3
+        : 1
+    return owlSendSelectionApprovalSize(selectedNfts, { uniqueRecipients: unique })
+  }, [selectedNfts, mode, activeScatterRecipients])
+
   const cost = useMemo(() => {
     if (preparedLines && preparedLines.length > 0) {
       return buildOwlSendCostEstimate({
@@ -464,18 +490,12 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     }
     const count = selectedNfts.length
     if (count < 1) return null
-    const perApproval = owlSendSelectionApprovalSize(selectedNfts)
     return buildOwlSendCostEstimate({
       nftCount: count,
-      batchCount: Math.ceil(count / perApproval),
+      batchCount: Math.ceil(count / nftApprovalSize),
       discountBps,
     })
-  }, [preparedLines, batches.length, selectedNfts, discountBps])
-
-  const nftApprovalSize = useMemo(
-    () => owlSendSelectionApprovalSize(selectedNfts),
-    [selectedNfts]
-  )
+  }, [preparedLines, batches.length, selectedNfts, discountBps, nftApprovalSize])
 
   const cancelInFlightSend = () => {
     sendCancelledRef.current = true
@@ -566,8 +586,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   }
 
   /**
-   * Server thaw for Gen2 leftover nest locks / CM mint freezes.
-   * Requires SIWS session matching the connected wallet.
+   * Thaw leftover nest locks: MPL Core Owner FreezeDelegate (wallet) and/or Gen2 SPL/CM (server).
+   * Requires SIWS only for the Gen2 server path.
    */
   const thawFrozenMints = useCallback(
     async (
@@ -575,53 +595,98 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       opts?: { silent?: boolean }
     ): Promise<{ ok: boolean; thawedCount: number; error?: string }> => {
       if (!publicKey || mints.length < 1) return { ok: false, thawedCount: 0, error: 'Nothing to thaw.' }
+      const adapter = wallet?.adapter
       setThawing(true)
       if (!opts?.silent) {
         setSessionError(null)
         setSessionNotice(null)
       }
       try {
-        const signedIn = await ensureLedgerSiws()
-        if (!signedIn) {
-          return { ok: false, thawedCount: 0, error: 'Sign in with your wallet to thaw frozen Gen2s.' }
+        let thawedCount = 0
+        const remainingForGen2: string[] = []
+
+        // 1) Core Owner freeze (admin force-leave leftover) — holder wallet only.
+        if (adapter) {
+          const core = await thawOwlSendCoreOwnerFreezes({
+            connection,
+            wallet: adapter,
+            sendTransaction,
+            mints,
+          })
+          thawedCount += core.thawedCount
+          const coreHardError = core.results.find((r) => r.error && !r.skipToGen2)
+          if (coreHardError?.error) {
+            if (!opts?.silent) setSessionError(coreHardError.error)
+            return { ok: false, thawedCount, error: coreHardError.error }
+          }
+          for (const r of core.results) {
+            if (r.skipToGen2) remainingForGen2.push(r.mint)
+          }
+        } else {
+          remainingForGen2.push(...mints)
         }
-        const res = await fetch('/api/owl-send/thaw', {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'content-type': 'application/json',
-            'x-connected-wallet': publicKey.toBase58(),
-          },
-          body: JSON.stringify({ mints }),
-        })
-        const data = (await res.json().catch(() => null)) as {
-          ok?: boolean
-          thawedCount?: number
-          error?: string
-          results?: Array<{ mint: string; ok: boolean; kind: string; error?: string }>
-        } | null
-        if (!res.ok) {
-          const err = data?.error || 'Thaw request failed.'
-          if (!opts?.silent) setSessionError(err)
-          return { ok: false, thawedCount: 0, error: err }
+
+        // 2) Gen2 nest / Candy Machine freeze — server thaw.
+        if (remainingForGen2.length > 0) {
+          const signedIn = await ensureLedgerSiws()
+          if (!signedIn) {
+            if (thawedCount > 0) {
+              // Partial Core success is still useful.
+              if (!opts?.silent) {
+                setSessionNotice(
+                  `Thawed ${thawedCount} Core nest lock${thawedCount === 1 ? '' : 's'}. Sign in to thaw any remaining Gen2 locks.`
+                )
+              }
+              return { ok: true, thawedCount }
+            }
+            return { ok: false, thawedCount: 0, error: 'Sign in with your wallet to thaw frozen Gen2s.' }
+          }
+          const res = await fetch('/api/owl-send/thaw', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'content-type': 'application/json',
+              'x-connected-wallet': publicKey.toBase58(),
+            },
+            body: JSON.stringify({ mints: remainingForGen2 }),
+          })
+          const data = (await res.json().catch(() => null)) as {
+            ok?: boolean
+            thawedCount?: number
+            error?: string
+            results?: Array<{ mint: string; ok: boolean; kind: string; error?: string }>
+          } | null
+          if (!res.ok) {
+            const err = data?.error || 'Thaw request failed.'
+            if (thawedCount < 1 && !opts?.silent) setSessionError(err)
+            return { ok: thawedCount > 0, thawedCount, error: err }
+          }
+          thawedCount += data?.thawedCount ?? 0
+          const activeNest = (data?.results ?? []).find((r) => r.kind === 'active_nest')
+          if (activeNest?.error && !opts?.silent) {
+            setSessionError(activeNest.error)
+          } else if (thawedCount > 0 && !opts?.silent) {
+            setSessionNotice(
+              `Thawed ${thawedCount} lock${thawedCount === 1 ? '' : 's'}. Tap Retry to send.`
+            )
+            setRetryMints([])
+          } else if (!data?.ok && data?.error && thawedCount < 1 && !opts?.silent) {
+            setSessionError(data.error)
+          }
+          return {
+            ok: thawedCount > 0 || data?.ok === true,
+            thawedCount,
+            error: data?.error,
+          }
         }
-        const thawedCount = data?.thawedCount ?? 0
-        const activeNest = (data?.results ?? []).find((r) => r.kind === 'active_nest')
-        if (activeNest?.error && !opts?.silent) {
-          setSessionError(activeNest.error)
-        } else if (data?.ok && thawedCount > 0 && !opts?.silent) {
+
+        if (thawedCount > 0 && !opts?.silent) {
           setSessionNotice(
-            `Thawed ${thawedCount} Gen2 lock${thawedCount === 1 ? '' : 's'}. Reload and Review send again.`
+            `Thawed ${thawedCount} Core nest lock${thawedCount === 1 ? '' : 's'}. Tap Retry to send.`
           )
           setRetryMints([])
-        } else if (!data?.ok && data?.error && !opts?.silent) {
-          setSessionError(data.error)
         }
-        return {
-          ok: data?.ok === true,
-          thawedCount,
-          error: data?.error,
-        }
+        return { ok: thawedCount > 0, thawedCount }
       } catch (e) {
         const err = e instanceof Error ? e.message : 'Thaw failed.'
         if (!opts?.silent) setSessionError(err)
@@ -630,7 +695,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         setThawing(false)
       }
     },
-    [publicKey, ensureLedgerSiws]
+    [publicKey, wallet?.adapter, connection, sendTransaction, ensureLedgerSiws]
   )
 
   const prepareNftSend = async () => {
@@ -800,9 +865,15 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     let lines = workingBatches[workingIndex]
     if (!lines?.length) return
 
-    // Before the chain (including Retry): drop nested/frozen so we never replay a
-    // poison Gen2 batch. Thawed leftover CM delegates stay.
+    // Before every attempt (including Retry): drop nested/frozen so we never replay the
+    // same poison Gen2 batch. Thawed leftover CM delegates stay.
     try {
+      const frozenInBatch = await findFrozenOwlSendMints({
+        connection,
+        owner: publicKey,
+        lines,
+      })
+      // Also scan the whole remaining plan — frozen mints in later approvals poison Retry loops too.
       const allPendingLines = workingBatches.flatMap((batch, i) => {
         const st = workingProgress[i]?.status
         if (st === 'done') return []
@@ -817,7 +888,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
             })
           : []
       const pickerFrozen = nfts.filter((n) => isWalletNftTransferLocked(n)).map((n) => n.mint)
-      const frozenSet = new Set([...frozenInPlan, ...pickerFrozen].map((m) => m.trim()))
+      const frozenSet = new Set(
+        [...frozenInBatch, ...frozenInPlan, ...pickerFrozen].map((m) => m.trim())
+      )
       if (frozenSet.size > 0) {
         const plan = buildResumeSkippingFrozenPlan({
           preparedLines: workingPrepared,
@@ -866,6 +939,164 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setSessionError(null)
     setSuccessPopup(null)
 
+    const remainingForSignAll = workingBatches.slice(workingIndex)
+    const useSignAll =
+      walletSupportsOwlSendSignAll(wallet?.adapter ?? null) &&
+      owlSendBatchesCanSignAll(remainingForSignAll)
+
+    if (useSignAll) {
+      setActiveBatch(workingIndex)
+      setSendPhase('building')
+      setSendPhaseStartedAt(Date.now())
+      workingProgress = workingProgress.map((b) =>
+        b.index >= workingIndex && b.status !== 'done'
+          ? { ...b, status: 'sending' as const, error: undefined }
+          : b
+      )
+      setBatchProgress(workingProgress)
+
+      try {
+        const built: Array<{
+          tx: import('@solana/web3.js').Transaction
+          lines: OwlSendLine[]
+          newAtaCount: number
+        }> = []
+        const queue = remainingForSignAll.map((batch) => [...batch])
+        while (queue.length > 0) {
+          if (sendCancelledRef.current) {
+            setSendPhase(null)
+            setSendPhaseStartedAt(null)
+            return
+          }
+          const nextLines = queue.shift()!
+          const builtOne = await withOwlSendTimeout(
+            buildOwlSendSplNftTransaction({
+              connection,
+              owner: publicKey,
+              lines: nextLines,
+              feeDiscountBps: discountBps,
+            }),
+            OWL_SEND_BUILD_TIMEOUT_MS,
+            OWL_SEND_BUILD_TIMEOUT_HINT
+          )
+          if (!builtOne.ok) {
+            throw new Error(builtOne.error)
+          }
+          built.push({
+            tx: builtOne.tx,
+            lines: nextLines.slice(0, builtOne.includedCount),
+            newAtaCount: builtOne.newAtaCount,
+          })
+          if (builtOne.includedCount < nextLines.length) {
+            queue.unshift(nextLines.slice(builtOne.includedCount))
+          }
+        }
+
+        const group = await sendOwlSendSignedBatchGroup({
+          connection,
+          owner: publicKey,
+          walletAdapter: wallet?.adapter ?? null,
+          built,
+          onPhase: (phase) => {
+            if (!sendCancelledRef.current) setSendPhase(phase)
+          },
+        })
+
+        if (sendCancelledRef.current) {
+          setSendPhase(null)
+          setSendPhaseStartedAt(null)
+          return
+        }
+
+        const accumulatedItems = group.flatMap((g, i) =>
+          owlSendSuccessItemsFromNftLines(built[i]!.lines, { showRecipient: mode === 'scatter' })
+        )
+        workingProgress = workingProgress.map((b) => {
+          if (b.index < workingIndex) return b
+          const offset = b.index - workingIndex
+          const row = group[offset]
+          if (!row) return { ...b, status: 'pending' as const }
+          return { ...b, status: 'done' as const, signature: row.signature }
+        })
+        if (built.length !== remainingForSignAll.length) {
+          const rebuiltLines = [
+            ...workingBatches.slice(0, workingIndex).flat(),
+            ...built.flatMap((b) => b.lines),
+          ]
+          const rebuiltBatches = [
+            ...workingBatches.slice(0, workingIndex),
+            ...built.map((b) => b.lines),
+          ]
+          workingBatches = rebuiltBatches
+          workingPrepared = rebuiltLines
+          workingProgress = rebuiltBatches.map((_, i) => ({
+            index: i,
+            total: rebuiltBatches.length,
+            status: (i < workingIndex
+              ? workingProgress[i]?.status
+              : 'done') as 'pending' | 'ready' | 'sending' | 'done' | 'failed',
+            signature:
+              i < workingIndex
+                ? workingProgress[i]?.signature
+                : group[i - workingIndex]?.signature,
+          }))
+        }
+        setBatches(workingBatches)
+        setPreparedLines(workingPrepared)
+        setBatchProgress(workingProgress)
+        setRetryMints([])
+        setSendPhase(null)
+        setSendPhaseStartedAt(null)
+        for (let i = 0; i < group.length; i++) {
+          const row = group[i]!
+          void recordOwlSendLedger({
+            fromWallet: publicKey.toBase58(),
+            mode: mode === 'scatter' ? 'nft_scatter' : 'nft_one',
+            assetKind: 'nft',
+            txSignature: row.signature,
+            batchIndex: workingIndex + i,
+            feeDiscountBps: discountBps,
+            lines: built[i]!.lines.map((l) => ({
+              recipient: l.recipient,
+              mint: l.mint,
+              name: l.name ?? null,
+            })),
+            ensureSiws: ensureLedgerSiws,
+          }).then(() => setLedgerRefreshKey((k) => k + 1))
+        }
+        setSuccessPopup({
+          title:
+            group.length > 1
+              ? `All ${group.length} batches sent`
+              : 'NFTs sent successfully',
+          detail:
+            mode === 'scatter'
+              ? `${accumulatedItems.length} NFT${accumulatedItems.length === 1 ? '' : 's'} transferred in one wallet approval.`
+              : `${accumulatedItems.length} NFT${accumulatedItems.length === 1 ? '' : 's'} transferred in one wallet approval.`,
+          signature: group[group.length - 1]!.signature,
+          items: accumulatedItems,
+        })
+        void loadAssets()
+        return
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        setSendPhase(null)
+        setSendPhaseStartedAt(null)
+        setBatchProgress((prev) =>
+          prev.map((b) =>
+            b.index === workingIndex
+              ? { ...b, status: 'failed' as const, error: msg }
+              : b.index > workingIndex && b.status === 'sending'
+                ? { ...b, status: 'pending' as const }
+                : b
+          )
+        )
+        setActiveBatch(workingIndex)
+        setSessionError(msg)
+        return
+      }
+    }
+
     const chainStartIndex = workingIndex
     const accumulatedItems: ReturnType<typeof owlSendSuccessItemsFromNftLines> = []
     let lastSignature = ''
@@ -879,11 +1110,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       setSendPhase('building')
       setSendPhaseStartedAt(Date.now())
       workingProgress = workingProgress.map((b) =>
-        b.index === workingIndex
-          ? { ...b, status: 'sending', error: undefined }
-          : b.index > workingIndex && b.status === 'pending'
-            ? b
-            : b
+        b.index === workingIndex ? { ...b, status: 'sending', error: undefined } : b
       )
       setBatchProgress(workingProgress)
       setBatches(workingBatches)
@@ -908,58 +1135,96 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       }
 
       if (!result.ok) {
+        const sizeSplit =
+          isOwlSendPacketSizeError(result.error) || /too large/i.test(result.error)
+            ? splitOversizedOwlSendBatch({
+                batches: workingBatches,
+                batchProgress: workingProgress,
+                batchIndex: workingIndex,
+                error: result.error,
+              })
+            : null
         setSendPhase(null)
         setSendPhaseStartedAt(null)
-        setBatches(workingBatches)
-        setPreparedLines(workingPrepared)
-        setBatchProgress(
-          workingProgress.map((b) =>
-            b.index === workingIndex
-              ? {
-                  ...b,
-                  status: 'failed' as const,
-                  error: result.error,
-                  failedMints: result.failedMints,
-                }
-              : b
+        if (sizeSplit) {
+          setBatches(sizeSplit.batches)
+          setPreparedLines(sizeSplit.batches.flat())
+          setBatchProgress(sizeSplit.batchProgress)
+          setSessionNotice(
+            sentInChain > 0
+              ? `${sentInChain} approval${sentInChain === 1 ? '' : 's'} already confirmed — this one was split so Retry can finish the rest.`
+              : 'Split this approval so the next Retry fits in one Solana transaction.'
           )
-        )
+        } else {
+          setBatches(workingBatches)
+          setPreparedLines(workingPrepared)
+          setBatchProgress(
+            workingProgress.map((b) =>
+              b.index === workingIndex
+                ? {
+                    ...b,
+                    status: 'failed' as const,
+                    error: result.error,
+                    failedMints: result.failedMints,
+                  }
+                : b
+            )
+          )
+        }
         setActiveBatch(workingIndex)
         if (result.failedMints?.length) {
           setRetryMints((prev) => [...new Set([...prev, ...result.failedMints!])])
         }
         setSessionError(result.error)
-        if (sentInChain > 0) {
-          setSessionNotice(
-            `${sentInChain} approval${sentInChain === 1 ? '' : 's'} already confirmed — fix the error, then Retry to continue the rest.`
-          )
-          if (lastSignature) {
-            setSuccessPopup({
-              title:
-                sentInChain === 1
-                  ? 'Partial send — first approval ok'
-                  : `Partial send — ${sentInChain} approvals ok`,
-              detail: 'Remaining approvals were not sent. Tap Retry when ready.',
-              signature: lastSignature,
-              items: accumulatedItems,
-            })
-          }
+        if (sentInChain > 0 && lastSignature) {
+          setSuccessPopup({
+            title:
+              sentInChain === 1
+                ? 'Partial send — first approval ok'
+                : `Partial send — ${sentInChain} approvals ok`,
+            detail: 'Remaining approvals were not sent. Tap Retry to continue the rest in one shot.',
+            signature: lastSignature,
+            items: accumulatedItems,
+          })
         }
         return
       }
 
-      workingProgress = workingProgress.map((b) =>
-        b.index === workingIndex
-          ? { ...b, status: 'done' as const, signature: result.signature }
-          : b.index === workingIndex + 1 && b.status === 'pending'
-            ? { ...b, status: 'ready' as const }
-            : b
-      )
-      setBatchProgress(workingProgress)
-      const sent = new Set(lines.map((l) => l.mint))
+      const sentMintSet = new Set(result.sentMints?.length ? result.sentMints : lines.map((l) => l.mint))
+      const sentLines = lines.filter((l) => sentMintSet.has(l.mint))
+      const deferredLines = lines.filter((l) => !sentMintSet.has(l.mint))
+
+      if (deferredLines.length > 0 && sentLines.length > 0) {
+        const split = applyPartialOwlSendBatchSuccess({
+          preparedLines: workingPrepared,
+          batches: workingBatches,
+          batchProgress: workingProgress,
+          batchIndex: workingIndex,
+          sentLines,
+          deferredLines,
+          signature: result.signature,
+        })
+        workingBatches = split.batches
+        workingProgress = split.batchProgress
+        workingPrepared = split.preparedLines
+        setBatches(workingBatches)
+        setBatchProgress(workingProgress)
+        setPreparedLines(workingPrepared)
+      } else {
+        workingProgress = workingProgress.map((b) =>
+          b.index === workingIndex
+            ? { ...b, status: 'done' as const, signature: result.signature }
+            : b.index === workingIndex + 1 && b.status === 'pending'
+              ? { ...b, status: 'ready' as const }
+              : b
+        )
+        setBatchProgress(workingProgress)
+      }
+
+      const sent = new Set(sentLines.map((l) => l.mint))
       setRetryMints((prev) => prev.filter((m) => !sent.has(m)))
       accumulatedItems.push(
-        ...owlSendSuccessItemsFromNftLines(lines, {
+        ...owlSendSuccessItemsFromNftLines(sentLines, {
           showRecipient: mode === 'scatter',
         })
       )
@@ -973,7 +1238,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         txSignature: result.signature,
         batchIndex: workingIndex,
         feeDiscountBps: discountBps,
-        lines: lines.map((l) => ({
+        lines: sentLines.map((l) => ({
           recipient: l.recipient,
           mint: l.mint,
           name: l.name ?? null,
@@ -986,7 +1251,6 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
       workingIndex += 1
       setActiveBatch(workingIndex)
-      // Let mobile wallets close the previous sheet before the next opens.
       await new Promise<void>((resolve) => setTimeout(resolve, OWL_SEND_CHAIN_APPROVAL_GAP_MS))
       if (sendCancelledRef.current) {
         setSendPhase(null)
@@ -1668,7 +1932,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     Up to {OWL_SEND_MAX_SELECT} NFTs ·{' '}
                     {nftApprovalSize === OWL_SEND_MAX_SPECIAL_PER_TX
                       ? `${OWL_SEND_MAX_SPECIAL_PER_TX} cNFT/pNFT per wallet approval (sequential)`
-                      : `${OWL_SEND_MAX_PER_TX} classic NFTs per wallet approval`}
+                      : `${nftApprovalSize} classic NFTs per wallet approval`}
                     {' · '}
                     cNFTs and classic NFTs can’t mix — you’ll get a prompt if you try
                   </CardDescription>
@@ -1746,7 +2010,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     {mode === 'send_to_one'
                       ? nftApprovalSize === OWL_SEND_MAX_SPECIAL_PER_TX
                         ? 'All selected NFTs go to this wallet (1 cNFT/pNFT per approval).'
-                        : `All selected NFTs go to this wallet (batches of ${OWL_SEND_MAX_PER_TX}).`
+                        : `All selected NFTs go to this wallet (batches of ${nftApprovalSize}).`
                       : randomizeScatter
                         ? 'Paste wallets (one per line), or wallet,N for exact counts — e.g. walletA,5 then walletB,1. Counts must sum to selected NFTs; otherwise split evenly.'
                         : pairPerNft
@@ -2096,7 +2360,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                           {cost.batchCount} wallet approvals ·{' '}
                           {nftApprovalSize === OWL_SEND_MAX_SPECIAL_PER_TX
                             ? `${OWL_SEND_MAX_SPECIAL_PER_TX} cNFT/pNFT each`
-                            : `${OWL_SEND_MAX_PER_TX} NFTs each`}
+                            : `${nftApprovalSize} NFTs each`}
                         </p>
                       ) : null}
                     </div>
@@ -2161,6 +2425,9 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                     <ol className="space-y-2">
                       {batchProgress.map((b) => {
                         const lines = batches[b.index] ?? []
+                        const uniqueWallets = new Set(
+                          lines.map((l) => l.recipient.trim()).filter(Boolean)
+                        ).size
                         return (
                           <li
                             key={b.index}
@@ -2186,7 +2453,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                             <p className="mt-1 text-xs text-muted-foreground">
                               {lines.length} NFT{lines.length === 1 ? '' : 's'}
                               {mode === 'scatter'
-                                ? ` → ${lines.length} wallet${lines.length === 1 ? '' : 's'}`
+                                ? ` → ${uniqueWallets} wallet${uniqueWallets === 1 ? '' : 's'}`
                                 : ` → ${shorten(lines[0]?.recipient ?? '')}`}
                               {' · '}
                               {formatOwlSendFeeSol(feeSol * lines.length)} fee
@@ -2283,6 +2550,14 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                                   remainingFromActive: batchProgress.filter(
                                     (b, i) => i >= activeBatch && b.status !== 'done'
                                   ).length,
+                                  signAll:
+                                    walletSupportsOwlSendSignAll(wallet?.adapter ?? null) &&
+                                    owlSendBatchesCanSignAll(
+                                      batches.filter(
+                                        (_, i) =>
+                                          i >= activeBatch && batchProgress[i]?.status !== 'done'
+                                      )
+                                    ),
                                 })}
                           </Button>
                           {nftSending ? (
@@ -2299,7 +2574,15 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                         {!nftSending && batchProgress[activeBatch]?.status !== 'failed' ? (
                           <p className="text-xs text-muted-foreground">
                             {batches.length > 1
-                              ? 'One click starts every remaining approval — confirm each transfer in your wallet as it opens (cNFTs need one signature each).'
+                              ? walletSupportsOwlSendSignAll(wallet?.adapter ?? null) &&
+                                owlSendBatchesCanSignAll(
+                                  batches.filter(
+                                    (_, i) =>
+                                      i >= activeBatch && batchProgress[i]?.status !== 'done'
+                                  )
+                                )
+                                ? 'One wallet sheet signs every batch. Solana still sends them as separate transactions — you only approve once.'
+                                : 'This wallet signs one batch at a time. Phantom can sign all batches in one sheet. Solana cannot fit all 20 in a single transaction.'
                               : 'Opens your wallet for this transfer.'}
                           </p>
                         ) : null}
@@ -2328,8 +2611,8 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                               ? 'Check Jupiter for the approve prompt (Mobile: stay in the Jupiter globe browser). If nothing appears, Cancel, reconnect Jupiter, then Retry.'
                               : `Check ${walletName} for the approve prompt (mobile: open the wallet app). If nothing appears, Cancel and Retry.`
                             : 'Confirming on-chain can take up to ~90s on mobile/busy RPC.'}{' '}
-                        Cancel marks this approval failed — reject any open wallet popup, check
-                        Solscan, then Retry or Resume remaining.
+                        Cancel stops the remaining batches — reject any open wallet popup, check
+                        Solscan, then Retry to send the rest in one shot.
                       </p>
                     ) : null}
                   </CardContent>
@@ -2376,8 +2659,11 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                         sessionError || batchProgress[activeBatch]?.error || ''
                       ) ? (
                       <p className="text-[11px] text-amber-100/60">
-                        Only truly nested/frozen Gen2s need Thaw locks or Unnest. Leftover CM
-                        delegates alone are fine and are revoked in the send transaction.
+                        {isOwlSendCoreOwnerFreezeError(
+                          sessionError || batchProgress[activeBatch]?.error || ''
+                        )
+                          ? 'These Metaplex Core NFTs were force-released from nesting but are still Owner-frozen on-chain. Tap Thaw locks (wallet approve), or open Nesting → Thaw leftover nest locks, then Retry.'
+                          : 'Only truly nested/frozen Gen2s need Thaw locks or Unnest. Leftover CM delegates alone are fine and are revoked in the send transaction. Core nest leftovers also use Thaw locks here.'}
                       </p>
                     ) : (
                       <p className="text-[11px] text-amber-100/60">
