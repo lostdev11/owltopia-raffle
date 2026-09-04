@@ -75,7 +75,7 @@ export function PackVault({
   }
 
   return (
-    <div className="mx-auto w-full max-w-[min(100%,36rem)] overflow-x-hidden">
+    <div className="mx-auto w-full max-w-[min(100%,36rem)] overflow-clip">
       <div
         ref={vaultRef}
         tabIndex={0}
