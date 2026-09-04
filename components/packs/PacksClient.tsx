@@ -6,9 +6,9 @@ import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { PackAnimationPreload } from '@/components/packs/PackAnimationPreload'
-import { PackHoverVideo } from '@/components/packs/PackHoverVideo'
 import { PackOpeningExperience } from '@/components/packs/PackOpeningExperience'
 import { PackPrizeReveal } from '@/components/packs/PackPrizeReveal'
+import { PackVault } from '@/components/packs/vault/PackVault'
 import { executePackPurchase, type PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
 import { preloadConfetti } from '@/lib/confetti'
 import {
@@ -25,8 +25,6 @@ import {
   Gift,
   Loader2,
   Package,
-  ShoppingBag,
-  ShieldCheck,
   Ticket,
   Trophy,
 } from 'lucide-react'
@@ -310,6 +308,29 @@ export function PacksClient({
     )
   }
 
+  if (!allowed && access.accessCheckError) {
+    return (
+      <div className="mx-auto flex min-h-[50vh] max-w-lg flex-col items-center justify-center gap-4 px-4 py-16 text-center text-[#EAFBF4]">
+        <Package className="h-10 w-10 text-amber-300" aria-hidden />
+        <h1 className="font-display text-3xl tracking-wide">Owl Packs</h1>
+        <p className="text-sm text-amber-100/90">Could not verify access against the database.</p>
+        <p className="text-xs leading-relaxed text-white/55">{access.accessCheckError}</p>
+        <p className="text-xs leading-relaxed text-white/45">
+          On this machine Norton HTTPS scanning breaks Node → Supabase TLS. Turn off Norton SSL
+          scanning, or add <code className="text-[#00FF9C]">ALLOW_INSECURE_TLS=1</code> to{' '}
+          <code className="text-[#00FF9C]">.env.local</code> and restart <code>npm run dev</code>.
+        </p>
+        <button
+          type="button"
+          onClick={() => access.recheck()}
+          className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[#00FF9C]/40 px-4 text-sm font-semibold text-[#00FF9C] hover:bg-[#00FF9C]/10"
+        >
+          Retry access check
+        </button>
+      </div>
+    )
+  }
+
   if (!allowed) {
     if (!connected || !publicKey) {
       return (
@@ -413,10 +434,7 @@ export function PacksClient({
             : 'Buying…'}
         </>
       ) : (
-        <>
-          <ShoppingBag className="h-5 w-5" aria-hidden />
-          Buy pack — {price} SOL
-        </>
+        <>Claim this pack</>
       )}
     </button>
   )
@@ -508,30 +526,11 @@ export function PacksClient({
                 Built on Solana — every pack wins
               </li>
             </ul>
-
-            <div
-              className="mx-auto flex w-full max-w-sm flex-col gap-2 animate-hero-rise lg:mx-0"
-              style={{ animationDelay: '220ms' }}
-            >
-              {buyButton}
-              <p className="inline-flex items-center justify-center gap-1.5 text-[11px] uppercase tracking-[0.18em] text-white/40 lg:justify-start">
-                <ShieldCheck className="h-3.5 w-3.5 text-[#00FF9C]/70" aria-hidden />
-                Secure checkout with Solana
-              </p>
-              {phaseCaption ? (
-                <p className="text-sm text-[#00FF9C]/90">{phaseCaption}</p>
-              ) : null}
-              {paused && (
-                <p className="text-sm text-amber-200/90">{publicPauseMessage}</p>
-              )}
-              {error && <p className="text-sm text-red-300">{error}</p>}
-              {loadError && <p className="text-sm text-red-300">{loadError}</p>}
-            </div>
           </div>
 
           {/* Center pack / reveal */}
           <div
-            className="order-1 flex min-h-[340px] flex-col items-center justify-center animate-hero-rise lg:order-2 lg:min-h-[460px]"
+            className="order-1 flex min-h-[340px] w-full min-w-0 flex-col items-center justify-center animate-hero-rise lg:order-2 lg:min-h-[520px]"
             style={{ animationDelay: '80ms' }}
           >
             {showReveal && result ? (
@@ -545,7 +544,16 @@ export function PacksClient({
                 }}
               />
             ) : (
-              <PackHoverVideo phase={phase === 'paying' ? 'paying' : 'idle'} />
+              <PackVault
+                price={price}
+                interactionLocked={ripping || showExperience || showReveal}
+                paying={phase === 'paying'}
+                cta={buyButton}
+                phaseCaption={phaseCaption}
+                error={error}
+                loadError={loadError}
+                pauseMessage={paused ? publicPauseMessage : null}
+              />
             )}
           </div>
 

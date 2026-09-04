@@ -46,7 +46,16 @@ export function PackHoverClip({ className, onHoverFailed }: ClipProps) {
   }, [showWebm, webmSrc])
 
   if (format === 'pending') {
-    return <div className={cn('aspect-[180/305] w-full bg-transparent', className)} aria-hidden />
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- brief poster until hover format is chosen
+      <img
+        src="/images/owltopia-pack.png"
+        alt=""
+        draggable={false}
+        decoding="async"
+        className={cn(CLIP_CLASS, className)}
+      />
+    )
   }
 
   if (showWebm) {

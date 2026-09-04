@@ -1402,3 +1402,84 @@ input[type="submit"] {
   }
 }
 
+/* Pack Vault circular selector — slot rest pose + proximity via --p */
+.pack-vault-slot {
+  --p: 0;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--slot-size, 2.75rem);
+  height: calc(var(--slot-size, 2.75rem) * 1.85);
+  margin-left: calc(var(--slot-size, 2.75rem) / -2);
+  margin-top: calc(var(--slot-size, 2.75rem) * -0.92);
+  transform: rotate(var(--slot-angle, 0deg))
+    translateY(calc(-1 * var(--vault-radius, 0px)))
+    rotate(calc(-1 * (var(--slot-angle, 0deg) + var(--wheel-rotation, 0deg))))
+    scale(calc(0.9 + 0.26 * var(--p)));
+  transform-origin: center center;
+  opacity: calc(0.55 + 0.45 * var(--p));
+  filter: brightness(calc(0.78 + 0.35 * var(--p)));
+  border: 0;
+  padding: 0;
+  background: transparent;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pack-vault-slot-face {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.15rem;
+  padding: 0.2rem 0.15rem 0.25rem;
+  border-radius: 0.55rem;
+  border: 1px solid rgb(0 255 156 / calc(0.18 + 0.65 * var(--p)));
+  background: rgb(0 0 0 / calc(0.35 + 0.25 * var(--p)));
+}
+
+.pack-vault-slot-art {
+  display: block;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  object-fit: contain;
+  object-position: center top;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.pack-vault-slot-id {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: rgb(0 255 156 / calc(0.45 + 0.55 * var(--p)));
+}
+
+.pack-vault-slot--selected .pack-vault-slot-face {
+  border-color: rgb(0 255 156 / 0.95);
+  box-shadow: 0 0 14px rgb(0 255 156 / 0.35);
+}
+
+.pack-vault-slot--selected .pack-vault-slot-id {
+  color: #00ff9c;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-vault-ring-cw,
+  .animate-vault-ring-ccw,
+  .animate-vault-ring-cw-slow,
+  .animate-vault-selected-float,
+  .animate-vault-glow-pulse,
+  .animate-vault-pack-swap,
+  .animate-vault-id-tick {
+    animation: none !important;
+  }
+}
+

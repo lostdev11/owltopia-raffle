@@ -278,6 +278,37 @@ const config: Config = {
           '50%': { transform: 'translate(-50%, -50%) rotate(180deg) scale(1.04)' },
           '100%': { transform: 'translate(-50%, -50%) rotate(360deg) scale(1)' },
         },
+        'vault-ring-cw': {
+          '0%': { transform: 'rotate(0deg)' },
+          '100%': { transform: 'rotate(360deg)' },
+        },
+        'vault-ring-ccw': {
+          '0%': { transform: 'rotate(0deg)' },
+          '100%': { transform: 'rotate(-360deg)' },
+        },
+        'vault-selected-float': {
+          '0%, 100%': { transform: 'translateY(0) rotate(-0.5deg)' },
+          '50%': { transform: 'translateY(-6px) rotate(0.5deg)' },
+        },
+        'vault-glow-pulse': {
+          '0%, 100%': { opacity: '0.72' },
+          '50%': { opacity: '1' },
+        },
+        'vault-selector-flash': {
+          '0%': { opacity: '0.7', filter: 'drop-shadow(0 0 0 rgba(0,255,156,0))' },
+          '35%': { opacity: '1', filter: 'drop-shadow(0 0 10px rgba(0,255,156,0.95))' },
+          '100%': { opacity: '0.7', filter: 'drop-shadow(0 0 0 rgba(0,255,156,0))' },
+        },
+        'vault-pack-swap': {
+          '0%': { opacity: '1', transform: 'scale(1)' },
+          '40%': { opacity: '0.4', transform: 'scale(0.96)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        'vault-id-tick': {
+          '0%': { opacity: '1', transform: 'translateY(0)' },
+          '40%': { opacity: '0.8', transform: 'translateY(-2px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -315,6 +346,14 @@ const config: Config = {
         'pack-pedestal-glow': 'pack-pedestal-glow 1.4s ease-in-out infinite',
         'pack-reward-enter': 'pack-reward-enter 0.8s cubic-bezier(0.22, 1, 0.36, 1) both',
         'pack-energy-spin': 'pack-energy-spin 24s linear infinite',
+        'vault-ring-cw': 'vault-ring-cw 80s linear infinite',
+        'vault-ring-ccw': 'vault-ring-ccw 120s linear infinite',
+        'vault-ring-cw-slow': 'vault-ring-cw 160s linear infinite',
+        'vault-selected-float': 'vault-selected-float 3.5s ease-in-out infinite',
+        'vault-glow-pulse': 'vault-glow-pulse 3.2s ease-in-out infinite',
+        'vault-selector-flash': 'vault-selector-flash 260ms ease-out',
+        'vault-pack-swap': 'vault-pack-swap 180ms ease-out',
+        'vault-id-tick': 'vault-id-tick 220ms ease-out',
       },
     },
   },

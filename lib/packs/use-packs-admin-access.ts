@@ -17,6 +17,8 @@ type AccessState = {
   loading: boolean
   /** Connected wallet checked and not allowed. */
   denied: boolean
+  /** Access API failed (DB/TLS) — not the same as denied. */
+  accessCheckError: string | null
   /** SIWS cookie session is an Owl Vision admin (works even if adapter disconnected). */
   adminSessionActive: boolean
   /** Force re-check after SIWS sign-in. */
@@ -49,6 +51,7 @@ export function usePacksAdminAccess(params: {
     return initialViewerIsAdmin ? true : null
   })
   const [walletIsTester, setWalletIsTester] = useState(false)
+  const [accessCheckError, setAccessCheckError] = useState<string | null>(null)
   const [walletCheckPending, setWalletCheckPending] = useState(() => {
     if (isPublic) return false
     if (!connected || !wallet) return false
@@ -89,6 +92,7 @@ export function usePacksAdminAccess(params: {
       setWalletIsAdmin(null)
       setWalletIsTester(false)
       setWalletCheckPending(false)
+      setAccessCheckError(null)
       return
     }
     const addr = publicKey.toBase58()
@@ -99,15 +103,28 @@ export function usePacksAdminAccess(params: {
     } else {
       setWalletCheckPending(true)
     }
+    setAccessCheckError(null)
 
     let cancelled = false
     fetch(`/api/packs/access-check?wallet=${encodeURIComponent(addr)}`, {
       credentials: 'include',
       cache: 'no-store',
     })
-      .then((res) => {
+      .then(async (res) => {
         if (cancelled) return undefined
-        return res.ok ? res.json() : undefined
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setAccessCheckError(
+            typeof data?.error === 'string'
+              ? data.error
+              : 'Could not reach the database to verify access (often Norton HTTPS scanning on local).'
+          )
+          // Keep prior cache if we already knew this wallet was admin.
+          setWalletIsAdmin((prev) => (prev === true ? true : null))
+          setWalletIsTester(false)
+          return undefined
+        }
+        return data
       })
       .then((data) => {
         if (cancelled || data === undefined) return
@@ -117,9 +134,16 @@ export function usePacksAdminAccess(params: {
         setCachedAdmin(addr, admin, role)
         setWalletIsAdmin(admin)
         setWalletIsTester(tester)
+        setAccessCheckError(null)
       })
       .catch(() => {
-        /* do not clear access on network errors */
+        if (!cancelled) {
+          setAccessCheckError(
+            'Network error verifying Packs access. If you use Norton, turn off HTTPS scanning or set ALLOW_INSECURE_TLS=1 in .env.local for local only.'
+          )
+          setWalletIsAdmin((prev) => (prev === true ? true : null))
+          setWalletIsTester(false)
+        }
       })
       .finally(() => {
         if (!cancelled) setWalletCheckPending(false)
@@ -138,6 +162,7 @@ export function usePacksAdminAccess(params: {
     connected &&
     Boolean(publicKey) &&
     !walletCheckPending &&
+    accessCheckError == null &&
     walletIsAdmin === false &&
     !walletIsTester &&
     !adminSessionActive &&
@@ -147,6 +172,7 @@ export function usePacksAdminAccess(params: {
     !isPublic &&
     !allowed &&
     !denied &&
+    accessCheckError == null &&
     (walletCheckPending || Boolean(connected && publicKey && walletIsAdmin === null))
 
   return {
@@ -155,6 +181,7 @@ export function usePacksAdminAccess(params: {
     isTester,
     loading,
     denied,
+    accessCheckError,
     adminSessionActive,
     recheck,
   }
