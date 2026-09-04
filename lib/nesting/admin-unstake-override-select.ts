@@ -26,6 +26,9 @@ export type AdminOverrideUnstakeCandidate = {
 export type AdminOverrideUnstakeClosed = AdminOverrideUnstakeCandidate & {
   unstake_signature: string | null
   execution_path: 'onchain_token_transfer' | 'database_mock'
+  /** MPL Core Owner freeze left on-chain; holder must thaw from wallet. */
+  needs_owner_thaw?: boolean
+  thaw_mint?: string | null
 }
 
 export type AdminOverrideUnstakeFailed = {
@@ -80,6 +83,7 @@ export async function runAdminOverrideUnstakeBatch(params: {
   open_position_count?: number
   unstakeOne: (positionId: string) => Promise<{
     position: Pick<StakingPositionRow, 'unstake_signature'>
+    nest_owner_thaw?: { mint: string } | null
   }>
 }): Promise<{
   wallet: string
@@ -88,6 +92,7 @@ export async function runAdminOverrideUnstakeBatch(params: {
   remaining_eligible: number
   attempted: number
   eligible_total: number
+  needs_owner_thaw_count: number
 }> {
   const eligibleTotal = params.candidates.length
   if (eligibleTotal === 0) {
@@ -104,13 +109,16 @@ export async function runAdminOverrideUnstakeBatch(params: {
 
   for (const candidate of batch) {
     try {
-      const { position } = await params.unstakeOne(candidate.position_id)
+      const { position, nest_owner_thaw } = await params.unstakeOne(candidate.position_id)
+      const thawMint = nest_owner_thaw?.mint?.trim() || null
       closed.push({
         ...candidate,
         unstake_signature: position.unstake_signature ?? null,
         execution_path: position.unstake_signature
           ? 'onchain_token_transfer'
           : 'database_mock',
+        needs_owner_thaw: Boolean(thawMint),
+        thaw_mint: thawMint,
       })
     } catch (e) {
       const message = isStakingUserError(e) ? e.message : safeErrorMessage(e)
@@ -131,5 +139,6 @@ export async function runAdminOverrideUnstakeBatch(params: {
     remaining_eligible: Math.max(0, eligibleTotal - closed.length),
     attempted: batch.length,
     eligible_total: eligibleTotal,
+    needs_owner_thaw_count: closed.filter((c) => c.needs_owner_thaw).length,
   }
 }

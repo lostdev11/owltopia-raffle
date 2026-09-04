@@ -11,6 +11,7 @@ import {
   isMplCoreNestingLockHeld,
   mplCoreNestCanServerRefreeze,
   mplCoreNestNeedsWalletRelock,
+  planMplCoreNestThaw,
   readMplCoreFreezeDelegate,
 } from '@/lib/solana/mpl-core-nest-lock'
 import bs58 from 'bs58'
@@ -464,9 +465,16 @@ export async function thawWalletNftForNesting(params: {
   /**
    * Admin-only: trust MPL Core `asset.owner` on RPC instead of Helius collection grouping.
    * Caller should pass `collectionMint: null` so thaw uses the asset’s real collection from chain.
+   * Owner-authority freezes cannot be thawed by the server keypair — admin recovery closes DB-only
+   * and returns `needsOwnerThaw` so the holder can thaw from their wallet.
    */
   adminRecoveryUnstake?: boolean
-}): Promise<{ signature: string | null; tokenAccount: string }> {
+}): Promise<{
+  signature: string | null
+  tokenAccount: string
+  /** NFT remains frozen under Owner authority; holder must `updatePlugin({ frozen: false })`. */
+  needsOwnerThaw?: boolean
+}> {
   if (params.adminRecoveryUnstake === true) {
     await assertMplCoreAssetOwnedByWalletOnChain({
       assetId: params.assetId,
@@ -483,28 +491,48 @@ export async function thawWalletNftForNesting(params: {
     throw new StakingUserError('Invalid wallet or NFT asset address.', 400)
   }
 
-  const { umi, signer } = await createCoreAuthorityUmi()
-  const { asset, collection } = await fetchCoreAssetAndCollection(umi, params.assetId.trim(), params.collectionMint)
-  const delegateAddress = signer.publicKey.toString()
-  const fd = readMplCoreFreezeDelegate(asset)
+  const assetId = params.assetId.trim()
+  // Read-only plan first so Owner-authority nests do not require the freeze keypair
+  // (admin DB-close + holder "needs wallet thaw" paths never call thawAsset).
+  const readEndpoint = resolveServerSolanaRpcUrl()
+  const readUmi: any = (createUmi as any)(readEndpoint as any)
+  const readAsset = await fetchCoreAssetOnly(readUmi, assetId)
+  const fd = readMplCoreFreezeDelegate(readAsset)
+  const plan = planMplCoreNestThaw({
+    freezeDelegate: fd,
+    nestingDelegateAddress: getNestingNftFreezeDelegateAddress(),
+    adminRecoveryUnstake: params.adminRecoveryUnstake === true,
+  })
 
-  if (!fd?.frozen) {
-    return { signature: null, tokenAccount: params.assetId.trim() }
+  if (plan.kind === 'noop') {
+    return { signature: null, tokenAccount: assetId }
   }
 
-  if (fd.authorityType === 'Owner') {
+  if (plan.kind === 'admin_db_close_needs_owner_thaw') {
+    return { signature: null, tokenAccount: assetId, needsOwnerThaw: true }
+  }
+
+  if (plan.kind === 'require_wallet_owner_thaw') {
     throw new StakingUserError(
-      'This nest uses a wallet-controlled freeze lock. Close the nest from your wallet so it can thaw the NFT.',
-      400
+      'This nest uses a wallet-controlled freeze lock. Approve the thaw in your wallet, then try Leave nest again.',
+      400,
+      { code: 'needs_owner_thaw', mint: assetId, needs_owner_thaw: true }
     )
   }
 
-  if (fd.authorityType !== 'Address' || fd.authorityAddress !== delegateAddress) {
+  if (plan.kind === 'incompatible_authority') {
     throw new StakingUserError(
       'This NFT has a freeze lock that Owltopia cannot thaw automatically. Contact support.',
       503
     )
   }
+
+  const { umi, signer } = await createCoreAuthorityUmi()
+  const { asset, collection } = await fetchCoreAssetAndCollection(
+    umi,
+    assetId,
+    params.collectionMint
+  )
 
   try {
     const result = await thawAsset(umi as any, {
@@ -512,7 +540,7 @@ export async function thawWalletNftForNesting(params: {
       ...(collection ? { collection } : {}),
       delegate: signer,
     } as any).sendAndConfirm(umi as any)
-    return { signature: signatureToString(result), tokenAccount: params.assetId.trim() }
+    return { signature: signatureToString(result), tokenAccount: assetId }
   } catch (e) {
     throw new StakingUserError(
       e instanceof Error ? e.message : 'MPL Core thaw delegate failed.',

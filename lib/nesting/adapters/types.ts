@@ -7,11 +7,17 @@ export type NestDelegateRevokeHint = {
   mint: string
 }
 
+/** Returned when MPL Core freeze remains under Owner authority (holder must thaw in wallet). */
+export type NestOwnerThawHint = {
+  mint: string
+}
+
 export interface StakingMutationAdapter {
   stakeIntoPool(input: StakeIntoPoolInput): Promise<{ position: StakingPositionRow }>
   unstakePosition(input: UnstakePositionInput): Promise<{
     position: StakingPositionRow
     nest_delegate_revoke?: NestDelegateRevokeHint | null
+    nest_owner_thaw?: NestOwnerThawHint | null
   }>
   claimPositionRewards(input: ClaimPositionInput): Promise<{
     claimed: number

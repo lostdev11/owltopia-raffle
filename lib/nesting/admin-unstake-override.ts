@@ -84,6 +84,7 @@ export async function executeUnstakeAdminOverrideByWallet(params: {
   limit?: number
   unstakeOne: (positionId: string) => Promise<{
     position: StakingPositionRow
+    nest_owner_thaw?: { mint: string } | null
   }>
 }): Promise<{
   wallet: string
@@ -92,6 +93,7 @@ export async function executeUnstakeAdminOverrideByWallet(params: {
   remaining_eligible: number
   attempted: number
   eligible_total: number
+  needs_owner_thaw_count: number
 }> {
   const wallet = normalizeSolanaWalletAddress(params.wallet_address)
   if (!wallet) {
