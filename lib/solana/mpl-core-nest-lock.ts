@@ -73,3 +73,36 @@ export function mplCoreNestCanServerRefreeze(params: {
   const delegate = params.nestingDelegateAddress.trim()
   return fd.authorityType === 'Address' && fd.authorityAddress === delegate
 }
+
+/**
+ * Decide how to thaw an MPL Core nest FreezeDelegate.
+ * Owner-authority freezes can only be thawed by the holder wallet (`updatePlugin frozen:false`).
+ * Admin recovery may close the DB nest and leave thaw to the holder.
+ */
+export type MplCoreNestThawPlan =
+  | { kind: 'noop' }
+  | { kind: 'admin_db_close_needs_owner_thaw' }
+  | { kind: 'require_wallet_owner_thaw' }
+  | { kind: 'incompatible_authority' }
+  | { kind: 'server_thaw_delegate' }
+
+export function planMplCoreNestThaw(params: {
+  freezeDelegate: MplCoreFreezeDelegateInfo | null
+  nestingDelegateAddress: string
+  adminRecoveryUnstake: boolean
+}): MplCoreNestThawPlan {
+  const fd = params.freezeDelegate
+  if (!fd?.frozen) return { kind: 'noop' }
+
+  if (fd.authorityType === 'Owner') {
+    return params.adminRecoveryUnstake
+      ? { kind: 'admin_db_close_needs_owner_thaw' }
+      : { kind: 'require_wallet_owner_thaw' }
+  }
+
+  const delegate = params.nestingDelegateAddress.trim()
+  if (fd.authorityType !== 'Address' || fd.authorityAddress !== delegate) {
+    return { kind: 'incompatible_authority' }
+  }
+  return { kind: 'server_thaw_delegate' }
+}

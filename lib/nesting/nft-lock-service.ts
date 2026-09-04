@@ -357,31 +357,11 @@ export async function thawWalletNftForPool(params: {
   /** Gen 2 FreezeDelegatedAccount path: holder should Revoke leftover SPL approve after thaw. */
   needsOwnerRevoke?: boolean
   revokeMint?: string
+  /** MPL Core Owner freeze: holder must thaw via wallet (`updatePlugin frozen:false`). */
+  needsOwnerThaw?: boolean
+  thawMint?: string
 }> {
   const resolved = await resolveEffectiveNftLockStandard(params.pool, params.assetId)
-  // #region agent log
-  try {
-    const fs = await import('fs')
-    fs.appendFileSync(
-      '/opt/cursor/logs/debug.log',
-      JSON.stringify({
-        location: 'nft-lock-service.ts:thawWalletNftForPool:resolved',
-        message: 'resolved nft lock standard for thaw',
-        data: {
-          assetId: params.assetId,
-          resolved,
-          adminRecoveryUnstake: params.adminRecoveryUnstake === true,
-          poolNftLockStandard: params.pool.nft_lock_standard ?? null,
-          asset_type: params.pool.asset_type,
-        },
-        timestamp: Date.now(),
-        hypothesisId: 'D',
-      }) + '\n'
-    )
-  } catch {
-    /* debug log best-effort */
-  }
-  // #endregion
   if (resolved === 'database_only') {
     return { signature: null, tokenAccount: params.assetId.trim(), resolved_standard: resolved }
   }
@@ -416,7 +396,13 @@ export async function thawWalletNftForPool(params: {
       params.adminRecoveryUnstake === true ? null : (params.collectionMint ?? params.pool.collection_key),
     adminRecoveryUnstake: params.adminRecoveryUnstake,
   })
-  return { signature: thawed.signature, tokenAccount: thawed.tokenAccount, resolved_standard: resolved }
+  return {
+    signature: thawed.signature,
+    tokenAccount: thawed.tokenAccount,
+    resolved_standard: resolved,
+    needsOwnerThaw: thawed.needsOwnerThaw === true,
+    thawMint: thawed.needsOwnerThaw === true ? params.assetId.trim() : undefined,
+  }
 }
 
 export async function readNestLockEligibilityForPool(params: {

@@ -18,6 +18,7 @@ import {
   type StakingPlatformFeeUmiTransfer,
 } from '@/lib/nesting/staking-platform-fee-umi'
 import {
+  assetOwnerAddress,
   isMplCoreNestingLockHeld,
   mplCoreNestCanServerRefreeze,
   mplCoreNestNeedsWalletRelock,
@@ -335,6 +336,80 @@ export async function addMplCoreFreezeDelegate({
       throw new Error(
         'This NFT has collection plugins that blocked updating the nest lock (Metaplex error 0x1a). ' +
           'Confirm it is not listed for sale, or contact Owltopia support with the mint address.'
+      )
+    }
+    throw e
+  }
+}
+
+/**
+ * Holder-signed thaw for Owner-authority FreezeDelegate (`updatePlugin frozen:false`).
+ * Server nesting keypair cannot thaw these — Leave nest / recovery must use this wallet path.
+ * Returns `null` when already thawed or no FreezeDelegate.
+ */
+export async function thawMplCoreOwnerFreezeInWallet({
+  connection,
+  wallet,
+  assetId,
+  sendTransaction,
+}: {
+  connection: Connection
+  wallet: any
+  assetId: string
+  sendTransaction?: WalletSendTransactionFn
+}): Promise<string | null> {
+  const pubkey = wallet?.publicKey ?? wallet?.adapter?.publicKey
+  if (!pubkey) {
+    throw new Error('Wallet adapter not ready for MPL Core thaw.')
+  }
+  const ownerWallet = pubkey.toString?.() ? String(pubkey) : String(pubkey)
+  const mint = assetId.trim()
+  if (!mint) {
+    throw new Error('NFT asset id is required to thaw.')
+  }
+
+  const endpoint = resolveMetaplexClientRpcUrl(connection)
+  const umi = createNestLockUmi(endpoint, ownerWallet, wallet)
+  const asset = publicKey(mint)
+  const assetAccount: any = await fetchAsset(umi as any, asset)
+
+  if (assetOwnerAddress(assetAccount) !== ownerWallet.trim()) {
+    throw new Error('This NFT is not in the connected wallet.')
+  }
+
+  const fd = readMplCoreFreezeDelegate(assetAccount)
+  if (!fd?.frozen) return null
+
+  if (fd.authorityType !== 'Owner') {
+    throw new Error(
+      'This NFT freeze is not wallet-controlled. Try Leave nest again, or contact Owltopia support.'
+    )
+  }
+
+  const maybeCollection = collectionForAsset(assetAccount)
+  const ixBase = {
+    asset,
+    ...(maybeCollection ? { collection: maybeCollection } : {}),
+  }
+
+  try {
+    const builder = updatePlugin(umi as any, {
+      ...ixBase,
+      plugin: { type: 'FreezeDelegate', frozen: false },
+    } as any)
+
+    return await sendNestLockBuilder({
+      umi,
+      builder,
+      connection,
+      wallet,
+      sendTransaction,
+    })
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e)
+    if (isMplCoreNoApprovalsError(detail)) {
+      throw new Error(
+        'Collection plugins blocked thawing this NFT (Metaplex error 0x1a). Contact support with the mint address.'
       )
     }
     throw e

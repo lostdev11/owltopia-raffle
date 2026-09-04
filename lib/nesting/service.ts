@@ -273,88 +273,12 @@ export async function executeUnstakeAdminOverride(params: { position_id: string 
   }
 
   const holderWallet = existing.wallet_address.trim()
-  // #region agent log
-  try {
-    const fs = await import('fs')
-    fs.appendFileSync(
-      '/opt/cursor/logs/debug.log',
-      JSON.stringify({
-        location: 'service.ts:executeUnstakeAdminOverride:entry',
-        message: 'admin override unstake one',
-        data: {
-          position_id,
-          holderWallet,
-          pool_id: pool.id,
-          pool_slug: pool.slug,
-          asset_type: pool.asset_type,
-          adapter_mode: pool.adapter_mode,
-          nft_lock_standard: (pool as { nft_lock_standard?: string | null }).nft_lock_standard ?? null,
-          status: existing.status,
-          asset_identifier: existing.asset_identifier,
-          external_reference: existing.external_reference,
-          openingNftNestAbortable,
-        },
-        timestamp: Date.now(),
-        hypothesisId: 'D',
-      }) + '\n'
-    )
-  } catch {
-    /* debug log best-effort */
-  }
-  // #endregion
   const adapter = resolveMutationAdapter(pool)
-  try {
-    const result = await adapter.unstakePosition({
-      wallet: holderWallet,
-      positionId: position_id,
-      adminRecoveryUnstake: true,
-    })
-    // #region agent log
-    try {
-      const fs = await import('fs')
-      fs.appendFileSync(
-        '/opt/cursor/logs/debug.log',
-        JSON.stringify({
-          location: 'service.ts:executeUnstakeAdminOverride:ok',
-          message: 'admin override unstake one ok',
-          data: {
-            position_id,
-            unstake_signature: result.position?.unstake_signature ?? null,
-          },
-          timestamp: Date.now(),
-          hypothesisId: 'E',
-        }) + '\n'
-      )
-    } catch {
-      /* debug log best-effort */
-    }
-    // #endregion
-    return result
-  } catch (e) {
-    // #region agent log
-    try {
-      const fs = await import('fs')
-      fs.appendFileSync(
-        '/opt/cursor/logs/debug.log',
-        JSON.stringify({
-          location: 'service.ts:executeUnstakeAdminOverride:err',
-          message: 'admin override unstake one threw',
-          data: {
-            position_id,
-            asset_identifier: existing.asset_identifier,
-            error: e instanceof Error ? e.message : String(e),
-            name: e instanceof Error ? e.name : typeof e,
-          },
-          timestamp: Date.now(),
-          hypothesisId: 'A',
-        }) + '\n'
-      )
-    } catch {
-      /* debug log best-effort */
-    }
-    // #endregion
-    throw e
-  }
+  return adapter.unstakePosition({
+    wallet: holderWallet,
+    positionId: position_id,
+    adminRecoveryUnstake: true,
+  })
 }
 
 /**

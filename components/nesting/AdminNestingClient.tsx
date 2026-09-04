@@ -919,16 +919,41 @@ export function AdminNestingClient() {
         const failed = Array.isArray(json?.failed) ? json.failed.length : 0
         const remaining =
           typeof json?.remaining_eligible === 'number' ? json.remaining_eligible : 0
+        const needsOwnerThaw =
+          typeof json?.needs_owner_thaw_count === 'number'
+            ? json.needs_owner_thaw_count
+            : Array.isArray(json?.closed)
+              ? json.closed.filter((c: { needs_owner_thaw?: boolean }) => c?.needs_owner_thaw)
+                  .length
+              : 0
+        const failSamples = Array.isArray(json?.failed)
+          ? json.failed
+              .slice(0, 3)
+              .map((f: { error?: string; asset_identifier?: string | null }) => {
+                const asset =
+                  typeof f?.asset_identifier === 'string' && f.asset_identifier.trim()
+                    ? `${f.asset_identifier.trim().slice(0, 8)}…`
+                    : 'asset?'
+                return `${asset}: ${typeof f?.error === 'string' ? f.error : 'unknown error'}`
+              })
+              .filter(Boolean)
+          : []
         const failNote =
           failed > 0
-            ? ` ${failed} failed (re-check wallet diagnostics or retry by position id).`
+            ? ` ${failed} failed${
+                failSamples.length > 0 ? ` (${failSamples.join(' | ')})` : ''
+              }.`
+            : ''
+        const thawNote =
+          needsOwnerThaw > 0
+            ? ` ${needsOwnerThaw} NFT(s) still Owner-frozen on-chain — holder must thaw from their wallet (Leave nest / updatePlugin frozen:false).`
             : ''
         const remainNote =
           remaining > 0
             ? ` ${remaining} still eligible — run Force leave all again to continue the batch.`
             : ''
         setForceUnstakeMsg(
-          `Closed ${closed} nest(s) for ${typeof json?.wallet === 'string' ? json.wallet : wallet}.${failNote}${remainNote}`
+          `Closed ${closed} nest(s) for ${typeof json?.wallet === 'string' ? json.wallet : wallet}.${failNote}${thawNote}${remainNote}`
         )
         if (remaining === 0 && failed === 0) {
           setForceUnstakeWallet('')
@@ -959,10 +984,24 @@ export function AdminNestingClient() {
       }
       const holder =
         typeof json?.holder_wallet === 'string' ? json.holder_wallet : (json?.position?.wallet_address as string) ?? ''
+      const needsOwnerThaw =
+        json?.needs_owner_thaw === true ||
+        Boolean(json?.nest_owner_thaw?.mint) ||
+        Boolean(json?.execution?.nest_owner_thaw?.mint)
+      const thawMint =
+        (typeof json?.nest_owner_thaw?.mint === 'string' && json.nest_owner_thaw.mint.trim()) ||
+        (typeof json?.execution?.nest_owner_thaw?.mint === 'string' &&
+          json.execution.nest_owner_thaw.mint.trim()) ||
+        ''
+      const thawNote = needsOwnerThaw
+        ? ` NFT remains Owner-frozen on-chain${
+            thawMint ? ` (${thawMint.slice(0, 8)}…)` : ''
+          } — holder must thaw from their wallet.`
+        : ''
       setForceUnstakeMsg(
         holder
-          ? `Closed nest for holder ${holder}. Position status is now unstaked.`
-          : 'Nest closed successfully.'
+          ? `Closed nest for holder ${holder}.${thawNote} Position status is now unstaked.`
+          : `Nest closed successfully.${thawNote}`
       )
       setForceUnstakePositionId('')
     } finally {
@@ -1906,7 +1945,7 @@ export function AdminNestingClient() {
       <section className="space-y-4">
         <SectionHeader
           title="Support: force leave nest"
-          description="Runs the same on-chain / DB unstake as the holder’s Leave nest — bypasses lock timer, council vote lock, and global nesting pause. For NFTs, also skips Helius collection grouping when the pool collection_key does not match the asset (uses on-chain owner + asset collection). Close one nest by staking_positions.id, or force leave all eligible open nests for a holder wallet."
+          description="Runs the same on-chain / DB unstake as the holder’s Leave nest — bypasses lock timer, council vote lock, and global nesting pause. For NFTs, also skips Helius collection grouping when the pool collection_key does not match the asset (uses on-chain owner + asset collection). Owner-authority freeze locks cannot be thawed by the server keypair: admin force leave still closes the nest in the ledger and reports that the holder must thaw the NFT from their wallet. Close one nest by staking_positions.id, or force leave all eligible open nests for a holder wallet."
         />
         <Card className="rounded-xl border-amber-500/30 bg-amber-500/5">
           <CardHeader>

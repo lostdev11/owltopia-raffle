@@ -141,6 +141,7 @@ import {
   capNftStakeAssetIds,
   chunkNftFreezeAssetIds,
   NESTING_NFT_STAKE_MAX_PER_RUN,
+  thawMplCoreOwnerFreezeInWallet,
 } from '@/lib/solana/mpl-core-freeze'
 import {
   approveTokenMetadataNestDelegatesInWallet,
@@ -2742,22 +2743,64 @@ export function DashboardNestingClient() {
             // the user does not think another wallet approval is pending and re-pay the fee.
             setPosSubPhase(positionId, 'unstake', 'submitting')
           }
-          const res = await fetch(nestingClientApiUrl('/api/me/staking/unstake'), {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Connected-Wallet': publicKey.toBase58(),
-            },
-            body: JSON.stringify({
-              position_id: positionId,
-              ...(platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}),
-            }),
-          })
-          const json = (await res.json().catch(() => ({}))) as {
-            error?: string
-            execution?: { nest_delegate_revoke?: { mint?: string } | null }
+
+          const postUnstake = async () => {
+            const res = await fetch(nestingClientApiUrl('/api/me/staking/unstake'), {
+              method: 'POST',
+              credentials: 'include',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Connected-Wallet': publicKey.toBase58(),
+              },
+              body: JSON.stringify({
+                position_id: positionId,
+                ...(platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}),
+              }),
+            })
+            const json = (await res.json().catch(() => ({}))) as {
+              error?: string
+              code?: string
+              mint?: string
+              needs_owner_thaw?: boolean
+              execution?: { nest_delegate_revoke?: { mint?: string } | null }
+            }
+            return { res, json }
           }
+
+          let { res, json } = await postUnstake()
+
+          // Owner-authority FreezeDelegate: server cannot thaw — holder signs updatePlugin(frozen:false).
+          if (
+            !res.ok &&
+            (json.code === 'needs_owner_thaw' ||
+              json.needs_owner_thaw === true ||
+              (typeof json.error === 'string' &&
+                json.error.toLowerCase().includes('wallet-controlled freeze')))
+          ) {
+            const adapter = wallet?.adapter
+            const positionAsset =
+              typeof json.mint === 'string' && json.mint.trim()
+                ? json.mint.trim()
+                : positions.find((p) => p.id === positionId)?.asset_identifier?.trim() || ''
+            if (!adapter || !positionAsset) {
+              setActionError(
+                typeof json.error === 'string'
+                  ? json.error
+                  : 'Approve a wallet thaw for this NFT, then try Leave nest again.'
+              )
+              throw new Error('unstake')
+            }
+            setPosSubPhase(positionId, 'unstake', 'awaiting_wallet_signature')
+            await thawMplCoreOwnerFreezeInWallet({
+              connection,
+              wallet: adapter,
+              assetId: positionAsset,
+              sendTransaction,
+            })
+            setPosSubPhase(positionId, 'unstake', 'submitting')
+            ;({ res, json } = await postUnstake())
+          }
+
           if (!res.ok) {
             const err =
               res.status === 501
