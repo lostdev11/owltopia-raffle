@@ -158,7 +158,10 @@ async function testBatchRunner() {
     limit: 2,
     unstakeOne: async (id) => {
       if (id === 'a') throw new StakingUserError('boom', 400)
-      return { position: { unstake_signature: id === 'b' ? 'sig-b' : null } }
+      return {
+        position: { unstake_signature: id === 'b' ? 'sig-b' : null },
+        nest_owner_thaw: id === 'b' ? { mint: 'm2' } : null,
+      }
     },
   })
 
@@ -166,6 +169,9 @@ async function testBatchRunner() {
   assert.equal(result.closed.length, 1)
   assert.equal(result.closed[0]?.position_id, 'b')
   assert.equal(result.closed[0]?.execution_path, 'onchain_token_transfer')
+  assert.equal(result.closed[0]?.needs_owner_thaw, true)
+  assert.equal(result.closed[0]?.thaw_mint, 'm2')
+  assert.equal(result.needs_owner_thaw_count, 1)
   assert.equal(result.failed.length, 1)
   assert.equal(result.failed[0]?.position_id, 'a')
   assert.equal(result.remaining_eligible, 2, 'failed + not-attempted remain eligible')

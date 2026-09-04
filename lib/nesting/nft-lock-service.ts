@@ -357,6 +357,9 @@ export async function thawWalletNftForPool(params: {
   /** Gen 2 FreezeDelegatedAccount path: holder should Revoke leftover SPL approve after thaw. */
   needsOwnerRevoke?: boolean
   revokeMint?: string
+  /** MPL Core Owner freeze: holder must thaw via wallet (`updatePlugin frozen:false`). */
+  needsOwnerThaw?: boolean
+  thawMint?: string
 }> {
   const resolved = await resolveEffectiveNftLockStandard(params.pool, params.assetId)
   if (resolved === 'database_only') {
@@ -393,7 +396,13 @@ export async function thawWalletNftForPool(params: {
       params.adminRecoveryUnstake === true ? null : (params.collectionMint ?? params.pool.collection_key),
     adminRecoveryUnstake: params.adminRecoveryUnstake,
   })
-  return { signature: thawed.signature, tokenAccount: thawed.tokenAccount, resolved_standard: resolved }
+  return {
+    signature: thawed.signature,
+    tokenAccount: thawed.tokenAccount,
+    resolved_standard: resolved,
+    needsOwnerThaw: thawed.needsOwnerThaw === true,
+    thawMint: thawed.needsOwnerThaw === true ? params.assetId.trim() : undefined,
+  }
 }
 
 export async function readNestLockEligibilityForPool(params: {

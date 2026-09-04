@@ -20,6 +20,10 @@ export const dynamic = 'force-dynamic'
  *
  * Runs the same adapter path as the holder "Leave nest" (thaw NFT or return tokens from vault),
  * bypassing lock timer / council vote lock / global nesting pause.
+ *
+ * MPL Core Owner-authority freezes cannot be thawed by the server keypair. Admin recovery still
+ * closes the DB nest and returns `needs_owner_thaw` / `nest_owner_thaw` so the holder can thaw
+ * from their wallet (`updatePlugin frozen:false`).
  */
 export async function POST(request: NextRequest) {
   const session = await requireFullAdminSession(request)
@@ -55,6 +59,13 @@ export async function POST(request: NextRequest) {
         closed: result.closed.length,
         failed: result.failed.length,
         remaining_eligible: result.remaining_eligible,
+        needs_owner_thaw_count: result.needs_owner_thaw_count,
+        failed_errors: result.failed.map((f) => ({
+          position_id: f.position_id,
+          asset: f.asset_identifier,
+          error: f.error,
+          status: f.status,
+        })),
       })
 
       return NextResponse.json({
@@ -74,20 +85,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { position } = await executeUnstakeAdminOverride({ position_id })
+    const { position, nest_owner_thaw } = await executeUnstakeAdminOverride({ position_id })
 
     console.warn('[admin/staking/unstake-override]', {
       admin_wallet: session.wallet,
       position_id,
       holder_wallet: position.wallet_address,
+      needs_owner_thaw: Boolean(nest_owner_thaw?.mint),
     })
 
     return NextResponse.json({
       position,
       holder_wallet: position.wallet_address,
       admin_override: true,
+      needs_owner_thaw: Boolean(nest_owner_thaw?.mint),
+      nest_owner_thaw: nest_owner_thaw?.mint ? { mint: nest_owner_thaw.mint } : null,
       execution: {
         path: position.unstake_signature ? ('onchain_token_transfer' as const) : ('database_mock' as const),
+        ...(nest_owner_thaw?.mint
+          ? { nest_owner_thaw: { mint: nest_owner_thaw.mint } }
+          : {}),
       },
     })
   } catch (e) {

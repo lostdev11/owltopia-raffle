@@ -122,18 +122,24 @@ export const solanaStakingAdapterStub: StakingMutationAdapter = {
       collectionMint: input.adminRecoveryUnstake === true ? null : pool.collection_key,
       adminRecoveryUnstake: input.adminRecoveryUnstake === true,
     })
+    const externalReference =
+      thawed.needsOwnerThaw && thawed.thawMint
+        ? `nft_needs_owner_thaw:${thawed.thawMint}`
+        : `nft_thaw_confirmed:${thawed.tokenAccount}`
     const position = await markPositionUnstaked(input.positionId, input.wallet, {
       unstake_signature: thawed.signature,
       sync_status: 'confirmed',
       last_synced_at: new Date().toISOString(),
       last_transaction_error: null,
-      external_reference: `nft_thaw_confirmed:${thawed.tokenAccount}`,
+      external_reference: externalReference,
     })
     const nest_delegate_revoke =
       thawed.needsOwnerRevoke && thawed.revokeMint
         ? { mint: thawed.revokeMint }
         : null
-    return { position, nest_delegate_revoke }
+    const nest_owner_thaw =
+      thawed.needsOwnerThaw && thawed.thawMint ? { mint: thawed.thawMint } : null
+    return { position, nest_delegate_revoke, nest_owner_thaw }
   },
   async claimPositionRewards(input) {
     const row = await getStakingPositionForWallet(input.positionId, input.wallet)
