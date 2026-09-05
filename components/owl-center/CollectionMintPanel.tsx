@@ -28,6 +28,7 @@ import {
 } from '@/lib/owl-center/mint-time-budget'
 import { isMintInProgress, type MintProgressSnapshot, type MintUiStep } from '@/lib/owl-center/mint-ui-steps'
 import { collectionMintDisabledHint } from '@/lib/owl-center/mint-button-hint'
+import { formatMintDate } from '@/lib/owl-center/phase-schedule'
 import { formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { shouldCollectOwlCenterPlatformMintFeeClient } from '@/lib/solana/owl-center-platform-mint-fee'
 import type { OwlCenterMintControls } from '@/lib/owl-center/mint-policy'
@@ -397,6 +398,14 @@ export function CollectionMintPanel({
     cmConfigured,
   })
 
+  /** Prefer browser-local formatting when the API only sent a UTC-formatted reason string. */
+  const scheduleWaitMessage = useMemo(() => {
+    if (elig?.phase_starts_at) {
+      return `Public mint opens ${formatMintDate(elig.phase_starts_at)}`
+    }
+    return elig?.reason ?? 'Mint is not open yet'
+  }, [elig?.phase_starts_at, elig?.reason])
+
   const mintButtonDisabled =
     !connected ||
     (eligLoading && !elig) ||
@@ -449,7 +458,7 @@ export function CollectionMintPanel({
         {soldOut ? (
           <p className="font-mono text-sm text-[#00FF9C]">SOLD OUT</p>
         ) : waitingForSchedule ? (
-          <p className="text-sm text-[#C5D0D8]">{elig?.reason ?? 'Mint is not open yet'}</p>
+          <p className="text-sm text-[#C5D0D8]">{scheduleWaitMessage}</p>
         ) : mintClosed ? (
           <p className="text-sm text-[#9BA8B4]">{elig?.reason ?? 'Mint unavailable'}</p>
         ) : (

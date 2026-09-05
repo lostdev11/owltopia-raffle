@@ -26,6 +26,15 @@ import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligib
 import { launchPublicPhaseBadgeLabel } from '@/lib/owl-center/launch-mint-open'
 import type { CollectionMintStateResponse } from '@/lib/owl-center/types'
 
+function SectionHeading({ id, title, hint }: { id: string; title: string; hint?: string }) {
+  return (
+    <div id={id} className="scroll-mt-28 md:scroll-mt-24">
+      <h2 className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">{title}</h2>
+      {hint ? <p className="mt-2 max-w-2xl text-sm text-[#9BA8B4]">{hint}</p> : null}
+    </div>
+  )
+}
+
 export function CollectionMintPageClient({ slug, launchName }: { slug: string; launchName: string }) {
   const { isOwlCenterAdmin } = useOwlCenterView()
   const { sessionWallet } = useSiwsSession()
@@ -35,6 +44,9 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
   const [state, setState] = useState<CollectionMintStateResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+  const [myMints, setMyMints] = useState<string[]>([])
+  const [myMintsLoading, setMyMintsLoading] = useState(false)
+  const [phaseBadgeLabel, setPhaseBadgeLabel] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -51,11 +63,45 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
     }
   }, [slug])
 
+  const loadMyMints = useCallback(async () => {
+    if (!connected || !walletStr) {
+      setMyMints([])
+      return
+    }
+    setMyMintsLoading(true)
+    try {
+      const res = await fetch(`/api/owl-center/collections/${encodeURIComponent(slug)}/my-mints`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet: walletStr }),
+        cache: 'no-store',
+      })
+      const j = (await res.json()) as { mints?: string[] }
+      if (res.ok && Array.isArray(j.mints)) setMyMints(j.mints)
+    } catch {
+      /* keep prior list on transient error */
+    } finally {
+      setMyMintsLoading(false)
+    }
+  }, [connected, walletStr, slug])
+
   useEffect(() => {
     void load()
     const t = setInterval(() => void load(), 30_000)
     return () => clearInterval(t)
   }, [load])
+
+  useEffect(() => {
+    void loadMyMints()
+  }, [loadMyMints])
+
+  useEffect(() => {
+    if (!state?.launch) {
+      setPhaseBadgeLabel(null)
+      return
+    }
+    setPhaseBadgeLabel(launchPublicPhaseBadgeLabel(state.launch))
+  }, [state?.launch])
 
   if (loading && !state) {
     return (
@@ -96,7 +142,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
     >
       <div className="mb-6 flex flex-wrap items-center gap-2">
         <StatusBadge status={launch.status} />
-        <PhaseBadge phase={launch.active_phase} overrideLabel={launchPublicPhaseBadgeLabel(launch)} />
+        <PhaseBadge phase={launch.active_phase} overrideLabel={phaseBadgeLabel} />
         <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">{mint_network}</span>
       </div>
 
@@ -147,9 +193,71 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
             launch={launch}
             remaining={supply.remaining}
             mintControls={mint_controls}
-            onRefresh={load}
+            onRefresh={() => {
+              void load()
+              void loadMyMints()
+            }}
           />
-          <CollectionMintedGrid mints={minted_mints} preferMainnet={mint_network === 'mainnet'} />
+
+          <section className="space-y-4">
+            <SectionHeading
+              id="my-minted"
+              title="My mints"
+              hint="Pieces this wallet (and any linked wallets) minted from this drop."
+            />
+            {!connected ? (
+              <CommandCard label="MY MINTS">
+                <p className="text-sm leading-relaxed text-[#9BA8B4]">
+                  Connect your wallet in the site header to see which pieces you minted.
+                </p>
+              </CommandCard>
+            ) : myMintsLoading && !myMints.length ? (
+              <CommandCard label="MY MINTS">
+                <p className="text-sm leading-relaxed text-[#9BA8B4]">Loading your mints…</p>
+              </CommandCard>
+            ) : myMints.length ? (
+              <CollectionMintedGrid
+                mints={myMints}
+                preferMainnet={mint_network === 'mainnet'}
+                label={`MY MINTS // ${myMints.length}`}
+                description="Pieces you minted in this drop. Just minted? It appears here once confirm-mint records the tx — tap Refresh in the mint console if it's not showing yet."
+              />
+            ) : (
+              <CommandCard label="MY MINTS // 0">
+                <p className="text-sm leading-relaxed text-[#9BA8B4]">
+                  You haven&apos;t minted from this drop yet. After you mint, your pieces show up here once the
+                  transaction is confirmed on-chain.
+                </p>
+              </CommandCard>
+            )}
+          </section>
+
+          <section className="space-y-4">
+            <SectionHeading
+              id="minted"
+              title="All minted"
+              hint={
+                minted_mints.length
+                  ? 'Every piece minted from this drop so far. New pieces appear after confirm-mint records the tx.'
+                  : 'Minted pieces will appear here once the first mints are confirmed on-chain.'
+              }
+            />
+            {minted_mints.length ? (
+              <CollectionMintedGrid
+                mints={minted_mints}
+                preferMainnet={mint_network === 'mainnet'}
+                label={`ALL MINTS // ${minted_mints.length}`}
+                description="Every piece minted from this drop so far (all wallets)."
+              />
+            ) : (
+              <CommandCard label="ALL MINTS // 0">
+                <p className="text-sm leading-relaxed text-[#9BA8B4]">
+                  No pieces minted yet. Once minting opens and the first transactions confirm, they will show up here.
+                </p>
+              </CommandCard>
+            )}
+          </section>
+
           {soldOut && canEditMintSettings ? (
             <CollectionSoldOutPanel
               slug={slug}

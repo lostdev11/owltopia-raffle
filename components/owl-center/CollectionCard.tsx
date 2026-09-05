@@ -1,37 +1,17 @@
-import Link from 'next/link'
-
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
-import { launchCollectionCtaLabel, launchPublicPhaseBadgeLabel } from '@/lib/owl-center/launch-mint-open'
 
+import { CollectionCardActions } from '@/components/owl-center/CollectionCardActions'
+import { CollectionCardBadges } from '@/components/owl-center/CollectionCardLabels'
 import { HubCardCoverImage } from '@/components/owl-center/HubCardCoverImage'
 import { LaunchMintDetails } from '@/components/owl-center/LaunchMintDetails'
-import { PhaseBadge } from '@/components/owl-center/PhaseBadge'
-import { StatusBadge } from '@/components/owl-center/StatusBadge'
-import { owlCenterBtnGhost, owlCenterBtnPrimary } from '@/components/owl-center/owl-center-cta-styles'
 
-function hrefForLaunch(slug: string): string {
-  return `/owl-center/collection/${slug}`
-}
-
-function ctaHref(launch: OwlCenterLaunchPublic): string {
-  if (launch.active_phase === 'TRADING_ACTIVE') {
-    return launch.orbis_url || launch.magic_eden_url || launch.tensor_url || hrefForLaunch(launch.slug)
-  }
-  return hrefForLaunch(launch.slug)
-}
-
-export function CollectionCard({
+export async function CollectionCard({
   launch,
   presaleSoldOut = false,
 }: {
   launch: OwlCenterLaunchPublic
   presaleSoldOut?: boolean
 }) {
-  const href = ctaHref(launch)
-  const internal = href.startsWith('/')
-  const label = launchCollectionCtaLabel(launch)
-  const scheduledPublicLabel = launchPublicPhaseBadgeLabel(launch)
-
   return (
     <article className="flex w-full flex-col border border-[#1A222B] bg-[#10161C]/85 sm:max-w-[300px]">
       <div className="relative aspect-square w-full overflow-hidden border-b border-[#1A222B] bg-[#0F1419]">
@@ -41,15 +21,7 @@ export function CollectionCard({
         </span>
       </div>
       <div className="flex flex-1 flex-col gap-2.5 p-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge status={launch.status} />
-          <PhaseBadge
-            phase={launch.active_phase}
-            pulse={launch.active_phase === 'PRESALE' && !presaleSoldOut}
-            presaleSoldOut={launch.slug === 'gen2' ? presaleSoldOut : false}
-            overrideLabel={scheduledPublicLabel}
-          />
-        </div>
+        <CollectionCardBadges launch={launch} presaleSoldOut={presaleSoldOut} />
         <div>
           <h3 className="font-display text-lg leading-tight text-[#F4FBF8]">{launch.name}</h3>
           <p className="mt-1 font-mono text-xs text-[#5C6773]">
@@ -57,20 +29,7 @@ export function CollectionCard({
           </p>
         </div>
         <LaunchMintDetails launch={launch} />
-        <div className="mt-auto flex flex-wrap gap-2 pt-1">
-          {internal ? (
-            <Link href={href} className={`${owlCenterBtnPrimary} w-full sm:w-auto`}>
-              {label}
-            </Link>
-          ) : (
-            <a href={href} target="_blank" rel="noreferrer" className={`${owlCenterBtnPrimary} w-full sm:w-auto`}>
-              {label}
-            </a>
-          )}
-          <Link href={hrefForLaunch(launch.slug)} className={`${owlCenterBtnGhost} w-full sm:w-auto`}>
-            Hub
-          </Link>
-        </div>
+        <CollectionCardActions launch={launch} />
       </div>
     </article>
   )
