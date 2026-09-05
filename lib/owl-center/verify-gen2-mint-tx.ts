@@ -6,6 +6,7 @@ import {
   feePayerMatchesBuyer,
   collectParsedTransactionAccountKeys,
 } from '@/lib/gen2-presale/verify-payment'
+import { collectCoreAssetsCreatedInTx } from '@/lib/owl-center/parse-candy-machine-mint-tx'
 import {
   owlCenterPlatformMintFeeVerifyBand,
   owlCenterPlatformMintFeeVerifyFallbackBand,
@@ -160,6 +161,31 @@ function countNftsMintedToWallet(
 }
 
 /**
+ * True when the parsed tx actually created enough Core assets (not merely listed planned asset
+ * pubkeys in account keys — bot-tax / mint-limit txs still include those signers).
+ */
+export function coreTxCreatedRequiredAssets(
+  parsed: Parameters<typeof collectCoreAssetsCreatedInTx>[0],
+  coreAssetAddresses: string[] | undefined,
+  minMinted: number
+): boolean {
+  const need = Math.max(1, Math.floor(minMinted))
+  const created = new Set(
+    collectCoreAssetsCreatedInTx(parsed).map((a) => normalizeSolanaWalletAddress(a) ?? a)
+  )
+  if (created.size < need) return false
+  const assets = (coreAssetAddresses ?? [])
+    .map((a) => normalizeSolanaWalletAddress(a.trim()) ?? a.trim())
+    .filter(Boolean)
+  if (assets.length === 0) return true
+  let matched = 0
+  for (const asset of assets) {
+    if (created.has(asset)) matched++
+  }
+  return matched >= need
+}
+
+/**
  * Confirms the signature exists, succeeded, and fee payer matches minter.
  * Optionally ensures the configured Candy Machine pubkey appears in loaded account keys.
  *
@@ -236,26 +262,14 @@ export async function verifyGen2MintTransaction(params: {
 
   // A bot-tax tx references the Candy Machine and "succeeds" (no meta.err) but mints no NFT — the
   // candy guard charges the bot tax instead of failing. Require a real NFT / Core asset to land.
+  //
+  // Core: do NOT treat planned asset pubkeys in account keys as proof of mint. Candy Guard still
+  // loads the asset signer on bot-tax / AllowedMintLimitReached txs (meta.err stays null). Only
+  // system createAccount owned by MPL Core (or CreateV1) means an asset was created.
   const minMinted = Math.max(1, Math.floor(params.minMintedNfts ?? 1))
   const walletNorm = normalizeSolanaWalletAddress(params.wallet) ?? params.wallet
   if (params.mintStandard === 'core') {
-    const flat = collectParsedTransactionAccountKeys(parsed)
-    const assets = (params.coreAssetAddresses ?? [])
-      .map((a) => normalizeSolanaWalletAddress(a.trim()) ?? a.trim())
-      .filter(Boolean)
-    if (assets.length < minMinted) {
-      return { ok: false, reason: 'no_nft_minted' }
-    }
-    let matched = 0
-    for (const asset of assets) {
-      try {
-        const pk = new PublicKey(asset)
-        if (flat.some((k) => k.equals(pk))) matched++
-      } catch {
-        /* skip invalid */
-      }
-    }
-    if (matched < minMinted) {
+    if (!coreTxCreatedRequiredAssets(parsed, params.coreAssetAddresses, minMinted)) {
       return { ok: false, reason: 'no_nft_minted' }
     }
   } else if (countNftsMintedToWallet(parsed, walletNorm) < minMinted) {

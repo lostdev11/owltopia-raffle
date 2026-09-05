@@ -120,6 +120,44 @@ console.log('Candy Machine mint tx parse:')
 }
 
 {
+  // Bot-tax / AllowedMintLimitReached: planned asset signer is in account keys, but no Core
+  // createAccount — must not count as a mint (Adrian / Breppe OG double-charge ticket).
+  const plannedAsset = '3SVrQLKD1ypQpjuUY9wYa14KXNAX2EbwFkHq7EQvueEr'
+  const walletPk = new PublicKey(WALLET)
+  const plannedPk = new PublicKey(plannedAsset)
+  const cmPk = new PublicKey(CM)
+  const botTaxTx = {
+    slot: 1,
+    transaction: {
+      signatures: ['bot-tax'],
+      message: {
+        accountKeys: [
+          { pubkey: walletPk, signer: true, writable: true, source: 'transaction' },
+          { pubkey: plannedPk, signer: true, writable: true, source: 'transaction' },
+          { pubkey: cmPk, signer: false, writable: true, source: 'transaction' },
+        ],
+        instructions: [],
+        recentBlockhash: '11111111111111111111111111111111',
+      },
+    },
+    meta: {
+      err: null,
+      fee: 5000,
+      preBalances: [1, 0, 1],
+      postBalances: [1, 0, 1],
+      logMessages: [
+        'Program log: Instruction: MintV1',
+        'Program log: AnchorError { error_name: "AllowedMintLimitReached"',
+        'Program log: Candy Guard Botting is taxed at 1000000 lamports',
+      ],
+      innerInstructions: [],
+    },
+  } as unknown as ParsedTransactionWithMeta
+  check('bot-tax creates zero Core assets', collectCoreAssetsCreatedInTx(botTaxTx).length === 0)
+  check('bot-tax parse returns null', parseCandyMachineMintFromTransaction(botTaxTx, CM) === null)
+}
+
+{
   const tx = tmMintTx()
   const mint = parseCandyMachineMintFromTransaction(tx, CM)
   check('TM MintV2 wallet', mint?.wallet === WALLET)
