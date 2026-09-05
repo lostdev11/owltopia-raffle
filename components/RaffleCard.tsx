@@ -16,6 +16,8 @@ import { RaffleDeadlineExtensionBadge } from '@/components/RaffleDeadlineExtensi
 import { CreatorModerationBuyerWarning } from '@/components/CreatorModerationBuyerWarning'
 import { HootBoostMeter } from '@/components/HootBoostMeter'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
+import { AvailablePaymentBalanceRow } from '@/components/AvailablePaymentBalanceRow'
+import { useWalletPaymentBalance } from '@/hooks/use-wallet-payment-balance'
 import { getPartnerPrizeTokenByCurrency } from '@/lib/partner-prize-tokens'
 import { raffleSoldOutButtonLabel } from '@/lib/raffles/sold-out-copy'
 import type { Raffle, Entry } from '@/lib/types'
@@ -144,6 +146,14 @@ export function RaffleCard({
   
   // Calculate purchase amount automatically based on ticket price and quantity
   const purchaseAmount = raffle.ticket_price * ticketQuantity
+  const paymentBalance = useWalletPaymentBalance(
+    raffle.currency,
+    Boolean(connected && showQuickBuy)
+  )
+  const paymentBalanceInsufficient =
+    paymentBalance.amount != null &&
+    Number.isFinite(purchaseAmount) &&
+    purchaseAmount > paymentBalance.amount
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [ticketsConfirming, setTicketsConfirming] = useState(false)
@@ -1308,6 +1318,14 @@ export function RaffleCard({
                   <CurrencyIcon currency={raffle.currency as 'SOL' | 'USDC' | 'OWL'} size={displaySize === 'large' ? 20 : 16} className="inline-block" />
                 </div>
               </div>
+              {connected && (
+                <AvailablePaymentBalanceRow
+                  currency={raffle.currency}
+                  display={paymentBalance.display}
+                  insufficient={paymentBalanceInsufficient}
+                  compact={displaySize !== 'large'}
+                />
+              )}
               {error && (
                 <div className="p-2 rounded-lg bg-destructive/10 border border-destructive text-destructive text-xs">
                   {error}
