@@ -35,7 +35,7 @@ function check(name: string, cond: boolean) {
 
 const base: SimpleMintEligibilityResponse = {
   active_phase: 'PUBLIC',
-  status: 'live',
+  status: 'PUBLIC',
   is_paused: false,
   is_eligible: true,
   max_mintable: 1,
