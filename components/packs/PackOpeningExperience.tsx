@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { createPortal } from 'react-dom'
 import Image from 'next/image'
 import Link from 'next/link'
-import { CheckCircle2, ImageIcon, Ticket } from 'lucide-react'
+import { CheckCircle2, ImageIcon } from 'lucide-react'
 import type { PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
 import {
   PACK_ANIMATION_POSTER,
@@ -410,13 +410,6 @@ export function PackOpeningExperience({
             {reward.category === 'nft' && reward.nftMint ? (
               <p className="font-mono text-[11px] text-white/40">
                 {reward.nftMint.slice(0, 4)}…{reward.nftMint.slice(-4)}
-              </p>
-            ) : null}
-            {reward.category === 'owl' && reward.freeTicketCredits > 0 ? (
-              <p className="inline-flex items-center gap-2 rounded-full border border-[#00E58B]/25 bg-[#00E58B]/10 px-3 py-1.5 text-sm text-[#00FF9C]">
-                <Ticket className="h-4 w-4" aria-hidden />
-                {reward.freeTicketCredits} free raffle ticket
-                {reward.freeTicketCredits === 1 ? '' : 's'} credited
               </p>
             ) : null}
           </div>

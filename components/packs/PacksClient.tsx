@@ -29,7 +29,6 @@ import {
   Gift,
   Loader2,
   Package,
-  Ticket,
   Trophy,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -65,7 +64,6 @@ type PacksConfig = {
       percentOverall: number
     }[]
     nftBands: { min: number; max: number; weight: number }[]
-    owlToTicketRatio: number
   }
   fairness?: {
     openAlgo: string
@@ -90,7 +88,6 @@ type PacksConfig = {
     wallet: string
     category: string | null
     prizeLabel: string | null
-    freeTicketCredits: number
     isJackpotWin?: boolean
     completedAt: string | null
   }[]
@@ -102,73 +99,6 @@ function shortWallet(w: string) {
 
 function bpsToPercent(bps: number) {
   return `${(bps / 100).toFixed(0)}%`
-}
-
-function RedeemCreditsForm({ onDone }: { onDone: () => void }) {
-  const [raffleId, setRaffleId] = useState('')
-  const [tickets, setTickets] = useState('1')
-  const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
-
-  async function redeem() {
-    setBusy(true)
-    setMsg(null)
-    try {
-      const res = await fetch('/api/packs/credits/redeem', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          raffleId: raffleId.trim(),
-          tickets: Number(tickets),
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Redeem failed')
-      setMsg(`Redeemed ${data.tickets} ticket(s)`)
-      onDone()
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Redeem failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="mt-4 space-y-2 border-t border-white/10 pt-4">
-      <label className="sr-only" htmlFor="packs-raffle-id">
-        Raffle UUID
-      </label>
-      <input
-        id="packs-raffle-id"
-        className="w-full rounded-lg border border-white/10 bg-black/35 px-3 py-2.5 text-sm text-[#EAFBF4] placeholder:text-[#A9CBB9]/50"
-        placeholder="Raffle UUID"
-        value={raffleId}
-        onChange={(e) => setRaffleId(e.target.value)}
-      />
-      <div className="flex gap-2">
-        <label className="sr-only" htmlFor="packs-ticket-qty">
-          Ticket quantity
-        </label>
-        <input
-          id="packs-ticket-qty"
-          className="w-20 rounded-lg border border-white/10 bg-black/35 px-3 py-2.5 text-sm text-[#EAFBF4]"
-          value={tickets}
-          onChange={(e) => setTickets(e.target.value)}
-          inputMode="numeric"
-        />
-        <button
-          type="button"
-          disabled={busy || !raffleId.trim()}
-          onClick={() => void redeem()}
-          className="min-h-[44px] flex-1 rounded-lg bg-[#00E58B]/90 px-3 text-sm font-semibold text-[#062016] hover:bg-[#00FF9C] disabled:opacity-40"
-        >
-          {busy ? 'Redeeming…' : 'Redeem'}
-        </button>
-      </div>
-      {msg && <p className="text-xs text-[#A9CBB9]">{msg}</p>}
-    </div>
-  )
 }
 
 function RarityRow({
@@ -205,7 +135,6 @@ export function PacksClient({
   const [ripping, setRipping] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<PackOpenClientResult | null>(null)
-  const [credits, setCredits] = useState<number | null>(null)
   const [phase, setPhase] = useState<RipPhase>('idle')
   const [paymentConfirmed, setPaymentConfirmed] = useState(false)
   const [balanceLamports, setBalanceLamports] = useState<number | null>(null)
@@ -225,19 +154,6 @@ export function PacksClient({
     }
   }, [])
 
-  const loadCredits = useCallback(async () => {
-    if (!publicKey) {
-      setCredits(null)
-      return
-    }
-    try {
-      const res = await fetch(`/api/packs/credits?wallet=${publicKey.toBase58()}`)
-      const data = await res.json()
-      if (res.ok) setCredits(data.freeTicketCredits ?? 0)
-    } catch {
-      // ignore
-    }
-  }, [publicKey])
 
   useEffect(() => {
     if (!allowed) return
@@ -245,10 +161,6 @@ export function PacksClient({
     preloadConfetti()
   }, [allowed, load])
 
-  useEffect(() => {
-    if (!allowed) return
-    void loadCredits()
-  }, [allowed, loadCredits])
 
 
   useEffect(() => {
@@ -302,7 +214,6 @@ export function PacksClient({
       setPhase('experience')
       setRipping(false)
       void load()
-      void loadCredits()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Rip failed')
       setPhase('idle')
@@ -657,22 +568,7 @@ export function PacksClient({
       </section>
 
       {/* Below-fold */}
-      <section className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-        <div className="border-t border-white/10 pt-10">
-          <h2 className="font-display text-3xl tracking-[0.12em] text-[#EAFBF4]">Your free tickets</h2>
-          <p className="mt-2 max-w-lg text-sm text-[#A9CBB9]">
-            OWL wins credit free raffle tickets. Sign in with your wallet to redeem on an active raffle.
-          </p>
-          <p className="mt-4 font-display text-5xl tracking-wide text-amber-200">
-            {credits == null ? '—' : credits}
-          </p>
-          {connected && credits != null && credits > 0 ? (
-            <RedeemCreditsForm onDone={() => void loadCredits()} />
-          ) : null}
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-3xl px-4 pb-10 sm:px-6">
+      <section className="mx-auto max-w-3xl px-4 pb-10 sm:px-6 pt-10">
         <div className="border-t border-white/10 pt-10">
           <h2 className="flex items-center gap-2 font-display text-3xl tracking-[0.12em] text-[#EAFBF4]">
             <Gift className="h-6 w-6 text-[#00FF9C]" aria-hidden />
@@ -694,11 +590,6 @@ export function PacksClient({
                       o.prizeLabel
                     )}
                   </span>
-                  {o.freeTicketCredits > 0 ? (
-                    <span className="ml-2 inline-flex items-center gap-1 text-[11px] text-[#00FF9C]/80">
-                      <Ticket className="h-3 w-3" aria-hidden />+{o.freeTicketCredits}
-                    </span>
-                  ) : null}
                 </div>
                 <Link
                   href={`/packs/verify/${o.id}`}

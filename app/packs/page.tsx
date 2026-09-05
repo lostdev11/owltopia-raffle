@@ -8,7 +8,7 @@ import { PLATFORM_NAME, getSiteBaseUrl } from '@/lib/site-config'
 
 const SITE_URL = getSiteBaseUrl()
 const DESCRIPTION =
-  'Rip Owl Packs for 0.1 SOL — every pack wins $OWL, SOL, or an NFT. Free raffle tickets on OWL wins.'
+  'Rip Owl Packs for 0.1 SOL — every pack wins $OWL, SOL, or an NFT. OWL prizes are sent to your wallet.'
 /** Dedicated Packs link-preview art (`public/packs-og.jpg`). Bump `v` when the asset changes. */
 const OG_IMAGE_URL = `${SITE_URL}/packs-og.jpg?v=1`
 const OG_IMAGE_DIMS = { width: 1024, height: 682 } as const

@@ -79,10 +79,10 @@ export function mockPackOpenReward(category: 'owl' | 'sol' | 'nft'): PackOpenCli
     nftMint: null,
     nftName: null,
     nftImageUrl: null,
-    freeTicketCredits: 25,
+    freeTicketCredits: 0,
     payoutSignature: null,
     openSeed: 'preview-seed',
     openCommitHash: 'preview-commit',
-    revealMessage: 'You have won 25 free tickets on raffle site (preview)',
+    revealMessage: 'You won 25 $OWL — sent to your wallet (preview)',
   }
 }

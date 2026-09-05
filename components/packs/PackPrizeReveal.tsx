@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import Link from 'next/link'
-import { CheckCircle2, ImageIcon, Ticket } from 'lucide-react'
+import { CheckCircle2, ImageIcon } from 'lucide-react'
 import type { PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
 import { PACK_OWL_PRIZE_ART, PACK_SOL_PRIZE_ART } from '@/lib/packs/animations'
 import { cn } from '@/lib/utils'
@@ -102,14 +102,6 @@ export function PackPrizeReveal({ result, onRipAgain, className }: Props) {
 
       <p className="mt-5 text-xl font-semibold text-amber-200 sm:text-2xl">{result.prizeLabel}</p>
       <p className="mt-2 text-sm leading-relaxed text-white/60">{result.revealMessage}</p>
-
-      {result.category === 'owl' && result.freeTicketCredits > 0 ? (
-        <p className="mt-4 inline-flex items-center gap-2 rounded-full border border-[#00E58B]/25 bg-[#00E58B]/10 px-3 py-1.5 text-sm text-[#00FF9C]">
-          <Ticket className="h-4 w-4" aria-hidden />
-          {result.freeTicketCredits} free raffle ticket
-          {result.freeTicketCredits === 1 ? '' : 's'} credited
-        </p>
-      ) : null}
 
       <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:justify-center">
         <Link
