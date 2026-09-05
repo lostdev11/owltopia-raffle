@@ -91,6 +91,7 @@
     "backfill:platform-projects": "npx --yes tsx --env-file=.env.local scripts/backfill-platform-projects.ts",
     "test:packs-open-rng": "npx --yes tsx scripts/test-packs-open-rng.ts",
     "test:packs-deposit-batch": "npx --yes tsx scripts/test-packs-deposit-batch.ts",
+    "test:pack-purchase-errors": "npx --yes tsx scripts/test-pack-purchase-errors.ts",
     "packs:ev-simulator": "npx --yes tsx scripts/packs-ev-simulator.ts",
     "packs:grind-vault": "npx --yes tsx scripts/grind-packs-vault-vanity.ts",
     "packs:normalize-vault-keypair": "node scripts/normalize-packs-vault-keypair.mjs",

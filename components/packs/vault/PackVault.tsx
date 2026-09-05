@@ -17,6 +17,7 @@ type Props = {
   error: string | null
   loadError: string | null
   pauseMessage: string | null
+  fundHint?: string | null
 }
 
 export function PackVault({
@@ -28,6 +29,7 @@ export function PackVault({
   error,
   loadError,
   pauseMessage,
+  fundHint = null,
 }: Props) {
   const vaultRef = useRef<HTMLDivElement | null>(null)
   const [reducedMotion, setReducedMotion] = useState(false)
@@ -122,6 +124,7 @@ export function PackVault({
         error={error}
         loadError={loadError}
         pauseMessage={pauseMessage}
+        fundHint={fundHint}
         onPrev={() => wheel.rotateToIndex(wheel.selectedIndex - 1)}
         onNext={() => wheel.rotateToIndex(wheel.selectedIndex + 1)}
       />
