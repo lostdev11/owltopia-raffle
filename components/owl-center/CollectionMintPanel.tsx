@@ -85,7 +85,8 @@ export function CollectionMintPanel({
   const mintNetwork = resolveLaunchMintNetwork(launch)
 
   const [qtyText, setQtyText] = useState('1')
-  const { elig, loading: eligLoading, error: eligError, refresh: loadElig } = useCollectionMintEligibility(slug, walletStr, connected)
+  const { elig, loading: eligLoading, error: eligError, refresh: loadElig, applyMinted } =
+    useCollectionMintEligibility(slug, walletStr, connected)
   const [step, setStep] = useState<MintUiStep>('idle')
   const [err, setErr] = useState<string | null>(null)
   const [lastSig, setLastSig] = useState<string | null>(null)
@@ -180,10 +181,12 @@ export function CollectionMintPanel({
       setErr(null)
       setMintProgress(null)
       setStep('success')
-      await Promise.all([loadElig(), onRefresh()])
+      applyMinted(confirmedCount || mintPks.length || 1)
+      onRefresh()
+      void loadElig({ background: true })
       return true
     },
-    [walletStr, slug, mintNetwork, loadElig, onRefresh]
+    [walletStr, slug, mintNetwork, loadElig, onRefresh, applyMinted]
   )
 
   const checkWalletForMint = useCallback(
@@ -338,6 +341,14 @@ export function CollectionMintPanel({
           setMintedCount(mintedCount)
           setMintProgress(null)
           setStep('success')
+          // Debit locally so Mint disables immediately — prevents a second tap that only pays
+          // Candy Guard bot tax + platform fee (Breppe / AllowedMintLimitReached).
+          applyMinted(mintedCount)
+        },
+        // Refresh eligibility only AFTER the DB record lands; refreshing earlier can re-enable the
+        // button on stale (still-eligible) server data and undo the optimistic debit.
+        onRecordSuccess: () => {
+          void Promise.all([loadElig({ background: true }), onRefresh()])
         },
         onRecordWarning: (failure) => {
           if (!failure.hardFailure) {
@@ -357,14 +368,11 @@ export function CollectionMintPanel({
                 : failure.message
             )
             setStep('error')
+            // Foreground refresh restores server truth (undoes the optimistic debit).
             void Promise.all([loadElig(), onRefresh()])
           })()
         },
-        onRecordSuccess: () => {
-          void Promise.all([loadElig({ background: true }), onRefresh()])
-        },
       })
-      void Promise.all([loadElig(), onRefresh()])
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'mint_failed'
       const low = msg.toLowerCase()

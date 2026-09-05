@@ -19,6 +19,7 @@ export {
   createCandyGuard,
   safeFetchCandyGuard,
   updateCandyGuard,
+  safeFetchMintCounterFromSeeds,
   MPL_CORE_CANDY_GUARD_PROGRAM_ID,
   MPL_CORE_CANDY_MACHINE_CORE_PROGRAM_ID,
 } from '@metaplex-foundation/mpl-core-candy-machine'

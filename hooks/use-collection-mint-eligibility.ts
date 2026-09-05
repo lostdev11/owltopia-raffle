@@ -37,5 +37,30 @@ export function useCollectionMintEligibility(slug: string, wallet: string | null
     void refresh()
   }, [connected, wallet, refresh])
 
-  return { elig, loading, error, refresh }
+  /**
+   * Optimistically debit allocation after an on-chain mint confirms so the Mint button disables
+   * immediately. Without this, a second tap during the server eligibility refresh window can hit
+   * Candy Guard AllowedMintLimitReached + botTax (platform fee charged, no NFT) — Breppe ticket.
+   */
+  const applyMinted = useCallback((quantity: number) => {
+    const debit = Math.max(0, Math.floor(quantity))
+    if (debit <= 0) return
+    setElig((prev) => {
+      if (!prev) return prev
+      const nextMax = Math.max(0, prev.max_mintable - debit)
+      const nextMinted = prev.wallet_minted + debit
+      return {
+        ...prev,
+        max_mintable: nextMax,
+        wallet_minted: nextMinted,
+        is_eligible: prev.is_eligible && nextMax > 0,
+        reason:
+          nextMax > 0
+            ? prev.reason
+            : `Wallet limit reached (${prev.wallet_mint_limit} per wallet)`,
+      }
+    })
+  }, [])
+
+  return { elig, loading, error, refresh, applyMinted }
 }
