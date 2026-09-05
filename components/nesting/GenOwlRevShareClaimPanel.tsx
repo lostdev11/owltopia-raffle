@@ -138,6 +138,13 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
   const [feeConfig, setFeeConfig] = useState<StakingPlatformFeeTxConfig | null>(null)
   const [poolFunding, setPoolFunding] = useState<PoolFundingState | null>(null)
   const [savedFeeHint, setSavedFeeHint] = useState<string | null>(null)
+  const [liabilitySummary, setLiabilitySummary] = useState<{
+    claimed_nests: number
+    unclaimed_nests: number
+    unclaimed_sol: number
+    open_period_count: number
+    pool_covered: boolean
+  } | null>(null)
 
   const load = useCallback(async () => {
     if (!connected || needsSignIn) {
@@ -146,6 +153,7 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
       setClaimsEnabled(true)
       setPoolFunding(null)
       setSavedFeeHint(null)
+      setLiabilitySummary(null)
       return
     }
     setLoading(true)
@@ -161,6 +169,7 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
         setClaimable([])
         setHistory([])
         setPoolFunding(null)
+        setLiabilitySummary(null)
         return
       }
       setClaimsEnabled(data.claims_enabled !== false)
@@ -182,6 +191,18 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
       } else {
         setPoolFunding(null)
       }
+      const liab = data.liability
+      if (liab && typeof liab === 'object') {
+        setLiabilitySummary({
+          claimed_nests: Number(liab.claimed_nests) || 0,
+          unclaimed_nests: Number(liab.unclaimed_nests) || 0,
+          unclaimed_sol: Number(liab.unclaimed_sol) || 0,
+          open_period_count: Number(liab.open_period_count) || 0,
+          pool_covered: liab.pool_covered !== false,
+        })
+      } else {
+        setLiabilitySummary(null)
+      }
 
       const wallet = publicKey?.toBase58()
       if (wallet && nextClaimable.length > 0) {
@@ -199,6 +220,7 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
       setClaimable([])
       setHistory([])
       setPoolFunding(null)
+      setLiabilitySummary(null)
     } finally {
       setLoading(false)
     }
@@ -489,6 +511,14 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
           {feeLabel ? (
             <p className="text-xs text-muted-foreground leading-relaxed">
               Platform fee: {feeLabel}. Approve once in your wallet, then payout runs automatically.
+            </p>
+          ) : null}
+          {liabilitySummary && liabilitySummary.open_period_count > 0 ? (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Across {liabilitySummary.open_period_count} open month
+              {liabilitySummary.open_period_count === 1 ? '' : 's'}: {liabilitySummary.claimed_nests}{' '}
+              nests already claimed · {liabilitySummary.unclaimed_nests} still waiting ·{' '}
+              {liabilitySummary.unclaimed_sol.toFixed(4)} SOL reserved for late claims.
             </p>
           ) : null}
           {poolBlocked ? (

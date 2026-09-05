@@ -73,6 +73,25 @@ export function GenOwlRevShareAdminDepositPanel({
   const [poolOnchain, setPoolOnchain] = useState<{ sol: number | null; usdc: number | null } | null>(
     null
   )
+  const [liability, setLiability] = useState<{
+    claimed_nests: number
+    unclaimed_nests: number
+    paid_sol: number
+    unclaimed_sol: number
+    required_sol: number
+    shortfall_sol: number
+    pool_covered: boolean
+    open_period_count: number
+    message: string | null
+    periods: Array<{
+      period_month: string
+      claimed_nests: number
+      unclaimed_nests: number
+      paid_sol: number
+      unclaimed_sol: number
+      claim_rate: number | null
+    }>
+  } | null>(null)
 
   const refreshPeriod = useCallback(async () => {
     try {
@@ -97,6 +116,23 @@ export function GenOwlRevShareAdminDepositPanel({
         })
       } else {
         setPoolOnchain(null)
+      }
+      const liab = data.liability
+      if (liab && typeof liab === 'object') {
+        setLiability({
+          claimed_nests: Number(liab.claimed_nests) || 0,
+          unclaimed_nests: Number(liab.unclaimed_nests) || 0,
+          paid_sol: Number(liab.paid_sol) || 0,
+          unclaimed_sol: Number(liab.unclaimed_sol) || 0,
+          required_sol: Number(liab.required_sol) || 0,
+          shortfall_sol: Number(liab.shortfall_sol) || 0,
+          pool_covered: liab.pool_covered !== false,
+          open_period_count: Number(liab.open_period_count) || 0,
+          message: typeof liab.message === 'string' ? liab.message : null,
+          periods: Array.isArray(liab.periods) ? liab.periods : [],
+        })
+      } else {
+        setLiability(null)
       }
     } catch {
       // Non-blocking status
@@ -258,7 +294,9 @@ export function GenOwlRevShareAdminDepositPanel({
       {poolOnchain ? (
         <p
           className={`text-xs tabular-nums leading-relaxed ${
-            (poolOnchain.sol ?? 0) <= 0.05 ? 'text-amber-400/95 font-medium' : 'text-foreground/90'
+            (poolOnchain.sol ?? 0) <= 0.05 || (liability && !liability.pool_covered)
+              ? 'text-amber-400/95 font-medium'
+              : 'text-foreground/90'
           }`}
         >
           On-chain pool balance:{' '}
@@ -266,10 +304,39 @@ export function GenOwlRevShareAdminDepositPanel({
           {poolOnchain.usdc != null && poolOnchain.usdc > 0
             ? ` · ${poolOnchain.usdc.toFixed(2)} USDC`
             : ''}
-          {(poolOnchain.sol ?? 0) <= 0.05
-            ? ' — top up before opening claims or holders will see failed payouts.'
-            : ''}
+          {liability && !liability.pool_covered
+            ? ` — short ${liability.shortfall_sol.toFixed(5)} SOL vs ${liability.unclaimed_nests} unclaimed nests across ${liability.open_period_count} open month(s).`
+            : (poolOnchain.sol ?? 0) <= 0.05
+              ? ' — top up before opening claims or holders will see failed payouts.'
+              : ''}
         </p>
+      ) : null}
+      {liability ? (
+        <div className="rounded-md border border-white/10 bg-black/20 px-2.5 py-2 space-y-1.5 text-xs">
+          <p className="font-medium text-foreground/90">
+            Claimed vs unclaimed (stacked open months)
+          </p>
+          <p className="tabular-nums text-muted-foreground leading-relaxed">
+            {liability.claimed_nests} claimed · {liability.unclaimed_nests} still unclaimed ·{' '}
+            {liability.paid_sol.toFixed(4)} SOL paid · {liability.unclaimed_sol.toFixed(4)} SOL owed ·
+            pool needs ~{liability.required_sol.toFixed(4)} SOL
+            {liability.pool_covered ? ' (covered)' : ' (underfunded)'}
+          </p>
+          {liability.periods.length > 0 ? (
+            <ul className="space-y-0.5 text-muted-foreground/90">
+              {liability.periods.map((p) => (
+                <li key={p.period_month} className="tabular-nums">
+                  {p.period_month}: {p.claimed_nests} claimed / {p.unclaimed_nests} left ·{' '}
+                  {p.unclaimed_sol.toFixed(4)} SOL owed
+                  {p.claim_rate != null ? ` · ${(p.claim_rate * 100).toFixed(0)}% claimed` : ''}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {liability.message ? (
+            <p className="text-amber-400/95 leading-relaxed">{liability.message}</p>
+          ) : null}
+        </div>
       ) : null}
       {gen1MonthLabel || gen2MonthLabel ? (
         <div className="space-y-1 text-xs text-foreground/90 tabular-nums">

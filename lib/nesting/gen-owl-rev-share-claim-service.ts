@@ -26,6 +26,7 @@ import {
   validateStakingPlatformFeeLinked,
 } from '@/lib/nesting/link-staking-platform-fee'
 import { assessGenOwlRevSharePoolAffordability } from '@/lib/nesting/gen-owl-rev-share-pool'
+import { assertGenOwlRevShareOutstandingLiabilityCovered } from '@/lib/nesting/gen-owl-rev-share-liability-service'
 
 async function perNestAmountsForPosition(
   period: GenOwlRevSharePeriodRow,
@@ -117,6 +118,9 @@ export async function executeGenOwlRevShareClaim(params: {
   if (amounts.sol <= 0 && amounts.usdc <= 0) {
     throw new StakingUserError('No rev share amount configured for this generation this month.', 400)
   }
+
+  // Cover stacked unclaimed liability first so late claimers are not left unpaid.
+  await assertGenOwlRevShareOutstandingLiabilityCovered()
 
   // Refuse before platform fee so an underfunded pool cannot burn user SOL fees.
   const afford = await assessGenOwlRevSharePoolAffordability({
@@ -254,6 +258,9 @@ export async function executeGenOwlRevShareClaimAll(params: {
   if (totalSol <= 0 && totalUsdc <= 0) {
     throw new StakingUserError('No rev share amount configured for these nests.', 400)
   }
+
+  // Cover stacked unclaimed liability first so late claimers are not left unpaid.
+  await assertGenOwlRevShareOutstandingLiabilityCovered()
 
   // Refuse before platform fee so an underfunded pool cannot burn user SOL fees.
   const afford = await assessGenOwlRevSharePoolAffordability({
