@@ -737,6 +737,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
         for (const built of builtMints) {
           await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(built), {
             failMessagePrefix: 'Mint would fail on-chain before wallet approval.',
+            rejectCandyGuardBotTax: true,
           })
         }
 

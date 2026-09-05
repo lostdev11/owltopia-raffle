@@ -1,4 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js'
+import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
+import { isSome, publicKey } from '@metaplex-foundation/umi'
+import type { DefaultGuardSet } from '@metaplex-foundation/mpl-core-candy-machine'
 
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import { getLaunchWlWallet, sumLaunchWlPhaseUsedMints } from '@/lib/db/owl-center-launch-wl-wallets'
@@ -17,9 +20,19 @@ import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/l
 import { publicSimpleMintClosedInfo, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import { OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS, isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
+import { publicSimpleMintGuardGroupLabel } from '@/lib/owl-center/public-simple-guard-plan'
 import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
-import type { SimpleMintEligibilityResponse } from '@/lib/owl-center/types'
+import type { OwlCenterLaunchPublic, SimpleMintEligibilityResponse } from '@/lib/owl-center/types'
 import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
+import {
+  fetchCandyMachine,
+  mplCoreCandyMachine,
+  safeFetchCandyGuard,
+} from '@/lib/solana/core-candy-machine'
+import {
+  coreGuardMintLimitId,
+  fetchCoreWalletMintLimitCount,
+} from '@/lib/solana/core-mint-limit'
 import {
   getLaunchCandyMachineId,
   launchMintInfraConfigured,
@@ -30,6 +43,59 @@ import { assertOwlCenterPlatformMintFeeSolBalance, resolveOwlCenterPlatformMintF
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { invalidLaunchMintIdReason } from '@/lib/solana/validate-pubkey'
+
+function mergeCoreGuardSets(defaults: DefaultGuardSet, group: DefaultGuardSet | null): DefaultGuardSet {
+  if (!group) return defaults
+  const merged: Record<string, unknown> = { ...(defaults as unknown as Record<string, unknown>) }
+  for (const [key, value] of Object.entries(group as unknown as Record<string, unknown>)) {
+    if (isSome(value as never)) merged[key] = value
+  }
+  return merged as unknown as DefaultGuardSet
+}
+
+/**
+ * Tamper-proof on-chain mintLimit count for the active public_simple guard group.
+ * Returns null when Core CM / mintLimit is unavailable (caller keeps DB count).
+ */
+async function walletOnChainCoreMintLimitCount(
+  launch: OwlCenterLaunchPublic,
+  wallet: string,
+  network: 'mainnet' | 'devnet',
+  activeAllowlistKey: string | null
+): Promise<number | null> {
+  if (launch.mint_standard !== 'core') return null
+  const cmId = getLaunchCandyMachineId(launch, network)?.trim()
+  if (!cmId) return null
+  try {
+    const umi = createUmi(getLaunchSolanaRpcUrl(network), { commitment: 'confirmed' }).use(
+      mplCoreCandyMachine()
+    )
+    const candyMachine = publicKey(cmId)
+    const cmAccount = await fetchCandyMachine(umi, candyMachine)
+    const candyGuardAccount = await safeFetchCandyGuard(umi, cmAccount.mintAuthority)
+    if (!candyGuardAccount) return null
+
+    let mergedGuards = candyGuardAccount.guards
+    const wanted = publicSimpleMintGuardGroupLabel(launch, activeAllowlistKey)
+    if (candyGuardAccount.groups.length > 0) {
+      const group = candyGuardAccount.groups.find((g) => g.label === wanted)
+      if (!group) return null
+      mergedGuards = mergeCoreGuardSets(candyGuardAccount.guards, group.guards)
+    }
+    const mintLimitId = coreGuardMintLimitId(mergedGuards)
+    if (mintLimitId == null) return null
+
+    return await fetchCoreWalletMintLimitCount({
+      umi,
+      mintLimitId,
+      wallet,
+      candyGuard: candyGuardAccount.publicKey,
+      candyMachine,
+    })
+  } catch {
+    return null
+  }
+}
 
 async function walletPublicMintCount(
   launchId: string,
@@ -76,9 +142,20 @@ export async function buildSimpleMintEligibility(
     onChainRemaining != null ? Math.min(dbRemaining, onChainRemaining) : dbRemaining
   const onChainSoldOut = onChainRemaining === 0 && dbRemaining > 0
   const wallet = walletRaw?.trim() ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
-  const wallet_minted = wallet ? await walletPublicMintCount(launch.id, wallet, mint_network) : 0
   const allowlistOpen = isLaunchWhitelistWindowOpen(launch)
   const activeAllowlistPhase = allowlistOpen ? getLaunchActiveAllowlistPhase(launch) : null
+  const dbWalletMinted = wallet ? await walletPublicMintCount(launch.id, wallet, mint_network) : 0
+  // Prefer the higher of DB ledger vs on-chain mintLimit counter so a lagging confirm cannot
+  // re-enable Mint after the wallet already hit AllowedMintLimitReached (Breppe double-charge).
+  const onChainWalletMinted = wallet
+    ? await walletOnChainCoreMintLimitCount(
+        launch,
+        wallet,
+        mint_network,
+        allowlistOpen ? activeAllowlistPhase?.key ?? null : null
+      )
+    : null
+  const wallet_minted = Math.max(dbWalletMinted, onChainWalletMinted ?? 0)
   const effectiveWalletLimit = allowlistOpen
     ? resolvePartnerPhaseWalletMintLimit(activeAllowlistPhase, launch.wallet_mint_limit)
     : Math.max(1, Math.floor(Number(launch.wallet_mint_limit) || 1))
@@ -202,9 +279,9 @@ export async function buildSimpleMintEligibility(
             : 'Wallet is not on this collection whitelist'
         } else {
           on_allowlist = true
-          reported_wallet_minted = wlRow.used_mints
-          const phaseWalletRemaining = Math.max(0, effectiveWalletLimit - wlRow.used_mints)
-          const wlRemaining = Math.max(0, wlRow.allowed_mints - wlRow.used_mints)
+          reported_wallet_minted = Math.max(wlRow.used_mints, onChainWalletMinted ?? 0)
+          const phaseWalletRemaining = Math.max(0, effectiveWalletLimit - reported_wallet_minted)
+          const wlRemaining = Math.max(0, wlRow.allowed_mints - reported_wallet_minted)
           allowlist_spots_remaining = Math.min(wlRemaining, phaseWalletRemaining, phaseRemaining)
           if (phaseWalletRemaining <= 0) {
             max_mintable = 0

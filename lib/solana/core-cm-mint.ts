@@ -34,6 +34,7 @@ import {
   type MintSessionDeadline,
 } from '@/lib/owl-center/mint-time-budget'
 import { fetchCandyMachine, mintV1, safeFetchCandyGuard } from '@/lib/solana/core-candy-machine'
+import { assertCoreWalletMintLimitRemaining } from '@/lib/solana/core-mint-limit'
 import {
   getLaunchCandyMachineId,
   getLaunchCollectionMint,
@@ -225,13 +226,31 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
       ? coreGuardMintArgs(mergedGuards)
       : { mintArgs: undefined, mintPriceLamports: 0n }
 
+    const walletB58 = walletAdapter.publicKey.toBase58()
+    // Candy Guard botTax makes AllowedMintLimitReached look like a successful tx (platform fee +
+    // bot tax charged, no NFT). Block before the wallet prompt when the on-chain counter is full.
+    if (candyGuardAccount && mergedGuards) {
+      const limitCheck = await withSolanaRpcRetry(
+        () =>
+          assertCoreWalletMintLimitRemaining({
+            umi,
+            guards: mergedGuards,
+            wallet: walletB58,
+            candyGuard: candyGuardAccount.publicKey,
+            candyMachine,
+            quantity,
+          }),
+        MINT_SOLANA_RPC_RETRY
+      )
+      if (!limitCheck.ok) return { ok: false, error: limitCheck.error }
+    }
+
     let platformFeeLamports = 0n
     if (collectPlatformMintFee) {
       if (!feeQuote.ok) return { ok: false, error: feeQuote.error }
       platformFeeLamports = feeQuote.lamports
     }
 
-    const walletB58 = walletAdapter.publicKey.toBase58()
     if (collectPlatformMintFee && platformFeeLamports > 0n) {
       const feeBal = await withSolanaRpcRetry(
         () =>
@@ -312,6 +331,7 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
       for (const built of builtMints) {
         await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(built), {
           failMessagePrefix: 'Mint would fail on-chain before wallet approval.',
+          rejectCandyGuardBotTax: true,
         })
       }
 
@@ -406,6 +426,15 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
         }
       }
       try {
+        const blockhash = await withSolanaRpcRetry(
+          () => umi.rpc.getLatestBlockhash({ commitment: 'confirmed' }),
+          MINT_SOLANA_SEND_RETRY
+        )
+        const built = res.builder.setBlockhash(blockhash).build(umi)
+        await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(built), {
+          failMessagePrefix: 'Mint would fail on-chain before wallet approval.',
+          rejectCandyGuardBotTax: true,
+        })
         const result = await withSolanaRpcRetry(
           () => res.builder.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } }),
           MINT_SOLANA_SEND_RETRY
