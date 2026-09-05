@@ -151,6 +151,15 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
         <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">{mint_network}</span>
       </div>
 
+      {launch.mint_standard === 'core' &&
+      launch.freeze_enabled &&
+      launch.freeze_status !== 'thawed' ? (
+        <p className="mb-6 break-words rounded border border-[#FFD769]/35 bg-[#FFD769]/10 px-4 py-3 text-sm leading-relaxed text-[#FFD769]">
+          Collection freeze is on — you own minted NFTs in your wallet, but transfers and marketplace
+          listings stay locked until the project unlocks trading (usually after mint ends).
+        </p>
+      ) : null}
+
       {canEditMintSettings ? (
         <p className="mb-6 break-words rounded border border-[#1A222B] bg-[#0F1419]/80 px-4 py-3 font-mono text-xs leading-relaxed text-[#9BA8B4]">
           Per-wallet cap:{' '}

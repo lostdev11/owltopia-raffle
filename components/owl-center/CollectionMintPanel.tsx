@@ -18,7 +18,7 @@ import { publicSimpleMintGuardGroupLabel } from '@/lib/owl-center/public-simple-
 import { isLaunchWhitelistWindowOpen } from '@/lib/owl-center/launch-wl-window'
 import { isPublicSimpleMintOpen } from '@/lib/owl-center/phase-schedule'
 import { postCollectionConfirmMintWithRetry } from '@/lib/owl-center/confirm-mint-client'
-import { finalizeMintSessionOptimistic } from '@/lib/owl-center/mint-finalize-client'
+import { finalizeMintSessionOptimistic, isHardMintConfirmFailure } from '@/lib/owl-center/mint-finalize-client'
 import { recordMintSessionConfirms } from '@/lib/owl-center/mint-session'
 import {
   createMintSessionDeadline,
@@ -339,6 +339,30 @@ export function CollectionMintPanel({
           setMintProgress(null)
           setStep('success')
         },
+        onRecordWarning: (failure) => {
+          if (!failure.hardFailure) {
+            void Promise.all([loadElig({ background: true }), onRefresh()])
+            return
+          }
+          void (async () => {
+            const recovered = await checkWalletForMint({ silent: true })
+            if (recovered) return
+            setMintedAddresses([])
+            setMintedCount(0)
+            setLastSig(null)
+            setMintProgress(null)
+            setErr(
+              isHardMintConfirmFailure(failure.message)
+                ? 'That didn’t go through — no NFT was minted (wallet limit or guard rejected; you may only have paid the small bot tax). Your allocation is intact if you still have spots.'
+                : failure.message
+            )
+            setStep('error')
+            void Promise.all([loadElig(), onRefresh()])
+          })()
+        },
+        onRecordSuccess: () => {
+          void Promise.all([loadElig({ background: true }), onRefresh()])
+        },
       })
       void Promise.all([loadElig(), onRefresh()])
     } catch (e) {
@@ -449,6 +473,14 @@ export function CollectionMintPanel({
           {elig && connected ? ` · you: ${elig.wallet_minted}/${elig.wallet_mint_limit}` : ''} · {remaining}{' '}
           remaining
         </p>
+        {launch.mint_standard === 'core' &&
+        launch.freeze_enabled &&
+        launch.freeze_status !== 'thawed' ? (
+          <p className="rounded border border-[#FFD769]/35 bg-[#FFD769]/10 px-3 py-2 text-sm leading-relaxed text-[#FFD769]">
+            Transfers stay locked until the project unlocks trading (usually after mint ends). You still own the
+            NFT in your wallet — listing or sending waits on that unlock.
+          </p>
+        ) : null}
         {mintControls.env_kill_switch ? (
           <p className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
             Mint kill switch active — contact support.
