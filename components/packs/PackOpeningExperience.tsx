@@ -17,6 +17,11 @@ import {
 } from '@/lib/packs/animations'
 import { PackHoverClip } from '@/components/packs/PackHoverVideo'
 import { fireMintConfetti } from '@/lib/confetti'
+import {
+  fixedBottomWithWalletInset,
+  paddingBottomWithWalletInset,
+  useWalletBrowserBottomInset,
+} from '@/hooks/use-wallet-browser-bottom-inset'
 import { cn } from '@/lib/utils'
 
 export type PackOpeningStage =
@@ -139,6 +144,9 @@ export function PackOpeningExperience({
   const [showMeta, setShowMeta] = useState(false)
   const [showControls, setShowControls] = useState(false)
   const [hoverReady, setHoverReady] = useState(false)
+  const walletBottomInset = useWalletBrowserBottomInset()
+  const openPackBottom = fixedBottomWithWalletInset(walletBottomInset)
+  const footerPaddingBottom = paddingBottomWithWalletInset(walletBottomInset)
 
   const revealCfg = getPackCategoryReveal(reward.category)
 
@@ -418,11 +426,11 @@ export function PackOpeningExperience({
         <div
           className={cn(
             'relative z-[4] flex w-full shrink-0 flex-col gap-3 px-4',
-            'pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3',
-            'sm:flex-row sm:justify-center',
+            'pt-3 sm:flex-row sm:justify-center',
             'transition-opacity duration-500',
             showControls ? 'opacity-100' : 'pointer-events-none opacity-0'
           )}
+          style={{ paddingBottom: footerPaddingBottom }}
         >
           <button
             type="button"
@@ -501,7 +509,10 @@ export function PackOpeningExperience({
           </div>
 
           {hoverOnly && inHoverStages ? (
-            <div className="absolute inset-x-0 bottom-[max(2rem,env(safe-area-inset-bottom))] flex justify-center px-4">
+            <div
+              className="absolute inset-x-0 flex justify-center px-4"
+              style={{ bottom: openPackBottom }}
+            >
               <button
                 type="button"
                 onClick={handleContinue}
@@ -516,7 +527,10 @@ export function PackOpeningExperience({
           includeHoverGate &&
           inHoverStages &&
           !openClicked ? (
-            <div className="absolute inset-x-0 bottom-[max(2rem,env(safe-area-inset-bottom))] flex justify-center px-4">
+            <div
+              className="absolute inset-x-0 flex justify-center px-4"
+              style={{ bottom: openPackBottom }}
+            >
               <button
                 type="button"
                 disabled={!hoverReady || openClicked}
