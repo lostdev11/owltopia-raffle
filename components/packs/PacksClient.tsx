@@ -434,7 +434,7 @@ export function PacksClient({
             : 'Buying…'}
         </>
       ) : (
-        <>Claim this pack</>
+        <>Buy pack</>
       )}
     </button>
   )
