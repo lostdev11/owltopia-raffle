@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { OwlCenterSaveNotice } from '@/components/owl-center/OwlCenterSaveNotice'
-import { creatorWlWalletsApiPath } from '@/lib/owl-center/creator-api-paths'
+import { creatorDiscordWlApiPath, creatorWlWalletsApiPath } from '@/lib/owl-center/creator-api-paths'
 import { launchHasWhitelistProgram } from '@/lib/owl-center/launch-wl-window'
 import {
   resolvePartnerAllowlistPhases,
@@ -20,6 +20,18 @@ type WlRow = {
   allowed_mints: number
   used_mints: number
   note: string | null
+}
+
+type DiscordCampaignRow = {
+  id: number
+  name: string
+  phase_key: string
+  phase_label: string
+  status: string
+  wallet_count: number
+  spots_per_wallet: number
+  last_pushed_at: string | null
+  phase_on_launch: boolean
 }
 
 type Props = {
@@ -47,6 +59,9 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
   const [totals, setTotals] = useState<{ wallet_count: number; total_allowed: number; total_used: number } | null>(
     null
   )
+  const [discordCampaigns, setDiscordCampaigns] = useState<DiscordCampaignRow[]>([])
+  const [discordLoading, setDiscordLoading] = useState(false)
+  const [importingId, setImportingId] = useState<number | null>(null)
 
   useEffect(() => {
     const next = resolvePartnerAllowlistPhases(launch)
@@ -92,6 +107,64 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
   useEffect(() => {
     void load()
   }, [load])
+
+  const loadDiscord = useCallback(async () => {
+    setDiscordLoading(true)
+    try {
+      const res = await fetch(creatorDiscordWlApiPath(launchId), { credentials: 'include', cache: 'no-store' })
+      const j = (await res.json()) as { error?: string; campaigns?: DiscordCampaignRow[] }
+      if (!res.ok) throw new Error(j.error || 'Failed to load Discord spots')
+      setDiscordCampaigns(j.campaigns ?? [])
+    } catch {
+      setDiscordCampaigns([])
+    } finally {
+      setDiscordLoading(false)
+    }
+  }, [launchId])
+
+  useEffect(() => {
+    void loadDiscord()
+  }, [loadDiscord])
+
+  async function importDiscordCampaign(campaign: DiscordCampaignRow) {
+    setImportingId(campaign.id)
+    setMsg(null)
+    setErr(null)
+    try {
+      // Prefer the campaign's phase (OG / WL); fall back to the phase tab you're viewing.
+      const targetPhase =
+        campaign.phase_on_launch || apiPhases.some((p) => p.key === campaign.phase_key)
+          ? campaign.phase_key
+          : phaseKey
+      const res = await fetch(creatorDiscordWlApiPath(launchId), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaign_id: campaign.id, phase_key: targetPhase }),
+      })
+      const j = (await res.json()) as {
+        error?: string
+        upserted?: number
+        phase_label?: string
+        wallet_count?: number
+      }
+      if (!res.ok) throw new Error(j.error || 'Import failed')
+      setMsg(
+        `Imported ${j.upserted ?? j.wallet_count ?? 0} wallet(s) from Discord “${campaign.name}” into ${j.phase_label ?? targetPhase}.`
+      )
+      if (targetPhase !== phaseKey) {
+        setPhaseKey(targetPhase)
+        const phase = apiPhases.find((p) => p.key === targetPhase)
+        setAllowed(String(resolvePartnerPhaseWalletMintLimit(phase, launch.wallet_mint_limit)))
+      }
+      await load()
+      await loadDiscord()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Import failed')
+    } finally {
+      setImportingId(null)
+    }
+  }
 
   async function upload() {
     setSaving(true)
@@ -196,6 +269,64 @@ export function CreatorWlWalletsPanel({ launchId, launch, embedded = false }: Pr
           then come back here.
         </p>
       ) : null}
+
+      <div className="space-y-3 rounded border border-[#1A222B] bg-[#0F1419]/60 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#5C6773]">
+            Import from Owltopia Discord bot
+          </p>
+          <DeployButton
+            type="button"
+            variant="ghost"
+            disabled={discordLoading || saving}
+            onClick={() => void loadDiscord()}
+          >
+            {discordLoading ? 'Loading…' : 'Refresh spots'}
+          </DeployButton>
+        </div>
+        <p className="text-xs leading-relaxed text-[#9BA8B4]">
+          Pull wallets collected with <code className="text-[#C5D0D8]">/owltopia-wl</code> or look them up with{' '}
+          <code className="text-[#C5D0D8]">/query mintlist</code>. Link the Discord spot to this collection when you
+          create it (or push with <code className="text-[#C5D0D8]">/owltopia-wl push</code>), then import OG / WL here.
+        </p>
+        {discordCampaigns.length === 0 ? (
+          <p className="font-mono text-xs text-[#5C6773]">
+            No Discord spots linked to this launch yet. In Discord: `/owltopia-wl create … launch:{launch.slug}` then
+            `/owltopia-wl push`, or use Partners → Whitelist spots.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {discordCampaigns.map((c) => (
+              <li
+                key={c.id}
+                className="flex flex-wrap items-center justify-between gap-2 border border-[#1A222B] bg-[#0B0F13] px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="font-mono text-xs text-[#E8EEF2]">
+                    {c.name}{' '}
+                    <span className="text-[#5C6773]">
+                      · {c.phase_label} · {c.status} · {c.wallet_count} wallet{c.wallet_count === 1 ? '' : 's'}
+                    </span>
+                  </p>
+                  {!c.phase_on_launch ? (
+                    <p className="mt-1 text-[11px] text-[#FFD769]">
+                      Phase “{c.phase_label}” is missing on this mint — import will use the selected tab ({activeLabel}
+                      ), or add the phase in Mint details first.
+                    </p>
+                  ) : null}
+                </div>
+                <DeployButton
+                  type="button"
+                  disabled={!wlEnabled || saving || c.wallet_count < 1 || importingId === c.id}
+                  onClick={() => void importDiscordCampaign(c)}
+                >
+                  {importingId === c.id ? 'Importing…' : `Import → ${c.phase_on_launch ? c.phase_label : activeLabel}`}
+                </DeployButton>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       {apiPhases.length > 0 ? (
         <div className="flex flex-wrap gap-2">

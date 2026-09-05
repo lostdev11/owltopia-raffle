@@ -6,6 +6,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 
 import { ActivityLog } from '@/components/owl-center/ActivityLog'
 import { CollectionMintedGrid } from '@/components/owl-center/CollectionMintedGrid'
+import { CollectionMintEligibilityCard } from '@/components/owl-center/CollectionMintEligibilityCard'
 import { CollectionMintPanel } from '@/components/owl-center/CollectionMintPanel'
 import { CollectionSoldOutPanel } from '@/components/owl-center/CollectionSoldOutPanel'
 import { CommandCard } from '@/components/owl-center/CommandCard'
@@ -40,7 +41,11 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
   const { sessionWallet } = useSiwsSession()
   const { publicKey, connected } = useWallet()
   const walletStr = publicKey?.toBase58() ?? null
-  const { elig } = useCollectionMintEligibility(slug, walletStr, connected)
+  const { elig, loading: eligLoading, error: eligError, refresh: refreshElig } = useCollectionMintEligibility(
+    slug,
+    walletStr,
+    connected
+  )
   const [state, setState] = useState<CollectionMintStateResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -188,6 +193,14 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
             launch={launch}
             liveUnitLamports={elig?.unit_lamports_estimate}
           />
+          <CollectionMintEligibilityCard
+            connected={connected}
+            wallet={walletStr}
+            elig={elig}
+            loading={eligLoading}
+            error={eligError}
+            onRefresh={() => void refreshElig()}
+          />
           <CollectionMintPanel
             slug={slug}
             launch={launch}
@@ -196,6 +209,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
             onRefresh={() => {
               void load()
               void loadMyMints()
+              void refreshElig()
             }}
           />
 

@@ -116,6 +116,8 @@ export async function buildSimpleMintEligibility(
   let reported_wallet_minted = wallet_minted
   let wallet_sol_balance_lamports: string | null = null
   let mint_sol_needed_lamports: string | null = null
+  let on_allowlist: boolean | null = null
+  let allowlist_spots_remaining: number | null = null
 
   if (wallet) {
     try {
@@ -166,7 +168,9 @@ export async function buildSimpleMintEligibility(
     // No early allowlist window — honor scheduled PUBLIC open (#110).
     reason = launchScheduledPublicReason(launch) ?? 'Public mint is not open yet'
   } else if (!wallet) {
-    reason = 'Connect wallet to mint'
+    reason = allowlistOpen && activeAllowlistPhase
+      ? `${activeAllowlistPhase.label} is live — connect wallet to check if you’re on the list`
+      : 'Connect wallet to mint'
   } else if (!allowlistOpen && walletRemainingPublic <= 0) {
     reason = `Wallet limit reached (${effectiveWalletLimit} per wallet)`
   } else {
@@ -190,14 +194,18 @@ export async function buildSimpleMintEligibility(
       } else {
         const wlRow = await getLaunchWlWallet(launch.id, wallet, phaseKey)
         if (!wlRow) {
+          on_allowlist = false
+          allowlist_spots_remaining = 0
           max_mintable = 0
           reason = activePhase
-            ? `Wallet is not on the ${activePhase.label} list`
+            ? `Not on the ${activePhase.label} list — wait for the next phase or public`
             : 'Wallet is not on this collection whitelist'
         } else {
+          on_allowlist = true
           reported_wallet_minted = wlRow.used_mints
           const phaseWalletRemaining = Math.max(0, effectiveWalletLimit - wlRow.used_mints)
           const wlRemaining = Math.max(0, wlRow.allowed_mints - wlRow.used_mints)
+          allowlist_spots_remaining = Math.min(wlRemaining, phaseWalletRemaining, phaseRemaining)
           if (phaseWalletRemaining <= 0) {
             max_mintable = 0
             reason = `Wallet limit reached (${effectiveWalletLimit} per wallet for ${activePhase?.label ?? 'this phase'})`
@@ -206,12 +214,16 @@ export async function buildSimpleMintEligibility(
             reason = `${activePhase?.label ?? 'Whitelist'} mint allocation exhausted`
           } else {
             max_mintable = Math.min(max_mintable, wlRemaining, phaseWalletRemaining, phaseRemaining)
+            reason = `Eligible for ${activePhase?.label ?? 'allowlist'} · up to ${max_mintable} mint${max_mintable === 1 ? '' : 's'}`
           }
         }
       }
     }
 
     is_eligible = max_mintable > 0
+    if (is_eligible && !allowlistOpen && !reason) {
+      reason = `Eligible for public · up to ${max_mintable} mint${max_mintable === 1 ? '' : 's'}`
+    }
     if (is_eligible && platformFeeEnabled && wallet && platformFeeQuote?.ok) {
       const feeBal = await assertOwlCenterPlatformMintFeeSolBalance(
         wallet,
@@ -258,5 +270,7 @@ export async function buildSimpleMintEligibility(
     mint_operational,
     mint_window_open,
     phase_starts_at: scheduleClosed?.opensAt ?? null,
+    on_allowlist,
+    allowlist_spots_remaining,
   }
 }

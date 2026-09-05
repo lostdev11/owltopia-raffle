@@ -197,6 +197,13 @@ export type SimpleMintEligibilityResponse = {
   mint_window_open: boolean
   /** ISO time the public mint button becomes live, when scheduled. */
   phase_starts_at: string | null
+  /**
+   * Allowlist membership for the live phase (null when no allowlist window / no wallet).
+   * Used by the mint eligibility card so buyers see “on list” vs “not on list” clearly.
+   */
+  on_allowlist: boolean | null
+  /** Spots left for this wallet on the live allowlist phase (null when N/A). */
+  allowlist_spots_remaining: number | null
 }
 
 export type CollectionMintStateResponse = {
