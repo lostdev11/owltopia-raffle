@@ -25,9 +25,20 @@ import {
 } from '@solana/spl-token'
 import { getSolanaConnection, getSolanaReadConnection } from '@/lib/solana/connection'
 import { getTokenInfo } from '@/lib/tokens'
+import {
+  evaluateGenOwlRevSharePoolAffordabilityFromBalances,
+  GEN_OWL_REV_SHARE_SOL_FEE_BUFFER_LAMPORTS,
+  type GenOwlRevSharePoolAffordability,
+} from '@/lib/nesting/gen-owl-rev-share-pool-affordability'
+
+export {
+  evaluateGenOwlRevSharePoolAffordabilityFromBalances,
+  GEN_OWL_REV_SHARE_SOL_FEE_BUFFER_LAMPORTS,
+  type GenOwlRevSharePoolAffordability,
+}
 
 const TOKEN_PROGRAM_IDS = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID] as const
-const SOL_FEE_BUFFER_LAMPORTS = 15_000
+const SOL_FEE_BUFFER_LAMPORTS = GEN_OWL_REV_SHARE_SOL_FEE_BUFFER_LAMPORTS
 
 function parsePoolKeypair(): Keypair | null {
   const raw = process.env.GEN_OWL_REV_SHARE_POOL_SECRET_KEY?.trim()
@@ -79,6 +90,84 @@ export function getGenOwlRevSharePoolKeypair(): Keypair | null {
 export function getGenOwlRevSharePoolPublicKey(): string | null {
   const kp = getGenOwlRevSharePoolKeypair()
   return kp ? kp.publicKey.toBase58() : null
+}
+
+export type GenOwlRevSharePoolBalances = {
+  configured: boolean
+  address: string | null
+  sol_lamports: number | null
+  sol: number | null
+  usdc: number | null
+}
+
+/** Live on-chain SOL/USDC balances for the dedicated rev-share pool (read RPC). */
+export async function getGenOwlRevSharePoolBalances(): Promise<GenOwlRevSharePoolBalances> {
+  const kp = getGenOwlRevSharePoolKeypair()
+  if (!kp) {
+    return { configured: false, address: null, sol_lamports: null, sol: null, usdc: null }
+  }
+
+  const address = kp.publicKey.toBase58()
+  const readConn = getSolanaReadConnection()
+  let solLamports: number | null = null
+  try {
+    solLamports = await readConn.getBalance(kp.publicKey, 'confirmed')
+  } catch (e) {
+    console.warn(
+      '[gen-owl-rev-share-pool] getBalance failed',
+      e instanceof Error ? e.message : e
+    )
+  }
+
+  let usdc: number | null = null
+  try {
+    const tokenInfo = getTokenInfo('USDC')
+    if (tokenInfo.mintAddress) {
+      const mint = new PublicKey(tokenInfo.mintAddress)
+      const programId = await getPoolTokenProgramForMint(mint, kp.publicKey)
+      if (programId) {
+        const ata = await getAssociatedTokenAddress(
+          mint,
+          kp.publicKey,
+          false,
+          programId,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+        const acct = await getAccount(readConn, ata, 'confirmed', programId)
+        usdc = Number(acct.amount) / Math.pow(10, tokenInfo.decimals)
+      } else {
+        usdc = 0
+      }
+    }
+  } catch {
+    usdc = null
+  }
+
+  return {
+    configured: true,
+    address,
+    sol_lamports: solLamports,
+    sol: solLamports != null ? solLamports / LAMPORTS_PER_SOL : null,
+    usdc,
+  }
+}
+
+/**
+ * Whether the pool can cover a SOL/USDC payout (incl. network fee buffer).
+ * Used to refuse claims before users pay the platform fee.
+ */
+export async function assessGenOwlRevSharePoolAffordability(params: {
+  amount_sol: number
+  amount_usdc: number
+}): Promise<GenOwlRevSharePoolAffordability> {
+  const balances = await getGenOwlRevSharePoolBalances()
+  return evaluateGenOwlRevSharePoolAffordabilityFromBalances({
+    amount_sol: params.amount_sol,
+    amount_usdc: params.amount_usdc,
+    hold_sol: balances.sol,
+    hold_usdc: balances.usdc,
+    configured: balances.configured,
+  })
 }
 
 async function getPoolTokenProgramForMint(

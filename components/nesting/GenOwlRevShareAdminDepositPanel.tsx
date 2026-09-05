@@ -70,6 +70,9 @@ export function GenOwlRevShareAdminDepositPanel({
   const [period, setPeriod] = useState<PeriodTotals | null>(null)
   const [gen1Period, setGen1Period] = useState<PeriodTotals | null>(null)
   const [gen2Period, setGen2Period] = useState<PeriodTotals | null>(null)
+  const [poolOnchain, setPoolOnchain] = useState<{ sol: number | null; usdc: number | null } | null>(
+    null
+  )
 
   const refreshPeriod = useCallback(async () => {
     try {
@@ -86,6 +89,15 @@ export function GenOwlRevShareAdminDepositPanel({
       setPeriod(data.period ?? null)
       setGen1Period(data.gen1_period ?? data.period ?? null)
       setGen2Period(data.gen2_period ?? data.period ?? null)
+      const onchain = data.pool_onchain
+      if (onchain && typeof onchain === 'object') {
+        setPoolOnchain({
+          sol: onchain.sol == null ? null : Number(onchain.sol),
+          usdc: onchain.usdc == null ? null : Number(onchain.usdc),
+        })
+      } else {
+        setPoolOnchain(null)
+      }
     } catch {
       // Non-blocking status
     }
@@ -239,8 +251,26 @@ export function GenOwlRevShareAdminDepositPanel({
         dedicated rev-share pool. Funds escrow is not used. Only verified on-chain deposits credit claimable
         totals (homepage Save is display-only). Use the Gen 1 or Gen 2 button to fund that pool alone —
         amounts are <span className="font-medium text-foreground/90">added</span> to the month on that
-        gen&apos;s next-date field (so Gen 2 set to August credits August, not July).
+        gen&apos;s next-date field (so Gen 2 set to August credits August, not July). Platform claim fees go
+        to the mint-fee treasury — they do <span className="font-medium text-foreground/90">not</span> fund
+        this pool.
       </p>
+      {poolOnchain ? (
+        <p
+          className={`text-xs tabular-nums leading-relaxed ${
+            (poolOnchain.sol ?? 0) <= 0.05 ? 'text-amber-400/95 font-medium' : 'text-foreground/90'
+          }`}
+        >
+          On-chain pool balance:{' '}
+          {poolOnchain.sol == null ? '— SOL' : `${poolOnchain.sol.toFixed(5)} SOL`}
+          {poolOnchain.usdc != null && poolOnchain.usdc > 0
+            ? ` · ${poolOnchain.usdc.toFixed(2)} USDC`
+            : ''}
+          {(poolOnchain.sol ?? 0) <= 0.05
+            ? ' — top up before opening claims or holders will see failed payouts.'
+            : ''}
+        </p>
+      ) : null}
       {gen1MonthLabel || gen2MonthLabel ? (
         <div className="space-y-1 text-xs text-foreground/90 tabular-nums">
           <p>

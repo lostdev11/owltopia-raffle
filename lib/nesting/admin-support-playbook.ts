@@ -209,7 +209,7 @@ export function buildAdminSupportPlaybook(params: {
     recommendations.push({
       action: 'Gen 1 / Gen 2: confirm perch + rev share',
       detail:
-        'Daily OWL claims use Claim all / per-nest claim. Month-end SOL/USDC rev share is separate (Gen Owl rev share panel) and pays from the dedicated rev-share pool — never funds escrow. Do not use OWL catch-up for rev-share payouts.',
+        'Daily OWL claims use Claim all / per-nest claim. Month-end SOL/USDC rev share is separate (Gen Owl rev share panel) and pays from the dedicated rev-share pool — never funds escrow. Do not use OWL catch-up for rev-share payouts. Platform fees for rev-share claims go to the mint-fee treasury and do not fund the pool. If users see "pool is short of SOL", deposit into the rev-share pool (Admin → Gen Owl deposit) until on-chain balance covers unclaimed liability; claims now preflight the pool so users are not charged another fee while it is empty. Paid-but-failed rev-share fees are reusable for 48h (same as OWL claim fee recovery).',
     })
   }
 

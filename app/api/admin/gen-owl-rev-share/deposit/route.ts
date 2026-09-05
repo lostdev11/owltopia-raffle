@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
-import { getGenOwlRevSharePoolPublicKey } from '@/lib/nesting/gen-owl-rev-share-pool'
+import {
+  getGenOwlRevSharePoolBalances,
+  getGenOwlRevSharePoolPublicKey,
+} from '@/lib/nesting/gen-owl-rev-share-pool'
 import { confirmGenOwlRevSharePoolDeposit } from '@/lib/nesting/gen-owl-rev-share-deposit-service'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { getRevShareSchedule } from '@/lib/db/rev-share-schedule'
@@ -57,10 +60,11 @@ export async function GET(request: NextRequest) {
   const gen2PeriodMonth =
     periodMonthFromScheduleDate(schedule?.gen2_next_date ?? schedule?.next_date) ?? currentMonth
   const periodMonth = currentMonth
-  const [period, gen1Period, gen2Period] = await Promise.all([
+  const [period, gen1Period, gen2Period, poolBalances] = await Promise.all([
     getGenOwlRevSharePeriod(periodMonth),
     getGenOwlRevSharePeriod(gen1PeriodMonth),
     getGenOwlRevSharePeriod(gen2PeriodMonth),
+    getGenOwlRevSharePoolBalances(),
   ])
   return NextResponse.json({
     address,
@@ -71,6 +75,11 @@ export async function GET(request: NextRequest) {
     period: periodSummary(period),
     gen1_period: periodSummary(gen1Period),
     gen2_period: periodSummary(gen2Period),
+    pool_onchain: {
+      sol: poolBalances.sol,
+      usdc: poolBalances.usdc,
+      sol_lamports: poolBalances.sol_lamports,
+    },
   })
 }
 
