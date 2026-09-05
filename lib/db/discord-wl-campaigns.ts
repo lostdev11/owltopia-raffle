@@ -148,6 +148,24 @@ export async function listDiscordWlCampaignsByGuild(guildId: string): Promise<Di
   return (data ?? []).map((r) => mapCampaign(r as Record<string, unknown>))
 }
 
+/** Campaigns linked to a specific Owl Center launch (creator mint console import). */
+export async function listDiscordWlCampaignsByLaunchId(launchId: string): Promise<DiscordWlCampaignRow[]> {
+  const id = launchId.trim()
+  if (!id) return []
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('discord_wl_campaigns')
+    .select('*')
+    .eq('launch_id', id)
+    .order('updated_at', { ascending: false })
+    .limit(50)
+  if (error) {
+    console.error('listDiscordWlCampaignsByLaunchId:', error.message)
+    return []
+  }
+  return (data ?? []).map((r) => mapCampaign(r as Record<string, unknown>))
+}
+
 export async function listDiscordWlCampaignsForPartner(input: {
   wallet: string
   tenantId: string | null

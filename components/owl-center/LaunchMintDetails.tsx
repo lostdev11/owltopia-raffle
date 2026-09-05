@@ -1,5 +1,6 @@
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
+import { LocalMintTime } from '@/components/owl-center/LocalMintTime'
 import { MintCountdown } from '@/components/owl-center/MintCountdown'
 import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
 import { launchHasPresaleProgram, launchShowsPresaleOverage } from '@/lib/owl-center/launch-presale'
@@ -11,9 +12,9 @@ import {
 } from '@/lib/owl-center/partner-mint-phase-schedule'
 import { resolveEffectivePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
 import { formatRoyaltyPercentLabel, launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
-import { formatMintDate, formatPhaseStartShort, getMintCountdownInfo } from '@/lib/owl-center/phase-schedule'
+import { getMintCountdownInfo } from '@/lib/owl-center/phase-schedule'
 
-type PhaseRow = { label: string; supply: number; note?: string }
+type PhaseRow = { label: string; supply: number; note?: string; opensAt?: string | null }
 
 function phaseRows(launch: OwlCenterLaunchPublic): PhaseRow[] {
   const rows: PhaseRow[] = []
@@ -38,11 +39,11 @@ function phaseRows(launch: OwlCenterLaunchPublic): PhaseRow[] {
   const allowlists = resolveEffectivePartnerAllowlistPhases(launch)
   if (allowlists.length > 0) {
     for (const phase of allowlists) {
-      const start = formatPhaseStartShort(phase.starts_at)
       rows.push({
         label: phase.label,
         supply: phase.supply,
-        note: start ? `opens ${start}` : 'FCFS',
+        note: phase.starts_at ? 'opens' : 'FCFS',
+        opensAt: phase.starts_at,
       })
     }
   } else if (launch.wl_supply > 0) {
@@ -89,7 +90,14 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
               <dt className="text-[#5C6773]">{row.label}</dt>
               <dd>
                 <span className="tabular-nums text-[#00FF9C]">{row.supply.toLocaleString()}</span>
-                {row.note ? <span className="text-[#5C6773]"> · {row.note}</span> : null}
+                {row.note === 'opens' && row.opensAt ? (
+                  <span className="text-[#5C6773]">
+                    {' '}
+                    · opens <LocalMintTime iso={row.opensAt} variant="short" />
+                  </span>
+                ) : row.note ? (
+                  <span className="text-[#5C6773]"> · {row.note}</span>
+                ) : null}
               </dd>
             </div>
           ))}
@@ -101,7 +109,7 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
             <div key={`t-${row.key}`} className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
               <dt className="text-[#5C6773]">{row.label}</dt>
               <dd className="text-[#E8EEF2]">
-                {formatPhaseStartShort(row.starts_at) ?? 'TBA'}
+                <LocalMintTime iso={row.starts_at} variant="short" />
                 {row.wallet_mint_limit != null ? ` · ${row.wallet_mint_limit}/wallet` : ''}
               </dd>
             </div>
@@ -136,7 +144,9 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
         ) : null}
         <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5 border-t border-[#1A222B]/80 pt-1.5">
           <dt className="text-[#5C6773]">Mint opens</dt>
-          <dd className="text-[#E8EEF2]">{formatMintDate(mintOpensAt)}</dd>
+          <dd className="text-[#E8EEF2]">
+            <LocalMintTime iso={mintOpensAt} variant="full" />
+          </dd>
         </div>
         {launch.slug === 'gen2' ? (
           <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">

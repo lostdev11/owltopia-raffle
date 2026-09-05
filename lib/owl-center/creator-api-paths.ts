@@ -27,6 +27,11 @@ export function creatorWlWalletsApiPath(launchId: string): string {
   return `/api/owl-center/launches/${launchId}/wl-wallets`
 }
 
+/** Discord whitelist spots linked to this launch — list + import into allowlist phases. */
+export function creatorDiscordWlApiPath(launchId: string): string {
+  return `/api/owl-center/launches/${launchId}/discord-wl`
+}
+
 export function creatorCoreThawApiPath(launchId: string): string {
   return `/api/owl-center/launches/${launchId}/core-thaw`
 }
