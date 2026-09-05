@@ -64,14 +64,15 @@ function parseStakingPlatformFeeLinkParams(params: StakingPlatformFeeLinkParams)
 }
 
 /**
- * For claim actions: if the client lost the fee signature (mobile redirect / cleared storage),
- * recover a recent unpaid or spare-capacity claim fee for this wallet before requiring a new payment.
+ * For claim / rev-share-claim actions: if the client lost the fee signature
+ * (mobile redirect / cleared storage), recover a recent unpaid or spare-capacity
+ * fee for this wallet before requiring a new payment.
  */
 export async function resolveStakingPlatformFeeSignature(
   params: StakingPlatformFeeLinkParams
 ): Promise<StakingPlatformFeeLinkParams> {
   if (!isStakingPlatformFeeEnabled()) return params
-  if (params.action !== 'claim') return params
+  if (params.action !== 'claim' && params.action !== 'rev_share_claim') return params
 
   const provided = parseFeeSignature(params.feeSignature)
   if (provided) return params
@@ -80,6 +81,7 @@ export async function resolveStakingPlatformFeeSignature(
   const recovered = await findReusableClaimPlatformFeeSignature({
     wallet: params.wallet,
     minUnits: positionIds.length,
+    action: params.action,
   })
   if (!recovered) return params
 

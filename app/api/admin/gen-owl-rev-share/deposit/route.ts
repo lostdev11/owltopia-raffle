@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireFullAdminSession } from '@/lib/auth-server'
-import { getGenOwlRevSharePoolPublicKey } from '@/lib/nesting/gen-owl-rev-share-pool'
+import {
+  getGenOwlRevSharePoolBalances,
+  getGenOwlRevSharePoolPublicKey,
+} from '@/lib/nesting/gen-owl-rev-share-pool'
+import { loadGenOwlRevShareLiabilityWithCoverage } from '@/lib/nesting/gen-owl-rev-share-liability-service'
 import { confirmGenOwlRevSharePoolDeposit } from '@/lib/nesting/gen-owl-rev-share-deposit-service'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { getRevShareSchedule } from '@/lib/db/rev-share-schedule'
@@ -57,10 +61,12 @@ export async function GET(request: NextRequest) {
   const gen2PeriodMonth =
     periodMonthFromScheduleDate(schedule?.gen2_next_date ?? schedule?.next_date) ?? currentMonth
   const periodMonth = currentMonth
-  const [period, gen1Period, gen2Period] = await Promise.all([
+  const [period, gen1Period, gen2Period, poolBalances, liabilitySnap] = await Promise.all([
     getGenOwlRevSharePeriod(periodMonth),
     getGenOwlRevSharePeriod(gen1PeriodMonth),
     getGenOwlRevSharePeriod(gen2PeriodMonth),
+    getGenOwlRevSharePoolBalances(),
+    loadGenOwlRevShareLiabilityWithCoverage(),
   ])
   return NextResponse.json({
     address,
@@ -71,6 +77,36 @@ export async function GET(request: NextRequest) {
     period: periodSummary(period),
     gen1_period: periodSummary(gen1Period),
     gen2_period: periodSummary(gen2Period),
+    pool_onchain: {
+      sol: poolBalances.sol,
+      usdc: poolBalances.usdc,
+      sol_lamports: poolBalances.sol_lamports,
+    },
+    liability: {
+      open_period_count: liabilitySnap.liability.open.open_period_count,
+      claimed_nests: liabilitySnap.liability.open.claimed_nests,
+      unclaimed_nests: liabilitySnap.liability.open.unclaimed_nests,
+      paid_sol: liabilitySnap.liability.open.paid_sol,
+      unclaimed_sol: liabilitySnap.liability.open.unclaimed_sol,
+      paid_usdc: liabilitySnap.liability.open.paid_usdc,
+      unclaimed_usdc: liabilitySnap.liability.open.unclaimed_usdc,
+      required_sol: liabilitySnap.liability.open.required_sol,
+      required_usdc: liabilitySnap.liability.open.required_usdc,
+      shortfall_sol: liabilitySnap.coverage.shortfall_sol,
+      shortfall_usdc: liabilitySnap.coverage.shortfall_usdc,
+      pool_covered: liabilitySnap.coverage.ok,
+      message: liabilitySnap.coverage.error,
+      periods: liabilitySnap.liability.periods
+        .filter((p) => p.claims_open)
+        .map((p) => ({
+          period_month: p.period_month,
+          claimed_nests: p.claimed_nests,
+          unclaimed_nests: p.unclaimed_nests,
+          paid_sol: p.paid_sol,
+          unclaimed_sol: p.unclaimed_sol,
+          claim_rate: p.claim_rate,
+        })),
+    },
   })
 }
 

@@ -98,24 +98,27 @@ export async function appendStakingPlatformFeePositionIds(
 
 /**
  * Recent claim-fee payments for a wallet that still have unused nest capacity
- * (paid more units than nests already linked). Used to recover after OWL payout failure.
+ * (paid more units than nests already linked). Used to recover after OWL / rev-share
+ * payout failure.
  */
 export async function listClaimPlatformFeesWithSpareCapacity(params: {
   wallet: string
   minSpareUnits: number
   newerThanIso: string
+  action?: StakingPlatformFeePaymentRow['action']
   limit?: number
 }): Promise<StakingPlatformFeePaymentRow[]> {
   const wallet = params.wallet.trim()
   const minSpare = Math.max(1, Math.floor(params.minSpareUnits))
   const limit = Math.min(20, Math.max(1, params.limit ?? 10))
+  const action = params.action ?? 'claim'
   if (!wallet) return []
 
   const { data, error } = await getSupabaseAdmin()
     .from('staking_platform_fee_payments')
     .select('*')
     .eq('wallet_address', wallet)
-    .eq('action', 'claim')
+    .eq('action', action)
     .gte('created_at', params.newerThanIso)
     .order('created_at', { ascending: false })
     .limit(limit)

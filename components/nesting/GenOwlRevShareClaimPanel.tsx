@@ -22,6 +22,13 @@ import {
 import { sendStakingPlatformFeeTransaction } from '@/lib/nesting/client/staking-platform-fee-tx'
 import type { StakingPlatformFeeTxConfig } from '@/lib/nesting/client/staking-platform-fee-tx'
 import {
+  clearPendingRevShareClaimPlatformFee,
+  pendingClaimPlatformFeeCovers,
+  readPendingRevShareClaimPlatformFee,
+  revShareClaimRetryWithoutRepayMessage,
+  writePendingRevShareClaimPlatformFee,
+} from '@/lib/nesting/pending-claim-platform-fee'
+import {
   formatStakingPlatformFeeTotalLabel,
   getStakingPlatformFeeLamports,
   getStakingPlatformFeeSol,
@@ -52,6 +59,17 @@ type ClaimSuccessState = {
   fee_signature: string | null
   sol_transaction_signature: string | null
   usdc_transaction_signature: string | null
+}
+
+type PoolFundingState = {
+  can_pay: boolean
+  need_sol: number
+  hold_sol: number | null
+  need_usdc: number
+  hold_usdc: number | null
+  shortfall_sol: number
+  shortfall_usdc: number
+  message: string | null
 }
 
 function solscanTxUrl(signature: string): string {
@@ -118,12 +136,24 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
   const [success, setSuccess] = useState<ClaimSuccessState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [feeConfig, setFeeConfig] = useState<StakingPlatformFeeTxConfig | null>(null)
+  const [poolFunding, setPoolFunding] = useState<PoolFundingState | null>(null)
+  const [savedFeeHint, setSavedFeeHint] = useState<string | null>(null)
+  const [liabilitySummary, setLiabilitySummary] = useState<{
+    claimed_nests: number
+    unclaimed_nests: number
+    unclaimed_sol: number
+    open_period_count: number
+    pool_covered: boolean
+  } | null>(null)
 
   const load = useCallback(async () => {
     if (!connected || needsSignIn) {
       setClaimable([])
       setHistory([])
       setClaimsEnabled(true)
+      setPoolFunding(null)
+      setSavedFeeHint(null)
+      setLiabilitySummary(null)
       return
     }
     setLoading(true)
@@ -138,19 +168,63 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
         setError(typeof data.error === 'string' ? data.error : 'Could not load rev share claims.')
         setClaimable([])
         setHistory([])
+        setPoolFunding(null)
+        setLiabilitySummary(null)
         return
       }
       setClaimsEnabled(data.claims_enabled !== false)
-      setClaimable(Array.isArray(data.claimable) ? data.claimable : [])
+      const nextClaimable = Array.isArray(data.claimable) ? data.claimable : []
+      setClaimable(nextClaimable)
       setHistory(Array.isArray(data.history) ? data.history : [])
+      const pool = data.pool
+      if (pool && typeof pool === 'object') {
+        setPoolFunding({
+          can_pay: pool.can_pay !== false,
+          need_sol: Number(pool.need_sol) || 0,
+          hold_sol: pool.hold_sol == null ? null : Number(pool.hold_sol),
+          need_usdc: Number(pool.need_usdc) || 0,
+          hold_usdc: pool.hold_usdc == null ? null : Number(pool.hold_usdc),
+          shortfall_sol: Number(pool.shortfall_sol) || 0,
+          shortfall_usdc: Number(pool.shortfall_usdc) || 0,
+          message: typeof pool.message === 'string' ? pool.message : null,
+        })
+      } else {
+        setPoolFunding(null)
+      }
+      const liab = data.liability
+      if (liab && typeof liab === 'object') {
+        setLiabilitySummary({
+          claimed_nests: Number(liab.claimed_nests) || 0,
+          unclaimed_nests: Number(liab.unclaimed_nests) || 0,
+          unclaimed_sol: Number(liab.unclaimed_sol) || 0,
+          open_period_count: Number(liab.open_period_count) || 0,
+          pool_covered: liab.pool_covered !== false,
+        })
+      } else {
+        setLiabilitySummary(null)
+      }
+
+      const wallet = publicKey?.toBase58()
+      if (wallet && nextClaimable.length > 0) {
+        const pendingFee = readPendingRevShareClaimPlatformFee()
+        if (pendingFee && pendingClaimPlatformFeeCovers(pendingFee, wallet, nextClaimable.length)) {
+          setSavedFeeHint(revShareClaimRetryWithoutRepayMessage(pendingFee.units))
+        } else {
+          setSavedFeeHint(null)
+        }
+      } else {
+        setSavedFeeHint(null)
+      }
     } catch {
       setError('Network error loading rev share.')
       setClaimable([])
       setHistory([])
+      setPoolFunding(null)
+      setLiabilitySummary(null)
     } finally {
       setLoading(false)
     }
-  }, [connected, needsSignIn])
+  }, [connected, needsSignIn, publicKey])
 
   useEffect(() => {
     void load()
@@ -200,6 +274,7 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
 
   const feeActive = Boolean(feeConfig && (feeConfig.unitLamports > 0 || getStakingPlatformFeeSol() > 0))
   const feeLabel = feeActive ? formatStakingPlatformFeeTotalLabel(claimAllCount) : null
+  const poolBlocked = Boolean(poolFunding && !poolFunding.can_pay)
 
   const openPeriodMonth = useMemo(() => latestOpenClaimPeriodMonth(), [])
   const claimedOpenPeriod = useMemo(() => {
@@ -217,20 +292,42 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
 
   const claimAll = async () => {
     if (claimable.length === 0 || !publicKey) return
+    if (poolBlocked) {
+      setError(
+        poolFunding?.message ??
+          'Rev share pool is short of funds for this payout. An admin needs to top up the pool before claims can complete.'
+      )
+      return
+    }
     setBusy(true)
     setError(null)
     setPhaseHint(null)
+    const wallet = publicKey.toBase58()
     try {
       let platformFeeSignature: string | undefined
       if (feeActive) {
-        setPhaseHint('Approve the SOL platform fee in your wallet — rev share is sent right after.')
-        platformFeeSignature = await sendStakingPlatformFeeTransaction({
-          connection,
-          sendTransaction,
-          publicKey,
-          units: claimable.length,
-          feeConfig,
-        })
+        const pendingFee = readPendingRevShareClaimPlatformFee()
+        if (pendingFee && pendingClaimPlatformFeeCovers(pendingFee, wallet, claimable.length)) {
+          platformFeeSignature = pendingFee.signature
+          setPhaseHint('Reusing your paid platform fee — sending rev share…')
+          setSavedFeeHint(revShareClaimRetryWithoutRepayMessage(pendingFee.units))
+        } else {
+          setPhaseHint('Approve the SOL platform fee in your wallet — rev share is sent right after.')
+          platformFeeSignature = await sendStakingPlatformFeeTransaction({
+            connection,
+            sendTransaction,
+            publicKey,
+            units: claimable.length,
+            feeConfig,
+          })
+          writePendingRevShareClaimPlatformFee({
+            wallet,
+            signature: platformFeeSignature,
+            units: claimable.length,
+            savedAtMs: Date.now(),
+          })
+          setSavedFeeHint(revShareClaimRetryWithoutRepayMessage(claimable.length))
+        }
       }
 
       setPhaseHint('Sending rev share to your wallet…')
@@ -244,10 +341,16 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError(typeof data.error === 'string' ? data.error : 'Claim failed.')
+        const errMsg = typeof data.error === 'string' ? data.error : 'Claim failed.'
+        setError(errMsg)
+        if (data.pool_shortfall && platformFeeSignature) {
+          setSavedFeeHint(revShareClaimRetryWithoutRepayMessage(claimable.length))
+        }
         return
       }
 
+      clearPendingRevShareClaimPlatformFee()
+      setSavedFeeHint(null)
       setSuccess({
         amount_sol: Number(data.amount_sol) || totals.sol,
         amount_usdc: Number(data.amount_usdc) || totals.usdc,
@@ -410,6 +513,26 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
               Platform fee: {feeLabel}. Approve once in your wallet, then payout runs automatically.
             </p>
           ) : null}
+          {liabilitySummary && liabilitySummary.open_period_count > 0 ? (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Across {liabilitySummary.open_period_count} open month
+              {liabilitySummary.open_period_count === 1 ? '' : 's'}: {liabilitySummary.claimed_nests}{' '}
+              nests already claimed · {liabilitySummary.unclaimed_nests} still waiting ·{' '}
+              {liabilitySummary.unclaimed_sol.toFixed(4)} SOL reserved for late claims.
+            </p>
+          ) : null}
+          {poolBlocked ? (
+            <p className="text-xs text-amber-400/95 leading-relaxed" role="status">
+              {poolFunding?.message ??
+                'Rev share pool is short of funds for this payout. Claims are paused until an admin deposits into the pool — you will not be asked for a platform fee until then.'}
+            </p>
+          ) : null}
+          {savedFeeHint ? (
+            <p className="text-xs text-emerald-300/90 leading-relaxed" role="status">
+              {savedFeeHint}
+              {poolBlocked ? ' After the pool is topped up, Claim will reuse this fee.' : ''}
+            </p>
+          ) : null}
           {monthGroups.length > 1 ? (
             <ul className="space-y-1.5">
               {monthGroups.map((g) => (
@@ -442,7 +565,7 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
           <Button
             type="button"
             className={cn(nestingClaimReadyButtonClass, 'min-h-[48px] w-full touch-manipulation text-base')}
-            disabled={busy || !publicKey}
+            disabled={busy || !publicKey || poolBlocked}
             onClick={() => void claimAll()}
           >
             {busy ? (
@@ -450,15 +573,19 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
                 <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />
                 Claiming…
               </>
+            ) : poolBlocked ? (
+              'Waiting for pool top-up'
             ) : (
               <>
                 Claim
                 {totals.sol > 0 ? ` ${formatGenOwlRevShareSol(totals.sol)} SOL` : ''}
                 {totals.sol > 0 && totals.usdc > 0 ? ' ·' : ''}
                 {totals.usdc > 0 ? ` ${formatGenOwlRevShareUsdc(totals.usdc)} USDC` : ''}
-                {feeActive && claimAllCount > 0
+                {feeActive && claimAllCount > 0 && !savedFeeHint
                   ? ` · ${(getStakingPlatformFeeSol() * claimAllCount).toFixed(3)} SOL fee`
-                  : ''}
+                  : feeActive && savedFeeHint
+                    ? ' · fee already paid'
+                    : ''}
               </>
             )}
           </Button>

@@ -22,8 +22,11 @@ import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups
 import { areGenOwlRevShareClaimsEnabled } from '@/lib/db/rev-share-schedule'
 import {
   commitStakingPlatformFeeLinked,
+  resolveStakingPlatformFeeSignature,
   validateStakingPlatformFeeLinked,
 } from '@/lib/nesting/link-staking-platform-fee'
+import { assessGenOwlRevSharePoolAffordability } from '@/lib/nesting/gen-owl-rev-share-pool'
+import { assertGenOwlRevShareOutstandingLiabilityCovered } from '@/lib/nesting/gen-owl-rev-share-liability-service'
 
 async function perNestAmountsForPosition(
   period: GenOwlRevSharePeriodRow,
@@ -116,7 +119,31 @@ export async function executeGenOwlRevShareClaim(params: {
     throw new StakingUserError('No rev share amount configured for this generation this month.', 400)
   }
 
-  const feeParams = feeParamsForRevShareClaim(wallet, params.platform_fee_signature, [positionId])
+  // Cover stacked unclaimed liability first so late claimers are not left unpaid.
+  await assertGenOwlRevShareOutstandingLiabilityCovered()
+
+  // Refuse before platform fee so an underfunded pool cannot burn user SOL fees.
+  const afford = await assessGenOwlRevSharePoolAffordability({
+    amount_sol: amounts.sol,
+    amount_usdc: amounts.usdc,
+  })
+  if (!afford.ok) {
+    throw new StakingUserError(
+      afford.error ?? 'Rev share pool cannot cover this payout right now.',
+      503,
+      {
+        pool_shortfall: true,
+        need_sol: afford.need_sol,
+        hold_sol: afford.hold_sol,
+        need_usdc: afford.need_usdc,
+        hold_usdc: afford.hold_usdc,
+      }
+    )
+  }
+
+  const feeParams = await resolveStakingPlatformFeeSignature(
+    feeParamsForRevShareClaim(wallet, params.platform_fee_signature, [positionId])
+  )
   await validateStakingPlatformFeeLinked(feeParams)
 
   // Reserve unique claim row BEFORE payout so concurrent requests cannot double-pay.
@@ -221,13 +248,46 @@ export async function executeGenOwlRevShareClaimAll(params: {
     throw new StakingUserError('Nothing to claim right now.', 400)
   }
 
+  let totalSol = 0
+  let totalUsdc = 0
+  for (const row of pending) {
+    totalSol += row.amount_sol
+    totalUsdc += row.amount_usdc
+  }
+
+  if (totalSol <= 0 && totalUsdc <= 0) {
+    throw new StakingUserError('No rev share amount configured for these nests.', 400)
+  }
+
+  // Cover stacked unclaimed liability first so late claimers are not left unpaid.
+  await assertGenOwlRevShareOutstandingLiabilityCovered()
+
+  // Refuse before platform fee so an underfunded pool cannot burn user SOL fees.
+  const afford = await assessGenOwlRevSharePoolAffordability({
+    amount_sol: totalSol,
+    amount_usdc: totalUsdc,
+  })
+  if (!afford.ok) {
+    throw new StakingUserError(
+      afford.error ?? 'Rev share pool cannot cover this payout right now.',
+      503,
+      {
+        pool_shortfall: true,
+        need_sol: afford.need_sol,
+        hold_sol: afford.hold_sol,
+        need_usdc: afford.need_usdc,
+        hold_usdc: afford.hold_usdc,
+      }
+    )
+  }
+
   const positionIds = pending.map((r) => r.position_id)
-  const feeParams = feeParamsForRevShareClaim(wallet, params.platform_fee_signature, positionIds)
+  const feeParams = await resolveStakingPlatformFeeSignature(
+    feeParamsForRevShareClaim(wallet, params.platform_fee_signature, positionIds)
+  )
   await validateStakingPlatformFeeLinked(feeParams)
 
   const reservedIds: string[] = []
-  let totalSol = 0
-  let totalUsdc = 0
 
   try {
     for (const row of pending) {
@@ -251,19 +311,12 @@ export async function executeGenOwlRevShareClaimAll(params: {
         throw new StakingUserError('Could not reserve rev share claim. Try again.', 500)
       }
       reservedIds.push(reserved.claim.id)
-      totalSol += row.amount_sol
-      totalUsdc += row.amount_usdc
     }
   } catch (e) {
     if (reservedIds.length > 0) {
       await deleteGenOwlRevShareClaims(reservedIds)
     }
     throw e
-  }
-
-  if (totalSol <= 0 && totalUsdc <= 0) {
-    await deleteGenOwlRevShareClaims(reservedIds)
-    throw new StakingUserError('No rev share amount configured for these nests.', 400)
   }
 
   const payout = await payoutGenOwlRevShareClaim({

@@ -5,10 +5,14 @@
 import assert from 'node:assert/strict'
 import {
   claimRetryWithoutRepayMessage,
+  clearPendingRevShareClaimPlatformFee,
   isPendingClaimPlatformFeeFresh,
   parsePendingClaimPlatformFee,
   pendingClaimPlatformFeeCovers,
   PENDING_CLAIM_FEE_TTL_MS,
+  readPendingRevShareClaimPlatformFee,
+  revShareClaimRetryWithoutRepayMessage,
+  writePendingRevShareClaimPlatformFee,
 } from '../lib/nesting/pending-claim-platform-fee'
 
 const now = 1_700_000_000_000
@@ -38,5 +42,33 @@ assert.equal(pendingClaimPlatformFeeCovers(parsed!, 'Other', 1, now), false)
 
 assert.match(claimRetryWithoutRepayMessage(1), /platform fee was paid/i)
 assert.match(claimRetryWithoutRepayMessage(5), /5 nest platform fees were paid/i)
+
+assert.match(revShareClaimRetryWithoutRepayMessage(1), /rev share was not sent/i)
+assert.match(revShareClaimRetryWithoutRepayMessage(19), /19 nest platform fees were paid/i)
+
+const mem = new Map<string, string>()
+const fakeStorage = {
+  getItem(key: string) {
+    return mem.has(key) ? mem.get(key)! : null
+  },
+  setItem(key: string, value: string) {
+    mem.set(key, value)
+  },
+  removeItem(key: string) {
+    mem.delete(key)
+  },
+}
+
+writePendingRevShareClaimPlatformFee(
+  { wallet: 'W1', signature: 'SigRev', units: 19, savedAtMs: now },
+  fakeStorage
+)
+const loaded = readPendingRevShareClaimPlatformFee(fakeStorage)
+assert.ok(loaded)
+assert.equal(loaded!.signature, 'SigRev')
+assert.equal(loaded!.units, 19)
+assert.equal(pendingClaimPlatformFeeCovers(loaded!, 'W1', 19, now), true)
+clearPendingRevShareClaimPlatformFee(fakeStorage)
+assert.equal(readPendingRevShareClaimPlatformFee(fakeStorage), null)
 
 console.log('pending-claim-platform-fee: ok')

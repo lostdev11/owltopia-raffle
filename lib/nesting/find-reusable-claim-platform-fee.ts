@@ -3,6 +3,7 @@ import { PublicKey } from '@solana/web3.js'
 import {
   getStakingPlatformFeePaymentBySignature,
   listClaimPlatformFeesWithSpareCapacity,
+  type StakingPlatformFeePaymentRow,
 } from '@/lib/db/staking-platform-fee-payments'
 import { isStakingPlatformFeeEnabled } from '@/lib/nesting/staking-platform-fee'
 import { verifyStakingPlatformFeeTransaction } from '@/lib/nesting/verify-staking-platform-fee'
@@ -14,19 +15,21 @@ export const CLAIM_FEE_RECOVERY_MAX_SIGNATURES = 20
 export const CLAIM_FEE_RECOVERY_MAX_AGE_MS = 48 * 60 * 60 * 1000
 
 /**
- * Finds a recent claim platform-fee signature the wallet already paid that can cover
+ * Finds a recent claim / rev-share platform-fee signature the wallet already paid that can cover
  * `minUnits` nests — either spare capacity in DB, or an on-chain fee never linked because
- * the OWL payout failed after the wallet approval.
+ * the payout failed after the wallet approval.
  */
 export async function findReusableClaimPlatformFeeSignature(params: {
   wallet: string
   minUnits: number
+  action?: Extract<StakingPlatformFeePaymentRow['action'], 'claim' | 'rev_share_claim'>
   nowMs?: number
 }): Promise<string | null> {
   if (!isStakingPlatformFeeEnabled()) return null
 
   const wallet = params.wallet.trim()
   const minUnits = Math.floor(params.minUnits)
+  const action = params.action ?? 'claim'
   if (!wallet || !Number.isFinite(minUnits) || minUnits < 1) return null
 
   const treasury = getPlatformFeeTreasuryWalletAddress()?.trim()
@@ -39,6 +42,7 @@ export async function findReusableClaimPlatformFeeSignature(params: {
     wallet,
     minSpareUnits: minUnits,
     newerThanIso,
+    action,
   })
   if (spare[0]?.tx_signature) {
     return spare[0].tx_signature.trim()
