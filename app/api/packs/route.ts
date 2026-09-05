@@ -3,7 +3,6 @@ import {
   PACK_CATEGORY_WEIGHTS_BPS,
   PACK_NFT_VALUE_BANDS,
   PACK_OWL_TIERS,
-  PACK_OWL_TO_TICKET_RATIO,
   PACK_PRICE_SOL,
   PACK_RTP_BPS,
   PACK_SOL_TIERS,
@@ -93,7 +92,6 @@ export async function GET() {
           weight: b.weight,
         })),
         categories: oddsPct.categories,
-        owlToTicketRatio: PACK_OWL_TO_TICKET_RATIO,
         /** Raw weight ladders (admin / legacy). Prefer percent fields above. */
         owlTiersRaw: PACK_OWL_TIERS.map((t) => ({ amount: t.amount, weight: t.weight })),
         solTiersRaw: PACK_SOL_TIERS.map((t) => ({ amountSol: t.amountSol, weight: t.weight })),
@@ -129,7 +127,6 @@ export async function GET() {
         wallet: o.buyer_wallet,
         category: o.category,
         prizeLabel: o.prize_label,
-        freeTicketCredits: o.free_ticket_credits,
         isJackpotWin: o.is_jackpot_win === true,
         completedAt: o.completed_at,
       })),

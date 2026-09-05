@@ -6,7 +6,7 @@
  * - Categories: 60% OWL / 20% SOL / 20% NFT
  * - Scales: OWL 10–50, SOL 0.02–0.08 (at 0.1 SOL pack), NFT 0.05+ SOL
  * - Target RTP: 80% (EV ≈ 0.08 SOL per open)
- * - OWL wins credit free raffle tickets (default 1 OWL → 1 ticket)
+ * - OWL wins pay $OWL to the buyer wallet (no separate raffle-ticket credits)
  * - NFT picks: inverse floor-price weights (higher FP = rarer)
  * - Randomness: Switchboard VRF by default (PACK_VRF_ENABLED=false for local commit–reveal)
  */
@@ -122,8 +122,11 @@ export function isPackNftFairValueSol(value: number): boolean {
  */
 export const PACK_NFT_FP_WEIGHT_ALPHA = 1.0
 
-/** Default free raffle ticket credits per OWL won (Gembird: 10 OWL → 10 tickets) */
-export const PACK_OWL_TO_TICKET_RATIO = 1
+/**
+ * @deprecated Free raffle ticket credits removed — OWL packs pay $OWL to wallet only.
+ * Kept as 0 so any residual callers stay inert.
+ */
+export const PACK_OWL_TO_TICKET_RATIO = 0
 
 /** Local commit–reveal (server seed). Used when VRF is off or as documented fallback. */
 export const PACK_OPEN_ALGO_V1 = 'owltopia-pack-open-v1' as const

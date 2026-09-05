@@ -1,5 +1,4 @@
 import {
-  PACK_OWL_TO_TICKET_RATIO,
   PACK_PRICE_SOL,
   solToLamports,
 } from '@/lib/packs/config'
@@ -14,7 +13,6 @@ import {
   getPackOpenById,
   getPackOpenByPaymentSignature,
   getPackVaultConfig,
-  grantPackTicketCredits,
   listAvailableNftsForOpen,
   markNftPaid,
   releaseNftReservation,
@@ -286,7 +284,6 @@ export async function confirmAndOpenPack(input: {
   let nftName: string | null = null
   let nftImageUrl: string | null = null
   let nftPrizeStandard: PackInventoryPrizeStandard | null = null
-  let freeTickets = 0
   let nftPoolSnapshot: PackNftPoolSnapshotRow[] | null = null
 
   if (category === 'owl') {
@@ -295,7 +292,6 @@ export async function confirmAndOpenPack(input: {
     owlAmount = pick.amount
     fairValueSol = pick.fairValueSol
     prizeLabel = `${pick.amount} $OWL`
-    freeTickets = Math.floor(pick.amount * PACK_OWL_TO_TICKET_RATIO)
   } else if (category === 'sol') {
     const pick = pickTier(seed, 'sol', config.owl_sol_price)
     if (pick.category !== 'sol') throw new Error('Invalid SOL pick')
@@ -394,7 +390,7 @@ export async function confirmAndOpenPack(input: {
     nft_inventory_id: nftInventoryId,
     nft_mint_address: nftMint,
     fair_value_sol: fairValueSol,
-    free_ticket_credits: freeTickets,
+    free_ticket_credits: 0,
     is_jackpot_win: false,
     jackpot_contribution_sol: jackpotContribution,
     jackpot_amount_sol: null,
@@ -411,11 +407,6 @@ export async function confirmAndOpenPack(input: {
         throw new Error(paid.error || 'OWL payout failed')
       }
       payoutSignature = paid.signature
-      await grantPackTicketCredits({
-        wallet: input.buyerWallet,
-        openId: open.id,
-        credits: freeTickets,
-      })
     } else if (category === 'sol' && solAmount != null) {
       const paid = await payoutSolFromPacksVault(input.buyerWallet, solToLamports(solAmount))
       if (!paid.ok || !paid.signature) {

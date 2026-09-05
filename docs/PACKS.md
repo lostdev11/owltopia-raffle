@@ -21,7 +21,7 @@ Assets (do not rename):
 
 Config: `lib/packs/animations.ts`. Dev playground (local only): `/dev/pack-opening`. **Admin preview** (production): Admin → Packs → **Preview pack opening**.
 
-The `/packs` page is a single-composition hero (OWL PACKS brand, pack visual, one CTA). Odds, ticket credits, recent opens, and prize tiers live below the fold.
+The `/packs` page is a single-composition hero (OWL PACKS brand, pack visual, one CTA). Odds, recent opens, and prize tiers live below the fold.
 
 ## Launch modes (Admin → Packs)
 
@@ -52,8 +52,7 @@ Buying stays off until a full admin turns packs on (`pack_vault_config.paused`):
 | SOL scale | 0.02 → 0.08 SOL (sized for 0.1 SOL pack + 10–50 OWL) |
 | NFT fair value | 0.05+ SOL (admin-tagged, up to 50 SOL); **higher FP = rarer** |
 | RTP target | **80%** (EV ≈ 0.08 SOL / open) |
-| OWL win UX | “You have won N free tickets on raffle site” |
-| Ticket mapping | Default **1 OWL → 1 free raffle ticket credit** |
+| OWL win UX | “You won N $OWL — sent to your wallet” |
 | UX | Instant rip (`/packs`) |
 | Odds UI | ME-style **percentages** (category + tier + per-NFT) |
 | Randomness | Switchboard VRF by default (`owltopia-pack-open-v2-vrf`); set `PACK_VRF_ENABLED=false` for local commit–reveal (`v1`) |
