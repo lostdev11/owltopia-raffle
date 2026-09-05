@@ -1,12 +1,24 @@
 import { isAdmin } from '@/lib/db/admins'
-import { getDiscordGiveawayPartnerByGuildId, getDiscordGiveawayPartnerById } from '@/lib/db/discord-giveaway-partners'
+import {
+  getDiscordGiveawayPartnerByGuildId,
+  getDiscordGiveawayPartnerById,
+  isPartnerTenantEntitled,
+} from '@/lib/db/discord-giveaway-partners'
 import { getPartnerRaffleVisibilityEntitlementForCreatorWallet } from '@/lib/db/partner-community-creators-admin'
 import { getWalletAddressByDiscordUserId } from '@/lib/db/wallet-profiles'
+import { memberHasDiscordPartnerManagePerms } from '@/lib/discord/member-permissions'
 import { getSiteBaseUrl } from '@/lib/site-config'
 
 export type DiscordPartnerCommandAccess =
   | { ok: true; wallet: string; isFounder: boolean }
   | { ok: false; message: string }
+
+export {
+  DISCORD_ADMINISTRATOR_BIT,
+  DISCORD_MANAGE_GUILD_BIT,
+  DISCORD_MANAGE_WEBHOOKS_BIT,
+  memberHasDiscordPartnerManagePerms,
+} from '@/lib/discord/member-permissions'
 
 function isPaidPartnerTier(tier: string | null): boolean {
   return tier === 'partner_pro' || tier === 'white_label'
@@ -81,4 +93,47 @@ export async function assertDiscordPartnerCommandAccess(
   }
 
   return { ok: true, wallet, isFounder: false }
+}
+
+/**
+ * Read-only WL lookup (`/query`, `/owltopia-wl status|list|export`):
+ * - Same as Partner Pro / Owl Vision admin access, OR
+ * - Manage Server / Administrator / Manage Webhooks in a Discord that already has an entitled Partner Pro link.
+ *
+ * Lets Owltopia staff and partner mods inspect mintlists without being on the Partner Pro wallet allowlist.
+ */
+export async function assertDiscordWlReadAccess(
+  discordUserId: string | undefined,
+  guildId: string,
+  memberPermissions: string | undefined
+): Promise<DiscordPartnerCommandAccess> {
+  const partner = await assertDiscordPartnerCommandAccess(discordUserId, guildId)
+  if (partner.ok) return partner
+
+  const g = guildId.trim()
+  const tenant = g ? await getDiscordGiveawayPartnerByGuildId(g) : null
+  if (tenant && isPartnerTenantEntitled(tenant) && memberHasDiscordPartnerManagePerms(memberPermissions)) {
+    const did = typeof discordUserId === 'string' ? discordUserId.trim() : ''
+    const linked = did ? await getWalletAddressByDiscordUserId(did) : null
+    const wallet = (linked || tenant.created_by_wallet || 'guild-manager').trim()
+    return { ok: true, wallet, isFounder: false }
+  }
+
+  const base = getSiteBaseUrl()
+  if (!partner.ok && partner.message.includes('Partner Pro')) {
+    return {
+      ok: false,
+      message: [
+        partner.message,
+        '',
+        '**Looking up a mintlist?** You need one of:',
+        '· **Manage Server** (or Administrator) in this Partner Pro Discord, or',
+        '· Your Discord linked to an **Owl Vision admin** / Partner Pro wallet on the dashboard.',
+        '',
+        `${base}/dashboard`,
+      ].join('\n'),
+    }
+  }
+
+  return partner
 }
