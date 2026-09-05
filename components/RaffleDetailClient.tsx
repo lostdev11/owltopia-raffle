@@ -23,6 +23,8 @@ import { ParticipantsModal } from '@/components/ParticipantsModal'
 import { RaffleBuyoutPanel } from '@/components/RaffleBuyoutPanel'
 import { WinnerModal } from '@/components/WinnerModal'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
+import { AvailablePaymentBalanceRow } from '@/components/AvailablePaymentBalanceRow'
+import { useWalletPaymentBalance } from '@/hooks/use-wallet-payment-balance'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -306,6 +308,14 @@ export function RaffleDetailClient({
   }, [dualSolBamboo, raffle, ticketPaymentCurrency, ticketQuantity])
   const [showWinner, setShowWinner] = useState(false)
   const [showEnterRaffleDialog, setShowEnterRaffleDialog] = useState(false)
+  const paymentBalance = useWalletPaymentBalance(
+    ticketPaymentCurrency,
+    Boolean(connected && showEnterRaffleDialog)
+  )
+  const paymentBalanceInsufficient =
+    paymentBalance.amount != null &&
+    Number.isFinite(purchaseAmount) &&
+    purchaseAmount > paymentBalance.amount
   const [showNftTransferDialog, setShowNftTransferDialog] = useState(false)
   const [nftTransferSignature, setNftTransferSignature] = useState('')
   const [isSubmittingTransfer, setIsSubmittingTransfer] = useState(false)
@@ -5112,6 +5122,13 @@ export function RaffleDetailClient({
                 />
               </div>
             </div>
+            {connected && (
+              <AvailablePaymentBalanceRow
+                currency={ticketPaymentCurrency}
+                display={paymentBalance.display}
+                insufficient={paymentBalanceInsufficient}
+              />
+            )}
             
             {error && (
               <div className="p-3 rounded-lg bg-destructive/10 border border-destructive text-destructive text-sm">
