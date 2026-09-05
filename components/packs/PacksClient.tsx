@@ -10,6 +10,10 @@ import { PackOpeningExperience } from '@/components/packs/PackOpeningExperience'
 import { PackPrizeReveal } from '@/components/packs/PackPrizeReveal'
 import { PackVault } from '@/components/packs/vault/PackVault'
 import { executePackPurchase, type PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
+import {
+  packPaymentLamportsNeeded,
+  softPackFundHint,
+} from '@/lib/packs/pack-purchase-errors'
 import { preloadConfetti } from '@/lib/confetti'
 import {
   isPacksLaunchPause,
@@ -204,6 +208,7 @@ export function PacksClient({
   const [credits, setCredits] = useState<number | null>(null)
   const [phase, setPhase] = useState<RipPhase>('idle')
   const [paymentConfirmed, setPaymentConfirmed] = useState(false)
+  const [balanceLamports, setBalanceLamports] = useState<number | null>(null)
 
   const allowed = access.allowed
   const showAdminPreview = access.isAdmin && !isPublic
@@ -245,6 +250,29 @@ export function PacksClient({
     void loadCredits()
   }, [allowed, loadCredits])
 
+
+  useEffect(() => {
+    if (!publicKey) {
+      setBalanceLamports(null)
+      return
+    }
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const bal = await connection.getBalance(publicKey, 'confirmed')
+        if (!cancelled) setBalanceLamports(bal)
+      } catch {
+        if (!cancelled) setBalanceLamports(null)
+      }
+    }
+    void refresh()
+    const id = window.setInterval(() => void refresh(), 15_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [publicKey, connection])
+
   async function onRip() {
     if (!publicKey || !sendTransaction) return
     setError(null)
@@ -257,6 +285,7 @@ export function PacksClient({
         publicKey,
         connection,
         sendTransaction,
+        expectedPriceSol: config?.product.priceSol ?? 0.1,
         onPaymentConfirmed: () => {
           setPaymentConfirmed(true)
         },
@@ -287,6 +316,13 @@ export function PacksClient({
   const publicPauseMessage = packPublicPauseMessage(config?.vault.pauseReason)
   const launchPause = config ? isPacksLaunchPause(config.vault.pauseReason) : true
   const price = config?.product.priceSol ?? 0.1
+  const fundHint =
+    connected &&
+    publicKey &&
+    balanceLamports != null &&
+    balanceLamports < packPaymentLamportsNeeded(price)
+      ? softPackFundHint({ priceSol: price, balanceLamports })
+      : null
   const showReveal = phase === 'reveal' && !!result
   const showExperience = phase === 'experience' && !!result
   const weights = config?.product.categoryWeightsBps ?? { owl: 6000, sol: 2000, nft: 2000 }
@@ -553,6 +589,7 @@ export function PacksClient({
                 error={error}
                 loadError={loadError}
                 pauseMessage={paused ? publicPauseMessage : null}
+                fundHint={fundHint}
               />
             )}
           </div>

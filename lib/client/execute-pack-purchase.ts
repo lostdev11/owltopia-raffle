@@ -10,6 +10,13 @@ import {
 } from '@solana/web3.js'
 import type { SendTransactionOptions } from '@solana/wallet-adapter-base'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
+import {
+  friendlyPackPaymentError,
+  insufficientPackSolMessage,
+  isPackPriceMismatch,
+  packPaymentLamportsNeeded,
+  packPriceMismatchMessage,
+} from '@/lib/packs/pack-purchase-errors'
 
 export type PackOpenClientResult = {
   openId: string
@@ -38,6 +45,11 @@ export type ExecutePackPurchaseOptions = {
     c: Connection,
     opts?: SendTransactionOptions
   ) => Promise<string>
+  /**
+   * Price shown on the packs page. Used to pre-check balance before creating a
+   * pending open, and to catch UI vs checkout price drift.
+   */
+  expectedPriceSol?: number
   /** Fires after on-chain payment confirms — UI may show “resolving prize…” here. */
   onPaymentConfirmed?: (info: {
     openId: string
@@ -66,10 +78,39 @@ async function confirmPackOpen(input: {
   return { ok: true, result: openData.result as PackOpenClientResult }
 }
 
+async function readBalanceLamports(
+  connection: Connection,
+  publicKey: PublicKey
+): Promise<number | null> {
+  try {
+    return await connection.getBalance(publicKey, 'confirmed')
+  } catch {
+    // Never block purchase solely because balance RPC failed — wallet/preflight still runs.
+    return null
+  }
+}
+
 export async function executePackPurchase(
   opts: ExecutePackPurchaseOptions
 ): Promise<{ ok: true; result: PackOpenClientResult } | { ok: false; error: string }> {
   const wallet = opts.publicKey.toBase58()
+  let balanceLamports = await readBalanceLamports(opts.connection, opts.publicKey)
+  const expectedPriceSol =
+    opts.expectedPriceSol && opts.expectedPriceSol > 0 ? opts.expectedPriceSol : null
+
+  // Fail fast before create so we do not leave stranded pending_payment rows.
+  if (expectedPriceSol != null && balanceLamports != null) {
+    const needed = packPaymentLamportsNeeded(expectedPriceSol)
+    if (balanceLamports < needed) {
+      return {
+        ok: false,
+        error: insufficientPackSolMessage({
+          priceSol: expectedPriceSol,
+          balanceLamports,
+        }),
+      }
+    }
+  }
 
   const createRes = await fetch('/api/packs/create', {
     method: 'POST',
@@ -88,6 +129,27 @@ export async function executePackPurchase(
     return { ok: false, error: 'Invalid pack create response' }
   }
 
+  if (expectedPriceSol != null && isPackPriceMismatch(expectedPriceSol, priceSol)) {
+    return { ok: false, error: packPriceMismatchMessage(expectedPriceSol, priceSol) }
+  }
+
+  // Re-check against the charged price (create is source of truth).
+  if (balanceLamports == null) {
+    balanceLamports = await readBalanceLamports(opts.connection, opts.publicKey)
+  }
+  if (balanceLamports != null) {
+    const needed = packPaymentLamportsNeeded(priceSol)
+    if (balanceLamports < needed) {
+      return {
+        ok: false,
+        error: insufficientPackSolMessage({
+          priceSol,
+          balanceLamports,
+        }),
+      }
+    }
+  }
+
   const lamports = Math.round(priceSol * LAMPORTS_PER_SOL)
   const tx = new Transaction().add(
     SystemProgram.transfer({
@@ -104,7 +166,13 @@ export async function executePackPurchase(
       preflightCommitment: 'confirmed',
     })
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : 'Payment cancelled' }
+    return {
+      ok: false,
+      error: friendlyPackPaymentError(e, {
+        priceSol,
+        balanceLamports: balanceLamports ?? undefined,
+      }),
+    }
   }
 
   try {

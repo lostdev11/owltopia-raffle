@@ -14,6 +14,8 @@ type Props = {
   error: string | null
   loadError: string | null
   pauseMessage: string | null
+  /** Soft warning when connected wallet SOL cannot cover pack + fee. */
+  fundHint: string | null
   onPrev: () => void
   onNext: () => void
 }
@@ -28,6 +30,7 @@ export function PackPurchasePanel({
   error,
   loadError,
   pauseMessage,
+  fundHint,
   onPrev,
   onNext,
 }: Props) {
@@ -76,6 +79,9 @@ export function PackPurchasePanel({
       ) : null}
       {pauseMessage ? (
         <p className="mt-2 text-center text-sm text-amber-200/90">{pauseMessage}</p>
+      ) : null}
+      {fundHint && !error ? (
+        <p className="mt-2 text-center text-sm text-amber-200/90">{fundHint}</p>
       ) : null}
       {error ? <p className="mt-2 text-center text-sm text-red-300">{error}</p> : null}
       {loadError ? <p className="mt-2 text-center text-sm text-red-300">{loadError}</p> : null}
