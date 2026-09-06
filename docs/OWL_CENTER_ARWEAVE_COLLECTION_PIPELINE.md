@@ -43,6 +43,32 @@ Until Irys env is set, Phase B still handles **staging + validate**; Arweave pus
 
 ---
 
+## After mint-out (`public_simple` / Core partners)
+
+Do this in order so holders are not stuck asking “is trading live?”:
+
+1. **Reconcile ledger vs Candy Machine** (if DB `minted_count` lags CM redeemed):
+   ```bash
+   npx --yes tsx --env-file=.env.local scripts/reconcile-public-simple-mint-ledger.ts <slug>
+   ```
+   Example (Breppe OG): `sub-55d9e2aeb5ac452eb6a378897987633e`. Reconcile backfills orphan mints and can force `SOLD_OUT` when the CM is empty (`lib/owl-center/sync-launch-sold-out.ts`). Mint state also auto-syncs `SOLD_OUT` when on-chain remaining is `0`.
+
+2. **Confirm sellout prep** — confirm/reconcile runs sellout marketplace prep (hash list). Creators can download the hash list from the sold-out panel on the mint page.
+
+3. **Do not thaw mid-mint** — only thaw Core `PermanentFreezeDelegate` when mint is finished and the project is ready for transfers. Thaw via Enable trading / core-thaw on Mint details.
+
+4. **Marketplace listing**
+   - List on Orbis first (collection mint)
+   - Optional: Magic Eden hash list + Tensor verify
+   - Paste Orbis / ME / Tensor URLs in Mint details
+   - Activate trading links → `TRADING_ACTIVE`
+
+5. **Community copy (Discord)** while freeze is still on: holders own NFTs in-wallet; transfers and listings unlock when the project enables trading. After `TRADING_ACTIVE`, share Orbis (primary), then ME/Tensor.
+
+6. **Residual ops** — bot-tax / platform-fee drains from limit-reached retries are manual treasury refunds (prevention is in product; refunds are not automated).
+
+---
+
 ## Gen2 (sold out)
 
 Gen2 mint ops are soft-retired via `isGen2PublicMintRetired()` (emergency re-open: `GEN2_PUBLIC_MINT_ENABLED=true`). Phase-advance and reprice crons are removed from `vercel.json`. Keep confirm/reconcile, freeze/thaw, metadata repair, milestones, nesting, and marketplaces.

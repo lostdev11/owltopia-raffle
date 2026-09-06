@@ -170,4 +170,46 @@ const progress = creatorSetupChecklistProgress(basics)
 assert.ok(progress.requiredTotal >= 2)
 assert.ok(progress.requiredDone >= 1)
 
+
+const soldOutWaiting = buildCreatorLaunchSetupChecklist({
+  launch: launch({
+    creator_mint_price: 1,
+    creator_mint_currency: 'SOL',
+    launch_deadline_at: '2026-08-24T12:00:00.000Z',
+    status: 'SOLD_OUT',
+    active_phase: 'SOLD_OUT',
+    is_paused: false,
+    candy_machine_id: 'Candy1111111111111111111111111111111111111',
+    freeze_enabled: true,
+    freeze_status: 'pending',
+    minted_count: 222,
+    total_supply: 222,
+  }),
+})
+assert.equal(soldOutWaiting.find((s) => s.id === 'hash-list')?.status, 'done')
+assert.equal(soldOutWaiting.find((s) => s.id === 'marketplace-urls')?.status, 'todo')
+assert.equal(soldOutWaiting.find((s) => s.id === 'activate-trading')?.status, 'todo')
+assert.equal(soldOutWaiting.find((s) => s.id === 'trading')?.status, 'waiting')
+
+const soldOutReady = buildCreatorLaunchSetupChecklist({
+  launch: launch({
+    creator_mint_price: 1,
+    creator_mint_currency: 'SOL',
+    launch_deadline_at: '2026-08-24T12:00:00.000Z',
+    status: 'TRADING_ACTIVE',
+    active_phase: 'TRADING_ACTIVE',
+    is_paused: false,
+    candy_machine_id: 'Candy1111111111111111111111111111111111111',
+    freeze_enabled: true,
+    freeze_status: 'thawed',
+    minted_count: 222,
+    total_supply: 222,
+    orbis_url: 'https://orbis.example/collection/demo',
+  }),
+})
+assert.equal(soldOutReady.find((s) => s.id === 'hash-list')?.status, 'done')
+assert.equal(soldOutReady.find((s) => s.id === 'marketplace-urls')?.status, 'done')
+assert.equal(soldOutReady.find((s) => s.id === 'activate-trading')?.status, 'done')
+assert.equal(soldOutReady.find((s) => s.id === 'trading')?.status, 'done')
+
 console.log('ok — creator launch setup checklist')

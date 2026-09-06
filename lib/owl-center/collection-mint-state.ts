@@ -8,6 +8,7 @@ import { buildOwlCenterMintControls } from '@/lib/owl-center/mint-policy'
 import type { CollectionMintStateResponse, MintTerminalLine } from '@/lib/owl-center/types'
 import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
 import { ensureSelloutMarketplacePrepIfNeeded } from '@/lib/owl-center/sellout-marketplace-prep'
+import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/sync-launch-sold-out'
 import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
 import { getLaunchCandyMachineId, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
@@ -84,6 +85,24 @@ export async function buildCollectionMintState(
   const onChainSupply = cmId ? await fetchCandyMachineOnChainSupply(cmId, mint_network) : { ok: false as const }
   const onChainRemaining = onChainSupply.ok ? onChainSupply.remaining : null
   const remaining = onChainRemaining != null ? Math.min(dbRemaining, onChainRemaining) : dbRemaining
+  if (
+    onChainRemaining === 0 &&
+    launch.active_phase !== 'SOLD_OUT' &&
+    launch.active_phase !== 'TRADING_ACTIVE' &&
+    launch.status !== 'TRADING_ACTIVE'
+  ) {
+    const synced = await syncLaunchSoldOutPhaseIfExhausted(launch.id, {
+      force: true,
+      reason: `on-chain Candy Machine empty (DB ${launch.minted_count}/${launch.total_supply})`,
+    })
+    if (synced) {
+      launch = {
+        ...launch,
+        active_phase: 'SOLD_OUT',
+        status: 'SOLD_OUT',
+      }
+    }
+  }
   const pct = launch.total_supply > 0 ? ((launch.total_supply - remaining) / launch.total_supply) * 100 : 0
   const mp = mpRow.data as {
     trading_links_active?: boolean

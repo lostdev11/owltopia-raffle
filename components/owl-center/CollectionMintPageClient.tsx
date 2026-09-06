@@ -171,6 +171,63 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
         </p>
       ) : null}
 
+
+      {soldOut && !trading ? (
+        <CommandCard label="SOLD OUT // what&apos;s next" className="mb-6">
+          <p className="text-sm leading-relaxed text-[#C5D0D8]">
+            This drop is sold out
+            {launch.mint_standard === 'core' &&
+            launch.freeze_enabled &&
+            launch.freeze_status !== 'thawed'
+              ? ' — collection freeze is still on, so transfers and marketplace listings stay locked until the project unlocks trading.'
+              : '.'}{' '}
+            {marketplace.orbis_url || marketplace.magic_eden_url || marketplace.tensor_url
+              ? 'Marketplace links are being prepared — trading opens on this page when the project activates them.'
+              : 'Secondary trading will appear here once the project lists the collection and activates trading links.'}
+          </p>
+          {(marketplace.orbis_url || marketplace.magic_eden_url || marketplace.tensor_url) &&
+          !marketplace.trading_links_active ? (
+            <div className="mt-4 space-y-2">
+              <p className="font-mono text-[10px] uppercase tracking-widest text-[#FFD769]">
+                Trading opening soon
+              </p>
+              <div className="flex flex-wrap gap-3 opacity-70">
+                {marketplace.orbis_url ? (
+                  <a
+                    href={marketplace.orbis_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex min-h-[44px] items-center border border-[#1A222B] px-4 text-sm font-semibold text-[#9BA8B4] hover:border-[#00FF9C]/35"
+                  >
+                    Preview Orbis
+                  </a>
+                ) : null}
+                {marketplace.magic_eden_url ? (
+                  <a
+                    href={marketplace.magic_eden_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex min-h-[44px] items-center border border-[#1A222B] px-4 text-sm font-semibold text-[#9BA8B4] hover:border-[#00FF9C]/35"
+                  >
+                    Preview Magic Eden
+                  </a>
+                ) : null}
+                {marketplace.tensor_url ? (
+                  <a
+                    href={marketplace.tensor_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex min-h-[44px] items-center border border-[#1A222B] px-4 text-sm font-semibold text-[#9BA8B4] hover:border-[#00FF9C]/35"
+                  >
+                    Preview Tensor
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </CommandCard>
+      ) : null}
+
       <div className="grid w-full min-w-0 max-w-full gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,320px)]">
         <div className="min-w-0 space-y-8">
           <SupplyProgress minted={supply.minted} total={supply.total} />

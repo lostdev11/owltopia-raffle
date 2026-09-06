@@ -40,18 +40,33 @@ function allowlistConfigured(launch: OwlCenterLaunchPublic): boolean {
 function mintLooksLive(launch: OwlCenterLaunchPublic): boolean {
   if (launch.is_paused) return false
   if (launch.status === 'SOLD_OUT' || launch.active_phase === 'SOLD_OUT') return true
+  if (launch.status === 'TRADING_ACTIVE' || launch.active_phase === 'TRADING_ACTIVE') return true
   const liveStatus =
     launch.status === 'PUBLIC' ||
     launch.status === 'WHITELIST' ||
-    launch.status === 'TRADING_ACTIVE' ||
     launch.active_phase === 'PUBLIC'
   const hasCm = Boolean(launch.candy_machine_id?.trim() || launch.devnet_candy_machine_id?.trim())
   return liveStatus && hasCm
 }
 
+function isSoldOut(launch: OwlCenterLaunchPublic): boolean {
+  if (launch.status === 'SOLD_OUT' || launch.active_phase === 'SOLD_OUT') return true
+  if (launch.status === 'TRADING_ACTIVE' || launch.active_phase === 'TRADING_ACTIVE') return true
+  return launch.total_supply > 0 && launch.minted_count >= launch.total_supply
+}
+
+function hasMarketplaceUrls(launch: OwlCenterLaunchPublic): boolean {
+  return Boolean(launch.orbis_url?.trim())
+}
+
+function tradingLinksLive(launch: OwlCenterLaunchPublic): boolean {
+  return launch.status === 'TRADING_ACTIVE' || launch.active_phase === 'TRADING_ACTIVE'
+}
+
 /**
  * Partner Manage collection guided steps (Phase A UX).
  * Allowlist + wallets are optional when no allowlist is configured.
+ * After sellout, steps guide hash list → thaw → marketplace URLs → activate trading.
  */
 export function buildCreatorLaunchSetupChecklist(
   input: CreatorSetupChecklistInput
@@ -68,12 +83,16 @@ export function buildCreatorLaunchSetupChecklist(
   const walletsWaiting = hasAllowlist && allowlistReady && !walletsDone
 
   const liveDone = mintLooksLive(launch)
+  const soldOut = isSoldOut(launch)
   const freezeOn = launch.mint_standard === 'core' && launch.freeze_enabled
   const tradingDone = !freezeOn || launch.freeze_status === 'thawed'
   const tradingWaiting =
-    freezeOn && launch.freeze_status !== 'thawed' && (launch.minted_count > 0 || liveDone)
+    freezeOn && launch.freeze_status !== 'thawed' && (launch.minted_count > 0 || liveDone || soldOut)
 
-  return [
+  const urlsDone = hasMarketplaceUrls(launch)
+  const activateDone = tradingLinksLive(launch)
+
+  const steps: CreatorSetupStep[] = [
     {
       id: 'mint-details',
       title: '1. Mint details',
@@ -109,7 +128,9 @@ export function buildCreatorLaunchSetupChecklist(
       id: 'share',
       title: '4. Share mint link',
       hint: liveDone
-        ? 'Mint page is live — share the link with your community.'
+        ? soldOut
+          ? 'Mint sold out — share the page for holders, then finish marketplace steps below.'
+          : 'Mint page is live — share the link with your community.'
         : launch.is_paused
           ? 'Mint is paused. Unpause / go live with your Owl Center contact when ready.'
           : 'Copy your mint link below. Go-live usually needs CM deploy + approval.',
@@ -117,19 +138,54 @@ export function buildCreatorLaunchSetupChecklist(
       href: '#mint-share-link',
     },
     {
+      id: 'hash-list',
+      title: '5. Sellout prep / hash list',
+      hint: !soldOut
+        ? 'After mint-out, reconcile if needed and download the hash list from the mint page sold-out panel.'
+        : 'Sold out — download the hash list from the mint page (or Mint details) for Magic Eden if you need it.',
+      status: !soldOut ? 'waiting' : 'done',
+      href: '#marketplace-readiness',
+    },
+    {
       id: 'trading',
-      title: '5. Enable trading',
+      title: '6. Thaw / enable trading',
       hint: !freezeOn
         ? 'Lock-at-mint is off — NFTs are transferable when minted.'
         : launch.freeze_status === 'thawed'
           ? 'Trading unlocked for the whole collection.'
           : tradingWaiting
-            ? 'After mint (or when ready for secondary), unlock trading below. Do not unlock to freeze.'
+            ? 'Mint is done (or in progress). Unlock trading below when ready for secondary — do not thaw mid-mint unless product asks for it.'
             : 'You chose lock-at-mint. Unlock trading only when mint is done.',
       status: !freezeOn ? 'skipped' : tradingDone ? 'done' : tradingWaiting ? 'waiting' : 'todo',
       href: '#enable-trading',
     },
+    {
+      id: 'marketplace-urls',
+      title: '7. Paste marketplace URLs',
+      hint: !soldOut
+        ? 'After sellout, list on Orbis first, then paste Orbis (and optional ME / Tensor) URLs in Mint details.'
+        : urlsDone
+          ? 'Orbis URL on file — add ME / Tensor if you want, then activate trading links.'
+          : 'List on Orbis first, then paste live Orbis (and optional ME / Tensor) URLs in Mint details.',
+      status: !soldOut ? 'waiting' : urlsDone ? 'done' : 'todo',
+      href: '#marketplace-readiness',
+    },
+    {
+      id: 'activate-trading',
+      title: '8. Activate trading links',
+      hint: !soldOut
+        ? 'When listings are live, activate trading links on Mint details to flip the mint page to TRADING_ACTIVE.'
+        : activateDone
+          ? 'Trading links are live on the mint page.'
+          : freezeOn && launch.freeze_status !== 'thawed'
+            ? 'Thaw / unlock trading first, then activate trading links so holders see Orbis / ME / Tensor.'
+            : 'Confirm and activate trading links on Mint details so the public mint page shows trade CTAs.',
+      status: !soldOut ? 'waiting' : activateDone ? 'done' : 'todo',
+      href: '#marketplace-readiness',
+    },
   ]
+
+  return steps
 }
 
 export function creatorSetupChecklistProgress(steps: CreatorSetupStep[]): {
