@@ -80,16 +80,14 @@ export function MarketplaceReadinessPanel({
   const [forceTrading, setForceTrading] = useState(false)
 
   const [opsItems, setOpsItems] = useState<ReadinessChecklistItem[]>([
-    { id: '1', label: 'Assets validated', checked: false },
-    { id: '2', label: 'Metadata uploaded to permanent storage', checked: false },
-    { id: '3', label: 'Candy Machine deployed', checked: false },
-    { id: '4', label: 'Collection mint verified', checked: false },
-    { id: '5', label: 'Mint completed or active', checked: false },
-    { id: '6', label: 'Hash list generated', checked: false },
-    { id: '7', label: 'Orbis listed / claimed', checked: false },
-    { id: '8', label: 'Magic Eden indexed / claimed', checked: false },
-    { id: '9', label: 'Tensor indexed / verified', checked: false },
-    { id: '10', label: 'Trading links activated in Owl Center', checked: false },
+    { id: '1', label: 'Mint sold out / CM empty reconciled', checked: false },
+    { id: '2', label: 'Hash list generated (sellout prep)', checked: false },
+    { id: '3', label: 'Core collection thawed / trading unlocked', checked: false },
+    { id: '4', label: 'Orbis listed (collection mint)', checked: false },
+    { id: '5', label: 'Magic Eden hash list submitted (optional)', checked: false },
+    { id: '6', label: 'Tensor verified (optional)', checked: false },
+    { id: '7', label: 'Marketplace URLs pasted in Mint details', checked: false },
+    { id: '8', label: 'Trading links activated (TRADING_ACTIVE)', checked: false },
   ])
 
   const applyRow = useCallback((r: OwlCenterMarketplaceReadiness) => {
@@ -196,9 +194,8 @@ export function MarketplaceReadinessPanel({
       <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
         {creatorMode ? (
           <>
-            Sell-out is done — Owl Center generated your hash list and suggested ME/Tensor URLs. List on Orbis first
-            (collection mint), then optionally submit the hash list on Magic Eden and verify on Tensor. Paste live links
-            below and go live on your mint page.
+            Post-sale order: confirm sellout + hash list → thaw / unlock trading → list on Orbis first → optional ME hash list +
+            Tensor verify → paste live URLs below → activate trading links (TRADING_ACTIVE).
           </>
         ) : (
           <>
