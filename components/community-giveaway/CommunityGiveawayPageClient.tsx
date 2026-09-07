@@ -35,7 +35,7 @@ export function CommunityGiveawayPageClient({
   sessionWallet,
   initialMeStatus,
 }: CommunityGiveawayPageClientProps) {
-  const { connected, publicKey, signMessage } = useWallet()
+  const { connected, publicKey, signMessage, signTransaction, wallet } = useWallet()
   const sendTransaction = useSendTransactionForWallet()
   const { connection } = useConnection()
 
@@ -155,52 +155,28 @@ export function CommunityGiveawayPageClient({
   }, [info.nft_mint_address])
 
   const handleSignIn = useCallback(async () => {
-    if (!publicKey || !signMessage) {
-      setSignInError('Your wallet does not support message signing.')
+    if (!publicKey || (!signMessage && !signTransaction)) {
+      setSignInError('Your wallet does not support signing.')
       return
     }
     setSignInError(null)
     setSigningIn(true)
     try {
-      const walletAddr = publicKey.toBase58()
-      const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(walletAddr)}`, {
-        credentials: 'include',
+      const { ensureSiwsSession } = await import('@/lib/client/ensure-siws-session')
+      await ensureSiwsSession({
+        publicKey,
+        signMessage,
+        signTransaction,
+        connection,
+        walletName: wallet?.adapter?.name,
       })
-      if (!nonceRes.ok) {
-        const data = await nonceRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Failed to get sign-in nonce')
-      }
-      const { message } = (await nonceRes.json()) as { message: string }
-      const messageBytes = new TextEncoder().encode(message)
-      const signature = await signMessage(messageBytes)
-      const signatureBase64 =
-        typeof signature === 'string'
-          ? btoa(signature)
-          : btoa(String.fromCharCode(...new Uint8Array(signature)))
-
-      const verifyRes = await fetch('/api/auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          wallet: walletAddr,
-          message,
-          signature: signatureBase64,
-        }),
-      })
-
-      if (!verifyRes.ok) {
-        const data = await verifyRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Sign-in verification failed')
-      }
-
       await loadStatus()
     } catch (e) {
       setSignInError(e instanceof Error ? e.message : 'Sign-in failed')
     } finally {
       setSigningIn(false)
     }
-  }, [publicKey, signMessage, loadStatus])
+  }, [publicKey, signMessage, signTransaction, connection, wallet?.adapter?.name, loadStatus])
 
   const handleJoin = async () => {
     if (!publicKey || !id) return
@@ -452,7 +428,7 @@ export function CommunityGiveawayPageClient({
                     type="button"
                     className="min-h-[44px] w-full"
                     onClick={() => void handleSignIn()}
-                    disabled={signingIn || !signMessage}
+                    disabled={signingIn || (!signMessage && !signTransaction)}
                   >
                     {signingIn ? (
                       <>

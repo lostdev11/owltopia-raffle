@@ -65,6 +65,7 @@ import {
 import { CreatorAnalyticsSection } from '@/components/dashboard/CreatorAnalyticsSection'
 import { DashboardOverviewSection } from '@/components/dashboard/DashboardOverviewSection'
 import { DashboardCollapsible } from '@/components/dashboard/DashboardCollapsible'
+import { DashboardSiwsSignInGate } from '@/components/dashboard/DashboardSiwsSignInGate'
 import { HostingClaimTracker } from '@/components/dashboard/hosting/HostingClaimTracker'
 import { HostingQuickStats } from '@/components/dashboard/hosting/HostingQuickStats'
 import { HostingStatusBadge } from '@/components/dashboard/hosting/HostingStatusBadge'
@@ -481,7 +482,7 @@ function parseDashboardTabParam(value: string | null): DashboardTabId | null {
 }
 
 export default function DashboardPage() {
-  const { publicKey, connected, signMessage } = useWallet()
+  const { publicKey, connected, signMessage, signTransaction, wallet: walletAdapter } = useWallet()
   const { connection } = useConnection()
   const sendTransaction = useSendTransactionForWallet()
   const { setVisible } = useWalletModal()
@@ -808,53 +809,36 @@ export default function DashboardPage() {
     }
   }, [data?.referral?.activeCode, data?.referral?.codeKind])
 
-  const handleSignIn = useCallback(async () => {
-    if (!publicKey || !signMessage) {
-      setSignInError('Your wallet does not support message signing.')
-      return
-    }
-    setSignInError(null)
-    setSigningIn(true)
-    try {
-      const walletAddr = publicKey.toBase58()
-      const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(walletAddr)}`, {
-        credentials: 'include',
-      })
-      if (!nonceRes.ok) {
-        const data = await nonceRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Failed to get sign-in nonce')
+  const handleSignIn = useCallback(
+    async (opts?: { preferTx?: boolean }) => {
+      if (!publicKey || (!signMessage && !signTransaction)) {
+        setSignInError('Your wallet does not support signing.')
+        return
       }
-      const { message } = (await nonceRes.json()) as { message: string }
-      const messageBytes = new TextEncoder().encode(message)
-      const signature = await signMessage(messageBytes)
-      const signatureBase64 =
-        typeof signature === 'string'
-          ? btoa(signature)
-          : btoa(String.fromCharCode(...new Uint8Array(signature)))
-
-      const verifyRes = await fetch('/api/auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          wallet: walletAddr,
-          message,
-          signature: signatureBase64,
-        }),
-      })
-
-      if (!verifyRes.ok) {
-        const data = await verifyRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Sign-in verification failed')
+      setSignInError(null)
+      setSigningIn(true)
+      try {
+        const { performSiwsSignIn } = await import('@/lib/client/siws-sign-in')
+        await performSiwsSignIn({
+          wallet: publicKey.toBase58(),
+          signMessage,
+          signTransaction,
+          preferTx: opts?.preferTx === true,
+          walletName: walletAdapter?.adapter?.name,
+          getBlockhash: async () => {
+            const latest = await connection.getLatestBlockhash('confirmed')
+            return latest.blockhash
+          },
+        })
+        await loadDashboard()
+      } catch (e) {
+        setSignInError(e instanceof Error ? e.message : 'Sign-in failed')
+      } finally {
+        setSigningIn(false)
       }
-
-      await loadDashboard()
-    } catch (e) {
-      setSignInError(e instanceof Error ? e.message : 'Sign-in failed')
-    } finally {
-      setSigningIn(false)
-    }
-  }, [publicKey, signMessage, loadDashboard])
+    },
+    [publicKey, signMessage, signTransaction, walletAdapter?.adapter?.name, connection, loadDashboard]
+  )
 
   const openEscrowCheck = useCallback(async (raffleId: string) => {
     setEscrowLinkLoadingId(raffleId)
@@ -1953,28 +1937,14 @@ export default function DashboardPage() {
 
   if (needsSignIn) {
     return (
-      <main className="container mx-auto px-4 py-8 max-w-2xl">
-        <h1 className="text-2xl font-bold mb-4">My Dashboard</h1>
-        <p className="text-muted-foreground mb-6">
-          Sign in with your wallet to see your raffles, entries, and revenue. This is a one-time message signature (no transaction or fee).
-        </p>
-        {signInError && <p className="text-destructive mb-4">{signInError}</p>}
-        <Button onClick={handleSignIn} disabled={signingIn || !signMessage}>
-          {signingIn ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              Signing in…
-            </>
-          ) : (
-            'Sign in with wallet'
-          )}
-        </Button>
-        {!signMessage && (
-          <p className="text-sm text-muted-foreground mt-2">
-            Your connected wallet does not support message signing. Try another wallet.
-          </p>
-        )}
-      </main>
+      <DashboardSiwsSignInGate
+        signingIn={signingIn}
+        signInError={signInError}
+        canSignMessage={Boolean(signMessage)}
+        canSignTransaction={Boolean(signTransaction)}
+        onSignIn={() => void handleSignIn()}
+        onSignInWithLedgerTx={() => void handleSignIn({ preferTx: true })}
+      />
     )
   }
 

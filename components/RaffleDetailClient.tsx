@@ -250,7 +250,7 @@ export function RaffleDetailClient({
   const depositPanelRef = useRef<HTMLDivElement | null>(null)
   const keepDepositProgressOpenRef = useRef(false)
   const walletCtx = useWallet()
-  const { publicKey, connected, wallet, signMessage } = walletCtx
+  const { publicKey, connected, wallet, signMessage, signTransaction } = walletCtx
   const sendTransaction = useSendTransactionForWallet()
   // Umi walletAdapterIdentity expects the actual WalletAdapter (with publicKey), not the Wallet metadata wrapper
   const walletAdapter = wallet?.adapter ?? null
@@ -1423,45 +1423,19 @@ export function RaffleDetailClient({
     setClaimPrizeAlreadyClaimed(false)
 
     const signInForClaim = async (): Promise<boolean> => {
-      if (!publicKey || !signMessage) {
-        setClaimPrizeError('Sign in required. Connect your wallet and sign the message.')
+      if (!publicKey || (!signMessage && !signTransaction)) {
+        setClaimPrizeError('Sign in required. Connect your wallet and sign in (Ledger: use Phantom/Solflare).')
         return false
       }
       try {
-        const walletAddr = publicKey.toBase58()
-        const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(walletAddr)}`, {
-          credentials: 'include',
+        const { ensureSiwsSession } = await import('@/lib/client/ensure-siws-session')
+        await ensureSiwsSession({
+          publicKey,
+          signMessage,
+          signTransaction,
+          connection,
+          walletName: wallet?.adapter?.name,
         })
-        if (!nonceRes.ok) {
-          const data = await nonceRes.json().catch(() => ({}))
-          const msg = typeof data?.error === 'string' ? data.error : 'Failed to get sign-in nonce'
-          setClaimPrizeError(msg)
-          return false
-        }
-        const { message } = (await nonceRes.json()) as { message: string }
-        const messageBytes = new TextEncoder().encode(message)
-        const signature = await signMessage(messageBytes)
-        const signatureBase64 =
-          typeof signature === 'string'
-            ? btoa(signature)
-            : btoa(String.fromCharCode(...new Uint8Array(signature)))
-        const verifyRes = await fetch('/api/auth/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            wallet: walletAddr,
-            message,
-            signature: signatureBase64,
-          }),
-        })
-        if (!verifyRes.ok) {
-          const data = await verifyRes.json().catch(() => ({}))
-          const msg =
-            typeof data?.error === 'string' ? data.error : 'Sign-in verification failed'
-          setClaimPrizeError(msg)
-          return false
-        }
         return true
       } catch (e) {
         setClaimPrizeError(e instanceof Error ? e.message : 'Sign-in failed')
@@ -1528,46 +1502,21 @@ export function RaffleDetailClient({
       }
 
       const signInForRefund = async (): Promise<boolean> => {
-        if (!publicKey || !signMessage) {
-          setClaimRefundError('Sign in required. Connect your wallet and sign the message.')
+        if (!publicKey || (!signMessage && !signTransaction)) {
+          setClaimRefundError(
+            'Sign in required. Connect your wallet and sign in (Ledger via Phantom/Solflare supported).'
+          )
           return false
         }
         try {
-          const walletAddr = publicKey.toBase58()
-          const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(walletAddr)}`, {
-            credentials: 'include',
+          const { ensureSiwsSession } = await import('@/lib/client/ensure-siws-session')
+          await ensureSiwsSession({
+            publicKey,
+            signMessage,
+            signTransaction,
+            connection,
+            walletName: wallet?.adapter?.name,
           })
-          if (!nonceRes.ok) {
-            const data = await nonceRes.json().catch(() => ({}))
-            setClaimRefundError(
-              typeof data?.error === 'string' ? data.error : 'Failed to get sign-in nonce'
-            )
-            return false
-          }
-          const { message } = (await nonceRes.json()) as { message: string }
-          const messageBytes = new TextEncoder().encode(message)
-          const signature = await signMessage(messageBytes)
-          const signatureBase64 =
-            typeof signature === 'string'
-              ? btoa(signature)
-              : btoa(String.fromCharCode(...new Uint8Array(signature)))
-          const verifyRes = await fetch('/api/auth/verify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({
-              wallet: walletAddr,
-              message,
-              signature: signatureBase64,
-            }),
-          })
-          if (!verifyRes.ok) {
-            const data = await verifyRes.json().catch(() => ({}))
-            setClaimRefundError(
-              typeof data?.error === 'string' ? data.error : 'Sign-in verification failed'
-            )
-            return false
-          }
           return true
         } catch (e) {
           setClaimRefundError(e instanceof Error ? e.message : 'Sign-in failed')
@@ -1607,7 +1556,7 @@ export function RaffleDetailClient({
         noPayment: (json as { noPayment?: boolean }).noPayment === true,
       }
     },
-    [connected, publicKey, signMessage]
+    [connected, publicKey, signMessage, signTransaction, connection, wallet?.adapter?.name]
   )
 
   const presentActionClaimSuccess = useCallback(
@@ -1773,46 +1722,19 @@ export function RaffleDetailClient({
     }
 
     const signInForSession = async (): Promise<boolean> => {
-      if (!publicKey || !signMessage) {
+      if (!publicKey || (!signMessage && !signTransaction)) {
         setDepositEscrowError('Sign in required. Connect your wallet and sign in.')
         return false
       }
       try {
-        const walletAddr = publicKey.toBase58()
-        const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(walletAddr)}`, {
-          credentials: 'include',
+        const { ensureSiwsSession } = await import('@/lib/client/ensure-siws-session')
+        await ensureSiwsSession({
+          publicKey,
+          signMessage,
+          signTransaction,
+          connection,
+          walletName: wallet?.adapter?.name,
         })
-        if (!nonceRes.ok) {
-          const data = await nonceRes.json().catch(() => ({}))
-          const msg = typeof data?.error === 'string' ? data.error : 'Failed to get sign-in nonce'
-          setDepositEscrowError(msg)
-          return false
-        }
-        const { message } = (await nonceRes.json()) as { message: string }
-        const messageBytes = new TextEncoder().encode(message)
-        const signature = await signMessage(messageBytes)
-        const signatureBase64 =
-          typeof signature === 'string'
-            ? btoa(signature)
-            : btoa(String.fromCharCode(...new Uint8Array(signature)))
-
-        const verifyRes = await fetch('/api/auth/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            wallet: walletAddr,
-            message,
-            signature: signatureBase64,
-          }),
-        })
-        if (!verifyRes.ok) {
-          const data = await verifyRes.json().catch(() => ({}))
-          const msg =
-            typeof data?.error === 'string' ? data.error : 'Sign-in verification failed'
-          setDepositEscrowError(msg)
-          return false
-        }
         return true
       } catch (e) {
         setDepositEscrowError(e instanceof Error ? e.message : 'Sign-in failed')
@@ -2226,6 +2148,8 @@ export function RaffleDetailClient({
   }, [
     publicKey,
     signMessage,
+    signTransaction,
+    wallet?.adapter?.name,
     escrowAddress,
     raffle.id,
     raffle.slug,
@@ -2266,45 +2190,19 @@ export function RaffleDetailClient({
     const manualTx = depositTxFromUi
     try {
       const signInForSession = async (): Promise<boolean> => {
-        if (!publicKey || !signMessage) {
+        if (!publicKey || (!signMessage && !signTransaction)) {
           setDepositEscrowError('Sign in required. Connect your wallet and sign in.')
           return false
         }
         try {
-          const walletAddr = publicKey.toBase58()
-          const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(walletAddr)}`, {
-            credentials: 'include',
+          const { ensureSiwsSession } = await import('@/lib/client/ensure-siws-session')
+          await ensureSiwsSession({
+            publicKey,
+            signMessage,
+            signTransaction,
+            connection,
+            walletName: wallet?.adapter?.name,
           })
-          if (!nonceRes.ok) {
-            const data = await nonceRes.json().catch(() => ({}))
-            const msg = typeof data?.error === 'string' ? data.error : 'Failed to get sign-in nonce'
-            setDepositEscrowError(msg)
-            return false
-          }
-          const { message } = (await nonceRes.json()) as { message: string }
-          const messageBytes = new TextEncoder().encode(message)
-          const signature = await signMessage(messageBytes)
-          const signatureBase64 =
-            typeof signature === 'string'
-              ? btoa(signature)
-              : btoa(String.fromCharCode(...new Uint8Array(signature)))
-          const verifyRes = await fetch('/api/auth/verify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({
-              wallet: walletAddr,
-              message,
-              signature: signatureBase64,
-            }),
-          })
-          if (!verifyRes.ok) {
-            const data = await verifyRes.json().catch(() => ({}))
-            const msg =
-              typeof data?.error === 'string' ? data.error : 'Sign-in verification failed'
-            setDepositEscrowError(msg)
-            return false
-          }
           return true
         } catch (e) {
           setDepositEscrowError(e instanceof Error ? e.message : 'Sign-in failed')
@@ -2408,6 +2306,9 @@ export function RaffleDetailClient({
     router,
     publicKey,
     signMessage,
+    signTransaction,
+    wallet?.adapter?.name,
+    connection,
     manualDepositTx,
     depositLastTxSignature,
   ])
@@ -4604,7 +4505,16 @@ export function RaffleDetailClient({
                   </div>
                 )}
                 {claimRefundError && (
-                  <p className="text-sm text-destructive px-1">{claimRefundError}</p>
+                  <div className="text-sm text-destructive px-1 space-y-1" role="alert">
+                    <p>{claimRefundError}</p>
+                    {/invalid signature|ledger|sign.?in/i.test(claimRefundError) ? (
+                      <p className="text-muted-foreground">
+                        Ledger tip: unlock the device, open the Solana app, close Ledger Live, prefer USB — then try
+                        Claim again (Owltopia uses a memo transaction for sign-in that is not broadcast). Refunds are
+                        paid from funds escrow; you do not need SOL for the payout itself.
+                      </p>
+                    ) : null}
+                  </div>
                 )}
               </div>
             )}
