@@ -405,7 +405,17 @@ These do not block Phase 1 engineering if env defaults ship as specified in §4.
 
 ## 15. OwlSwap Trading Room UI
 
-Immersive Owltopia-branded NFT trading room (Pokémon-trade energy), planned as Phase 1 UI completion on top of the shipped admin-only scaffold. Design reference: standalone `OwlSwap.html` prototype (chambers, exchange ring, review bar). **Prototype is design/interaction only** — do not ship its demo wallet, sample history, simulated completion, embedded Three runtime, or sample artwork.
+Immersive Owltopia-branded NFT trading room (Pokémon-trade energy), planned as Phase 1 UI completion on top of the shipped admin-only scaffold. Design reference: standalone `OwlSwap.html` / uploaded Trading Room prototype (chambers, exchange ring, review bar).
+
+### Prototype constraints
+
+Treat the HTML as **visual/interaction reference only**. **Do not** port into production:
+
+- Demo wallet / sample trade history / local “preview complete” swap
+- Embedded Three.js bundle / sample artwork / screenshot blobs
+- Animation-timer success (`finishExchange` after preview)
+
+**Keep from the prototype:** dual chambers, central exchange ring + conduits, review bar (summary + fees + primary CTA), inspect dialogs, mobile stacking, `prefers-reduced-motion`, WebGL fallback cards.
 
 ### 15.0 Admin-only gate (non-negotiable)
 
@@ -418,6 +428,8 @@ Immersive Owltopia-branded NFT trading room (Pokémon-trade energy), planned as 
 | Public launch | Separate step after admin approval — not bundled with Trading Room merge |
 
 ### 15.1 Design goal
+
+Immersive Owltopia-branded trading room on the existing create/accept **review** surfaces:
 
 - Two glowing chambers: **You offer** and **You receive**
 - Prominent NFT artwork, collection names, inspect/enlarge
@@ -466,103 +478,172 @@ flowchart TB
   ReviewBar --> FeeAPI
 ```
 
-**Locked integration:** npm `three` (+ `@types/three`); client-only canvas via `dynamic(..., { ssr: false })`. No iframe of the HTML prototype. HTML/shadcn for text, buttons, dialogs, a11y.
+**Locked integration:** add npm `three` (+ `@types/three`) and a **client-only** React component that owns the WebGL lifecycle (`dynamic(..., { ssr: false })`). Do **not** iframe the HTML. Do **not** embed the prototype’s inlined Three runtime. Prefer a thin custom scene port over R3F for Phase 1 UI; HTML/CSS/shadcn for all text, buttons, dialogs, a11y.
 
 **Mount points:**
 
-- **Accept:** maker assets = You receive; taker selection = You offer
-- **Create:** maker selection = You offer; You receive = empty chamber + “Awaiting counterparty” (no fake NFTs)
-- Selection stays on `WalletNftPicker`; room is the **review/status stage**
+- **Accept review** ([`OwlSwapAcceptClient`](../components/owl-swap/OwlSwapAcceptClient.tsx)): maker assets = **You receive**; taker selection = **You offer**
+- **Create review** ([`OwlSwapClient`](../components/owl-swap/OwlSwapClient.tsx)): maker selection = **You offer**; **You receive** = empty chamber + “Awaiting counterparty” (no fake NFTs)
+- Selection remains via [`WalletNftPicker`](../components/WalletNftPicker.tsx); room is the **immersive review/status stage**, not a replacement for picker or escrow logic
 
-**Planned components:** under `components/owl-swap/trading-room/` as listed in §8; state helpers in `lib/owl-swap/trading-room-ui-state.ts`.
+**New focused components (planned names):**
 
-### 15.3 Chamber data (multi-asset — do not narrow to 1:1)
+- `components/owl-swap/trading-room/OwlSwapTradingRoom.tsx` — scene host + overlay composition
+- `OwlSwapTradingRoomCanvas.tsx` — Three.js mount/dispose/pause
+- `OwlSwapChamberOverlay.tsx` — labels, counts, change/inspect hotspots
+- `OwlSwapNftInspectDialog.tsx` — enlarge + mint/collection display (untrusted metadata)
+- `OwlSwapTradeReviewBar.tsx` — summary, View fees, primary CTA
+- `OwlSwapFeeBreakdown.tsx` — real quote lines; never invent `0` if quote missing
+- `OwlSwapTxStatusBanner.tsx` — maps UI ↔ authoritative state
+- `lib/owl-swap/trading-room-ui-state.ts` — pure state machine helpers (no timers as proof)
 
-Phase 1 supports up to **5 classic SPL NFTs/side** + optional SOL. Mockup is 1:1; production must not silently drop multi-asset support.
+Reuse unchanged: wallet/SIWS, access hooks, deposit builders, APIs, escrow, fee helpers, `theme-prime` / dark surfaces.
 
-- Featured NFT large; badge `N NFT(s)`; stack/rail for remaining thumbs; SOL as text chip
-- Inspect dialog steps through all assets
-- Identity from API: `mint`, `name`, `image_url`, `collection`, `verified`
-- Separate: artwork URL (display) vs ownership (wallet/escrow verify) vs allowlist `verified`
-- Handle loading, missing art (branded placeholder — not prototype samples), empty side, stale offers (`reviewEpoch` invalidation)
+### 15.3 Chamber data binding (multi-asset)
+
+Phase 1 already supports **up to 5 NFTs/side** + SOL. Mockup is 1:1 — plan must not narrow that.
+
+**Locked multi-asset layout:**
+
+- Chamber shows **featured** NFT (first selected / first asset) large
+- Badge `N NFT` / `N NFTs` (+ SOL line if sweetener > 0)
+- Stack/rail of remaining thumbs under/beside featured (desktop); vertical stack on mobile
+- Inspect opens featured; carousel/next in dialog to step through all assets
+- SOL sweetener as text chip in chamber details, not a fake NFT card
+- Asset identity from API/DB: `mint`, `name`, `image_url`, `collection`, `verified` — display only
+
+**Separate concerns (required copy/logic):**
+
+| Concern | Source of truth |
+|---------|-----------------|
+| Artwork URL | DAS/metadata `image_url` (untrusted display) |
+| Ownership | Wallet holdings / deposit verify / escrow hold checks |
+| Collection allowlist `verified` | [`allowlist.ts`](../lib/owl-swap/allowlist.ts) — not proof of ownership or art authenticity |
+
+**Empty / loading / missing art / stale offer:**
+
+- Loading skeletons in overlay; canvas may show empty pods
+- Missing art → branded placeholder (not sample owls from HTML)
+- Empty side → “Add NFTs” / “Awaiting counterparty”
+- Stale: if offer `updated_at` / asset set changes or status ≠ expected, invalidate review approval and require renewed review (bump local `reviewEpoch`)
 
 ### 15.4 Transaction UI states ↔ backend evidence
 
-| UI state | Evidence | Room visuals |
-|----------|----------|--------------|
-| `idle_review` | Selection + offer payload | Chambers filled; CTA when valid |
-| `awaiting_signature` | Wallet pending sign | Banner; CTA off; **no** success anim |
-| `submitting` | Tx/POST in flight | Same |
-| `pending_confirmation` | Sig known; awaiting confirm/API | Progress only |
-| `open_shared` | `status === 'open'` + `maker_deposit_sig` | Share UI — not “swap complete” |
-| `completed` | `status === 'completed'` **and** `settle_sig` | Success / exchange flourish **only then** |
-| `rejected` / `failed` | Wallet reject / API error | Error; no complete |
-| `cancelled` / `expired` | Matching offer status | Terminal |
+| UI state | Authoritative evidence | Room visuals |
+|----------|------------------------|--------------|
+| `idle_review` | Local selection + open offer payload | Chambers populated; CTA enabled when valid |
+| `awaiting_signature` | Wallet adapter pending sign | Status banner; CTA disabled; **no** success anim |
+| `submitting` | Client sent tx / POST in flight | Same |
+| `pending_confirmation` | Sig known; waiting `confirmSignatureSuccessOnChain` / API | Progress only |
+| `open_shared` (maker) | Offer `status === 'open'` + `maker_deposit_sig` | Share UI; not “swap complete” |
+| `completed` | Offer `status === 'completed'` **and** `settle_sig` (and ledger row when present) | Success / exchanged presentation **only then** |
+| `rejected` | User rejected wallet | Error; chambers unchanged |
+| `failed` | API/sim/confirm error | Error; no complete |
+| `cancelled` | `status === 'cancelled'` | Terminal cancel |
+| `expired` | `status === 'expired'` (by-code on-read) | Terminal expired |
 
-**Hard rules:** animation ≠ settlement; never show completed visuals on rejected/failed/expired/pending; refresh restores server status; disable in-flight CTAs; offer/asset change renews review.
+**Hard rules (acceptance):**
+
+- Decorative conduit/particle/exchange animation ≠ settlement
+- Never show completed-trade visuals on rejected/failed/expired/pending
+- Refresh reloads offer via `GET .../by-code` or mine list — restore from server status
+- Idempotent CTAs: disable while in-flight; accept/confirm already server-guarded; UI must not double-POST
+- Offer/asset change → clear in-flight review approval (`reviewEpoch`)
 
 ### 15.5 Safeguards unchanged
 
-- Admin-only Phase 1 access; no public flag changes in Trading Room PRs
-- No changes to escrow custody, settle, reclaim, fee math, treasury
-- Fee UI from live `/api/owl-swap/holder-fee` + fee helpers; missing quote → block sign / “Fee unavailable”, never invent `0`
-- Migration `234_owl_swap.sql` and env requirements unchanged
+**Non-negotiable** for this workstream:
+
+- Admin-only Phase 1 + `requireOwlSwapAccess` / client access hook
+- No changes to escrow custody, settle, reclaim, fee math, treasury destination
+- Fee UI must use live `/api/owl-swap/holder-fee` + existing fee helpers; missing quote → “Fee unavailable” / block sign, **not** `0`
+- Migration `234_owl_swap.sql`, escrow/treasury envs, controlled admin test, public launch flags — **unchanged** by UI work
+- Trading Room PRs must not enable public flags
 
 ### 15.6 Performance and accessibility
 
-- Client-only Three.js; dispose on unmount; cap DPR; pause when hidden/off-screen
-- `prefers-reduced-motion`: no ambient float/particles; skip flourish; keep status text
-- WebGL fail → HTML fallback cards with **same** trade data
-- Actions usable without canvas; keyboard + dialog focus + ≥44px touch ([MOBILE_FIRST.md](./MOBILE_FIRST.md))
-- Assets under `public/owl-swap/trading-room/` (scene only — not demo NFTs)
+- Client-only dynamic import of canvas; App Router SSR-safe
+- On unmount: dispose renderer/geometries/textures/RAF
+- Cap pixel ratio (e.g. `min(devicePixelRatio, 1.5)`); pause RAF when `document.hidden` or off-screen (`IntersectionObserver`)
+- `prefers-reduced-motion`: disable ambient float/particles; skip exchange flourish; keep status text
+- WebGL unavailable / context lost → HTML fallback cards (prototype pattern) with **same** trade data
+- All actions available without canvas (picker, fees, CTA, status)
+- Keyboard: focusable hotspots, dialog focus trap (existing shadcn Dialog), touch ≥44px ([MOBILE_FIRST.md](./MOBILE_FIRST.md))
+- Production art/libs: npm `three`, assets under `public/owl-swap/trading-room/` (scene textures only — not demo NFTs)
 
-### 15.7 Visual verification loop
+### 15.7 Visual verification loop (required)
 
-1. Render at reference stage aspect (~1672×535 desktop basis from prototype)
-2. Compare chambers, NFT crop, type, spacing, color, lighting, conduits, review bar
-3. Fix and repeat
-4. Mobile: overflow, overlap, readability, controls
-5. WebGL **and** fallback
-6. Record remaining diffs honestly (prototype WebGL/screenshot verify was incomplete)
+1. Render desktop stage at prototype reference dimensions (stage UI basis ~1672×535; capture at that aspect)
+2. Compare: chamber positions, NFT size/crop, typography, spacing, colors, lighting, conduits, review bar
+3. Fix discrepancies; repeat
+4. Mobile pass: overflow, overlap, readability, usable controls (stacked chambers per prototype `@media max-width:760px`)
+5. Verify WebGL **and** fallback paths
+6. Record remaining diffs / unavailable checks honestly in PR notes (prototype itself noted incomplete WebGL/screenshot verification)
 
-### 15.8 Required vs optional polish
+### 15.8 Required Phase 1 UI vs optional polish
 
-**Required (admin preview):** room on create+accept review; multi-asset chambers; live fees; tx status machine; reduced-motion + fallback; visual loop; state-helper unit tests; **public flags untouched**.
+**Required (Phase 1 Trading Room — admin preview):**
 
-**Optional later:** richer FX, post-confirm card-flight flourish, QR/ledger polish, R3F migration, Phase 2 token theming.
+- Wire room into create + accept review paths with real assets/fees/status
+- Multi-asset chamber layout + inspect
+- Review bar + fee dialog from live quotes
+- Tx status machine + no false completion
+- Reduced-motion + WebGL fallback
+- Admin gates preserved; screenshot-comparison loop executed for admin preview
+- Relevant lint/tsc; focused unit tests for `trading-room-ui-state` helpers
+- **Public flags untouched**
+
+**Optional polish (later):**
+
+- Particle density / bloom / richer conduit FX
+- Full exchange “card flight” flourish after **confirmed** complete only
+- QR polish, ledger panel UI, sound
+- R3F migration
+- Token-swap tab theming (Phase 2)
 
 ### 15.9 Implementation order (Trading Room coding task)
 
-1. Add `three` + SSR-safe canvas stub on admin-gated pages (fallback first)
-2. Overlay + review bar wired to real selection/offer props
-3. Multi-asset chamber binding + inspect
-4. Port scene (pods, ring, conduits) with dispose/pause/reduced-motion
-5. Status machine on deposit + accept paths
-6. Visual comparison desktop/mobile + WebGL/fallback
-7. Admin checklist on `/admin/owl-swap` — **still no public launch**
+1. Add `three` dependency + empty client canvas shell (SSR-safe) behind admin-only pages
+2. HTML overlay + review bar wired to existing selection/offer props (no fake success)
+3. Bind multi-asset chamber data + inspect dialog
+4. Port scene (pods, ring, conduits) with dispose/pause/reduced-motion/fallback
+5. Status machine integration on create deposit + accept settle paths
+6. Visual comparison loop desktop/mobile + WebGL/fallback
+7. Unit tests for UI state helpers; manual admin checklist on `/admin/owl-swap` — **still no public launch**
 
-### 15.10 Acceptance criteria
+### 15.10 Dependencies
 
-- Assets and fees match the real trade under review
-- Auth + escrow intact; **public flags unchanged**
-- Offer changes invalidate stale review
+- npm: `three`, `@types/three`
+- Existing: wallet adapter, SIWS, OwlSwap APIs, escrow, fee quote, WalletNftPicker, shadcn Dialog/Button
+- Design refs: uploaded Trading Room HTML + any static reference capture stored outside prod bundle
+- **Does not depend on** Phase 1b assets, Phase 2 Jupiter, Phase 3 trustless program, or public launch
+
+### 15.11 Acceptance criteria (checklist for Trading Room PR)
+
+- Displayed mints/names/fees match the offer/selection under review
+- Authorization + escrow behavior unchanged; **public flags unchanged**
+- Offer/asset changes invalidate prior review approval
 - Rejected/failed/expired/pending never show completed visuals
-- Refresh restores authoritative offer state; no duplicate submissions
-- Desktop + mobile visual review; reduced-motion + fallback usable
-- `tsc` / eslint / state-helper tests pass
+- Refresh restores server offer status
+- Repeat clicks do not duplicate create/accept/cancel
+- Desktop + mobile pass visual review vs reference
+- Reduced-motion + fallback usable without canvas
+- `tsc` / eslint / new state-helper tests pass
+- No migration or fee/treasury/env requirement regressions
 - Admins can complete create → share → accept (and cancel) under admin-only gate
 
-### 15.11 Unresolved questions
+### 15.12 Unresolved questions
 
-1. Exact desktop reference still for screenshot loop (prototype verify incomplete)
-2. Create-flow empty “You receive” art direction (default: empty chamber + copy)
-3. Post-confirm exchange flourish required for admin preview or optional (default: **optional**; success **state/banner** required)
+1. Exact desktop reference PNG for screenshot loop (prototype WebGL verify was incomplete) — use best still from design if provided, else HTML layout metrics
+2. Create-flow “You receive” empty-state art direction (locked default: empty chamber + copy; confirm if marketing wants silhouette)
+3. Whether completed success flourish is required for Phase 1 admin preview or optional polish (plan default: **optional**; success **banner/state** required)
 
-### 15.12 Plan change summary
+### 15.13 Plan change summary
 
 - Trading Room UI added as Phase 1 UI completion on existing scaffold
 - **Admin test first** locked in status, decisions, §11 rollout, and §15.0
 - Public launch only after admin sign-off; Trading Room work must not flip flags
-- Multi-asset chambers, real tx states, escrow/fee safeguards preserved
+- Multi-asset chambers, real tx states, escrow/fee/admin gates preserved
+- Visual verification loop, a11y/perf, required vs optional polish, implementation order, acceptance criteria documented
 
-**First coding step (future task):** `three` + SSR-safe canvas stub + HTML fallback on admin-gated `/owl-swap` review — bind real selection, no demo success path, public flags unchanged.
+**First coding step (future task):** Add `three` + SSR-safe `OwlSwapTradingRoomCanvas` stub on admin-gated `/owl-swap` review UI with HTML fallback and **no** demo success path — then bind real selection props. Public flags unchanged.
