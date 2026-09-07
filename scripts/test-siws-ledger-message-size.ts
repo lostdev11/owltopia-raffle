@@ -48,7 +48,7 @@ const LEDGER_SAFE_MESSAGE_BYTES = 900
 
 const COMPUTE_BUDGET_PROGRAM_ID = new PublicKey('ComputeBudget111111111111111111111111111111')
 
-function main() {
+async function main() {
   if (!process.env.SESSION_SECRET && !process.env.AUTH_SECRET) {
     process.env.SESSION_SECRET = 'test-session-secret-for-siws-ledger-checks'
   }
@@ -279,6 +279,21 @@ function main() {
     safeguardsErr
   )
 
+  // Dashboard / refund SIWS: bogus Phantom+Ledger signatures must be detected client-side.
+  const {
+    isInvalidSignatureAuthError,
+    verifySiwsMessageSignatureLocally,
+  } = await import('../lib/client/siws-sign-in')
+  assert.ok(isInvalidSignatureAuthError(new Error('Invalid signature')))
+  assert.ok(isInvalidSignatureAuthError(new Error('Sign-in verification failed')))
+  assert.equal(isInvalidSignatureAuthError(new Error('network down')), false)
+  const goodSigB64 = signMessageSignatureToBase64(
+    nacl.sign.detached(new TextEncoder().encode(message), kp.secretKey)
+  )
+  assert.equal(verifySiwsMessageSignatureLocally(wallet, message, goodSigB64), true)
+  const junkSig = Buffer.alloc(64, 7).toString('base64')
+  assert.equal(verifySiwsMessageSignatureLocally(wallet, message, junkSig), false)
+
   console.log(
     JSON.stringify(
       {
@@ -294,6 +309,7 @@ function main() {
         safeguardsAckMessageBytes: ackBytes,
         safeguardsAckMemoTxFallback: true,
         safeguardsPhantomLedgerRejectHint: true,
+        invalidSignatureClientDetect: true,
       },
       null,
       2
@@ -301,4 +317,7 @@ function main() {
   )
 }
 
-main()
+main().catch((e) => {
+  console.error(e)
+  process.exit(1)
+})

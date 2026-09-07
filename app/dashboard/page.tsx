@@ -481,7 +481,7 @@ function parseDashboardTabParam(value: string | null): DashboardTabId | null {
 }
 
 export default function DashboardPage() {
-  const { publicKey, connected, signMessage } = useWallet()
+  const { publicKey, connected, signMessage, signTransaction, wallet: walletAdapter } = useWallet()
   const { connection } = useConnection()
   const sendTransaction = useSendTransactionForWallet()
   const { setVisible } = useWalletModal()
@@ -808,53 +808,36 @@ export default function DashboardPage() {
     }
   }, [data?.referral?.activeCode, data?.referral?.codeKind])
 
-  const handleSignIn = useCallback(async () => {
-    if (!publicKey || !signMessage) {
-      setSignInError('Your wallet does not support message signing.')
-      return
-    }
-    setSignInError(null)
-    setSigningIn(true)
-    try {
-      const walletAddr = publicKey.toBase58()
-      const nonceRes = await fetch(`/api/auth/nonce?wallet=${encodeURIComponent(walletAddr)}`, {
-        credentials: 'include',
-      })
-      if (!nonceRes.ok) {
-        const data = await nonceRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Failed to get sign-in nonce')
+  const handleSignIn = useCallback(
+    async (opts?: { preferTx?: boolean }) => {
+      if (!publicKey || (!signMessage && !signTransaction)) {
+        setSignInError('Your wallet does not support signing.')
+        return
       }
-      const { message } = (await nonceRes.json()) as { message: string }
-      const messageBytes = new TextEncoder().encode(message)
-      const signature = await signMessage(messageBytes)
-      const signatureBase64 =
-        typeof signature === 'string'
-          ? btoa(signature)
-          : btoa(String.fromCharCode(...new Uint8Array(signature)))
-
-      const verifyRes = await fetch('/api/auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          wallet: walletAddr,
-          message,
-          signature: signatureBase64,
-        }),
-      })
-
-      if (!verifyRes.ok) {
-        const data = await verifyRes.json().catch(() => ({}))
-        throw new Error((data as { error?: string })?.error || 'Sign-in verification failed')
+      setSignInError(null)
+      setSigningIn(true)
+      try {
+        const { performSiwsSignIn } = await import('@/lib/client/siws-sign-in')
+        await performSiwsSignIn({
+          wallet: publicKey.toBase58(),
+          signMessage,
+          signTransaction,
+          preferTx: opts?.preferTx === true,
+          walletName: walletAdapter?.adapter?.name,
+          getBlockhash: async () => {
+            const latest = await connection.getLatestBlockhash('confirmed')
+            return latest.blockhash
+          },
+        })
+        await loadDashboard()
+      } catch (e) {
+        setSignInError(e instanceof Error ? e.message : 'Sign-in failed')
+      } finally {
+        setSigningIn(false)
       }
-
-      await loadDashboard()
-    } catch (e) {
-      setSignInError(e instanceof Error ? e.message : 'Sign-in failed')
-    } finally {
-      setSigningIn(false)
-    }
-  }, [publicKey, signMessage, loadDashboard])
+    },
+    [publicKey, signMessage, signTransaction, walletAdapter?.adapter?.name, connection, loadDashboard]
+  )
 
   const openEscrowCheck = useCallback(async (raffleId: string) => {
     setEscrowLinkLoadingId(raffleId)
@@ -1955,25 +1938,52 @@ export default function DashboardPage() {
     return (
       <main className="container mx-auto px-4 py-8 max-w-2xl">
         <h1 className="text-2xl font-bold mb-4">My Dashboard</h1>
-        <p className="text-muted-foreground mb-6">
-          Sign in with your wallet to see your raffles, entries, and revenue. This is a one-time message signature (no transaction or fee).
+        <p className="text-muted-foreground mb-4">
+          Sign in with your wallet to see your raffles, entries, and revenue — including ticket refunds when a
+          raffle fails the minimum. This is a one-time proof (no Owltopia fee).
         </p>
-        {signInError && <p className="text-destructive mb-4">{signInError}</p>}
-        <Button onClick={handleSignIn} disabled={signingIn || !signMessage}>
-          {signingIn ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              Signing in…
-            </>
-          ) : (
-            'Sign in with wallet'
-          )}
-        </Button>
-        {!signMessage && (
-          <p className="text-sm text-muted-foreground mt-2">
-            Your connected wallet does not support message signing. Try another wallet.
+        {signTransaction ? (
+          <p className="text-sm text-muted-foreground mb-4 rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+            Using Ledger? Phantom/Solflare Sign Message often fails with{' '}
+            <span className="font-medium text-foreground">Invalid signature</span>. Tap{' '}
+            <span className="font-medium text-foreground">Sign with Ledger transaction</span> — unlock the
+            device, open the Solana app, close Ledger Live, prefer USB on desktop, then approve the memo (not
+            broadcast).
           </p>
-        )}
+        ) : null}
+        {signInError && <p className="text-destructive mb-4 whitespace-pre-wrap">{signInError}</p>}
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button
+            onClick={() => void handleSignIn()}
+            disabled={signingIn || (!signMessage && !signTransaction)}
+            className="min-h-[44px] touch-manipulation bg-green-600 hover:bg-green-700 text-white"
+          >
+            {signingIn ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Waiting for wallet / Ledger…
+              </>
+            ) : (
+              'Sign in with wallet'
+            )}
+          </Button>
+          {signTransaction ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-[44px] touch-manipulation"
+              disabled={signingIn}
+              onClick={() => void handleSignIn({ preferTx: true })}
+            >
+              Sign with Ledger transaction
+            </Button>
+          ) : null}
+        </div>
+        {!signMessage && !signTransaction ? (
+          <p className="text-sm text-muted-foreground mt-2">
+            Your connected wallet does not support signing. Try Phantom or Solflare.
+          </p>
+        ) : null}
       </main>
     )
   }

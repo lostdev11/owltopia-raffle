@@ -1,6 +1,8 @@
 'use client'
 
 import type { Transaction, VersionedTransaction } from '@solana/web3.js'
+import { PublicKey } from '@solana/web3.js'
+import nacl from 'tweetnacl'
 import { nestingClientApiUrl } from '@/lib/nesting/fetch-json'
 import {
   buildSignInMemoTransaction,
@@ -133,6 +135,36 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMes
     promise,
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs)),
   ])
+}
+
+/** Phantom + Ledger often returns a signature that does not verify against the raw SIWS message. */
+export function isInvalidSignatureAuthError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err ?? '')).toLowerCase()
+  return (
+    msg.includes('invalid signature') ||
+    msg.includes('signature does not match') ||
+    msg.includes('invalid signature length') ||
+    msg.includes('invalid signature encoding') ||
+    msg.includes('could not read wallet signature') ||
+    msg.includes('sign-in verification failed')
+  )
+}
+
+/** Local ed25519 check before /api/auth/verify — catches Phantom/Ledger bogus signatures early. */
+export function verifySiwsMessageSignatureLocally(
+  wallet: string,
+  message: string,
+  signatureBase64: string
+): boolean {
+  try {
+    const publicKey = new PublicKey(wallet)
+    const messageBytes = new TextEncoder().encode(message)
+    const signature = Uint8Array.from(atob(signatureBase64), (c) => c.charCodeAt(0))
+    if (signature.length !== 64) return false
+    return nacl.sign.detached.verify(messageBytes, signature, publicKey.toBytes())
+  } catch {
+    return false
+  }
 }
 
 async function signInViaMemoTransaction(params: {
@@ -281,47 +313,92 @@ export async function performSiwsSignIn(params: PerformSiwsSignInParams): Promis
 
   const messageBytes = new TextEncoder().encode(challenge.message)
 
+  const fallbackToMemoTx = async (reason: unknown): Promise<void> => {
+    try {
+      await signInViaMemoTransaction({
+        walletAddr,
+        message: challenge.message,
+        blockhash: challenge.blockhash,
+        signTransaction: signTransaction!,
+        getBlockhash,
+        apiUrl,
+        timeoutMs,
+        walletName,
+      })
+    } catch (txErr) {
+      const lead =
+        isInvalidSignatureAuthError(reason)
+          ? 'Message sign-in returned an invalid signature (common with Phantom/Solflare + Ledger).'
+          : null
+      throw new Error(
+        [
+          lead,
+          txErr instanceof Error ? txErr.message : 'Ledger transaction sign-in failed',
+          'Tip: unlock Ledger, open Solana app, close Ledger Live, use USB on desktop if Bluetooth fails.',
+        ]
+          .filter(Boolean)
+          .join(' ')
+      )
+    }
+  }
+
+  let signedMessageOk = false
   try {
     const signature = await withTimeout(
       signMessage!(messageBytes),
       timeoutMs,
       'Timed out waiting for a wallet signature. Open Phantom/Solflare, approve Sign Message on your Ledger if prompted, or use “Sign with Ledger transaction” below.'
     )
+    signedMessageOk = true
     const signatureBase64 = signMessageSignatureToBase64(signature)
-    await verifyWithMessageSignature({
-      walletAddr,
-      message: challenge.message,
-      signatureBase64,
-      apiUrl,
-    })
-    return
+
+    // Phantom + Ledger can return a 64-byte payload that does not verify — skip burning a
+    // server round-trip and fall straight to memo-tx when available.
+    if (!verifySiwsMessageSignatureLocally(walletAddr, challenge.message, signatureBase64)) {
+      if (canTx) {
+        await fallbackToMemoTx(new Error('Invalid signature'))
+        return
+      }
+      throw new Error(
+        'Invalid signature. If you use Ledger via Phantom/Solflare, reconnect on desktop USB and use “Sign with Ledger transaction”, or sign in from a hot wallet.'
+      )
+    }
+
+    try {
+      await verifyWithMessageSignature({
+        walletAddr,
+        message: challenge.message,
+        signatureBase64,
+        apiUrl,
+      })
+      return
+    } catch (verifyErr) {
+      if (canTx && isInvalidSignatureAuthError(verifyErr)) {
+        await fallbackToMemoTx(verifyErr)
+        return
+      }
+      throw verifyErr
+    }
   } catch (e) {
     if (isSignMessageUserRejection(e)) {
       throw new Error(formatSignMessageError(e, { walletName, context: 'sign-in' }))
     }
 
-    // Auto-fallback for Ledger / Phantom "Unexpected error" / no device prompt.
-    if (canTx && isLikelyHardwareWalletSignMessageFailure(e)) {
-      try {
-        await signInViaMemoTransaction({
-          walletAddr,
-          message: challenge.message,
-          blockhash: challenge.blockhash,
-          signTransaction: signTransaction!,
-          getBlockhash,
-          apiUrl,
-          timeoutMs,
-          walletName,
-        })
-        return
-      } catch (txErr) {
-        throw new Error(
-          (txErr instanceof Error ? txErr.message : 'Ledger transaction sign-in failed') +
-            ' Tip: unlock Ledger, open Solana app, close Ledger Live, use USB on desktop if Bluetooth fails.'
-        )
-      }
+    // Auto-fallback only when Sign Message itself failed (no usable signature yet).
+    // Invalid-signature after a returned sig already attempted memo-tx above when canTx.
+    if (
+      !signedMessageOk &&
+      canTx &&
+      (isLikelyHardwareWalletSignMessageFailure(e) || isInvalidSignatureAuthError(e))
+    ) {
+      await fallbackToMemoTx(e)
+      return
     }
 
-    throw new Error(formatSignMessageError(e, { walletName, context: 'sign-in' }))
+    throw new Error(
+      isInvalidSignatureAuthError(e) && e instanceof Error
+        ? e.message
+        : formatSignMessageError(e, { walletName, context: 'sign-in' })
+    )
   }
 }
