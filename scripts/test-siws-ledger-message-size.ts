@@ -49,7 +49,8 @@ const LEDGER_SAFE_MESSAGE_BYTES = 900
 const COMPUTE_BUDGET_PROGRAM_ID = new PublicKey('ComputeBudget111111111111111111111111111111')
 
 async function main() {
-  if (!process.env.SESSION_SECRET && !process.env.AUTH_SECRET) {
+  const existing = process.env.SESSION_SECRET || process.env.AUTH_SECRET
+  if (!existing || existing.length < 16) {
     process.env.SESSION_SECRET = 'test-session-secret-for-siws-ledger-checks'
   }
 
