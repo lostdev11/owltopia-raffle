@@ -160,7 +160,16 @@ export function AdminOwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
                 <>
                   Simulation mode is on (no{' '}
                   <code className="text-xs">OWL_SWAP_ESCROW_SECRET_KEY</code>). Flows are DB-only —
-                  nothing moves on-chain. Add the escrow key when you are ready for live deposits.
+                  nothing moves on-chain. For live deposits: run{' '}
+                  <code className="text-xs">npm run generate:owl-swap-escrow-key</code>, set the
+                  secret on the host, fund the pubkey, redeploy.
+                </>
+              ) : escrowMode === 'missing' ? (
+                <>
+                  Escrow missing (503). Generate with{' '}
+                  <code className="text-xs">npm run generate:owl-swap-escrow-key</code>, set{' '}
+                  <code className="text-xs">OWL_SWAP_ESCROW_SECRET_KEY</code>, fund the address,
+                  redeploy. Do not reuse prize/funds keys.
                 </>
               ) : (
                 <>

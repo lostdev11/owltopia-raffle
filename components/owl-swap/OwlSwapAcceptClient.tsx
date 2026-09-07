@@ -11,6 +11,8 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { WalletNftPicker } from '@/components/WalletNftPicker'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
+import { OwlSwapTradingRoom } from '@/components/owl-swap/trading-room/OwlSwapTradingRoom'
+import { OwlSwapMissingEscrowAlert } from '@/components/owl-swap/trading-room/OwlSwapMissingEscrowAlert'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import { useSiwsSession } from '@/hooks/use-siws-session'
@@ -26,12 +28,18 @@ import {
 } from '@/lib/owl-swap/fee'
 import { buildOwlSwapTakerDepositTx } from '@/lib/owl-swap/build-deposit-tx'
 import { makeOwlSwapSimulateSignature } from '@/lib/owl-swap/simulate'
+import {
+  deriveTradingRoomTxUiState,
+  nextReviewEpoch,
+  selectionFingerprint,
+  shouldEnablePrimaryCta,
+  type TradingRoomAsset,
+} from '@/lib/owl-swap/trading-room-ui-state'
 import type { OwlSendHolderRoleName } from '@/lib/owl-send/holder-discount'
 import type { OwlSwapOfferAssetRow, OwlSwapOfferRow } from '@/lib/db/owl-swap'
 
 type AcceptOffer = OwlSwapOfferRow & {
   assets?: OwlSwapOfferAssetRow[]
-  /** Present on by-code API when maker used simulation. */
   simulate?: boolean
 }
 
@@ -42,6 +50,14 @@ type HolderFeeQuote = {
   feeLamportsTotal: number
   feeSolPerLineLabel: string
 }
+
+type LocalPhase =
+  | 'idle'
+  | 'awaiting_signature'
+  | 'submitting'
+  | 'pending_confirmation'
+  | 'rejected'
+  | 'failed'
 
 type Props = {
   code: string
@@ -82,6 +98,8 @@ export function OwlSwapAcceptClient({
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [settleSig, setSettleSig] = useState<string | null>(null)
+  const [localPhase, setLocalPhase] = useState<LocalPhase>('idle')
+  const [reviewEpoch, setReviewEpoch] = useState(0)
 
   const wallet = publicKey?.toBase58() ?? ''
   const signedIn = Boolean(wallet && sessionWallet && sessionWallet === wallet)
@@ -90,6 +108,10 @@ export function OwlSwapAcceptClient({
     ? getOwlSwapFeeSolForDiscount(holderQuote.discountBps)
     : feeSolBase
   const feeLamports = holderQuote?.feeLamportsTotal ?? Math.round(feeSolBase * LAMPORTS_PER_SOL)
+  const feeAvailable = holderQuote != null && !Number.isNaN(holderQuote.feeLamportsTotal)
+  const feeSolLabel = feeAvailable
+    ? holderQuote?.feeSolPerLineLabel ?? formatOwlSwapFeeSol(feeSolDisplay)
+    : null
 
   const selectedNfts = useMemo(
     () => nfts.filter((n) => selectedMints.has(n.mint)),
@@ -107,6 +129,57 @@ export function OwlSwapAcceptClient({
     [offer]
   )
 
+  const receiveAssets: TradingRoomAsset[] = useMemo(
+    () =>
+      makerAssets.map((a) => ({
+        mint: a.mint,
+        name: a.name,
+        imageUrl: a.image_url,
+        collection: a.collection,
+      })),
+    [makerAssets]
+  )
+
+  const offerAssets: TradingRoomAsset[] = useMemo(
+    () =>
+      selectedNfts.map((n) => ({
+        mint: n.mint,
+        name: n.name,
+        imageUrl: n.image,
+        collection: n.collectionName ?? n.symbol ?? null,
+      })),
+    [selectedNfts]
+  )
+
+  const offerIsSimulated = offer?.simulate === true
+  const useSimulate = simulateMode || offerIsSimulated
+
+  const selectionKey = selectionFingerprint(offerAssets, takerSolLamports)
+  useEffect(() => {
+    setReviewEpoch((e) => nextReviewEpoch(e))
+    if (localPhase === 'rejected' || localPhase === 'failed') {
+      setLocalPhase('idle')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey])
+
+  const effectiveSettleSig = settleSig || offer?.settle_sig || null
+  const txState = deriveTradingRoomTxUiState({
+    offerStatus: offer?.status,
+    settleSig: effectiveSettleSig,
+    localPhase,
+    mode: 'accept',
+  })
+
+  const escrowReady = Boolean(escrowAddress) || useSimulate
+  const offerSideReady = selectedNfts.length >= 1 || takerSolLamports > 0
+  const ctaEnabled = shouldEnablePrimaryCta({
+    txState,
+    offerSideReady,
+    escrowReady,
+    feeQuoteReady: feeAvailable || useSimulate,
+  })
+
   const loadOffer = useCallback(async () => {
     setOfferLoading(true)
     setOfferError(null)
@@ -121,6 +194,9 @@ export function OwlSwapAcceptClient({
         return
       }
       setOffer(data.offer)
+      if (typeof data?.offer?.settle_sig === 'string') {
+        setSettleSig(data.offer.settle_sig)
+      }
     } catch {
       setOfferError('Failed to load offer')
       setOffer(null)
@@ -180,7 +256,16 @@ export function OwlSwapAcceptClient({
               : formatOwlSwapFeeSol(feeSolBase),
         })
       })
-      .catch(() => {})
+      .catch(() => {
+        if (cancelled) return
+        setHolderQuote({
+          discountBps: 0,
+          discountPercent: 0,
+          roleName: null,
+          feeLamportsTotal: Math.round(feeSolBase * LAMPORTS_PER_SOL),
+          feeSolPerLineLabel: formatOwlSwapFeeSol(feeSolBase),
+        })
+      })
     return () => {
       cancelled = true
     }
@@ -231,8 +316,11 @@ export function OwlSwapAcceptClient({
     return ok === true
   }
 
-  const offerIsSimulated = offer?.simulate === true
-  const useSimulate = simulateMode || offerIsSimulated
+  const scrollToPicker = () => {
+    document
+      .getElementById('owl-swap-accept-picker')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   const acceptOffer = async () => {
     if (!publicKey || !wallet || !offer) return
@@ -240,28 +328,34 @@ export function OwlSwapAcceptClient({
     setNotice(null)
     if (offer.status !== 'open') {
       setError(`Offer is ${offer.status}.`)
+      setLocalPhase('failed')
       return
     }
     if (offer.maker_wallet === wallet) {
       setError('You cannot accept your own offer.')
+      setLocalPhase('failed')
       return
     }
     if (selectedNfts.length < 1 && takerSolLamports <= 0) {
       setError('Select at least one NFT or add SOL.')
+      setLocalPhase('failed')
       return
     }
     if (!useSimulate && !escrowAddress) {
       setError(
         'OwlSwap escrow is not configured. Set OWL_SWAP_ESCROW_SECRET_KEY or use admin simulation mode.'
       )
+      setLocalPhase('failed')
       return
     }
 
     setBusy(true)
+    setLocalPhase('submitting')
     try {
       const signed = await ensureSignedIn()
       if (!signed) {
         setError(signInError ?? 'Sign in required.')
+        setLocalPhase('failed')
         return
       }
 
@@ -270,6 +364,7 @@ export function OwlSwapAcceptClient({
         setNotice('Simulation mode — accepting without on-chain deposit…')
         signature = makeOwlSwapSimulateSignature('taker-deposit', offer.id)
       } else {
+        setLocalPhase('awaiting_signature')
         setNotice('Approve deposit + Owl fee in your wallet…')
         const built = await buildOwlSwapTakerDepositTx({
           connection,
@@ -285,6 +380,7 @@ export function OwlSwapAcceptClient({
         })
         if (!built.ok) {
           setError(built.error)
+          setLocalPhase('failed')
           return
         }
 
@@ -292,10 +388,21 @@ export function OwlSwapAcceptClient({
         built.tx.feePayer = publicKey
         built.tx.recentBlockhash = blockhash
 
-        signature = await sendTransaction(built.tx, connection, {
-          skipPreflight: false,
-          preflightCommitment: 'confirmed',
-        })
+        try {
+          signature = await sendTransaction(built.tx, connection, {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+          })
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (/reject|cancel|denied/i.test(msg)) {
+            setLocalPhase('rejected')
+            setError(msg)
+            return
+          }
+          throw e
+        }
+        setLocalPhase('pending_confirmation')
         await confirmSignatureSuccessOnChain(
           connection,
           signature,
@@ -303,6 +410,7 @@ export function OwlSwapAcceptClient({
           'If the deposit shows in your wallet, wait a moment then we will settle.'
         )
         setNotice('Settling swap…')
+        setLocalPhase('submitting')
       }
 
       const res = await fetch(`/api/owl-swap/offers/${offer.id}/accept`, {
@@ -326,9 +434,12 @@ export function OwlSwapAcceptClient({
       const data = await res.json().catch(() => null)
       if (!res.ok) {
         setError(typeof data?.error === 'string' ? data.error : 'Accept failed')
+        setLocalPhase('failed')
         return
       }
-      setSettleSig(typeof data?.settleSig === 'string' ? data.settleSig : null)
+      const sig = typeof data?.settleSig === 'string' ? data.settleSig : null
+      setSettleSig(sig)
+      setLocalPhase('idle')
       setNotice(
         data?.simulate || useSimulate
           ? 'Simulated swap completed (DB only — nothing moved on-chain).'
@@ -337,10 +448,20 @@ export function OwlSwapAcceptClient({
       void loadOffer()
       void loadNfts()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(msg)
+      setLocalPhase(/reject|cancel|denied/i.test(msg) ? 'rejected' : 'failed')
     } finally {
       setBusy(false)
     }
+  }
+
+  const onPrimary = () => {
+    if (!signedIn) {
+      void ensureSignedIn()
+      return
+    }
+    void acceptOffer()
   }
 
   if (access.loading || sessionChecking || offerLoading) {
@@ -391,95 +512,77 @@ export function OwlSwapAcceptClient({
     )
   }
 
+  const isComplete = offer.status === 'completed' && Boolean(effectiveSettleSig)
+
   return (
-    <div className="mx-auto max-w-3xl space-y-6 px-3 py-6 sm:px-4 sm:py-10">
-      <header className="space-y-2">
-        <p className="text-xs uppercase tracking-wider text-muted-foreground">Accept offer</p>
-        <h1 className="font-display text-3xl tracking-wide text-theme-prime">
-          OwlSwap · {offer.short_code}
-        </h1>
-        {!isPublic ? (
-          <p className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-            <Shield className="h-4 w-4 shrink-0" />
-            Admin preview
-          </p>
-        ) : null}
-        {useSimulate ? (
-          <p className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-100">
-            Simulation mode — accept runs in the DB only;{' '}
-            <strong className="font-semibold">no NFTs or SOL move on-chain</strong>.
-          </p>
-        ) : null}
-      </header>
+    <div className="mx-auto max-w-5xl space-y-6 px-3 py-6 sm:px-4 sm:py-10">
+      {!isPublic ? (
+        <p className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+          <Shield className="h-4 w-4 shrink-0" />
+          Admin preview · offer {offer.short_code} · from {shorten(offer.maker_wallet)}
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Offer {offer.short_code} · from {shorten(offer.maker_wallet)}
+        </p>
+      )}
+      {useSimulate ? (
+        <p className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-100">
+          Simulation mode — accept runs in the DB only;{' '}
+          <strong className="font-semibold">no NFTs or SOL move on-chain</strong>.
+        </p>
+      ) : null}
+      {!escrowAddress && !useSimulate ? <OwlSwapMissingEscrowAlert /> : null}
 
-      <Card className="border-white/10 bg-black/40">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Maker offers</CardTitle>
-          <CardDescription>
-            From {shorten(offer.maker_wallet)} · status {offer.status}
-            {offer.maker_sol_lamports > 0
-              ? ` · +${(offer.maker_sol_lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL`
-              : ''}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ul className="space-y-2">
-            {makerAssets.map((a) => (
-              <li key={a.id} className="flex items-center gap-3 text-sm">
-                {a.image_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={a.image_url}
-                    alt=""
-                    className="h-10 w-10 rounded object-cover"
-                  />
-                ) : (
-                  <div className="h-10 w-10 rounded bg-white/10" />
-                )}
-                <span>{a.name || shorten(a.mint)}</span>
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
-
-      {offer.status === 'completed' || settleSig ? (
+      {isComplete ? (
         <Card className="border-emerald-500/40 bg-emerald-500/10">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-emerald-50">
               <CheckCircle2 className="h-5 w-5" /> Swap complete
             </CardTitle>
             <CardDescription className="text-emerald-100/80">
-              {settleSig || offer.settle_sig
-                ? `Settle sig: ${shorten(settleSig || offer.settle_sig || '')}`
-                : 'Assets have been exchanged.'}
+              Settle sig: {shorten(effectiveSettleSig || '')}
             </CardDescription>
           </CardHeader>
         </Card>
-      ) : offer.status !== 'open' ? (
-        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-          This offer is {offer.status} and cannot be accepted.
-        </p>
-      ) : !connected || !publicKey ? (
-        <div className="space-y-3 text-center">
-          <p className="text-sm text-muted-foreground">Connect to accept this swap.</p>
-          <WalletConnectButton />
-        </div>
-      ) : (
-        <>
-          <Card className="border-emerald-500/20 bg-black/40">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base text-emerald-100">Your cost</CardTitle>
-              <CardDescription>
-                Owl fee (you pay on accept): {formatOwlSwapFeeSol(feeSolDisplay)}
-                {holderQuote && holderQuote.discountPercent > 0
-                  ? ` (${holderQuote.roleName ?? 'holder'} ${holderQuote.discountPercent}% off)`
-                  : ''}
-              </CardDescription>
-            </CardHeader>
-          </Card>
+      ) : null}
 
-          <section className="space-y-3">
+      {offer.status === 'open' && connected && publicKey ? (
+        <>
+          <OwlSwapTradingRoom
+            mode="accept"
+            offerAssets={offerAssets}
+            receiveAssets={receiveAssets}
+            offerSolLamports={takerSolLamports}
+            receiveSolLamports={offer.maker_sol_lamports}
+            txState={txState}
+            errorDetail={error}
+            feeSolLabel={feeSolLabel}
+            feeAvailable={feeAvailable || useSimulate}
+            discountPercent={holderQuote?.discountPercent ?? 0}
+            roleName={holderQuote?.roleName ?? null}
+            ctaLabel={
+              !signedIn
+                ? 'Sign in to accept'
+                : useSimulate
+                  ? 'Accept simulated swap →'
+                  : `Accept & pay ${formatOwlSwapFeeSol(feeSolDisplay)} →`
+            }
+            ctaDisabled={
+              busy ||
+              (!signedIn ? signingIn : !ctaEnabled) ||
+              (!escrowAddress && !useSimulate)
+            }
+            busy={busy}
+            onPrimary={onPrimary}
+            onChangeOffer={scrollToPicker}
+            offerEmptyCopy="Add NFTs below to trade"
+            receiveEmptyCopy="Maker assets loading…"
+            helperText="You pay the Owl fee on accept. Review both chambers before signing."
+          />
+          <span className="sr-only" data-review-epoch={reviewEpoch} />
+
+          <section id="owl-swap-accept-picker" className="scroll-mt-24 space-y-3">
             <h2 className="font-display text-xl tracking-wide text-white">Your side</h2>
             {nftsLoading ? (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -510,50 +613,36 @@ export function OwlSwapAcceptClient({
               />
             </div>
           </section>
-
-          {!signedIn ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="min-h-[44px] w-full"
-              disabled={signingIn || busy}
-              onClick={() => void ensureSignedIn()}
-            >
-              {signingIn ? 'Signing in…' : 'Sign in to accept'}
-            </Button>
-          ) : null}
-
-          <Button
-            type="button"
-            className="min-h-[44px] w-full touch-manipulation bg-theme-prime text-black hover:bg-theme-prime/90"
-            disabled={
-              busy ||
-              (!escrowAddress && !useSimulate) ||
-              (selectedNfts.length < 1 && takerSolLamports <= 0)
-            }
-            onClick={() => void acceptOffer()}
-          >
-            {busy ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Working…
-              </>
-            ) : useSimulate ? (
-              'Accept simulated swap'
-            ) : (
-              `Accept & pay ${formatOwlSwapFeeSol(feeSolDisplay)}`
-            )}
-          </Button>
         </>
-      )}
+      ) : offer.status === 'open' && (!connected || !publicKey) ? (
+        <div className="space-y-4">
+          <OwlSwapTradingRoom
+            mode="accept"
+            offerAssets={[]}
+            receiveAssets={receiveAssets}
+            receiveSolLamports={offer.maker_sol_lamports}
+            txState="idle_review"
+            feeSolLabel={null}
+            feeAvailable={false}
+            ctaLabel="Connect wallet to accept"
+            ctaDisabled
+            onPrimary={() => {}}
+            receiveEmptyCopy="Maker assets"
+            helperText="Connect a wallet to choose your side and accept."
+          />
+          <div className="flex justify-center">
+            <WalletConnectButton />
+          </div>
+        </div>
+      ) : !isComplete ? (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+          This offer is {offer.status} and cannot be accepted.
+        </p>
+      ) : null}
 
       {notice ? (
         <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
           {notice}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-          {error}
         </p>
       ) : null}
 

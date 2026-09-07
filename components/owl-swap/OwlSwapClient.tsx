@@ -18,6 +18,8 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { WalletNftPicker } from '@/components/WalletNftPicker'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
+import { OwlSwapTradingRoom } from '@/components/owl-swap/trading-room/OwlSwapTradingRoom'
+import { OwlSwapMissingEscrowAlert } from '@/components/owl-swap/trading-room/OwlSwapMissingEscrowAlert'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { useSiwsSignIn } from '@/hooks/use-siws-sign-in'
 import { useSiwsSession } from '@/hooks/use-siws-session'
@@ -36,6 +38,13 @@ import {
 } from '@/lib/owl-swap/fee'
 import { buildOwlSwapMakerDepositTx } from '@/lib/owl-swap/build-deposit-tx'
 import { makeOwlSwapSimulateSignature } from '@/lib/owl-swap/simulate'
+import {
+  deriveTradingRoomTxUiState,
+  nextReviewEpoch,
+  selectionFingerprint,
+  shouldEnablePrimaryCta,
+  type TradingRoomAsset,
+} from '@/lib/owl-swap/trading-room-ui-state'
 import type { OwlSendHolderRoleName } from '@/lib/owl-send/holder-discount'
 import type { OwlSwapOfferRow } from '@/lib/db/owl-swap'
 import { cn } from '@/lib/utils'
@@ -51,14 +60,17 @@ type HolderFeeQuote = {
   feeSolPerLineLabel: string
 }
 
+type LocalPhase =
+  | 'idle'
+  | 'awaiting_signature'
+  | 'submitting'
+  | 'pending_confirmation'
+  | 'rejected'
+  | 'failed'
+
 type Props = {
   initialViewerIsAdmin: boolean
   isPublic: boolean
-}
-
-function shorten(addr: string): string {
-  if (addr.length <= 12) return addr
-  return `${addr.slice(0, 4)}…${addr.slice(-4)}`
 }
 
 export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
@@ -74,7 +86,7 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [selectedMints, setSelectedMints] = useState<Set<string>>(new Set())
   const [nftSearchQuery, setNftSearchQuery] = useState('')
   const [solSweetener, setSolSweetener] = useState('')
-  const [step, setStep] = useState<'pick' | 'review' | 'done'>('pick')
+  const [step, setStep] = useState<'pick' | 'done'>('pick')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -86,6 +98,9 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [holderQuote, setHolderQuote] = useState<HolderFeeQuote | null>(null)
   const [myOffers, setMyOffers] = useState<OwlSwapOfferRow[]>([])
   const [offersLoading, setOffersLoading] = useState(false)
+  const [localPhase, setLocalPhase] = useState<LocalPhase>('idle')
+  const [reviewEpoch, setReviewEpoch] = useState(0)
+  const [makerDepositSig, setMakerDepositSig] = useState<string | null>(null)
 
   const wallet = publicKey?.toBase58() ?? ''
   const signedIn = Boolean(wallet && sessionWallet && sessionWallet === wallet)
@@ -93,10 +108,25 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
   const feeSolDisplay = holderQuote
     ? getOwlSwapFeeSolForDiscount(holderQuote.discountBps)
     : feeSolBase
+  const feeAvailable = holderQuote != null && !Number.isNaN(holderQuote.feeLamportsTotal)
+  const feeSolLabel = feeAvailable
+    ? holderQuote?.feeSolPerLineLabel ?? formatOwlSwapFeeSol(feeSolDisplay)
+    : null
 
   const selectedNfts = useMemo(
     () => nfts.filter((n) => selectedMints.has(n.mint)),
     [nfts, selectedMints]
+  )
+
+  const offerAssets: TradingRoomAsset[] = useMemo(
+    () =>
+      selectedNfts.map((n) => ({
+        mint: n.mint,
+        name: n.name,
+        imageUrl: n.image,
+        collection: n.collectionName ?? n.symbol ?? null,
+      })),
+    [selectedNfts]
   )
 
   const makerSolLamports = useMemo(() => {
@@ -104,6 +134,30 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
     if (!Number.isFinite(n) || n <= 0) return 0
     return Math.round(n * LAMPORTS_PER_SOL)
   }, [solSweetener])
+
+  const selectionKey = selectionFingerprint(offerAssets, makerSolLamports)
+  useEffect(() => {
+    setReviewEpoch((e) => nextReviewEpoch(e))
+    if (localPhase === 'rejected' || localPhase === 'failed') {
+      setLocalPhase('idle')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bump epoch on selection change only
+  }, [selectionKey])
+
+  const txState = deriveTradingRoomTxUiState({
+    offerStatus: step === 'done' ? 'open' : null,
+    makerDepositSig: step === 'done' ? makerDepositSig : null,
+    localPhase,
+    mode: 'create',
+  })
+
+  const escrowReady = Boolean(escrowAddress) || simulateMode
+  const ctaEnabled = shouldEnablePrimaryCta({
+    txState,
+    offerSideReady: selectedNfts.length >= 1,
+    escrowReady,
+    feeQuoteReady: feeAvailable || simulateMode,
+  })
 
   const loadNfts = useCallback(async () => {
     if (!publicKey) {
@@ -182,7 +236,19 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
               : formatOwlSwapFeeSol(feeSolBase),
         })
       })
-      .catch(() => {})
+      .catch(() => {
+        if (cancelled) return
+        setHolderQuote({
+          discountBps: 0,
+          discountPercent: 0,
+          roleName: null,
+          gen1Count: 0,
+          gen2Count: 0,
+          checkAvailable: false,
+          feeLamportsTotal: Math.round(feeSolBase * LAMPORTS_PER_SOL),
+          feeSolPerLineLabel: formatOwlSwapFeeSol(feeSolBase),
+        })
+      })
     return () => {
       cancelled = true
     }
@@ -236,26 +302,34 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
     return ok === true
   }
 
+  const scrollToPicker = () => {
+    document.getElementById('owl-swap-picker')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   const createAndDeposit = async () => {
     if (!publicKey || !wallet) return
     setError(null)
     setNotice(null)
     if (selectedNfts.length < 1) {
       setError('Select at least one NFT.')
+      setLocalPhase('failed')
       return
     }
     if (!escrowAddress && !simulateMode) {
       setError(
         'OwlSwap escrow is not configured. Set OWL_SWAP_ESCROW_SECRET_KEY or use admin simulation mode.'
       )
+      setLocalPhase('failed')
       return
     }
 
     setBusy(true)
+    setLocalPhase('submitting')
     try {
       const signed = await ensureSignedIn()
       if (!signed) {
         setError(signInError ?? 'Sign in required to create an offer.')
+        setLocalPhase('failed')
         return
       }
 
@@ -281,6 +355,7 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
         setError(
           typeof createData?.error === 'string' ? createData.error : 'Failed to create offer'
         )
+        setLocalPhase('failed')
         return
       }
 
@@ -288,6 +363,7 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
       const code = createData?.offer?.short_code as string
       if (!offerId || !code) {
         setError('Offer created but response was incomplete.')
+        setLocalPhase('failed')
         return
       }
 
@@ -296,6 +372,7 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
         setNotice('Simulation mode — opening offer without on-chain deposit…')
         signature = makeOwlSwapSimulateSignature('maker-deposit', offerId)
       } else {
+        setLocalPhase('awaiting_signature')
         setNotice('Approve the deposit in your wallet…')
         const built = await buildOwlSwapMakerDepositTx({
           connection,
@@ -310,6 +387,7 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
         })
         if (!built.ok) {
           setError(built.error)
+          setLocalPhase('failed')
           return
         }
 
@@ -317,11 +395,22 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
         built.tx.feePayer = publicKey
         built.tx.recentBlockhash = blockhash
 
-        signature = await sendTransaction(built.tx, connection, {
-          skipPreflight: false,
-          preflightCommitment: 'confirmed',
-        })
+        try {
+          signature = await sendTransaction(built.tx, connection, {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+          })
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          if (/reject|cancel|denied/i.test(msg)) {
+            setLocalPhase('rejected')
+            setError(msg)
+            return
+          }
+          throw e
+        }
         void lastValidBlockHeight
+        setLocalPhase('pending_confirmation')
         await confirmSignatureSuccessOnChain(
           connection,
           signature,
@@ -329,6 +418,7 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
           'If the deposit shows in your wallet, wait a moment and the confirm step will retry.'
         )
         setNotice('Confirming deposit on-chain…')
+        setLocalPhase('submitting')
       }
 
       const confirmRes = await fetch(`/api/owl-swap/offers/${offerId}/confirm-deposit`, {
@@ -347,6 +437,7 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
             ? confirmData.error
             : 'Confirm failed — retry from My offers or contact admin.'
         )
+        setLocalPhase('failed')
         return
       }
 
@@ -356,7 +447,9 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
           : `/owl-swap/o/${code}`
       setSharePath(path)
       setShareCode(code)
+      setMakerDepositSig(signature)
       setStep('done')
+      setLocalPhase('idle')
       setNotice(
         confirmData?.simulate || simulateMode
           ? 'Simulated offer is live — share the link (no NFTs moved on-chain).'
@@ -369,6 +462,7 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setError(msg)
+      setLocalPhase(/reject|cancel|denied/i.test(msg) ? 'rejected' : 'failed')
     } finally {
       setBusy(false)
     }
@@ -414,6 +508,14 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
     } catch {
       setError('Could not copy — select the link manually.')
     }
+  }
+
+  const onPrimary = () => {
+    if (!signedIn) {
+      void ensureSignedIn()
+      return
+    }
+    void createAndDeposit()
   }
 
   if (access.loading || sessionChecking) {
@@ -469,49 +571,20 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 px-3 py-6 sm:px-4 sm:py-10">
-      <header className="space-y-2">
-        <h1 className="flex items-center gap-2 font-display text-3xl tracking-wide text-theme-prime sm:text-4xl">
-          <ArrowLeftRight className="h-7 w-7" />
-          OwlSwap
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Create an offer, share the link, counterparty accepts. Classic SPL NFTs — max{' '}
-          {OWL_SWAP_MAX_NFTS_PER_SIDE} per side.
+    <div className="mx-auto max-w-5xl space-y-6 px-3 py-6 sm:px-4 sm:py-10">
+      {!isPublic ? (
+        <p className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+          <Shield className="h-4 w-4 shrink-0" />
+          Admin preview — public flags stay off until sign-off.
         </p>
-        {!isPublic ? (
-          <p className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-            <Shield className="h-4 w-4 shrink-0" />
-            Admin preview — set <code className="text-xs">OWL_SWAP_PUBLIC</code> to go live.
-          </p>
-        ) : null}
-        {simulateMode ? (
-          <p className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-100">
-            Simulation mode — escrow key not set. Create / accept / cancel run in the DB only;{' '}
-            <strong className="font-semibold">no NFTs or SOL move on-chain</strong>. Set{' '}
-            <code className="text-xs">OWL_SWAP_ESCROW_SECRET_KEY</code> for live deposits.
-          </p>
-        ) : null}
-      </header>
-
-      <Card className="border-emerald-500/20 bg-black/40">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base text-emerald-100">Cost note</CardTitle>
-          <CardDescription>
-            You pay network / ATA rent to deposit. The taker pays the Owl fee on accept (
-            {formatOwlSwapFeeSol(feeSolDisplay)}
-            {holderQuote && holderQuote.discountPercent > 0
-              ? ` — ${holderQuote.roleName ?? 'holder'} ${holderQuote.discountPercent}% off`
-              : ''}
-            ).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          {holderQuote?.checkAvailable === false
-            ? 'Holder discount check unavailable — showing base fee.'
-            : `Quoted for your wallet: ${holderQuote?.feeSolPerLineLabel ?? formatOwlSwapFeeSol(feeSolBase)}.`}
-        </CardContent>
-      </Card>
+      ) : null}
+      {simulateMode ? (
+        <p className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-100">
+          Simulation mode — escrow key not set. Create / accept / cancel run in the DB only;{' '}
+          <strong className="font-semibold">no NFTs or SOL move on-chain</strong>.
+        </p>
+      ) : null}
+      {!escrowAddress && !simulateMode ? <OwlSwapMissingEscrowAlert /> : null}
 
       {step === 'done' && sharePath ? (
         <Card className="border-emerald-500/40 bg-emerald-500/10">
@@ -547,7 +620,9 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
                   setStep('pick')
                   setSharePath(null)
                   setShareCode(null)
+                  setMakerDepositSig(null)
                   setNotice(null)
+                  setLocalPhase('idle')
                 }}
               >
                 Create another
@@ -562,8 +637,41 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
 
       {step !== 'done' ? (
         <>
-          <section className="space-y-3">
-            <h2 className="font-display text-xl tracking-wide text-white">Your side</h2>
+          <OwlSwapTradingRoom
+            mode="create"
+            offerAssets={offerAssets}
+            receiveAssets={[]}
+            offerSolLamports={makerSolLamports}
+            txState={txState}
+            errorDetail={error}
+            feeSolLabel={feeSolLabel}
+            feeAvailable={feeAvailable || simulateMode}
+            discountPercent={holderQuote?.discountPercent ?? 0}
+            roleName={holderQuote?.roleName ?? null}
+            ctaLabel={
+              !signedIn
+                ? 'Sign in to create offer'
+                : simulateMode
+                  ? 'Create simulated offer →'
+                  : 'Create offer & deposit →'
+            }
+            ctaDisabled={
+              busy ||
+              (!signedIn ? signingIn : !ctaEnabled) ||
+              (!escrowAddress && !simulateMode)
+            }
+            busy={busy}
+            onPrimary={onPrimary}
+            onChangeOffer={scrollToPicker}
+            offerEmptyCopy="Add NFTs below, then review here"
+            receiveEmptyCopy="Awaiting counterparty"
+            helperText={`Max ${OWL_SWAP_MAX_OPEN_OFFERS_PER_WALLET} open/draft offers per wallet. Counterparty pays the Owl fee on accept.`}
+          />
+          {/* reviewEpoch kept for invalidate-on-change; exposed for future approval gate */}
+          <span className="sr-only" data-review-epoch={reviewEpoch} />
+
+          <section id="owl-swap-picker" className="scroll-mt-24 space-y-3">
+            <h2 className="font-display text-xl tracking-wide text-white">Select NFTs</h2>
             {nftsLoading ? (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading NFTs…
@@ -593,70 +701,6 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
               />
             </div>
           </section>
-
-          <Card className="border-white/10 bg-black/40">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Review</CardTitle>
-              <CardDescription>
-                {selectedNfts.length} NFT(s)
-                {makerSolLamports > 0
-                  ? ` + ${(makerSolLamports / LAMPORTS_PER_SOL).toFixed(4)} SOL`
-                  : ''}{' '}
-                · counterparty pays ~{formatOwlSwapFeeSol(feeSolDisplay)} Owl fee
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {selectedNfts.length > 0 ? (
-                <ul className="space-y-1 text-sm text-muted-foreground">
-                  {selectedNfts.map((n) => (
-                    <li key={n.mint}>
-                      {n.name || shorten(n.mint)}{' '}
-                      <span className="font-mono text-xs opacity-70">{shorten(n.mint)}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-muted-foreground">No NFTs selected yet.</p>
-              )}
-              {!signedIn ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="min-h-[44px] w-full touch-manipulation"
-                  disabled={signingIn || busy}
-                  onClick={() => void ensureSignedIn()}
-                >
-                  {signingIn ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Signing in…
-                    </>
-                  ) : (
-                    'Sign in to create offer'
-                  )}
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                className="min-h-[44px] w-full touch-manipulation bg-theme-prime text-black hover:bg-theme-prime/90"
-                disabled={busy || selectedNfts.length < 1 || (!escrowAddress && !simulateMode)}
-                onClick={() => void createAndDeposit()}
-              >
-                {busy ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Working…
-                  </>
-                ) : simulateMode ? (
-                  'Create simulated offer'
-                ) : (
-                  'Create offer & deposit'
-                )}
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Max {OWL_SWAP_MAX_OPEN_OFFERS_PER_WALLET} open/draft offers per wallet.
-                {simulateMode ? ' Simulation mode — no on-chain deposit.' : !escrowAddress ? ' Escrow address unavailable (503).' : ''}
-              </p>
-            </CardContent>
-          </Card>
         </>
       ) : null}
 
@@ -665,7 +709,7 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
           {notice}
         </p>
       ) : null}
-      {error ? (
+      {error && step === 'done' ? (
         <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
           {error}
         </p>

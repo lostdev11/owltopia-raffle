@@ -62,6 +62,7 @@ export async function GET(request: NextRequest, context: Ctx) {
         expires_at: offer.expires_at,
         created_at: offer.created_at,
         completed_at: offer.completed_at,
+        settle_sig: offer.settle_sig,
         assets: offer.assets,
         /** True when maker opened with a sim: deposit (no on-chain custody). */
         simulate: isOwlSwapSimulateSignature(offer.maker_deposit_sig),
