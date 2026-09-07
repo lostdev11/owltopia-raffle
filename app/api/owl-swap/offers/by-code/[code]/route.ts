@@ -5,6 +5,7 @@ import {
   getOwlSwapOfferWithAssetsByCode,
   updateOwlSwapOffer,
 } from '@/lib/db/owl-swap'
+import { isOwlSwapSimulateSignature } from '@/lib/owl-swap/simulate'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,7 +38,11 @@ export async function GET(request: NextRequest, context: Ctx) {
       const expired = await updateOwlSwapOffer(offer.id, { status: 'expired' })
       if (expired.ok) {
         return NextResponse.json({
-          offer: { ...expired.row, assets: offer.assets },
+          offer: {
+            ...expired.row,
+            assets: offer.assets,
+            simulate: isOwlSwapSimulateSignature(expired.row.maker_deposit_sig),
+          },
           expired: true,
         })
       }
@@ -58,6 +63,8 @@ export async function GET(request: NextRequest, context: Ctx) {
         created_at: offer.created_at,
         completed_at: offer.completed_at,
         assets: offer.assets,
+        /** True when maker opened with a sim: deposit (no on-chain custody). */
+        simulate: isOwlSwapSimulateSignature(offer.maker_deposit_sig),
       },
     })
   } catch (e) {

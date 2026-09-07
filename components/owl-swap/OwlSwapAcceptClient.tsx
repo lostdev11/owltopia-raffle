@@ -25,8 +25,15 @@ import {
   getOwlSwapFeeSolForDiscount,
 } from '@/lib/owl-swap/fee'
 import { buildOwlSwapTakerDepositTx } from '@/lib/owl-swap/build-deposit-tx'
+import { makeOwlSwapSimulateSignature } from '@/lib/owl-swap/simulate'
 import type { OwlSendHolderRoleName } from '@/lib/owl-send/holder-discount'
 import type { OwlSwapOfferAssetRow, OwlSwapOfferRow } from '@/lib/db/owl-swap'
+
+type AcceptOffer = OwlSwapOfferRow & {
+  assets?: OwlSwapOfferAssetRow[]
+  /** Present on by-code API when maker used simulation. */
+  simulate?: boolean
+}
 
 type HolderFeeQuote = {
   discountBps: number
@@ -59,9 +66,7 @@ export function OwlSwapAcceptClient({
   const { sessionWallet, checking: sessionChecking, checkSession } = useSiwsSession()
   const { signIn, signingIn, error: signInError } = useSiwsSignIn()
 
-  const [offer, setOffer] = useState<(OwlSwapOfferRow & { assets?: OwlSwapOfferAssetRow[] }) | null>(
-    null
-  )
+  const [offer, setOffer] = useState<AcceptOffer | null>(null)
   const [offerLoading, setOfferLoading] = useState(true)
   const [offerError, setOfferError] = useState<string | null>(null)
 
@@ -71,6 +76,7 @@ export function OwlSwapAcceptClient({
   const [nftSearchQuery, setNftSearchQuery] = useState('')
   const [solSweetener, setSolSweetener] = useState('')
   const [escrowAddress, setEscrowAddress] = useState<string | null>(null)
+  const [simulateMode, setSimulateMode] = useState(false)
   const [holderQuote, setHolderQuote] = useState<HolderFeeQuote | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -130,9 +136,22 @@ export function OwlSwapAcceptClient({
   useEffect(() => {
     let cancelled = false
     fetch('/api/owl-swap/escrow', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((data) => {
-        if (!cancelled && typeof data?.address === 'string') setEscrowAddress(data.address)
+      .then(async (r) => {
+        const data = await r.json().catch(() => null)
+        return { ok: r.ok, data }
+      })
+      .then(({ ok, data }) => {
+        if (cancelled) return
+        if (typeof data?.address === 'string' && data.address) {
+          setEscrowAddress(data.address)
+          setSimulateMode(false)
+          return
+        }
+        setEscrowAddress(null)
+        setSimulateMode(data?.simulate === true || data?.mode === 'simulate')
+        if (!ok && data?.simulate !== true) {
+          setSimulateMode(false)
+        }
       })
       .catch(() => {})
     return () => {
@@ -212,6 +231,9 @@ export function OwlSwapAcceptClient({
     return ok === true
   }
 
+  const offerIsSimulated = offer?.simulate === true
+  const useSimulate = simulateMode || offerIsSimulated
+
   const acceptOffer = async () => {
     if (!publicKey || !wallet || !offer) return
     setError(null)
@@ -228,8 +250,10 @@ export function OwlSwapAcceptClient({
       setError('Select at least one NFT or add SOL.')
       return
     }
-    if (!escrowAddress) {
-      setError('OwlSwap escrow is not configured.')
+    if (!useSimulate && !escrowAddress) {
+      setError(
+        'OwlSwap escrow is not configured. Set OWL_SWAP_ESCROW_SECRET_KEY or use admin simulation mode.'
+      )
       return
     }
 
@@ -241,40 +265,46 @@ export function OwlSwapAcceptClient({
         return
       }
 
-      setNotice('Approve deposit + Owl fee in your wallet…')
-      const built = await buildOwlSwapTakerDepositTx({
-        connection,
-        owner: publicKey,
-        escrowAddress,
-        mints: selectedNfts.map((n) => ({
-          mint: n.mint,
-          name: n.name,
-          tokenAccount: n.tokenAccount,
-        })),
-        solLamports: takerSolLamports,
-        feeLamports,
-      })
-      if (!built.ok) {
-        setError(built.error)
-        return
+      let signature: string
+      if (useSimulate || !escrowAddress) {
+        setNotice('Simulation mode — accepting without on-chain deposit…')
+        signature = makeOwlSwapSimulateSignature('taker-deposit', offer.id)
+      } else {
+        setNotice('Approve deposit + Owl fee in your wallet…')
+        const built = await buildOwlSwapTakerDepositTx({
+          connection,
+          owner: publicKey,
+          escrowAddress,
+          mints: selectedNfts.map((n) => ({
+            mint: n.mint,
+            name: n.name,
+            tokenAccount: n.tokenAccount,
+          })),
+          solLamports: takerSolLamports,
+          feeLamports,
+        })
+        if (!built.ok) {
+          setError(built.error)
+          return
+        }
+
+        const { blockhash } = await connection.getLatestBlockhash('confirmed')
+        built.tx.feePayer = publicKey
+        built.tx.recentBlockhash = blockhash
+
+        signature = await sendTransaction(built.tx, connection, {
+          skipPreflight: false,
+          preflightCommitment: 'confirmed',
+        })
+        await confirmSignatureSuccessOnChain(
+          connection,
+          signature,
+          120_000,
+          'If the deposit shows in your wallet, wait a moment then we will settle.'
+        )
+        setNotice('Settling swap…')
       }
 
-      const { blockhash } = await connection.getLatestBlockhash('confirmed')
-      built.tx.feePayer = publicKey
-      built.tx.recentBlockhash = blockhash
-
-      const signature = await sendTransaction(built.tx, connection, {
-        skipPreflight: false,
-        preflightCommitment: 'confirmed',
-      })
-      await confirmSignatureSuccessOnChain(
-        connection,
-        signature,
-        120_000,
-        'If the deposit shows in your wallet, wait a moment then we will settle.'
-      )
-
-      setNotice('Settling swap…')
       const res = await fetch(`/api/owl-swap/offers/${offer.id}/accept`, {
         method: 'POST',
         credentials: 'include',
@@ -299,7 +329,11 @@ export function OwlSwapAcceptClient({
         return
       }
       setSettleSig(typeof data?.settleSig === 'string' ? data.settleSig : null)
-      setNotice('Swap completed.')
+      setNotice(
+        data?.simulate || useSimulate
+          ? 'Simulated swap completed (DB only — nothing moved on-chain).'
+          : 'Swap completed.'
+      )
       void loadOffer()
       void loadNfts()
     } catch (e) {
@@ -368,6 +402,12 @@ export function OwlSwapAcceptClient({
           <p className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
             <Shield className="h-4 w-4 shrink-0" />
             Admin preview
+          </p>
+        ) : null}
+        {useSimulate ? (
+          <p className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-100">
+            Simulation mode — accept runs in the DB only;{' '}
+            <strong className="font-semibold">no NFTs or SOL move on-chain</strong>.
           </p>
         ) : null}
       </header>
@@ -488,7 +528,7 @@ export function OwlSwapAcceptClient({
             className="min-h-[44px] w-full touch-manipulation bg-theme-prime text-black hover:bg-theme-prime/90"
             disabled={
               busy ||
-              !escrowAddress ||
+              (!escrowAddress && !useSimulate) ||
               (selectedNfts.length < 1 && takerSolLamports <= 0)
             }
             onClick={() => void acceptOffer()}
@@ -497,6 +537,8 @@ export function OwlSwapAcceptClient({
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Working…
               </>
+            ) : useSimulate ? (
+              'Accept simulated swap'
             ) : (
               `Accept & pay ${formatOwlSwapFeeSol(feeSolDisplay)}`
             )}

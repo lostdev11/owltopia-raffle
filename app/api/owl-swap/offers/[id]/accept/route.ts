@@ -17,6 +17,11 @@ import {
   sendOwlSwapSettleTransaction,
 } from '@/lib/owl-swap/escrow'
 import {
+  isOwlSwapSimulateEnabled,
+  isOwlSwapSimulateSignature,
+  makeOwlSwapSimulateSignature,
+} from '@/lib/owl-swap/simulate'
+import {
   deleteOwlSwapOfferAssetsForSide,
   getOwlSwapOfferWithAssetsById,
   insertOwlSwapLedger,
@@ -120,16 +125,30 @@ export async function POST(request: NextRequest, context: Ctx) {
 
     const depositSignature =
       typeof body.depositSignature === 'string' ? body.depositSignature.trim() : ''
-    if (!depositSignature || depositSignature.length < 32) {
+    if (!depositSignature || depositSignature.length < 8) {
       return NextResponse.json({ error: 'depositSignature required' }, { status: 400 })
     }
 
+    const simulateRequested = isOwlSwapSimulateSignature(depositSignature)
+    const simulateAllowed = isOwlSwapSimulateEnabled()
     const escrow = getOwlSwapEscrowPublicKey()
-    if (!escrow) {
+
+    if (simulateRequested && !simulateAllowed) {
+      return NextResponse.json(
+        { error: 'Simulation mode is not enabled.' },
+        { status: 403 }
+      )
+    }
+    if (!simulateRequested && !escrow) {
       return NextResponse.json(
         { error: 'OwlSwap escrow is not configured.' },
         { status: 503 }
       )
+    }
+
+    // Simulated accept only against simulated open offers (maker used sim deposit).
+    if (simulateRequested) {
+      /* checked after offer load */
     }
 
     const offer = await getOwlSwapOfferWithAssetsById(id.trim())
@@ -161,6 +180,25 @@ export async function POST(request: NextRequest, context: Ctx) {
     if (offer.maker_wallet === takerWallet) {
       return NextResponse.json(
         { error: 'You cannot accept your own offer.' },
+        { status: 400 }
+      )
+    }
+
+    if (simulateRequested && !isOwlSwapSimulateSignature(offer.maker_deposit_sig)) {
+      return NextResponse.json(
+        {
+          error:
+            'This offer was deposited on-chain. Simulation accept is not allowed — use a live escrow accept.',
+        },
+        { status: 400 }
+      )
+    }
+    if (!simulateRequested && isOwlSwapSimulateSignature(offer.maker_deposit_sig)) {
+      return NextResponse.json(
+        {
+          error:
+            'This offer is simulated. Accept with a sim deposit (simulation mode) or recreate with live escrow.',
+        },
         { status: 400 }
       )
     }
@@ -224,34 +262,39 @@ export async function POST(request: NextRequest, context: Ctx) {
       )
     }
 
-    const connection = getSolanaConnection()
-    try {
-      await connection.confirmTransaction(depositSignature, 'confirmed')
-    } catch {
-      // balance checks are authoritative
-    }
-
-    // Maker assets must still be in escrow
     const makerAssets = offer.assets.filter((a) => a.side === 'maker')
-    for (const asset of makerAssets) {
-      const held = await isMintHeldByOwlSwapEscrow(asset.mint, connection)
-      if (!held) {
-        return NextResponse.json(
-          { error: `Maker asset ${asset.name ?? asset.mint.slice(0, 8)}… is no longer in escrow.` },
-          { status: 400 }
-        )
-      }
-    }
 
-    for (const m of takerMints) {
-      const held = await isMintHeldByOwlSwapEscrow(m.mint, connection)
-      if (!held) {
-        return NextResponse.json(
-          {
-            error: `Escrow does not yet hold your NFT ${m.name ?? m.mint.slice(0, 8)}…. Wait and retry.`,
-          },
-          { status: 400 }
-        )
+    if (!simulateRequested) {
+      const connection = getSolanaConnection()
+      try {
+        await connection.confirmTransaction(depositSignature, 'confirmed')
+      } catch {
+        // balance checks are authoritative
+      }
+
+      // Maker assets must still be in escrow
+      for (const asset of makerAssets) {
+        const held = await isMintHeldByOwlSwapEscrow(asset.mint, connection)
+        if (!held) {
+          return NextResponse.json(
+            {
+              error: `Maker asset ${asset.name ?? asset.mint.slice(0, 8)}… is no longer in escrow.`,
+            },
+            { status: 400 }
+          )
+        }
+      }
+
+      for (const m of takerMints) {
+        const held = await isMintHeldByOwlSwapEscrow(m.mint, connection)
+        if (!held) {
+          return NextResponse.json(
+            {
+              error: `Escrow does not yet hold your NFT ${m.name ?? m.mint.slice(0, 8)}…. Wait and retry.`,
+            },
+            { status: 400 }
+          )
+        }
       }
     }
 
@@ -262,7 +305,7 @@ export async function POST(request: NextRequest, context: Ctx) {
     })
     const feeLamports = getOwlSwapFeeLamportsForCount(1, discount.discountBps)
     const treasury = getPlatformFeeTreasuryWalletAddress()
-    if (feeLamports > 0) {
+    if (!simulateRequested && feeLamports > 0) {
       if (!treasury) {
         return NextResponse.json(
           { error: 'Platform fee treasury is not configured.' },
@@ -297,21 +340,27 @@ export async function POST(request: NextRequest, context: Ctx) {
       return NextResponse.json({ error: assetInsert.error }, { status: 500 })
     }
 
-    const settle = await sendOwlSwapSettleTransaction({
-      maker: {
-        mints: makerAssets.map((a) => a.mint),
-        solLamports: offer.maker_sol_lamports,
-        recipient: takerWallet,
-      },
-      taker: {
-        mints: takerMints.map((m) => m.mint),
-        solLamports: takerSolLamports,
-        recipient: offer.maker_wallet,
-      },
-    })
+    let settleSignature: string
+    if (simulateRequested) {
+      settleSignature = makeOwlSwapSimulateSignature('settle', offer.id)
+    } else {
+      const settle = await sendOwlSwapSettleTransaction({
+        maker: {
+          mints: makerAssets.map((a) => a.mint),
+          solLamports: offer.maker_sol_lamports,
+          recipient: takerWallet,
+        },
+        taker: {
+          mints: takerMints.map((m) => m.mint),
+          solLamports: takerSolLamports,
+          recipient: offer.maker_wallet,
+        },
+      })
 
-    if (!settle.ok) {
-      return NextResponse.json({ error: settle.error }, { status: 500 })
+      if (!settle.ok) {
+        return NextResponse.json({ error: settle.error }, { status: 500 })
+      }
+      settleSignature = settle.signature
     }
 
     const updated = await updateOwlSwapOffer(offer.id, {
@@ -321,7 +370,7 @@ export async function POST(request: NextRequest, context: Ctx) {
       owl_fee_lamports: feeLamports,
       fee_discount_bps: discount.discountBps,
       taker_deposit_sig: depositSignature,
-      settle_sig: settle.signature,
+      settle_sig: settleSignature,
       completed_at: new Date().toISOString(),
     })
 
@@ -330,7 +379,7 @@ export async function POST(request: NextRequest, context: Ctx) {
       shortCode: offer.short_code,
       makerWallet: offer.maker_wallet,
       takerWallet,
-      settleSig: settle.signature,
+      settleSig: settleSignature,
       owlFeeLamports: feeLamports,
       feeDiscountBps: discount.discountBps,
       makerMintCount: makerAssets.length,
@@ -339,8 +388,9 @@ export async function POST(request: NextRequest, context: Ctx) {
 
     return NextResponse.json({
       ok: true,
+      simulate: simulateRequested,
       offer: updated.ok ? updated.row : offer,
-      settleSig: settle.signature,
+      settleSig: settleSignature,
       feeLamports,
       feeDiscountBps: discount.discountBps,
     })

@@ -198,6 +198,11 @@ Env:
 - `OWL_SWAP_PUBLIC` / `NEXT_PUBLIC_OWL_SWAP_PUBLIC` (default admin-only)
 - `OWL_SWAP_OFFER_TTL_HOURS` (default `72`)
 - Escrow: `OWL_SWAP_ESCROW_SECRET_KEY` (server-only; dedicated keypair — do not reuse prize escrow)
+- **Simulation (admin-only):** `OWL_SWAP_SIMULATE` / `NEXT_PUBLIC_OWL_SWAP_SIMULATE`
+  - Auto-on when OwlSwap is **not** public and the escrow key is missing
+  - Create / accept / cancel use `sim:` signatures (DB-only; nothing moves on-chain)
+  - Disabled automatically when `OWL_SWAP_PUBLIC` is true; set `OWL_SWAP_SIMULATE=false` to require a real key during admin preview
+  - `GET /api/owl-swap/escrow` returns `{ simulate: true, mode: "simulate" }` instead of 503 when sim is on
 
 ---
 
@@ -270,7 +275,7 @@ RLS: makers/takers read own rows; service role for settle; public read of **open
 | Method | Path | Role |
 |--------|------|------|
 | GET | `/api/owl-swap/holder-fee` | Quote discount (reuse OwlSend holder count logic) |
-| GET | `/api/owl-swap/escrow` | Escrow pubkey for deposits (503 if unset) |
+| GET | `/api/owl-swap/escrow` | Escrow pubkey for deposits; `{ simulate:true }` when admin sim is on (no 503) |
 | POST | `/api/owl-swap/offers` | Create draft + maker assets |
 | POST | `/api/owl-swap/offers/[id]/confirm-deposit` | Confirm maker deposit → `open` |
 | GET | `/api/owl-swap/offers/by-code/[code]` | Offer view by share code |

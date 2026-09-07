@@ -35,6 +35,7 @@ import {
   getOwlSwapFeeSolForDiscount,
 } from '@/lib/owl-swap/fee'
 import { buildOwlSwapMakerDepositTx } from '@/lib/owl-swap/build-deposit-tx'
+import { makeOwlSwapSimulateSignature } from '@/lib/owl-swap/simulate'
 import type { OwlSendHolderRoleName } from '@/lib/owl-send/holder-discount'
 import type { OwlSwapOfferRow } from '@/lib/db/owl-swap'
 import { cn } from '@/lib/utils'
@@ -81,6 +82,7 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [shareCode, setShareCode] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [escrowAddress, setEscrowAddress] = useState<string | null>(null)
+  const [simulateMode, setSimulateMode] = useState(false)
   const [holderQuote, setHolderQuote] = useState<HolderFeeQuote | null>(null)
   const [myOffers, setMyOffers] = useState<OwlSwapOfferRow[]>([])
   const [offersLoading, setOffersLoading] = useState(false)
@@ -131,10 +133,22 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
   useEffect(() => {
     let cancelled = false
     fetch('/api/owl-swap/escrow', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((data) => {
+      .then(async (r) => {
+        const data = await r.json().catch(() => null)
+        return { ok: r.ok, data }
+      })
+      .then(({ ok, data }) => {
         if (cancelled) return
-        if (typeof data?.address === 'string') setEscrowAddress(data.address)
+        if (typeof data?.address === 'string' && data.address) {
+          setEscrowAddress(data.address)
+          setSimulateMode(false)
+          return
+        }
+        setEscrowAddress(null)
+        setSimulateMode(data?.simulate === true || data?.mode === 'simulate')
+        if (!ok && data?.simulate !== true) {
+          setSimulateMode(false)
+        }
       })
       .catch(() => {})
     return () => {
@@ -230,8 +244,10 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
       setError('Select at least one NFT.')
       return
     }
-    if (!escrowAddress) {
-      setError('OwlSwap escrow is not configured on the server.')
+    if (!escrowAddress && !simulateMode) {
+      setError(
+        'OwlSwap escrow is not configured. Set OWL_SWAP_ESCROW_SECRET_KEY or use admin simulation mode.'
+      )
       return
     }
 
@@ -275,40 +291,46 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
         return
       }
 
-      setNotice('Approve the deposit in your wallet…')
-      const built = await buildOwlSwapMakerDepositTx({
-        connection,
-        owner: publicKey,
-        escrowAddress,
-        mints: selectedNfts.map((n) => ({
-          mint: n.mint,
-          name: n.name,
-          tokenAccount: n.tokenAccount,
-        })),
-        solLamports: makerSolLamports,
-      })
-      if (!built.ok) {
-        setError(built.error)
-        return
+      let signature: string
+      if (simulateMode || !escrowAddress) {
+        setNotice('Simulation mode — opening offer without on-chain deposit…')
+        signature = makeOwlSwapSimulateSignature('maker-deposit', offerId)
+      } else {
+        setNotice('Approve the deposit in your wallet…')
+        const built = await buildOwlSwapMakerDepositTx({
+          connection,
+          owner: publicKey,
+          escrowAddress,
+          mints: selectedNfts.map((n) => ({
+            mint: n.mint,
+            name: n.name,
+            tokenAccount: n.tokenAccount,
+          })),
+          solLamports: makerSolLamports,
+        })
+        if (!built.ok) {
+          setError(built.error)
+          return
+        }
+
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
+        built.tx.feePayer = publicKey
+        built.tx.recentBlockhash = blockhash
+
+        signature = await sendTransaction(built.tx, connection, {
+          skipPreflight: false,
+          preflightCommitment: 'confirmed',
+        })
+        void lastValidBlockHeight
+        await confirmSignatureSuccessOnChain(
+          connection,
+          signature,
+          120_000,
+          'If the deposit shows in your wallet, wait a moment and the confirm step will retry.'
+        )
+        setNotice('Confirming deposit on-chain…')
       }
 
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
-      built.tx.feePayer = publicKey
-      built.tx.recentBlockhash = blockhash
-
-      const signature = await sendTransaction(built.tx, connection, {
-        skipPreflight: false,
-        preflightCommitment: 'confirmed',
-      })
-      void lastValidBlockHeight
-      await confirmSignatureSuccessOnChain(
-        connection,
-        signature,
-        120_000,
-        'If the deposit shows in your wallet, wait a moment and the confirm step will retry.'
-      )
-
-      setNotice('Confirming deposit on-chain…')
       const confirmRes = await fetch(`/api/owl-swap/offers/${offerId}/confirm-deposit`, {
         method: 'POST',
         credentials: 'include',
@@ -323,7 +345,7 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
         setError(
           typeof confirmData?.error === 'string'
             ? confirmData.error
-            : 'Deposit landed but confirm failed — retry from My offers or contact admin.'
+            : 'Confirm failed — retry from My offers or contact admin.'
         )
         return
       }
@@ -335,7 +357,11 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
       setSharePath(path)
       setShareCode(code)
       setStep('done')
-      setNotice('Offer is live — share the link with your counterparty.')
+      setNotice(
+        confirmData?.simulate || simulateMode
+          ? 'Simulated offer is live — share the link (no NFTs moved on-chain).'
+          : 'Offer is live — share the link with your counterparty.'
+      )
       setSelectedMints(new Set())
       setSolSweetener('')
       void loadMyOffers()
@@ -457,6 +483,13 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
           <p className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
             <Shield className="h-4 w-4 shrink-0" />
             Admin preview — set <code className="text-xs">OWL_SWAP_PUBLIC</code> to go live.
+          </p>
+        ) : null}
+        {simulateMode ? (
+          <p className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-100">
+            Simulation mode — escrow key not set. Create / accept / cancel run in the DB only;{' '}
+            <strong className="font-semibold">no NFTs or SOL move on-chain</strong>. Set{' '}
+            <code className="text-xs">OWL_SWAP_ESCROW_SECRET_KEY</code> for live deposits.
           </p>
         ) : null}
       </header>
@@ -605,20 +638,22 @@ export function OwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
               <Button
                 type="button"
                 className="min-h-[44px] w-full touch-manipulation bg-theme-prime text-black hover:bg-theme-prime/90"
-                disabled={busy || selectedNfts.length < 1 || !escrowAddress}
+                disabled={busy || selectedNfts.length < 1 || (!escrowAddress && !simulateMode)}
                 onClick={() => void createAndDeposit()}
               >
                 {busy ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Working…
                   </>
+                ) : simulateMode ? (
+                  'Create simulated offer'
                 ) : (
                   'Create offer & deposit'
                 )}
               </Button>
               <p className="text-xs text-muted-foreground">
                 Max {OWL_SWAP_MAX_OPEN_OFFERS_PER_WALLET} open/draft offers per wallet.
-                {!escrowAddress ? ' Escrow address unavailable (503).' : ''}
+                {simulateMode ? ' Simulation mode — no on-chain deposit.' : !escrowAddress ? ' Escrow address unavailable (503).' : ''}
               </p>
             </CardContent>
           </Card>

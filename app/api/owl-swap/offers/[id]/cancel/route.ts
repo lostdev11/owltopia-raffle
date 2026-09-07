@@ -6,6 +6,10 @@ import {
   updateOwlSwapOffer,
 } from '@/lib/db/owl-swap'
 import { sendOwlSwapCancelReclaimTransaction } from '@/lib/owl-swap/escrow'
+import {
+  isOwlSwapSimulateSignature,
+  makeOwlSwapSimulateSignature,
+} from '@/lib/owl-swap/simulate'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,16 +67,20 @@ export async function POST(request: NextRequest, context: Ctx) {
 
     let reclaimSig: string | null = null
     if (offer.status === 'open') {
-      const makerAssets = offer.assets.filter((a) => a.side === 'maker')
-      const reclaim = await sendOwlSwapCancelReclaimTransaction({
-        makerWallet: offer.maker_wallet,
-        mints: makerAssets.map((a) => a.mint),
-        solLamports: offer.maker_sol_lamports,
-      })
-      if (!reclaim.ok) {
-        return NextResponse.json({ error: reclaim.error }, { status: 500 })
+      if (isOwlSwapSimulateSignature(offer.maker_deposit_sig)) {
+        reclaimSig = makeOwlSwapSimulateSignature('reclaim', offer.id)
+      } else {
+        const makerAssets = offer.assets.filter((a) => a.side === 'maker')
+        const reclaim = await sendOwlSwapCancelReclaimTransaction({
+          makerWallet: offer.maker_wallet,
+          mints: makerAssets.map((a) => a.mint),
+          solLamports: offer.maker_sol_lamports,
+        })
+        if (!reclaim.ok) {
+          return NextResponse.json({ error: reclaim.error }, { status: 500 })
+        }
+        reclaimSig = reclaim.signature || null
       }
-      reclaimSig = reclaim.signature || null
     }
 
     const updated = await updateOwlSwapOffer(offer.id, { status: 'cancelled' })

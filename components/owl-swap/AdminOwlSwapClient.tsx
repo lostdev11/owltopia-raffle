@@ -1,6 +1,6 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { ArrowLeft, ArrowLeftRight, CheckCircle2, Loader2, Shield } from 'lucide-react'
@@ -16,6 +16,8 @@ import {
 } from '@/lib/owl-swap/fee'
 import { useOwlSwapAdminAccess } from '@/lib/owl-swap/use-owl-swap-admin-access'
 
+type EscrowMode = 'loading' | 'live' | 'simulate' | 'missing'
+
 type Props = {
   initialViewerIsAdmin: boolean
   isPublic: boolean
@@ -24,9 +26,38 @@ type Props = {
 export function AdminOwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
   const { publicKey, connected } = useWallet()
   const access = useOwlSwapAdminAccess({ initialViewerIsAdmin, isPublic })
+  const [escrowMode, setEscrowMode] = useState<EscrowMode>('loading')
 
   const feeSol = getOwlSwapFeeSol()
   const feeConfigured = isOwlSwapFeeEnabledClient()
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/owl-swap/escrow', { cache: 'no-store' })
+      .then(async (r) => {
+        const data = await r.json().catch(() => null)
+        return { ok: r.ok, data }
+      })
+      .then(({ ok, data }) => {
+        if (cancelled) return
+        if (typeof data?.address === 'string' && data.address) {
+          setEscrowMode('live')
+          return
+        }
+        if (data?.simulate === true || data?.mode === 'simulate') {
+          setEscrowMode('simulate')
+          return
+        }
+        void ok
+        setEscrowMode('missing')
+      })
+      .catch(() => {
+        if (!cancelled) setEscrowMode('missing')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   if (access.loading) {
     return (
@@ -40,7 +71,12 @@ export function AdminOwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
     if (access.isAdmin) {
       return (
         <div className="container mx-auto max-w-3xl px-4 py-10 pb-24">
-          <AdminChrome isPublic={isPublic} feeSol={feeSol} feeConfigured={feeConfigured} />
+          <AdminChrome
+            isPublic={isPublic}
+            feeSol={feeSol}
+            feeConfigured={feeConfigured}
+            escrowMode={escrowMode}
+          />
           <Card className="mt-6 border-white/10 bg-black/40">
             <CardHeader>
               <CardTitle className="text-lg">Reconnect your admin wallet</CardTitle>
@@ -57,7 +93,12 @@ export function AdminOwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
     }
     return (
       <div className="container mx-auto max-w-3xl px-4 py-10 pb-24">
-        <AdminChrome isPublic={isPublic} feeSol={feeSol} feeConfigured={feeConfigured} />
+        <AdminChrome
+          isPublic={isPublic}
+          feeSol={feeSol}
+          feeConfigured={feeConfigured}
+          escrowMode={escrowMode}
+        />
         <Card className="mt-6 border-white/10 bg-black/40">
           <CardHeader>
             <CardTitle className="text-lg">Connect an admin wallet</CardTitle>
@@ -102,7 +143,12 @@ export function AdminOwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
   return (
     <div className="pb-24">
       <div className="container mx-auto max-w-3xl px-4 pt-8">
-        <AdminChrome isPublic={isPublic} feeSol={feeSol} feeConfigured={feeConfigured} />
+        <AdminChrome
+          isPublic={isPublic}
+          feeSol={feeSol}
+          feeConfigured={feeConfigured}
+          escrowMode={escrowMode}
+        />
         <Card className="mt-4 border-amber-500/30 bg-amber-500/10">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base text-amber-100">
@@ -110,8 +156,18 @@ export function AdminOwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
               Test checklist
             </CardTitle>
             <CardDescription className="text-amber-100/80">
-              Use low-value classic SPL NFTs. Requires{' '}
-              <code className="text-xs">OWL_SWAP_ESCROW_SECRET_KEY</code>.
+              {escrowMode === 'simulate' ? (
+                <>
+                  Simulation mode is on (no{' '}
+                  <code className="text-xs">OWL_SWAP_ESCROW_SECRET_KEY</code>). Flows are DB-only —
+                  nothing moves on-chain. Add the escrow key when you are ready for live deposits.
+                </>
+              ) : (
+                <>
+                  Use low-value classic SPL NFTs. Requires{' '}
+                  <code className="text-xs">OWL_SWAP_ESCROW_SECRET_KEY</code>.
+                </>
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-amber-50/90">
@@ -122,10 +178,20 @@ export function AdminOwlSwapClient({ initialViewerIsAdmin, isPublic }: Props) {
             <ChecklistItem>
               Accept from a second admin wallet (max {OWL_SWAP_MAX_NFTS_PER_SIDE} NFTs / side)
             </ChecklistItem>
+            {escrowMode === 'simulate' ? (
+              <ChecklistItem>
+                Confirm create / accept / cancel complete without wallet deposit prompts
+              </ChecklistItem>
+            ) : (
+              <ChecklistItem>
+                Confirm fee treasury receives ~{formatOwlSwapFeeSol(feeSol)} (holder discount
+                applies)
+              </ChecklistItem>
+            )}
             <ChecklistItem>
-              Confirm fee treasury receives ~{formatOwlSwapFeeSol(feeSol)} (holder discount applies)
+              Cancel an open offer
+              {escrowMode === 'simulate' ? ' (sim reclaim)' : ' and confirm reclaim'}
             </ChecklistItem>
-            <ChecklistItem>Cancel an open offer and confirm reclaim</ChecklistItem>
             {!isPublic ? (
               <ChecklistItem>
                 When ready: set <code className="text-xs">OWL_SWAP_PUBLIC=true</code> and{' '}
@@ -147,10 +213,12 @@ function AdminChrome({
   isPublic,
   feeSol,
   feeConfigured,
+  escrowMode,
 }: {
   isPublic: boolean
   feeSol: number
   feeConfigured: boolean
+  escrowMode: EscrowMode
 }) {
   return (
     <div className="flex items-start gap-3">
@@ -179,6 +247,15 @@ function AdminChrome({
             {feeConfigured ? '' : ' — treasury not set'}
           </StatusPill>
           <StatusPill ok={isPublic}>{isPublic ? 'Public' : 'Admin-only preview'}</StatusPill>
+          {escrowMode === 'loading' ? (
+            <StatusPill ok={false}>Escrow…</StatusPill>
+          ) : escrowMode === 'live' ? (
+            <StatusPill ok>Escrow OK</StatusPill>
+          ) : escrowMode === 'simulate' ? (
+            <StatusPill ok={false}>Simulation</StatusPill>
+          ) : (
+            <StatusPill ok={false}>Escrow missing</StatusPill>
+          )}
         </div>
       </div>
     </div>

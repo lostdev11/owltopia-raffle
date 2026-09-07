@@ -10,6 +10,10 @@ import {
   getOwlSwapEscrowSolLamports,
   isMintHeldByOwlSwapEscrow,
 } from '@/lib/owl-swap/escrow'
+import {
+  isOwlSwapSimulateEnabled,
+  isOwlSwapSimulateSignature,
+} from '@/lib/owl-swap/simulate'
 import { getSolanaConnection } from '@/lib/solana/connection'
 
 export const dynamic = 'force-dynamic'
@@ -54,12 +58,22 @@ export async function POST(request: NextRequest, context: Ctx) {
 
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null
     const signature = typeof body?.signature === 'string' ? body.signature.trim() : ''
-    if (!signature || signature.length < 32) {
+    if (!signature || signature.length < 8) {
       return NextResponse.json({ error: 'signature required' }, { status: 400 })
     }
 
+    const simulateRequested = isOwlSwapSimulateSignature(signature)
+    const simulateAllowed = isOwlSwapSimulateEnabled()
     const escrow = getOwlSwapEscrowPublicKey()
-    if (!escrow) {
+
+    if (simulateRequested && !simulateAllowed) {
+      return NextResponse.json(
+        { error: 'Simulation mode is not enabled (set escrow or OWL_SWAP_SIMULATE, admin-only).' },
+        { status: 403 }
+      )
+    }
+
+    if (!simulateRequested && !escrow) {
       return NextResponse.json(
         { error: 'OwlSwap escrow is not configured.' },
         { status: 503 }
@@ -77,6 +91,7 @@ export async function POST(request: NextRequest, context: Ctx) {
       return NextResponse.json({
         ok: true,
         alreadyOpen: true,
+        simulate: isOwlSwapSimulateSignature(offer.maker_deposit_sig),
         offer,
         sharePath: `/owl-swap/o/${offer.short_code}`,
       })
@@ -88,38 +103,40 @@ export async function POST(request: NextRequest, context: Ctx) {
       )
     }
 
-    const connection = getSolanaConnection()
-    // Best-effort: wait for signature confirmation if still landing.
-    try {
-      await connection.confirmTransaction(signature, 'confirmed')
-    } catch {
-      // continue — balance checks are authoritative
-    }
-
-    const makerAssets = offer.assets.filter((a) => a.side === 'maker')
-    for (const asset of makerAssets) {
-      const held = await isMintHeldByOwlSwapEscrow(asset.mint, connection)
-      if (!held) {
-        return NextResponse.json(
-          {
-            error: `Escrow does not yet hold ${asset.name ?? asset.mint.slice(0, 8)}…. Wait for confirmation and retry.`,
-          },
-          { status: 400 }
-        )
+    if (!simulateRequested) {
+      const connection = getSolanaConnection()
+      // Best-effort: wait for signature confirmation if still landing.
+      try {
+        await connection.confirmTransaction(signature, 'confirmed')
+      } catch {
+        // continue — balance checks are authoritative
       }
-    }
 
-    if (offer.maker_sol_lamports > 0) {
-      const bal = await getOwlSwapEscrowSolLamports(connection)
-      // Soft check: escrow must have at least the sweetener (may hold more from other offers).
-      if (bal < offer.maker_sol_lamports) {
-        return NextResponse.json(
-          {
-            error:
-              'Escrow SOL balance is below the offer sweetener. Confirm the deposit landed, then retry.',
-          },
-          { status: 400 }
-        )
+      const makerAssets = offer.assets.filter((a) => a.side === 'maker')
+      for (const asset of makerAssets) {
+        const held = await isMintHeldByOwlSwapEscrow(asset.mint, connection)
+        if (!held) {
+          return NextResponse.json(
+            {
+              error: `Escrow does not yet hold ${asset.name ?? asset.mint.slice(0, 8)}…. Wait for confirmation and retry.`,
+            },
+            { status: 400 }
+          )
+        }
+      }
+
+      if (offer.maker_sol_lamports > 0) {
+        const bal = await getOwlSwapEscrowSolLamports(connection)
+        // Soft check: escrow must have at least the sweetener (may hold more from other offers).
+        if (bal < offer.maker_sol_lamports) {
+          return NextResponse.json(
+            {
+              error:
+                'Escrow SOL balance is below the offer sweetener. Confirm the deposit landed, then retry.',
+            },
+            { status: 400 }
+          )
+        }
       }
     }
 
@@ -133,6 +150,7 @@ export async function POST(request: NextRequest, context: Ctx) {
 
     return NextResponse.json({
       ok: true,
+      simulate: simulateRequested,
       offer: updated.row,
       sharePath: `/owl-swap/o/${updated.row.short_code}`,
     })
