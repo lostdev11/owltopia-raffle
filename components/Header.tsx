@@ -33,6 +33,7 @@ import {
   type SiteNavGroup,
 } from '@/lib/site-nav'
 import { isOwlSendPublicClient } from '@/lib/owl-send/access'
+import { isOwlSwapPublicClient } from '@/lib/owl-swap/access'
 import { isPacksEnvKillSwitchClient, isPacksPublicClient } from '@/lib/packs/access'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
@@ -174,6 +175,8 @@ export function Header() {
 
   const owlSendPublic = isOwlSendPublicClient()
   const showOwlSendNav = owlSendPublic || showOwlVision
+  const owlSwapPublic = isOwlSwapPublicClient()
+  const showOwlSwapNav = owlSwapPublic || showOwlVision
   const packsPublic = packsPublicLive
   const showOwlPacksNav = packsPublic || showOwlVision || packsTester
   const communityNavGroup = useMemo<SiteNavGroup>(
@@ -182,11 +185,13 @@ export function Header() {
       items: filterCommunityNavItems({
         showOwlSend: showOwlSendNav,
         owlSendPublic,
+        showOwlSwap: showOwlSwapNav,
+        owlSwapPublic,
         showOwlPacks: showOwlPacksNav,
         owlPacksPublic: packsPublic,
       }),
     }),
-    [owlSendPublic, showOwlSendNav, packsPublic, showOwlPacksNav]
+    [owlSendPublic, showOwlSendNav, owlSwapPublic, showOwlSwapNav, packsPublic, showOwlPacksNav]
   )
 
   const mobileNavGroups = useMemo(
