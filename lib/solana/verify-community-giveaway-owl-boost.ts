@@ -6,6 +6,7 @@ import type { ParsedTransactionWithMeta } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { getRaffleTreasuryWalletAddress } from '@/lib/solana/raffle-treasury-wallet'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 function raffleTreasuryPubkey(): PublicKey | null {
   const w = getRaffleTreasuryWalletAddress()
@@ -79,7 +80,7 @@ export async function verifyCommunityGiveawayOwlBoostPayment(params: {
 
   const connection = getSolanaConnection()
   const tx = await connection.getParsedTransaction(sig, {
-    maxSupportedTransactionVersion: 0,
+    maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     commitment: 'confirmed',
   })
 

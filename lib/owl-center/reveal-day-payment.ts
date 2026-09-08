@@ -15,6 +15,7 @@ import { collectParsedTransactionAccountKeys } from '@/lib/gen2-presale/verify-p
 import type { VerifyOwlCenterPlatformMintFeeResult } from '@/lib/solana/owl-center-platform-mint-fee'
 import { getLaunchSolanaRpcUrl } from '@/lib/solana/launch-cm'
 import type { OwlMintNetwork } from '@/lib/solana/network'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 function treasurySolIncrease(parsed: ParsedTransactionWithMeta, treasuryB58: string): bigint | null {
   const meta = parsed.meta
@@ -47,7 +48,7 @@ export async function verifyOwlCenterRevealDayPayment(params: {
 
   const conn = new Connection(getLaunchSolanaRpcUrl(params.network), 'confirmed')
   const parsed = await conn.getParsedTransaction(params.txSignature, {
-    maxSupportedTransactionVersion: 0,
+    maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     commitment: 'confirmed',
   })
   if (!parsed) return { ok: false, error: 'Transaction not found — wait for confirmation and retry.' }

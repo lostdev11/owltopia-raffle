@@ -1,6 +1,7 @@
 'use client'
 
 import type { Connection } from '@solana/web3.js'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 /**
  * Wait until the RPC reports the transaction landed without error.
@@ -14,7 +15,7 @@ async function pollSignatureOnce(connection: Connection, signature: string): Pro
   try {
     const tx = await connection.getTransaction(signature, {
       commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     })
     if (tx?.meta) {
       if (tx.meta.err) {

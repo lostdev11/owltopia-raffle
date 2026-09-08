@@ -1,6 +1,7 @@
 import bs58 from 'bs58'
 import type { Signer } from '@metaplex-foundation/umi'
 import { Connection, PublicKey, type ParsedTransactionWithMeta } from '@solana/web3.js'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 const SIG_RE = /^[1-9A-HJ-NP-Za-km-z]{64,128}$/
 
@@ -138,7 +139,7 @@ export async function findRecentCandyMachineMintSignature(
 
       const tx = await conn.getTransaction(entry.signature, {
         commitment: 'confirmed',
-        maxSupportedTransactionVersion: 0,
+        maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
       })
       if (!tx?.transaction) continue
 
@@ -204,7 +205,7 @@ export async function recoverRecentCandyMachineMintForWallet(params: {
     const conn = new Connection(params.rpcUrl, 'confirmed')
     const parsed = await conn.getParsedTransaction(txSignature, {
       commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     })
     if (!parsed?.meta || parsed.meta.err) return null
 

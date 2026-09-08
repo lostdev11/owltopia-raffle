@@ -12,6 +12,7 @@ import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { getNestingConnection, getNestingReadConnection } from '@/lib/solana/nesting/client'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 import { getNestingStakeVaultKeypair } from '@/lib/nesting/vault-keypair'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 function tokenDeltaForOwnerMint(
   meta: NonNullable<ParsedTransactionWithMeta['meta']>,
@@ -72,7 +73,7 @@ export async function verifyNestingTokenStakeTransfer(params: {
   const tx =
     params.parsedTransaction ??
     (await getNestingReadConnection().getParsedTransaction(sig, {
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
       commitment: 'confirmed',
     }))
 

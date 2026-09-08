@@ -6,6 +6,7 @@
  * SOL payments with no linked OWL payout in the same window.
  */
 import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 const UNIT_LAMPORTS = 1_000_000 // 0.001 SOL default nesting fee
 const LOOKBACK = 50
@@ -52,7 +53,7 @@ async function main() {
   for (const s of sigs) {
     if (s.err) continue
     const tx = await conn.getParsedTransaction(s.signature, {
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
       commitment: 'confirmed',
     })
     if (!tx?.meta || tx.meta.err) continue

@@ -6,6 +6,7 @@ import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getTransactionCached } from '@/lib/solana-rpc-transaction-cache'
 import { getFullAccountKeysForTransaction } from '@/lib/verify-transaction'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 export type PaymentTransactionDetails = {
   walletAddress: string
@@ -48,9 +49,9 @@ export async function getPaymentTransactionDetails(
     const recipientPubkey = new PublicKey(recipientWallet)
 
     const fetchOptions = [
-      { commitment: 'confirmed' as const, maxSupportedTransactionVersion: 0 },
+      { commitment: 'confirmed' as const, maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
       { commitment: 'confirmed' as const },
-      { commitment: 'finalized' as const, maxSupportedTransactionVersion: 0 },
+      { commitment: 'finalized' as const, maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
       { commitment: 'finalized' as const },
     ]
     const transaction = await getTransactionCached(transactionSignature, async () => {

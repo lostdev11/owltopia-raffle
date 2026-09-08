@@ -5,6 +5,7 @@ import { PublicKey } from '@solana/web3.js'
 import type { ParsedTransactionWithMeta } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { getTokenInfo } from '@/lib/tokens'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 function resolveUsdcMint(): PublicKey {
   const raw = process.env.DISCORD_PARTNER_USDC_MINT?.trim()
@@ -76,7 +77,7 @@ export async function verifyDiscordPartnerUsdcPayment(params: {
   const tx =
     params.parsedTransaction ??
     (await connection.getParsedTransaction(sig, {
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
       commitment: 'confirmed',
     }))
 
