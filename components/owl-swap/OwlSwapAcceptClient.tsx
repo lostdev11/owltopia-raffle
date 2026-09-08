@@ -85,6 +85,7 @@ export function OwlSwapAcceptClient({
   const [offer, setOffer] = useState<AcceptOffer | null>(null)
   const [offerLoading, setOfferLoading] = useState(true)
   const [offerError, setOfferError] = useState<string | null>(null)
+  const [authRequired, setAuthRequired] = useState(false)
 
   const [nfts, setNfts] = useState<WalletNft[]>([])
   const [nftsLoading, setNftsLoading] = useState(false)
@@ -185,19 +186,24 @@ export function OwlSwapAcceptClient({
     setOfferError(null)
     try {
       const res = await fetch(`/api/owl-swap/offers/by-code/${encodeURIComponent(code)}`, {
+        credentials: 'include',
         cache: 'no-store',
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) {
-        setOfferError(typeof data?.error === 'string' ? data.error : 'Offer not found')
+        const msg = typeof data?.error === 'string' ? data.error : 'Offer not found'
+        setAuthRequired(res.status === 401)
+        setOfferError(msg)
         setOffer(null)
         return
       }
+      setAuthRequired(false)
       setOffer(data.offer)
       if (typeof data?.offer?.settle_sig === 'string') {
         setSettleSig(data.offer.settle_sig)
       }
     } catch {
+      setAuthRequired(false)
       setOfferError('Failed to load offer')
       setOffer(null)
     } finally {
@@ -206,8 +212,9 @@ export function OwlSwapAcceptClient({
   }, [code])
 
   useEffect(() => {
+    if (sessionChecking) return
     void loadOffer()
-  }, [loadOffer])
+  }, [loadOffer, sessionChecking, sessionWallet])
 
   useEffect(() => {
     let cancelled = false
@@ -498,6 +505,38 @@ export function OwlSwapAcceptClient({
         </div>
       )
     }
+  }
+
+  if (authRequired) {
+    return (
+      <div className="mx-auto flex min-h-[50vh] max-w-lg flex-col items-center justify-center gap-4 px-4 py-16 text-center">
+        <ArrowLeftRight className="h-10 w-10 text-theme-prime" />
+        <h1 className="font-display text-3xl tracking-wide text-white">Sign in to view offer</h1>
+        <p className="text-sm text-muted-foreground">
+          {offerError ??
+            'Admin preview — sign in with an admin wallet in this same browser tab to open the share link.'}
+        </p>
+        {!connected || !publicKey ? <WalletConnectButton /> : null}
+        {connected && publicKey ? (
+          <Button
+            type="button"
+            className="min-h-[44px] touch-manipulation bg-theme-prime text-black hover:bg-theme-prime/90"
+            disabled={signingIn}
+            onClick={() => {
+              void (async () => {
+                const ok = await ensureSignedIn()
+                if (ok) void loadOffer()
+              })()
+            }}
+          >
+            {signingIn ? 'Signing in…' : 'Sign in & load offer'}
+          </Button>
+        ) : null}
+        <Button asChild variant="outline" className="min-h-[44px]">
+          <Link href="/owl-swap">Back to OwlSwap</Link>
+        </Button>
+      </div>
+    )
   }
 
   if (offerError || !offer) {
