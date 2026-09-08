@@ -12,6 +12,9 @@ export const OWL_SWAP_OFFER_TTL_HOURS = 72
 /** Max concurrent draft/open offers per maker wallet. */
 export const OWL_SWAP_MAX_OPEN_OFFERS_PER_WALLET = 3
 
+/** Max SOL sweetener per side (50 SOL) — blocks unbounded escrow drain claims. */
+export const OWL_SWAP_MAX_SOL_SWEETENER_LAMPORTS = 50_000_000_000
+
 /** Modest CU headroom for multi-NFT settle / reclaim. */
 export const OWL_SWAP_COMPUTE_UNIT_LIMIT = 400_000
 

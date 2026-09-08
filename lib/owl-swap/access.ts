@@ -2,7 +2,8 @@
  * OwlSwap rollout gate — admin preview first (same idea as OwlSend).
  *
  * Default: admin-only.
- * Go live: set `OWL_SWAP_PUBLIC=true` and `NEXT_PUBLIC_OWL_SWAP_PUBLIC=true`.
+ * Go live: set BOTH `OWL_SWAP_PUBLIC=true` (server) and `NEXT_PUBLIC_OWL_SWAP_PUBLIC=true` (UI).
+ * Server APIs only trust `OWL_SWAP_PUBLIC` — never the NEXT_PUBLIC flag alone.
  */
 
 function readBoolean(raw: string | undefined, fallback: boolean): boolean {
@@ -13,16 +14,13 @@ function readBoolean(raw: string | undefined, fallback: boolean): boolean {
   return fallback
 }
 
-/** When false (default), only site admins may use OwlSwap. */
+/** When false (default), only site admins may use OwlSwap APIs. Server-only env. */
 export function isOwlSwapPublic(): boolean {
   if (typeof process === 'undefined') return false
-  return readBoolean(
-    process.env.OWL_SWAP_PUBLIC ?? process.env.NEXT_PUBLIC_OWL_SWAP_PUBLIC,
-    false
-  )
+  return readBoolean(process.env.OWL_SWAP_PUBLIC, false)
 }
 
-/** Client-safe public flag (NEXT_PUBLIC only). */
+/** Client-safe public flag (NEXT_PUBLIC only) for UI gates. */
 export function isOwlSwapPublicClient(): boolean {
   if (typeof process === 'undefined') return false
   return readBoolean(process.env.NEXT_PUBLIC_OWL_SWAP_PUBLIC, false)

@@ -2,18 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { requireOwlSwapAccess } from '@/lib/owl-swap/require-owl-swap-access'
 import {
+  findActiveOwlSwapMintsInUse,
   getOwlSwapOfferWithAssetsById,
+  isOwlSwapDepositSignatureUsed,
   updateOwlSwapOffer,
 } from '@/lib/db/owl-swap'
-import {
-  getOwlSwapEscrowPublicKey,
-  getOwlSwapEscrowSolLamports,
-  isMintHeldByOwlSwapEscrow,
-} from '@/lib/owl-swap/escrow'
+import { getOwlSwapEscrowPublicKey } from '@/lib/owl-swap/escrow'
 import {
   isOwlSwapSimulateEnabled,
   isOwlSwapSimulateSignature,
 } from '@/lib/owl-swap/simulate'
+import { verifyOwlSwapDepositTransaction } from '@/lib/owl-swap/verify-deposit-tx'
 import { getSolanaConnection } from '@/lib/solana/connection'
 
 export const dynamic = 'force-dynamic'
@@ -103,40 +102,42 @@ export async function POST(request: NextRequest, context: Ctx) {
       )
     }
 
-    if (!simulateRequested) {
+    if (await isOwlSwapDepositSignatureUsed(signature, offer.id)) {
+      return NextResponse.json(
+        { error: 'This deposit signature was already used on another offer.' },
+        { status: 409 }
+      )
+    }
+
+    const makerAssets = offer.assets.filter((a) => a.side === 'maker')
+    const mints = makerAssets.map((a) => a.mint)
+    const inUse = await findActiveOwlSwapMintsInUse(mints, offer.id)
+    if (inUse.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Mint already listed on another active offer: ${inUse[0].slice(0, 8)}…`,
+        },
+        { status: 409 }
+      )
+    }
+
+    if (!simulateRequested && escrow) {
       const connection = getSolanaConnection()
-      // Best-effort: wait for signature confirmation if still landing.
       try {
         await connection.confirmTransaction(signature, 'confirmed')
       } catch {
-        // continue — balance checks are authoritative
+        // parsed verification is authoritative
       }
 
-      const makerAssets = offer.assets.filter((a) => a.side === 'maker')
-      for (const asset of makerAssets) {
-        const held = await isMintHeldByOwlSwapEscrow(asset.mint, connection)
-        if (!held) {
-          return NextResponse.json(
-            {
-              error: `Escrow does not yet hold ${asset.name ?? asset.mint.slice(0, 8)}…. Wait for confirmation and retry.`,
-            },
-            { status: 400 }
-          )
-        }
-      }
-
-      if (offer.maker_sol_lamports > 0) {
-        const bal = await getOwlSwapEscrowSolLamports(connection)
-        // Soft check: escrow must have at least the sweetener (may hold more from other offers).
-        if (bal < offer.maker_sol_lamports) {
-          return NextResponse.json(
-            {
-              error:
-                'Escrow SOL balance is below the offer sweetener. Confirm the deposit landed, then retry.',
-            },
-            { status: 400 }
-          )
-        }
+      const verified = await verifyOwlSwapDepositTransaction({
+        signature,
+        expectedPayer: session.wallet,
+        escrowAddress: escrow,
+        mints,
+        expectedSolLamports: offer.maker_sol_lamports,
+      })
+      if (!verified.ok) {
+        return NextResponse.json({ error: verified.error }, { status: 400 })
       }
     }
 
@@ -145,6 +146,12 @@ export async function POST(request: NextRequest, context: Ctx) {
       maker_deposit_sig: signature,
     })
     if (!updated.ok) {
+      if (/unique|duplicate/i.test(updated.error)) {
+        return NextResponse.json(
+          { error: 'This deposit signature was already used on another offer.' },
+          { status: 409 }
+        )
+      }
       return NextResponse.json({ error: updated.error }, { status: 500 })
     }
 

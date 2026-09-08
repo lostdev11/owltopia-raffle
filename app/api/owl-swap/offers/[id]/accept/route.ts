@@ -4,6 +4,7 @@ import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import { requireOwlSwapAccess } from '@/lib/owl-swap/require-owl-swap-access'
 import {
   OWL_SWAP_MAX_NFTS_PER_SIDE,
+  OWL_SWAP_MAX_SOL_SWEETENER_LAMPORTS,
 } from '@/lib/owl-swap/constants'
 import { verifyOwlSwapMintForAllowlist } from '@/lib/owl-swap/allowlist'
 import { getOwlSendHolderCounts } from '@/lib/owl-send/holder-counts'
@@ -21,11 +22,16 @@ import {
   isOwlSwapSimulateSignature,
   makeOwlSwapSimulateSignature,
 } from '@/lib/owl-swap/simulate'
+import { verifyOwlSwapDepositTransaction } from '@/lib/owl-swap/verify-deposit-tx'
 import {
+  claimOwlSwapOfferForSettle,
   deleteOwlSwapOfferAssetsForSide,
+  findActiveOwlSwapMintsInUse,
   getOwlSwapOfferWithAssetsById,
   insertOwlSwapLedger,
   insertOwlSwapOfferAssets,
+  isOwlSwapDepositSignatureUsed,
+  releaseOwlSwapOfferSettleClaim,
   updateOwlSwapOffer,
 } from '@/lib/db/owl-swap'
 
@@ -58,41 +64,9 @@ function requireConnectedMatchesSession(
   return null
 }
 
-async function txPaidFeeToTreasury(
-  signature: string,
-  treasury: string,
-  minLamports: number
-): Promise<boolean> {
-  if (minLamports <= 0) return true
-  const connection = getSolanaConnection()
-  const fetchOptions = [
-    { commitment: 'confirmed' as const, maxSupportedTransactionVersion: 0 },
-    { commitment: 'confirmed' as const },
-  ]
-  let tx: Awaited<ReturnType<typeof connection.getTransaction>> | null = null
-  for (const opts of fetchOptions) {
-    tx = await connection.getTransaction(signature, opts as never).catch(() => null)
-    if (tx?.meta) break
-  }
-  if (!tx?.meta || !tx.transaction) return false
-
-  const message = tx.transaction.message
-  const accountKeys =
-    'getAccountKeys' in message && typeof message.getAccountKeys === 'function'
-      ? message.getAccountKeys().staticAccountKeys.map((k) => k.toBase58())
-      : (
-          (message as { accountKeys?: Array<PublicKey | string> }).accountKeys ?? []
-        ).map((k) => (typeof k === 'string' ? k : k.toBase58()))
-
-  const treasuryIdx = accountKeys.findIndex((k) => k === treasury)
-  if (treasuryIdx < 0) return false
-  const pre = tx.meta.preBalances[treasuryIdx] ?? 0
-  const post = tx.meta.postBalances[treasuryIdx] ?? 0
-  return post - pre >= minLamports
-}
-
 /** POST /api/owl-swap/offers/[id]/accept — verify taker deposit + settle. */
 export async function POST(request: NextRequest, context: Ctx) {
+  let claimedOfferId: string | null = null
   try {
     const session = await requireOwlSwapAccess(request)
     if (session instanceof NextResponse) return session
@@ -146,11 +120,6 @@ export async function POST(request: NextRequest, context: Ctx) {
       )
     }
 
-    // Simulated accept only against simulated open offers (maker used sim deposit).
-    if (simulateRequested) {
-      /* checked after offer load */
-    }
-
     const offer = await getOwlSwapOfferWithAssetsById(id.trim())
     if (!offer) {
       return NextResponse.json({ error: 'Offer not found' }, { status: 404 })
@@ -174,7 +143,10 @@ export async function POST(request: NextRequest, context: Ctx) {
 
     if (new Date(offer.expires_at).getTime() < Date.now()) {
       await updateOwlSwapOffer(offer.id, { status: 'expired' })
-      return NextResponse.json({ error: 'Offer has expired.' }, { status: 410 })
+      return NextResponse.json(
+        { error: 'Offer has expired. Maker can cancel to reclaim.' },
+        { status: 410 }
+      )
     }
 
     if (offer.maker_wallet === takerWallet) {
@@ -200,6 +172,13 @@ export async function POST(request: NextRequest, context: Ctx) {
             'This offer is simulated. Accept with a sim deposit (simulation mode) or recreate with live escrow.',
         },
         { status: 400 }
+      )
+    }
+
+    if (await isOwlSwapDepositSignatureUsed(depositSignature, offer.id)) {
+      return NextResponse.json(
+        { error: 'This deposit signature was already used on another offer.' },
+        { status: 409 }
       )
     }
 
@@ -252,8 +231,14 @@ export async function POST(request: NextRequest, context: Ctx) {
     }
 
     const takerSolRaw = Number(body.takerSolLamports ?? 0)
-    const takerSolLamports =
+    let takerSolLamports =
       Number.isFinite(takerSolRaw) && takerSolRaw > 0 ? Math.floor(takerSolRaw) : 0
+    if (takerSolLamports > OWL_SWAP_MAX_SOL_SWEETENER_LAMPORTS) {
+      return NextResponse.json(
+        { error: 'SOL sweetener exceeds maximum allowed.' },
+        { status: 400 }
+      )
+    }
 
     if (takerMints.length < 1 && takerSolLamports <= 0) {
       return NextResponse.json(
@@ -263,16 +248,36 @@ export async function POST(request: NextRequest, context: Ctx) {
     }
 
     const makerAssets = offer.assets.filter((a) => a.side === 'maker')
+    const inUse = await findActiveOwlSwapMintsInUse(
+      takerMints.map((m) => m.mint),
+      offer.id
+    )
+    if (inUse.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Mint already listed on another active offer: ${inUse[0].slice(0, 8)}…`,
+        },
+        { status: 409 }
+      )
+    }
 
-    if (!simulateRequested) {
+    const counts = await getOwlSendHolderCounts(takerWallet)
+    const discount = quoteOwlSendHolderDiscount({
+      gen1Count: counts.gen1Count,
+      gen2Count: counts.gen2Count,
+    })
+    const feeLamports = getOwlSwapFeeLamportsForCount(1, discount.discountBps)
+    const treasury = getPlatformFeeTreasuryWalletAddress()
+
+    if (!simulateRequested && escrow) {
       const connection = getSolanaConnection()
       try {
         await connection.confirmTransaction(depositSignature, 'confirmed')
       } catch {
-        // balance checks are authoritative
+        // parsed verification is authoritative
       }
 
-      // Maker assets must still be in escrow
+      // Maker assets must still be in escrow (custody check)
       for (const asset of makerAssets) {
         const held = await isMintHeldByOwlSwapEscrow(asset.mint, connection)
         if (!held) {
@@ -285,43 +290,37 @@ export async function POST(request: NextRequest, context: Ctx) {
         }
       }
 
-      for (const m of takerMints) {
-        const held = await isMintHeldByOwlSwapEscrow(m.mint, connection)
-        if (!held) {
-          return NextResponse.json(
-            {
-              error: `Escrow does not yet hold your NFT ${m.name ?? m.mint.slice(0, 8)}…. Wait and retry.`,
-            },
-            { status: 400 }
-          )
-        }
-      }
-    }
-
-    const counts = await getOwlSendHolderCounts(takerWallet)
-    const discount = quoteOwlSendHolderDiscount({
-      gen1Count: counts.gen1Count,
-      gen2Count: counts.gen2Count,
-    })
-    const feeLamports = getOwlSwapFeeLamportsForCount(1, discount.discountBps)
-    const treasury = getPlatformFeeTreasuryWalletAddress()
-    if (!simulateRequested && feeLamports > 0) {
-      if (!treasury) {
+      if (feeLamports > 0 && !treasury) {
         return NextResponse.json(
           { error: 'Platform fee treasury is not configured.' },
           { status: 503 }
         )
       }
-      const feePaid = await txPaidFeeToTreasury(depositSignature, treasury, feeLamports)
-      if (!feePaid) {
-        return NextResponse.json(
-          {
-            error: `Deposit tx must include the Owl fee (${feeLamports} lamports) to the treasury.`,
-          },
-          { status: 400 }
-        )
+
+      const verified = await verifyOwlSwapDepositTransaction({
+        signature: depositSignature,
+        expectedPayer: takerWallet,
+        escrowAddress: escrow,
+        mints: takerMints.map((m) => m.mint),
+        expectedSolLamports: takerSolLamports,
+        treasuryAddress: treasury,
+        expectedFeeLamports: feeLamports,
+      })
+      if (!verified.ok) {
+        return NextResponse.json({ error: verified.error }, { status: 400 })
+      }
+
+      // Settle only the SOL actually credited in this deposit (never body alone).
+      if (takerSolLamports > 0) {
+        takerSolLamports = Math.min(takerSolLamports, verified.escrowSolCreditLamports)
       }
     }
+
+    const claimed = await claimOwlSwapOfferForSettle(offer.id, takerWallet)
+    if (!claimed.ok) {
+      return NextResponse.json({ error: claimed.error }, { status: 409 })
+    }
+    claimedOfferId = offer.id
 
     await deleteOwlSwapOfferAssetsForSide(offer.id, 'taker')
     const assetInsert = await insertOwlSwapOfferAssets(
@@ -337,6 +336,8 @@ export async function POST(request: NextRequest, context: Ctx) {
       }))
     )
     if (!assetInsert.ok) {
+      await releaseOwlSwapOfferSettleClaim(offer.id)
+      claimedOfferId = null
       return NextResponse.json({ error: assetInsert.error }, { status: 500 })
     }
 
@@ -358,6 +359,8 @@ export async function POST(request: NextRequest, context: Ctx) {
       })
 
       if (!settle.ok) {
+        await releaseOwlSwapOfferSettleClaim(offer.id)
+        claimedOfferId = null
         return NextResponse.json({ error: settle.error }, { status: 500 })
       }
       settleSignature = settle.signature
@@ -373,6 +376,20 @@ export async function POST(request: NextRequest, context: Ctx) {
       settle_sig: settleSignature,
       completed_at: new Date().toISOString(),
     })
+    claimedOfferId = null
+
+    if (!updated.ok) {
+      // On-chain settle may have succeeded; do not auto-reopen. Surface error for ops.
+      console.error('owl-swap accept db complete failed after settle', updated.error)
+      return NextResponse.json(
+        {
+          error:
+            'Settle may have landed but offer row failed to complete. Contact admin with settle signature.',
+          settleSig: settleSignature,
+        },
+        { status: 500 }
+      )
+    }
 
     await insertOwlSwapLedger({
       offerId: offer.id,
@@ -389,12 +406,19 @@ export async function POST(request: NextRequest, context: Ctx) {
     return NextResponse.json({
       ok: true,
       simulate: simulateRequested,
-      offer: updated.ok ? updated.row : offer,
+      offer: updated.row,
       settleSig: settleSignature,
       feeLamports,
       feeDiscountBps: discount.discountBps,
     })
   } catch (e) {
+    if (claimedOfferId) {
+      try {
+        await releaseOwlSwapOfferSettleClaim(claimedOfferId)
+      } catch (releaseErr) {
+        console.error('owl-swap accept release claim', releaseErr)
+      }
+    }
     console.error('owl-swap accept', e)
     return NextResponse.json({ error: 'Failed to accept offer' }, { status: 500 })
   }

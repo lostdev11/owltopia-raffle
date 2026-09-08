@@ -4,7 +4,10 @@
  * Enabled when:
  * - OwlSwap is NOT public, AND
  * - OWL_SWAP_SIMULATE is not explicitly false, AND
- * - (OWL_SWAP_SIMULATE / NEXT_PUBLIC_OWL_SWAP_SIMULATE is true) OR escrow key is missing
+ * - (explicit OWL_SWAP_SIMULATE / NEXT_PUBLIC_OWL_SWAP_SIMULATE true) OR escrow key missing
+ *
+ * If an escrow key IS configured, simulation stays off unless
+ * OWL_SWAP_SIMULATE_WITH_ESCROW=true (ops footgun guard).
  *
  * Never enabled when OwlSwap is public (real custody required).
  * Simulated signatures are prefixed with `sim:` and never verified on-chain.
@@ -52,10 +55,19 @@ export function isOwlSwapSimulateEnabled(): boolean {
     readBoolean(process.env.NEXT_PUBLIC_OWL_SWAP_SIMULATE)
 
   if (explicit === false) return false
-  if (explicit === true) return true
 
+  const hasEscrow = hasOwlSwapEscrowKeyConfigured()
+  if (hasEscrow) {
+    // Live key present: only simulate if ops explicitly opts in.
+    return (
+      explicit === true &&
+      readBoolean(process.env.OWL_SWAP_SIMULATE_WITH_ESCROW) === true
+    )
+  }
+
+  if (explicit === true) return true
   // Auto: admin-only preview with no escrow key.
-  return !hasOwlSwapEscrowKeyConfigured()
+  return true
 }
 
 /** Client-safe: explicit NEXT_PUBLIC flag only (API still authoritative via escrow GET). */

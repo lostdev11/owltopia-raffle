@@ -31,7 +31,7 @@ function requireConnectedMatchesSession(
   return null
 }
 
-/** POST /api/owl-swap/offers/[id]/cancel — maker cancel draft/open; reclaim if open. */
+/** POST /api/owl-swap/offers/[id]/cancel — maker cancel draft/open/expired; reclaim if needed. */
 export async function POST(request: NextRequest, context: Ctx) {
   try {
     const session = await requireOwlSwapAccess(request)
@@ -58,15 +58,28 @@ export async function POST(request: NextRequest, context: Ctx) {
     if (offer.maker_wallet !== session.wallet) {
       return NextResponse.json({ error: 'Only the maker can cancel.' }, { status: 403 })
     }
-    if (offer.status !== 'draft' && offer.status !== 'open') {
+
+    // Expired must be reclaimable so assets are not stuck in escrow.
+    const cancellable = new Set(['draft', 'open', 'expired'])
+    if (!cancellable.has(offer.status)) {
       return NextResponse.json(
         { error: `Offer is ${offer.status}; cannot cancel.` },
         { status: 400 }
       )
     }
+    if (offer.status === 'settling') {
+      return NextResponse.json(
+        { error: 'Offer is settling — wait for accept to finish or fail, then retry.' },
+        { status: 409 }
+      )
+    }
 
     let reclaimSig: string | null = null
-    if (offer.status === 'open') {
+    const needsReclaim =
+      (offer.status === 'open' || offer.status === 'expired') &&
+      Boolean(offer.maker_deposit_sig)
+
+    if (needsReclaim) {
       if (isOwlSwapSimulateSignature(offer.maker_deposit_sig)) {
         reclaimSig = makeOwlSwapSimulateSignature('reclaim', offer.id)
       } else {

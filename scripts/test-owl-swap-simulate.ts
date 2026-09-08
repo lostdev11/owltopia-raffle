@@ -59,11 +59,13 @@ try {
 
   delete process.env.OWL_SWAP_PUBLIC
   process.env.OWL_SWAP_SIMULATE = 'true'
-  // With a fake-looking escrow key present, explicit true still allows simulate
+  // With escrow key present, explicit true alone does NOT enable simulate
   process.env.OWL_SWAP_ESCROW_SECRET_KEY =
     '1111111111111111111111111111111111111111111111111111111111111111'
-  // Invalid key may still parse as null from getOwlSwapEscrowPublicKey — either way
-  // explicit true must return true when not public.
+  delete process.env.OWL_SWAP_SIMULATE_WITH_ESCROW
+  assert.equal(isOwlSwapSimulateEnabled(), false)
+
+  process.env.OWL_SWAP_SIMULATE_WITH_ESCROW = 'true'
   assert.equal(isOwlSwapSimulateEnabled(), true)
 } finally {
   restoreEnv()

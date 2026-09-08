@@ -5,6 +5,7 @@ import { requireOwlSwapAccess } from '@/lib/owl-swap/require-owl-swap-access'
 import {
   OWL_SWAP_MAX_NFTS_PER_SIDE,
   OWL_SWAP_MAX_OPEN_OFFERS_PER_WALLET,
+  OWL_SWAP_MAX_SOL_SWEETENER_LAMPORTS,
   OWL_SWAP_OFFER_TTL_HOURS,
 } from '@/lib/owl-swap/constants'
 import { getOwlSwapOfferTtlHours } from '@/lib/owl-swap/fee'
@@ -12,6 +13,7 @@ import { generateOwlSwapShortCode } from '@/lib/owl-swap/short-code'
 import { verifyOwlSwapMintForAllowlist } from '@/lib/owl-swap/allowlist'
 import {
   countOpenOwlSwapOffersForMaker,
+  findActiveOwlSwapMintsInUse,
   getOwlSwapOfferByShortCode,
   insertOwlSwapOffer,
   insertOwlSwapOfferAssets,
@@ -141,17 +143,45 @@ export async function POST(request: NextRequest) {
     const makerSolRaw = Number(body.makerSolLamports ?? 0)
     const makerSolLamports =
       Number.isFinite(makerSolRaw) && makerSolRaw > 0 ? Math.floor(makerSolRaw) : 0
+    if (makerSolLamports > OWL_SWAP_MAX_SOL_SWEETENER_LAMPORTS) {
+      return NextResponse.json(
+        { error: 'SOL sweetener exceeds maximum allowed.' },
+        { status: 400 }
+      )
+    }
+
+    const inUse = await findActiveOwlSwapMintsInUse(makerMints.map((m) => m.mint))
+    if (inUse.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Mint already listed on another active offer: ${inUse[0].slice(0, 8)}…`,
+        },
+        { status: 409 }
+      )
+    }
 
     const ttlHours = getOwlSwapOfferTtlHours() || OWL_SWAP_OFFER_TTL_HOURS
+    const now = Date.now()
+    const maxExpiryMs = now + ttlHours * 60 * 60 * 1000
+    const minExpiryMs = now + 5 * 60 * 1000
     let expiresAt: Date
     if (typeof body.expires === 'string' && body.expires.trim()) {
       const parsed = new Date(body.expires)
       if (Number.isNaN(parsed.getTime())) {
         return NextResponse.json({ error: 'Invalid expires' }, { status: 400 })
       }
+      const t = parsed.getTime()
+      if (t < minExpiryMs || t > maxExpiryMs) {
+        return NextResponse.json(
+          {
+            error: `expires must be between 5 minutes and ${ttlHours} hours from now.`,
+          },
+          { status: 400 }
+        )
+      }
       expiresAt = parsed
     } else {
-      expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000)
+      expiresAt = new Date(maxExpiryMs)
     }
 
     let shortCode = generateOwlSwapShortCode()
