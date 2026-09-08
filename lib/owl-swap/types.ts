@@ -1,6 +1,7 @@
 export type OwlSwapOfferStatus =
   | 'draft'
   | 'open'
+  | 'settling'
   | 'completed'
   | 'cancelled'
   | 'expired'
