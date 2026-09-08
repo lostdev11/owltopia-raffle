@@ -241,7 +241,7 @@ export async function countOpenOwlSwapOffersForMaker(makerWallet: string): Promi
     .from('owl_swap_offers')
     .select('id', { count: 'exact', head: true })
     .eq('maker_wallet', makerWallet)
-    .in('status', ['draft', 'open'])
+    .in('status', ['draft', 'open', 'settling'])
   if (error) throw new Error(error.message)
   return count ?? 0
 }
@@ -252,6 +252,7 @@ export async function updateOwlSwapOffer(
     status: OwlSwapOfferStatus
     taker_wallet: string | null
     taker_sol_lamports: number
+    maker_sol_lamports: number
     owl_fee_lamports: number | null
     fee_discount_bps: number
     maker_deposit_sig: string | null
@@ -273,6 +274,117 @@ export async function updateOwlSwapOffer(
     .single()
   if (error) return { ok: false, error: error.message }
   return { ok: true, row: normalizeOffer(data as Record<string, unknown>) }
+}
+
+/** CAS: open → settling so only one accept can proceed. */
+export async function claimOwlSwapOfferForSettle(
+  id: string,
+  takerWallet: string
+): Promise<{ ok: true; row: OwlSwapOfferRow } | { ok: false; error: string }> {
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('owl_swap_offers')
+    .update({
+      status: 'settling',
+      taker_wallet: takerWallet,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .eq('status', 'open')
+    .select('*')
+    .maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  if (!data) return { ok: false, error: 'Offer is no longer open (claimed or changed).' }
+  return { ok: true, row: normalizeOffer(data as Record<string, unknown>) }
+}
+
+/** Release settle claim after on-chain failure so maker can retry / cancel. */
+export async function releaseOwlSwapOfferSettleClaim(
+  id: string
+): Promise<{ ok: true; row: OwlSwapOfferRow } | { ok: false; error: string }> {
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('owl_swap_offers')
+    .update({
+      status: 'open',
+      taker_wallet: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .eq('status', 'settling')
+    .select('*')
+    .maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  if (!data) return { ok: false, error: 'Offer settle claim could not be released.' }
+  return { ok: true, row: normalizeOffer(data as Record<string, unknown>) }
+}
+
+/** True if maker or taker deposit signature already used on any offer. */
+export async function isOwlSwapDepositSignatureUsed(
+  signature: string,
+  excludeOfferId?: string
+): Promise<boolean> {
+  const db = getSupabaseAdmin()
+  const sig = signature.trim()
+  if (!sig) return false
+
+  let makerQ = db
+    .from('owl_swap_offers')
+    .select('id')
+    .eq('maker_deposit_sig', sig)
+    .limit(1)
+  let takerQ = db
+    .from('owl_swap_offers')
+    .select('id')
+    .eq('taker_deposit_sig', sig)
+    .limit(1)
+  if (excludeOfferId) {
+    makerQ = makerQ.neq('id', excludeOfferId)
+    takerQ = takerQ.neq('id', excludeOfferId)
+  }
+  const [maker, taker] = await Promise.all([makerQ.maybeSingle(), takerQ.maybeSingle()])
+  if (maker.error) throw new Error(maker.error.message)
+  if (taker.error) throw new Error(taker.error.message)
+  return Boolean(maker.data || taker.data)
+}
+
+/**
+ * Mints already listed on another active (draft|open|settling) offer.
+ */
+export async function findActiveOwlSwapMintsInUse(
+  mints: string[],
+  excludeOfferId?: string
+): Promise<string[]> {
+  if (mints.length === 0) return []
+  const db = getSupabaseAdmin()
+  const { data: assets, error } = await db
+    .from('owl_swap_offer_assets')
+    .select('mint, offer_id')
+    .in('mint', mints)
+  if (error) throw new Error(error.message)
+  const rows = (assets ?? []) as Array<{ mint: string; offer_id: string }>
+  const offerIds = [
+    ...new Set(
+      rows
+        .map((r) => r.offer_id)
+        .filter((id) => (excludeOfferId ? id !== excludeOfferId : true))
+    ),
+  ]
+  if (offerIds.length === 0) return []
+
+  const { data: offers, error: offerErr } = await db
+    .from('owl_swap_offers')
+    .select('id')
+    .in('id', offerIds)
+    .in('status', ['draft', 'open', 'settling'])
+  if (offerErr) throw new Error(offerErr.message)
+  const active = new Set((offers ?? []).map((o) => String((o as { id: string }).id)))
+  const used = new Set<string>()
+  for (const row of rows) {
+    if (excludeOfferId && row.offer_id === excludeOfferId) continue
+    if (active.has(row.offer_id)) used.add(row.mint)
+  }
+  return [...used]
 }
 
 export async function deleteOwlSwapOfferAssetsForSide(

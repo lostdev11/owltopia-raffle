@@ -27,6 +27,7 @@
     "generate:owl-swap-escrow-key": "node scripts/generate-owl-swap-escrow-keypair.mjs",
     "test:owl-swap-simulate": "npx --yes tsx scripts/test-owl-swap-simulate.ts",
     "test:owl-swap-trading-room-ui-state": "npx --yes tsx scripts/test-owl-swap-trading-room-ui-state.ts",
+    "test:owl-swap-security": "npx --yes tsx scripts/test-owl-swap-security.ts",
     "generate:gen-owl-rev-share-pool-key": "node scripts/generate-gen-owl-rev-share-pool-keypair.mjs",
     "generate:council-owl-escrow-key": "node scripts/generate-council-owl-escrow-keypair.mjs",
     "generate:discord-marketplace-wallets": "node scripts/generate-discord-marketplace-wallets.mjs --write-env",

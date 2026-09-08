@@ -350,11 +350,17 @@ Tx size: follow OwlSend scatter lessons — prefer fewer assets per deposit tx; 
 
 - Never expose escrow secret to client
 - Simulate txs before wallet sign (maker deposit; taker accept)
-- Verify mint ownership + allowlist before `open` / settle
+- **Parse deposit signatures** (fee payer, mint debit/credit, SOL/fee in same tx) — do not trust escrow balance alone
+- Unique `maker_deposit_sig` / `taker_deposit_sig`; mint exclusivity across active offers
+- Accept uses CAS `open → settling → completed` (release claim on settle failure)
+- Expired offers remain reclaimable via cancel
+- Server public gate: `OWL_SWAP_PUBLIC` only (not `NEXT_PUBLIC_*` alone)
+- Verify mint ownership + allowlist before `open` / settle; public requires allowlist or `OWL_SWAP_ALLOW_ANY_MINT`
 - Idempotent settle (unique `settle_sig`, status transition guards)
 - Rate limit create/accept by IP + wallet
 - SIWS for ledger and cancel
 - No private keys in logs; treat DAS metadata as untrusted display strings
+- Cap SOL sweetener; clamp offer TTL; FORCE RLS on OwlSwap tables
 
 ---
 
