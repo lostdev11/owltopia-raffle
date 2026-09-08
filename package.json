@@ -56,6 +56,7 @@
     "test:claim-all-combined": "npx --yes tsx scripts/test-claim-all-combined-threshold.ts",
     "test:siws-ledger-message": "npx --yes tsx scripts/test-siws-ledger-message-size.ts",
     "test:solana-tx-version-readiness": "npx --yes tsx scripts/test-solana-tx-version-readiness.ts",
+    "test:solana-v1-devnet-read": "npx --yes tsx scripts/test-solana-v1-devnet-read.ts",
     "test:raffle-draw-verify": "npx --yes tsx scripts/test-raffle-draw-verify.ts",
     "test:wallet-streak-logic": "npx --yes tsx scripts/test-wallet-streak-logic.ts",
     "test:discord-winner-streak-fields": "npx --yes tsx scripts/test-discord-winner-streak-fields.ts",

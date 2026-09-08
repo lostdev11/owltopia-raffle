@@ -99,9 +99,7 @@ async function fetchTransactionForParsing(
 ): Promise<TxResponse | null> {
   const fetchOptions = [
     { commitment: 'confirmed' as const, maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
-    { commitment: 'confirmed' as const },
     { commitment: 'finalized' as const, maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
-    { commitment: 'finalized' as const },
   ]
   for (const opts of fetchOptions) {
     try {

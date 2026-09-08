@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
+import { clampMaxSupportedTransactionVersion } from '@/lib/solana/rpc-version-clamp'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 export const runtime = 'nodejs'
@@ -116,13 +117,17 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Stale clients (e.g. Umi rpc-web3js hard-coding 0) must not under-request through this
+  // proxy once Transaction V1 exists on the cluster. Ceiling 1 still returns legacy/v0.
+  const proxiedBody = clampMaxSupportedTransactionVersion(body)
+
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
   try {
     const res = await fetch(upstream, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(proxiedBody),
       cache: 'no-store',
       signal: controller.signal,
     })

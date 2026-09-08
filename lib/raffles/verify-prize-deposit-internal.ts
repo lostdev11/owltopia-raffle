@@ -77,9 +77,7 @@ async function sumIncomingNativeSolToEscrowLamports(
 
   const fetchOptions = [
     { commitment: 'confirmed' as const, maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
-    { commitment: 'confirmed' as const },
     { commitment: 'finalized' as const, maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
-    { commitment: 'finalized' as const },
   ]
   let tx: Awaited<ReturnType<typeof connection.getTransaction>> | null = null
   for (const opts of fetchOptions) {
