@@ -30,6 +30,7 @@ yarn-error.log*
 .env
 .secrets/
 .secrets/discord-marketplace-wallets.json
+.secrets/owlswap-wallets.json
 
 # vercel
 .vercel

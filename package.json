@@ -104,7 +104,9 @@
     "copy:governance-keypair": "node scripts/copy-governance-program-keypair.mjs",
     "generate:governance-program-key": "node scripts/generate-governance-program-keypair.mjs",
     "notify:council-discord": "npx --yes tsx scripts/notify-recent-council-proposal-discord.ts",
-    "postinstall": "node scripts/postinstall-next-global-error.js"
+    "postinstall": "node scripts/postinstall-next-global-error.js",
+    "owlswap:grind-wallets": "npx --yes tsx scripts/grind-owlswap-vanity.ts",
+    "owlswap:install-env": "node scripts/merge-owlswap-env.mjs"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
