@@ -524,6 +524,7 @@ export function AdminRaffleActions({
   const cancellationRequested = !!raffle.cancellation_requested_at
   const cancellationFeePaid = !!raffle.cancellation_fee_paid_at
   const cancellationPendingAdmin = cancellationRequested || cancellationFeePaid
+  const isDraft = (raffle.status ?? '').toLowerCase() === 'draft'
   const isCancelled = (raffle.status ?? '').toLowerCase() === 'cancelled'
   const isFailedThreshold = (raffle.status ?? '').toLowerCase() === 'failed_refund_available'
   const terminalForMilestoneReturn = isCancelled || isFailedThreshold
@@ -1300,7 +1301,12 @@ export function AdminRaffleActions({
           <h1 className="text-2xl sm:text-4xl font-bold mb-2 break-words">Admin: {raffle.title}</h1>
           <p className="text-muted-foreground">
             Status: <span className="font-medium">{raffle.status ?? '—'}</span>
-            {endTimePassed && !isCancelled ? (
+            {isDraft ? (
+              <span className="text-amber-700 dark:text-amber-400">
+                {' '}
+                · Draft (never published{endTimePassed ? ' — may show as Ended on browse cards' : ''})
+              </span>
+            ) : endTimePassed && !isCancelled ? (
               <span className="text-amber-700 dark:text-amber-400">
                 {' '}
                 · End time passed (shows as ended on site)
@@ -1394,9 +1400,9 @@ export function AdminRaffleActions({
                   ) : milestoneSettleAvailability.mode === 'force_cancel' ? (
                     <>
                       <p className="text-xs text-muted-foreground">
-                        Cancel this raffle and return the main prize plus funded milestone bonuses to the
-                        creator. Use when the listing shows ended or is stuck without a creator cancellation
-                        request.
+                        {isDraft
+                          ? 'This raffle never went live (still draft). Abandon it and return the main prize plus any funded milestone bonuses to the creator — e.g. stuck on moderation fee or partial milestone deposits.'
+                          : 'Cancel this raffle and return the main prize plus funded milestone bonuses to the creator. Use when the listing shows ended or is stuck without a creator cancellation request.'}
                       </p>
                       <Dialog open={forceCancelDialogOpen} onOpenChange={setForceCancelDialogOpen}>
                         <Button
@@ -1410,15 +1416,21 @@ export function AdminRaffleActions({
                           disabled={forcingCancel}
                         >
                           <XCircle className="h-4 w-4 mr-2 shrink-0" />
-                          Cancel &amp; return milestone escrow
+                          {isDraft
+                            ? 'Abandon draft & return milestone escrow'
+                            : 'Cancel & return milestone escrow'}
                         </Button>
                         <DialogContent className="max-h-[90vh] overflow-y-auto">
                           <DialogHeader>
-                            <DialogTitle>Cancel &amp; return milestone escrow</DialogTitle>
+                            <DialogTitle>
+                              {isDraft
+                                ? 'Abandon draft & return milestone escrow'
+                                : 'Cancel & return milestone escrow'}
+                            </DialogTitle>
                             <DialogDescription>
-                              Ends the raffle immediately (status {raffle.status ?? '—'}). Ticket buyers can
-                              claim refunds. The platform attempts to return the main prize and each funded
-                              milestone bonus to the creator.
+                              {isDraft
+                                ? `Marks this draft cancelled (current status ${raffle.status ?? '—'}). The platform attempts to return the main prize and each funded milestone bonus to the creator. No ticket refunds apply — the raffle never published.`
+                                : `Ends the raffle immediately (status ${raffle.status ?? '—'}). Ticket buyers can claim refunds. The platform attempts to return the main prize and each funded milestone bonus to the creator.`}
                             </DialogDescription>
                           </DialogHeader>
                           <label className="flex items-start gap-3 text-sm cursor-pointer touch-manipulation min-h-[44px] py-1 rounded-md border border-red-500/40 bg-red-500/10 p-3">
@@ -1430,8 +1442,9 @@ export function AdminRaffleActions({
                               aria-label="Confirm cancel and return milestone escrow"
                             />
                             <span className="text-muted-foreground leading-snug">
-                              I confirm this milestone raffle should be cancelled now and escrowed prizes
-                              should return to the creator.
+                              {isDraft
+                                ? 'I confirm this draft milestone raffle should be abandoned and escrowed prizes should return to the creator.'
+                                : 'I confirm this milestone raffle should be cancelled now and escrowed prizes should return to the creator.'}
                             </span>
                           </label>
                           <DialogFooter className="gap-2">
@@ -1448,7 +1461,13 @@ export function AdminRaffleActions({
                               disabled={forcingCancel || !forceCancelConfirm}
                               className="bg-red-600 hover:bg-red-700 touch-manipulation min-h-[44px] w-full sm:w-auto"
                             >
-                              {forcingCancel ? 'Cancelling…' : 'Cancel & return'}
+                              {forcingCancel
+                                ? isDraft
+                                  ? 'Abandoning…'
+                                  : 'Cancelling…'
+                                : isDraft
+                                  ? 'Abandon & return'
+                                  : 'Cancel & return'}
                             </Button>
                           </DialogFooter>
                         </DialogContent>

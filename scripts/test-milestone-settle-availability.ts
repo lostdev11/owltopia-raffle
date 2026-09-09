@@ -32,6 +32,20 @@ function main() {
 
   assert.deepEqual(
     getAdminMilestoneSettleAvailability({
+      status: 'draft',
+      milestones: [fundedCryptoMilestone],
+      cancellationRequestedAt: null,
+      cancellationFeePaidAt: null,
+      cancelledAt: null,
+      winnerWallet: null,
+      winnerSelectedAt: null,
+    }),
+    { mode: 'force_cancel', returnableMilestoneCount: 0 },
+    'draft milestone raffle → abandon draft / force cancel'
+  )
+
+  assert.deepEqual(
+    getAdminMilestoneSettleAvailability({
       status: 'pending_min_not_met',
       milestones: [fundedCryptoMilestone],
       cancellationRequestedAt: null,
