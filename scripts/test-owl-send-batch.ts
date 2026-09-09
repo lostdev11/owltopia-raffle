@@ -69,13 +69,22 @@ import {
   OWL_SEND_MAX_PER_TX_NFT_SCATTER,
   OWL_SEND_MAX_SELECT,
   OWL_SEND_MAX_SPECIAL_PER_TX,
+  OWL_SEND_MAX_TOKEN_SCATTER,
+  OWL_SEND_MAX_PER_TX_TOKEN,
+  OWL_SEND_MAX_PER_TX_TOKEN_NEW_ATA,
+  OWL_SEND_TOKEN_SIGN_ALL_WINDOW,
   owlSendClassicApprovalSize,
 } from '@/lib/owl-send/constants'
+import {
+  estimateOwlSendTokenScatterTxBytes,
+  packOwlSendTokenScatterLines,
+} from '@/lib/owl-send/pack-token-scatter'
 import {
   isOwlSendPacketSizeError,
   measureOwlSendTxBytes,
   OWL_SEND_TX_PACKET_LIMIT,
   OWL_SEND_TX_SAFE_BYTES,
+  OWL_SEND_TX_SAFE_BYTES_TOKEN,
   owlSendTxFitsSafePacket,
 } from '@/lib/owl-send/tx-size'
 import {
@@ -94,7 +103,14 @@ assert.equal(owlSendClassicApprovalSize(1), OWL_SEND_MAX_PER_TX_NFT_ONE)
 assert.equal(owlSendClassicApprovalSize(2), OWL_SEND_MAX_PER_TX_NFT_ONE)
 assert.equal(owlSendClassicApprovalSize(5), OWL_SEND_MAX_PER_TX_NFT_SCATTER)
 assert.equal(OWL_SEND_MAX_SELECT, 20)
+assert.equal(OWL_SEND_MAX_TOKEN_SCATTER, 1000)
+assert.equal(OWL_SEND_MAX_PER_TX_TOKEN, 12)
+assert.equal(OWL_SEND_MAX_PER_TX_TOKEN_NEW_ATA, 7)
+assert.equal(OWL_SEND_TOKEN_SIGN_ALL_WINDOW, 8)
+assert.equal(OWL_SEND_TX_SAFE_BYTES_TOKEN, 1020)
 assert.ok(OWL_SEND_TX_SAFE_BYTES < OWL_SEND_TX_PACKET_LIMIT)
+assert.ok(OWL_SEND_TX_SAFE_BYTES_TOKEN > OWL_SEND_TX_SAFE_BYTES)
+assert.ok(OWL_SEND_TX_SAFE_BYTES_TOKEN < OWL_SEND_TX_PACKET_LIMIT)
 assert.equal(getOwlSendFeeSol(), 0.001)
 assert.equal(getOwlSendFeeLamportsForCount(5), Math.round(0.001 * LAMPORTS_PER_SOL) * 5)
 
@@ -398,9 +414,47 @@ const tooMany = buildTokenScatterLines({
   tokenAccount: 'ata1',
   decimals: 0,
   defaultAmountUi: '1',
-  entries: Array.from({ length: 21 }, (_, i) => ({ recipient: `r${i}`, amountUi: null })),
+  entries: Array.from({ length: OWL_SEND_MAX_TOKEN_SCATTER + 1 }, (_, i) => ({
+    recipient: `r${i}`,
+    amountUi: null,
+  })),
 })
 assert.equal(tooMany.ok, false)
+
+const largeAirdrop = buildTokenScatterLines({
+  mint: 'mint1',
+  tokenAccount: 'ata1',
+  decimals: 0,
+  defaultAmountUi: '5',
+  entries: Array.from({ length: 629 }, (_, i) => ({ recipient: `r${i}`, amountUi: null })),
+})
+assert.equal(largeAirdrop.ok, true)
+if (largeAirdrop.ok) {
+  assert.equal(largeAirdrop.lines.length, 629)
+  const allNew = packOwlSendTokenScatterLines(
+    largeAirdrop.lines,
+    largeAirdrop.lines.map(() => true)
+  )
+  const allExist = packOwlSendTokenScatterLines(
+    largeAirdrop.lines,
+    largeAirdrop.lines.map(() => false)
+  )
+  // New ATAs: ~7 / tx under token safe budget → fewer than old fixed-5 packs.
+  assert.equal(allNew.length, Math.ceil(629 / OWL_SEND_MAX_PER_TX_TOKEN_NEW_ATA))
+  assert.ok(allNew[0]!.length <= OWL_SEND_MAX_PER_TX_TOKEN_NEW_ATA)
+  assert.ok(allNew.every((c) => c.length <= OWL_SEND_MAX_PER_TX_TOKEN))
+  // Existing ATAs: up to 12 / tx.
+  assert.equal(allExist.length, Math.ceil(629 / 12))
+  assert.ok(allExist[0]!.length === OWL_SEND_MAX_PER_TX_TOKEN)
+  assert.ok(allExist.length < allNew.length)
+  assert.ok(allNew.length < Math.ceil(629 / 5))
+}
+
+assert.equal(estimateOwlSendTokenScatterTxBytes({ createAtaCount: 5, existingAtaCount: 0 }), 835)
+assert.equal(estimateOwlSendTokenScatterTxBytes({ createAtaCount: 7, existingAtaCount: 0 }), 1011)
+assert.equal(estimateOwlSendTokenScatterTxBytes({ createAtaCount: 0, existingAtaCount: 12 }), 895)
+assert.ok(estimateOwlSendTokenScatterTxBytes({ createAtaCount: 7, existingAtaCount: 0 }) <= OWL_SEND_TX_SAFE_BYTES_TOKEN)
+assert.ok(estimateOwlSendTokenScatterTxBytes({ createAtaCount: 8, existingAtaCount: 0 }) > OWL_SEND_TX_SAFE_BYTES_TOKEN)
 
   // Badge only for frozen (true nest lock); leftover CM delegates are not nested.
   // pNFT freeze-without-delegate must not look nested.
