@@ -32,10 +32,14 @@ export default async function EditRafflePage({
   const milestones = await getMilestonesByRaffleId(raffle.id)
   const hasConfirmedEntries = entries.some((entry) => entry.status === 'confirmed')
 
+  const endTimeMs = new Date(raffle.end_time).getTime()
+  const endTimePassed = Number.isFinite(endTimeMs) && endTimeMs <= Date.now()
+
   const useEditForm = shouldUseEditRaffleFormAdminView({
     status,
     hasConfirmedEntries,
     milestoneCount: milestones.length,
+    endTimePassed,
   })
 
   if (useEditForm) {
