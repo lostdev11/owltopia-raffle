@@ -58,6 +58,38 @@ function main() {
     'cancelled milestone raffle uses admin actions for deposit return'
   )
 
+  assert.equal(
+    shouldUseEditRaffleFormAdminView({
+      status: 'pending_min_not_met',
+      hasConfirmedEntries: false,
+      milestoneCount: 1,
+    }),
+    false,
+    'ended min-not-met milestone raffle uses admin actions'
+  )
+
+  assert.equal(
+    shouldUseEditRaffleFormAdminView({
+      status: 'live',
+      hasConfirmedEntries: false,
+      milestoneCount: 0,
+      endTimePassed: true,
+    }),
+    false,
+    'ended live raffle (no tickets) uses admin actions not edit form'
+  )
+
+  assert.equal(
+    shouldUseEditRaffleFormAdminView({
+      status: 'live',
+      hasConfirmedEntries: false,
+      milestoneCount: 0,
+      endTimePassed: false,
+    }),
+    true,
+    'live upcoming raffle with no tickets still uses edit form'
+  )
+
   console.log('test-raffle-admin-view-routing: ok')
 }
 

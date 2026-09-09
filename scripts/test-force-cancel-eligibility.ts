@@ -68,6 +68,12 @@ function main() {
     'ready_to_draw milestone raffle eligible'
   )
 
+  assert.equal(
+    canAdminForceCancelMilestoneRaffle({ ...base, status: 'pending_min_not_met' }),
+    true,
+    'pending_min_not_met (ended / min-not-met) eligible'
+  )
+
   console.log('test-force-cancel-eligibility: ok')
 }
 

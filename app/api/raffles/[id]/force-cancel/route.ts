@@ -52,7 +52,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            'Force-cancel is only for live milestone raffles with no creator cancellation request and no winner yet. Use Accept cancellation if the creator already requested cancel.',
+            'Force-cancel is only for milestone raffles with no creator cancellation request and no winner yet (live, ready_to_draw, or pending_min_not_met). Use Accept cancellation if the creator already requested cancel, or return milestone deposits if already cancelled/failed-refund.',
         },
         { status: 400 }
       )

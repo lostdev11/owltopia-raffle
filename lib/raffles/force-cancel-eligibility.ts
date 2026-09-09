@@ -1,6 +1,14 @@
+/** Statuses where admin may force-cancel a milestone raffle (no creator request yet). */
+export const ADMIN_FORCE_CANCEL_MILESTONE_STATUSES = [
+  'live',
+  'ready_to_draw',
+  'pending_min_not_met',
+] as const
+
 /**
- * Full admin may force-cancel live milestone raffles when the creator has not opened
+ * Full admin may force-cancel milestone raffles when the creator has not opened
  * a cancellation request (no request timestamp and no fee paid).
+ * Includes ended / min-not-met states so support is not stuck on "ended" listings.
  */
 export function canAdminForceCancelMilestoneRaffle(params: {
   status: string | null | undefined
@@ -16,7 +24,13 @@ export function canAdminForceCancelMilestoneRaffle(params: {
   if (params.cancelledAt) return false
 
   const status = (params.status ?? '').trim().toLowerCase()
-  if (status !== 'live' && status !== 'ready_to_draw') return false
+  if (
+    !ADMIN_FORCE_CANCEL_MILESTONE_STATUSES.includes(
+      status as (typeof ADMIN_FORCE_CANCEL_MILESTONE_STATUSES)[number]
+    )
+  ) {
+    return false
+  }
 
   if ((params.winnerWallet ?? '').trim()) return false
   if ((params.winnerSelectedAt ?? '').trim()) return false
