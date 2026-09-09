@@ -57,6 +57,7 @@
     "test:collection-mint-eligibility-copy": "npx --yes tsx scripts/test-collection-mint-eligibility-copy.ts",
     "test:effective-cm-remaining": "npx --yes tsx scripts/test-effective-cm-remaining.ts",
     "test:min-threshold-second-round": "npx --yes tsx scripts/test-min-threshold-second-round.ts",
+    "test:milestone-cancel-return": "npx --yes tsx scripts/test-milestone-cancel-return.ts",
     "test:claim-all-combined": "npx --yes tsx scripts/test-claim-all-combined-threshold.ts",
     "test:siws-ledger-message": "npx --yes tsx scripts/test-siws-ledger-message-size.ts",
     "test:raffle-draw-verify": "npx --yes tsx scripts/test-raffle-draw-verify.ts",

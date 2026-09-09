@@ -30,6 +30,7 @@ import {
   milestoneTargetTickets,
   ticketsSoldFromEntries,
 } from '@/lib/raffles/milestones/draw'
+import { isMilestoneDepositReturnable } from '@/lib/raffles/milestones/return-eligibility'
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
 import { fetchFundsEscrowAddress } from '@/lib/client/create-raffle-milestone-deposit'
 import { getTokenInfo } from '@/lib/tokens'
@@ -604,10 +605,10 @@ export function RaffleMilestonesPanel({
               )}
 
             {isCreator &&
-              (raffle.status === 'failed_refund_available' || raffle.status === 'cancelled') &&
-              m.deposit_verified_at &&
-              m.status === 'void' &&
-              !m.returned_at && (
+              isMilestoneDepositReturnable({
+                milestone: m,
+                raffleStatus: raffle.status,
+              }) && (
                 <Button
                   type="button"
                   variant="outline"
