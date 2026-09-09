@@ -7,6 +7,7 @@ import {
   transferNftPrizeToCreator,
   transferPartnerSplPrizeToCreator,
 } from '@/lib/raffles/prize-escrow'
+import { returnReturnableMilestoneDepositsToCreator } from '@/lib/raffles/milestones/cancel-side-effects'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
 export const dynamic = 'force-dynamic'
@@ -112,6 +113,10 @@ export async function POST(
       }
     }
 
+    const milestoneReturnAttempts = await returnReturnableMilestoneDepositsToCreator(id)
+    const milestoneReturnsOk = milestoneReturnAttempts.filter((a) => a.ok).length
+    const milestoneReturnsFailed = milestoneReturnAttempts.filter((a) => !a.ok)
+
     const baseMessage =
       hostPaidFee && feeApplies
         ? `Raffle cancelled. Ticket buyers can claim refunds from the dashboard (funds escrow). The creator paid the ${feeSol} SOL cancellation fee.`
@@ -129,6 +134,17 @@ export async function POST(
         ' No verified escrow deposit was on file — automatic prize return was skipped (nothing to send from escrow).'
     }
 
+    if (milestoneReturnAttempts.length > 0) {
+      if (milestoneReturnsOk === milestoneReturnAttempts.length) {
+        message += ` ${milestoneReturnsOk} milestone deposit${milestoneReturnsOk === 1 ? '' : 's'} returned to creator from funds escrow.`
+      } else if (milestoneReturnsOk > 0) {
+        message += ` ${milestoneReturnsOk}/${milestoneReturnAttempts.length} milestone deposit(s) returned; retry failed bonus returns in admin if needed.`
+      } else {
+        message +=
+          ' Milestone bonus deposits were not returned automatically — use “Return milestone deposit” in admin for each funded bonus.'
+      }
+    }
+
     return NextResponse.json({
       success: true,
       refundPolicy,
@@ -141,6 +157,16 @@ export async function POST(
             prizeReturnOk,
             ...(prizeReturnSignature ? { prizeReturnSignature } : {}),
             ...(prizeReturnError ? { prizeReturnError } : {}),
+          }
+        : {}),
+      ...(milestoneReturnAttempts.length > 0
+        ? {
+            milestoneReturnAttempts,
+            milestoneReturnsOk,
+            milestoneReturnErrors: milestoneReturnsFailed.map((a) => ({
+              milestoneId: a.milestoneId,
+              error: a.error,
+            })),
           }
         : {}),
     })
