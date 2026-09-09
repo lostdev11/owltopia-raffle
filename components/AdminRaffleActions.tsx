@@ -36,6 +36,7 @@ import {
   milestoneWinnerModeLabel,
 } from '@/lib/raffles/milestones/copy'
 import { isMilestoneDepositReturnable } from '@/lib/raffles/milestones/return-eligibility'
+import { canAdminForceCancelMilestoneRaffle } from '@/lib/raffles/force-cancel-eligibility'
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
 
 const PRIZE_RETURN_REASONS = [
@@ -85,6 +86,9 @@ export function AdminRaffleActions({
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [acceptCancelDialogOpen, setAcceptCancelDialogOpen] = useState(false)
   const [acceptingCancel, setAcceptingCancel] = useState(false)
+  const [forceCancelDialogOpen, setForceCancelDialogOpen] = useState(false)
+  const [forceCancelConfirm, setForceCancelConfirm] = useState(false)
+  const [forcingCancel, setForcingCancel] = useState(false)
   const [blockingPurchases, setBlockingPurchases] = useState(false)
   const [milestones, setMilestones] = useState<RaffleMilestone[]>(milestonesProp)
   const [milestoneModeBusyId, setMilestoneModeBusyId] = useState<string | null>(null)
@@ -525,6 +529,17 @@ export function AdminRaffleActions({
   /** Treasury fee not recorded; admin can still accept (support override). */
   const postStartFeeMissing = feeApplies && !cancellationFeePaid
   const feeSol = getCancellationFeeSol()
+  const canForceCancelMilestoneRaffle =
+    isFullAdmin &&
+    canAdminForceCancelMilestoneRaffle({
+      status: raffle.status,
+      milestoneCount: milestones.length,
+      cancellationRequestedAt: raffle.cancellation_requested_at,
+      cancellationFeePaidAt: raffle.cancellation_fee_paid_at,
+      cancelledAt: raffle.cancelled_at,
+      winnerWallet: raffle.winner_wallet,
+      winnerSelectedAt: raffle.winner_selected_at,
+    })
 
   const canAdminSendPrizeFromEscrow =
     isEscrowPrizeRaffle &&
@@ -697,6 +712,43 @@ export function AdminRaffleActions({
       })
     } finally {
       setAcceptingCancel(false)
+    }
+  }
+
+  const handleForceCancel = async () => {
+    if (!forceCancelConfirm) {
+      setMessage({
+        type: 'error',
+        text: 'Confirm force-cancel before proceeding.',
+      })
+      return
+    }
+    setForcingCancel(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/raffles/${raffle.id}/force-cancel`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.success) {
+        setMessage({ type: 'success', text: data.message ?? 'Raffle force-cancelled.' })
+        setForceCancelDialogOpen(false)
+        setForceCancelConfirm(false)
+        router.refresh()
+      } else {
+        setMessage({
+          type: 'error',
+          text: typeof data.error === 'string' ? data.error : 'Failed to force-cancel raffle',
+        })
+      }
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Failed to force-cancel raffle',
+      })
+    } finally {
+      setForcingCancel(false)
     }
   }
 
@@ -1229,6 +1281,15 @@ export function AdminRaffleActions({
               <CardDescription>
                 Change who wins each bonus (random / top buyer / creator draw). Prize amount stays the
                 same. Available until a winner is selected.
+                {!terminalForMilestoneReturn ? (
+                  <>
+                    {' '}
+                    Funded crypto bonuses can be returned to the creator after the raffle is cancelled
+                    {canForceCancelMilestoneRaffle
+                      ? ' (use Force cancel below if the creator has not requested cancellation).'
+                      : ' (use Accept cancellation below, or mark cancelled via admin restore flow).'}
+                  </>
+                ) : null}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-0">
@@ -1847,6 +1908,75 @@ export function AdminRaffleActions({
                         className="bg-amber-600 hover:bg-amber-700 touch-manipulation min-h-[44px] w-full sm:w-auto"
                       >
                         {acceptingCancel ? 'Accepting...' : 'Accept cancellation'}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </>
+            )}
+            {canForceCancelMilestoneRaffle && (
+              <>
+                <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3">
+                  <p className="text-sm font-medium text-red-700 dark:text-red-400">
+                    Force cancel (milestone raffle)
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    The creator has not requested cancellation. Force-cancel stops ticket sales, enables
+                    buyer refunds (funds escrow), returns the main prize from escrow when verified, and
+                    returns funded milestone bonus deposits to the creator.
+                  </p>
+                </div>
+                <Dialog open={forceCancelDialogOpen} onOpenChange={setForceCancelDialogOpen}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-red-500/50 text-red-600 hover:bg-red-500/10 touch-manipulation min-h-[44px]"
+                    onClick={() => {
+                      setForceCancelConfirm(false)
+                      setForceCancelDialogOpen(true)
+                    }}
+                    disabled={forcingCancel}
+                  >
+                    <XCircle className="h-4 w-4 mr-2 shrink-0" />
+                    Force cancel raffle
+                  </Button>
+                  <DialogContent className="max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>Force cancel milestone raffle</DialogTitle>
+                      <DialogDescription>
+                        This ends the raffle immediately without a creator cancellation request. Ticket
+                        buyers can claim refunds from the dashboard. The platform will attempt to return
+                        the escrowed main prize and each funded milestone bonus to the creator.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <label className="flex items-start gap-3 text-sm cursor-pointer touch-manipulation min-h-[44px] py-1 rounded-md border border-red-500/40 bg-red-500/10 p-3">
+                      <input
+                        type="checkbox"
+                        checked={forceCancelConfirm}
+                        onChange={(e) => setForceCancelConfirm(e.target.checked)}
+                        className="mt-1 h-5 w-5 shrink-0 rounded border-input"
+                        aria-label="Confirm force cancel milestone raffle"
+                      />
+                      <span className="text-muted-foreground leading-snug">
+                        I confirm this live milestone raffle should be cancelled now, refunds should be
+                        available to ticket buyers, and escrowed prizes should return to the creator.
+                      </span>
+                    </label>
+                    <DialogFooter className="gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => setForceCancelDialogOpen(false)}
+                        disabled={forcingCancel}
+                        className="touch-manipulation min-h-[44px] w-full sm:w-auto"
+                      >
+                        Back
+                      </Button>
+                      <Button
+                        onClick={handleForceCancel}
+                        disabled={forcingCancel || !forceCancelConfirm}
+                        className="bg-red-600 hover:bg-red-700 touch-manipulation min-h-[44px] w-full sm:w-auto"
+                      >
+                        {forcingCancel ? 'Cancelling…' : 'Force cancel'}
                       </Button>
                     </DialogFooter>
                   </DialogContent>
