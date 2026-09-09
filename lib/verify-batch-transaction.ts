@@ -15,6 +15,7 @@ import {
   CartBatchPaymentTotalMismatchError,
 } from '@/lib/entries/batch-invariants'
 import { getFullAccountKeysForTransaction } from '@/lib/verify-transaction'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 /** Float merge + RPC balance noise: legacy 12.5µ lamports was too tight for SOL cart batches. */
 const SOL_TOLERANCE_LAMPORTS = 150_000n /** ~150k lamports ≈ 0.00015 SOL */
@@ -238,16 +239,16 @@ export async function verifyBatchPaidEntries(
       await new Promise(resolve => setTimeout(resolve, 1000))
       let tx = await connection.getTransaction(transactionSignature, {
         commitment: 'confirmed',
-        maxSupportedTransactionVersion: 0,
+        maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
       })
       if (!tx) {
-        tx = await connection.getTransaction(transactionSignature, { commitment: 'confirmed' })
+        tx = await connection.getTransaction(transactionSignature, { commitment: 'confirmed', maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION })
       }
       if (!tx) {
         await new Promise(resolve => setTimeout(resolve, 1000))
         tx = await connection.getTransaction(transactionSignature, {
           commitment: 'confirmed',
-          maxSupportedTransactionVersion: 0,
+          maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
         })
       }
       return tx

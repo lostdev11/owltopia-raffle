@@ -3,6 +3,7 @@ import { getAssociatedTokenAddress } from '@solana/spl-token'
 import { getTokenInfo } from '@/lib/tokens'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getTransactionCached } from '@/lib/solana-rpc-transaction-cache'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 function asPublicKey(k: PublicKey | string): PublicKey {
   return k instanceof PublicKey ? k : new PublicKey(k)
@@ -58,16 +59,16 @@ export async function verifyBuyoutDepositTx(params: {
       await new Promise((resolve) => setTimeout(resolve, 800))
       let tx = await connection.getTransaction(transactionSignature, {
         commitment: 'confirmed',
-        maxSupportedTransactionVersion: 0,
+        maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
       })
       if (!tx) {
-        tx = await connection.getTransaction(transactionSignature, { commitment: 'confirmed' })
+        tx = await connection.getTransaction(transactionSignature, { commitment: 'confirmed', maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION })
       }
       if (!tx) {
         await new Promise((resolve) => setTimeout(resolve, 800))
         tx = await connection.getTransaction(transactionSignature, {
           commitment: 'confirmed',
-          maxSupportedTransactionVersion: 0,
+          maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
         })
       }
       return tx

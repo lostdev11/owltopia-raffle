@@ -63,6 +63,8 @@
     "test:milestone-settle-availability": "npx --yes tsx scripts/test-milestone-settle-availability.ts",
     "test:claim-all-combined": "npx --yes tsx scripts/test-claim-all-combined-threshold.ts",
     "test:siws-ledger-message": "npx --yes tsx scripts/test-siws-ledger-message-size.ts",
+    "test:solana-tx-version-readiness": "npx --yes tsx scripts/test-solana-tx-version-readiness.ts",
+    "test:solana-v1-devnet-read": "npx --yes tsx scripts/test-solana-v1-devnet-read.ts",
     "test:raffle-draw-verify": "npx --yes tsx scripts/test-raffle-draw-verify.ts",
     "test:wallet-streak-logic": "npx --yes tsx scripts/test-wallet-streak-logic.ts",
     "test:discord-winner-streak-fields": "npx --yes tsx scripts/test-discord-winner-streak-fields.ts",
@@ -112,7 +114,7 @@
     "copy:governance-keypair": "node scripts/copy-governance-program-keypair.mjs",
     "generate:governance-program-key": "node scripts/generate-governance-program-keypair.mjs",
     "notify:council-discord": "npx --yes tsx scripts/notify-recent-council-proposal-discord.ts",
-    "postinstall": "node scripts/postinstall-next-global-error.js",
+    "postinstall": "node scripts/postinstall-next-global-error.js && node scripts/postinstall-solana-web3-dedupe.js",
     "owlswap:grind-wallets": "npx --yes tsx scripts/grind-owlswap-vanity.ts",
     "owlswap:install-env": "node scripts/merge-owlswap-env.mjs"
   },
@@ -141,7 +143,7 @@
     "@solana/wallet-adapter-react": "^0.15.35",
     "@solana/wallet-adapter-react-ui": "^0.9.35",
     "@solana/wallet-adapter-wallets": "^0.19.37",
-    "@solana/web3.js": "^1.98.4",
+    "@solana/web3.js": "1.99.0-beta.0",
     "@supabase/supabase-js": "^2.39.0",
     "@switchboard-xyz/on-demand": "^3.10.4",
     "@vercel/analytics": "^1.6.1",
@@ -171,7 +173,8 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "lodash": "4.17.23",
-    "elliptic": "6.6.1"
+    "elliptic": "6.6.1",
+    "@solana/web3.js": "1.99.0-beta.0"
   },
   "devDependencies": {
     "@types/bn.js": "^5.2.0",

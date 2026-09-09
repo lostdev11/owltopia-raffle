@@ -9,6 +9,7 @@
 import { Connection, PublicKey } from '@solana/web3.js'
 import { getAccount, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token'
 import bs58 from 'bs58'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 const TOKEN_PROGRAM_IDS = [TOKEN_PROGRAM_ID.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58()]
 
@@ -97,10 +98,8 @@ async function fetchTransactionForParsing(
   signature: string
 ): Promise<TxResponse | null> {
   const fetchOptions = [
-    { commitment: 'confirmed' as const, maxSupportedTransactionVersion: 0 },
-    { commitment: 'confirmed' as const },
-    { commitment: 'finalized' as const, maxSupportedTransactionVersion: 0 },
-    { commitment: 'finalized' as const },
+    { commitment: 'confirmed' as const, maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
+    { commitment: 'finalized' as const, maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
   ]
   for (const opts of fetchOptions) {
     try {

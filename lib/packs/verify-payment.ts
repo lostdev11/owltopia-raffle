@@ -3,6 +3,7 @@ import { getSolanaReadConnection } from '@/lib/solana/connection'
 import { getFullAccountKeysForTransaction } from '@/lib/verify-transaction'
 import { PACK_PRICE_SOL, packPriceLamports } from '@/lib/packs/config'
 import { getPacksVaultPublicKey } from '@/lib/packs/vault'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 const SOL_TOLERANCE = 0.000_01 // ~10k lamports
 
@@ -36,7 +37,7 @@ export async function verifyPackPayment(input: {
   try {
     tx = await connection.getTransaction(input.signature, {
       commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     })
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'Failed to fetch transaction' }

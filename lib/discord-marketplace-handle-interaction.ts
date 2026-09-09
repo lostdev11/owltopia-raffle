@@ -58,6 +58,7 @@ import {
   notifyMarketplaceNftListingLive,
   notifyMarketplaceProductLive,
 } from '@/lib/discord-marketplace-webhooks'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 const ADMINISTRATOR_BIT = 0x8n
 
@@ -625,7 +626,7 @@ export async function handleDiscordMarketplaceCommand(
 
     const connection = getSolanaConnection()
     const tx = await connection.getParsedTransaction(sig, {
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
       commitment: 'confirmed',
     })
     if (!tx || tx.meta?.err) {

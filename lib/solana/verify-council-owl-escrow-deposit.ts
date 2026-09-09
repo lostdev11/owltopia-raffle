@@ -6,6 +6,7 @@ import { PublicKey } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { getCouncilOwlEscrowPublicKeyBase58 } from '@/lib/council/council-owl-escrow-keypair'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 function tokenDeltaForOwnerMint(
   meta: NonNullable<ParsedTransactionWithMeta['meta']>,
@@ -62,7 +63,7 @@ export async function verifyCouncilOwlEscrowDeposit(params: {
 
   const connection = getSolanaConnection()
   const tx = await connection.getParsedTransaction(sig, {
-    maxSupportedTransactionVersion: 0,
+    maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     commitment: 'confirmed',
   })
 

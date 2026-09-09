@@ -4,6 +4,7 @@ import { Connection, PublicKey } from '@solana/web3.js'
 import { collectParsedTransactionAccountKeys, feePayerMatchesBuyer } from '@/lib/gen2-presale/verify-payment'
 import { getStakingPlatformFeeLamports } from '@/lib/nesting/staking-platform-fee'
 import { getSolanaConnection } from '@/lib/solana/connection'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 export type VerifyStakingPlatformFeeResult =
   | { ok: true; lamports: number; units: number }
@@ -36,13 +37,13 @@ export async function fetchConfirmedParsedTransaction(
 
   let tx = await conn.getParsedTransaction(sig, {
     commitment: 'confirmed',
-    maxSupportedTransactionVersion: 0,
+    maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
   })
   if (!tx) {
     await new Promise((r) => setTimeout(r, 600))
     tx = await conn.getParsedTransaction(sig, {
       commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     })
   }
   return tx ?? null

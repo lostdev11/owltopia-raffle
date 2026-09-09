@@ -15,7 +15,8 @@ async function rpcCall(method, params) {
 
 for (const sig of sigs) {
   console.log(`\n=================== ${sig} ===================`)
-  const tx = await rpcCall('getTransaction', [sig, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' }])
+  // Ceiling 1 = SIMD-0385 / Transaction V1 decode support (legacy + v0 unchanged).
+  const tx = await rpcCall('getTransaction', [sig, { maxSupportedTransactionVersion: 1, commitment: 'confirmed' }])
   if (!tx) {
     console.log('  NOT FOUND on this RPC')
     continue

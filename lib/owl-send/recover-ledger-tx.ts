@@ -23,6 +23,7 @@ import type {
   OwlSendLedgerLine,
   OwlSendLedgerMode,
 } from '@/lib/db/owl-send-ledger'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 export type RecoverOwlSendLedgerDraft = {
   txSignature: string
@@ -266,10 +267,10 @@ export async function recoverOwlSendLedgerDraftFromSignature(params: {
       await new Promise((r) => setTimeout(r, 400))
       let tx = await connection.getTransaction(signature, {
         commitment: 'confirmed',
-        maxSupportedTransactionVersion: 0,
+        maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
       })
       if (!tx) {
-        tx = await connection.getTransaction(signature, { commitment: 'confirmed' })
+        tx = await connection.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION })
       }
       return tx
     })

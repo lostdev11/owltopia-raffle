@@ -13,6 +13,7 @@ import {
   unitLamportsBoundsFromOracle,
 } from '@/lib/gen2-presale/sol-usd-bounds'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 function isParsed(ix: ParsedInstruction | PartiallyDecodedInstruction): ix is ParsedInstruction {
   return 'parsed' in ix && ix.parsed !== undefined
@@ -263,25 +264,20 @@ export async function fetchParsedTransactionConfirmed(
   connection: Connection,
   signature: string
 ): Promise<ParsedTransactionWithMeta | null> {
-  /** v0 and legacy messages use different `maxSupportedTransactionVersion`; RPC cluster must match the tx. */
+  /**
+   * Ceiling for decode: `1` covers legacy, v0, and v1 (SIMD-0385). Passing `0` or omitting
+   * the field fails with RPC -32015 once any v1 transaction appears on the cluster.
+   */
   const commitments = ['confirmed', 'finalized'] as const
   for (const commitment of commitments) {
-    for (const maxSupportedTransactionVersion of [0] as const) {
-      try {
-        const tx = await connection.getParsedTransaction(signature, { commitment, maxSupportedTransactionVersion })
-        if (tx) return tx
-      } catch {
-        // retry
-      }
-    }
     try {
       const tx = await connection.getParsedTransaction(signature, {
         commitment,
-        maxSupportedTransactionVersion: 'legacy',
-      } as never)
+        maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
+      })
       if (tx) return tx
     } catch {
-      // retry
+      // retry next commitment
     }
   }
   return null

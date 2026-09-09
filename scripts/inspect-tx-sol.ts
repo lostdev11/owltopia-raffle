@@ -4,6 +4,7 @@
  *   npx --yes tsx --env-file=.env.local scripts/inspect-tx-sol.ts <signature>
  */
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 const RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
 const DIST = '3L2XNS7iNCFDmsMfNV3JLgCjkEaPWcCxPBXfDwF7uoTS' // candy-guard solPayment destination
@@ -12,7 +13,7 @@ async function main() {
   const sig = process.argv[2]?.trim()
   if (!sig) throw new Error('Usage: inspect-tx-sol.ts <signature>')
   const conn = new Connection(RPC, 'confirmed')
-  const tx = await conn.getParsedTransaction(sig, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' })
+  const tx = await conn.getParsedTransaction(sig, { maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION, commitment: 'confirmed' })
   if (!tx) throw new Error('tx not found')
 
   const meta = tx.meta

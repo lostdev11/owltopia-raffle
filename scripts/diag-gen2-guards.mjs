@@ -37,7 +37,8 @@ if (sig) {
     if (j.error) throw new Error(JSON.stringify(j.error))
     return j.result
   }
-  const tx = await rpcCall('getTransaction', [sig, { maxSupportedTransactionVersion: 0, commitment: 'confirmed', encoding: 'json' }])
+  // Ceiling 1 = SIMD-0385 / Transaction V1 decode support (legacy + v0 unchanged).
+  const tx = await rpcCall('getTransaction', [sig, { maxSupportedTransactionVersion: 1, commitment: 'confirmed', encoding: 'json' }])
   const msg = tx?.transaction?.message
   const keys = msg?.accountKeys ?? []
   let groupLabel = null

@@ -8,6 +8,7 @@ import {
   collectMplCoreTransferV1FromTx,
   mplCoreTransferCoversLedgerLine,
 } from '@/lib/owl-send/mpl-core-ledger-transfers'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 export type VerifyOwlSendLedgerTxResult =
   | { ok: true }
@@ -48,10 +49,10 @@ export async function verifyOwlSendLedgerTx(params: {
     await new Promise((r) => setTimeout(r, 400))
     let tx = await connection.getTransaction(signature, {
       commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     })
     if (!tx) {
-      tx = await connection.getTransaction(signature, { commitment: 'confirmed' })
+      tx = await connection.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION })
     }
     return tx
   })

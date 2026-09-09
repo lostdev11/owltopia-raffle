@@ -26,6 +26,7 @@ import { dasApi } from '@metaplex-foundation/digital-asset-standard-api'
 import { getAssetWithProof, mplBubblegum } from '@metaplex-foundation/mpl-bubblegum'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 const RPC_RATE_LIMIT_VERIFY_ERROR =
   'Solana RPC rate limit reached while verifying your deposit. Wait a moment and try Verify again — we also retry automatically in the background.'
@@ -75,10 +76,8 @@ async function sumIncomingNativeSolToEscrowLamports(
   const escrowBase58 = escrowPk.toBase58()
 
   const fetchOptions = [
-    { commitment: 'confirmed' as const, maxSupportedTransactionVersion: 0 },
-    { commitment: 'confirmed' as const },
-    { commitment: 'finalized' as const, maxSupportedTransactionVersion: 0 },
-    { commitment: 'finalized' as const },
+    { commitment: 'confirmed' as const, maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
+    { commitment: 'finalized' as const, maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION },
   ]
   let tx: Awaited<ReturnType<typeof connection.getTransaction>> | null = null
   for (const opts of fetchOptions) {

@@ -5,6 +5,7 @@
 import type { ParsedTransactionWithMeta } from '@solana/web3.js'
 import { PublicKey } from '@solana/web3.js'
 import { getNestingReadConnection } from '@/lib/solana/nesting/client'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 /**
  * Fetches a single transaction by id. **One RPC call.**
@@ -17,7 +18,7 @@ export async function fetchParsedTransactionOnce(
   if (!sig) return null
   const connection = getNestingReadConnection()
   return connection.getParsedTransaction(sig, {
-    maxSupportedTransactionVersion: 0,
+    maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     commitment: 'confirmed',
   })
 }

@@ -5,6 +5,7 @@
 
 import { Connection, PublicKey } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 export async function verifyCreationFeeTransaction(
   transactionSignature: string,
@@ -18,11 +19,11 @@ export async function verifyCreationFeeTransaction(
 
     let tx = await connection.getTransaction(transactionSignature, {
       commitment: 'confirmed',
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     })
     if (!tx) {
       await new Promise((r) => setTimeout(r, 800))
-      tx = await connection.getTransaction(transactionSignature, { commitment: 'confirmed' })
+      tx = await connection.getTransaction(transactionSignature, { commitment: 'confirmed', maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION })
     }
     if (!tx) {
       return {

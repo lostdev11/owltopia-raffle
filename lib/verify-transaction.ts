@@ -8,6 +8,7 @@ import { raffleUsesFundsEscrow } from '@/lib/raffles/ticket-escrow-policy'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { getTransactionCached } from '@/lib/solana-rpc-transaction-cache'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 function asPublicKey(k: PublicKey | string): PublicKey {
   return k instanceof PublicKey ? k : new PublicKey(k)
@@ -88,12 +89,13 @@ export async function verifyTransaction(
 
       let tx = await connection.getTransaction(transactionSignature, {
         commitment: 'confirmed',
-        maxSupportedTransactionVersion: 0,
+        maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
       })
 
       if (!tx) {
         tx = await connection.getTransaction(transactionSignature, {
           commitment: 'confirmed',
+          maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
         })
       }
 
@@ -101,7 +103,7 @@ export async function verifyTransaction(
         await new Promise(resolve => setTimeout(resolve, 1000))
         tx = await connection.getTransaction(transactionSignature, {
           commitment: 'confirmed',
-          maxSupportedTransactionVersion: 0,
+          maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
         })
       }
 

@@ -13,6 +13,7 @@ import { getSolanaConnection } from '@/lib/solana/connection'
 import { getDiscordMarketplacePaymentWalletPubkey } from '@/lib/solana/discord-marketplace-payment-wallet'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 import type { NftListingCurrency } from '@/lib/db/discord-marketplace-nfts'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 function transactionContainsExactMemo(tx: ParsedTransactionWithMeta, memo: string): boolean {
   if (!memo) return false
@@ -106,7 +107,7 @@ export async function verifyDiscordMarketplaceNftPayment(params: {
   const tx =
     params.parsedTransaction ??
     (await connection.getParsedTransaction(sig, {
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
       commitment: 'confirmed',
     }))
 

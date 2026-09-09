@@ -3,6 +3,7 @@
  *   npx --yes tsx --env-file=.env.local scripts/inspect-tx-logs.ts <signature>
  */
 import { Connection } from '@solana/web3.js'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 const RPC = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
 
@@ -10,7 +11,7 @@ async function main() {
   const sig = process.argv[2]?.trim()
   if (!sig) throw new Error('Usage: inspect-tx-logs.ts <signature>')
   const conn = new Connection(RPC, 'confirmed')
-  const tx = await conn.getParsedTransaction(sig, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' })
+  const tx = await conn.getParsedTransaction(sig, { maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION, commitment: 'confirmed' })
   if (!tx?.meta) throw new Error('tx/meta not found')
   console.log(`tx ${sig}  err=${JSON.stringify(tx.meta.err)}`)
   console.log('=== logs ===')
