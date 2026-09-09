@@ -59,6 +59,7 @@
     "test:min-threshold-second-round": "npx --yes tsx scripts/test-min-threshold-second-round.ts",
     "test:milestone-cancel-return": "npx --yes tsx scripts/test-milestone-cancel-return.ts",
     "test:raffle-admin-view-routing": "npx --yes tsx scripts/test-raffle-admin-view-routing.ts",
+    "test:force-cancel-eligibility": "npx --yes tsx scripts/test-force-cancel-eligibility.ts",
     "test:claim-all-combined": "npx --yes tsx scripts/test-claim-all-combined-threshold.ts",
     "test:siws-ledger-message": "npx --yes tsx scripts/test-siws-ledger-message-size.ts",
     "test:raffle-draw-verify": "npx --yes tsx scripts/test-raffle-draw-verify.ts",
