@@ -11,7 +11,12 @@ export type AdminMilestoneSettleAvailability = {
   returnableMilestoneCount: number
 }
 
-const FORCE_CANCEL_STATUSES = new Set(['live', 'ready_to_draw', 'pending_min_not_met'])
+const FORCE_CANCEL_STATUSES = new Set([
+  'draft',
+  'live',
+  'ready_to_draw',
+  'pending_min_not_met',
+])
 
 export function countReturnableMilestoneDeposits(params: {
   milestones: Array<
@@ -114,7 +119,7 @@ export function getAdminMilestoneSettleAvailability(params: {
   if (!FORCE_CANCEL_STATUSES.has(status)) {
     return {
       mode: 'unavailable',
-      reason: `Database status is "${status || 'unknown'}". Cancel & return supports live, ready_to_draw, and pending_min_not_met (ended / min-not-met).`,
+      reason: `Database status is "${status || 'unknown'}". Cancel & return supports draft (never published), live, ready_to_draw, and pending_min_not_met.`,
       returnableMilestoneCount,
     }
   }

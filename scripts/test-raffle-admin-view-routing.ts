@@ -12,10 +12,32 @@ function main() {
     shouldUseEditRaffleFormAdminView({
       status: 'draft',
       hasConfirmedEntries: false,
-      milestoneCount: 2,
+      milestoneCount: 0,
+      endTimePassed: false,
     }),
     true,
-    'draft always uses edit form'
+    'plain draft uses edit form'
+  )
+
+  assert.equal(
+    shouldUseEditRaffleFormAdminView({
+      status: 'draft',
+      hasConfirmedEntries: false,
+      milestoneCount: 2,
+    }),
+    false,
+    'draft milestone raffle uses admin actions for escrow settle'
+  )
+
+  assert.equal(
+    shouldUseEditRaffleFormAdminView({
+      status: 'draft',
+      hasConfirmedEntries: false,
+      milestoneCount: 0,
+      endTimePassed: true,
+    }),
+    false,
+    'draft past end_time uses admin actions (shows Ended on cards)'
   )
 
   assert.equal(

@@ -13,7 +13,12 @@ export function shouldUseEditRaffleFormAdminView(params: {
   endTimePassed?: boolean
 }): boolean {
   const status = (params.status ?? '').trim().toLowerCase()
-  if (status === 'draft') return true
+  if (status === 'draft') {
+    // Draft milestone raffles (or past end_time but never published) need escrow settle, not edit-only.
+    if (params.milestoneCount > 0) return false
+    if (params.endTimePassed) return false
+    return true
+  }
   // Any published milestone raffle needs operational admin (ended, live, cancelled, etc.).
   if (params.milestoneCount > 0) return false
   if (

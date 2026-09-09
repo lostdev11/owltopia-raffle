@@ -58,8 +58,14 @@ function main() {
 
   assert.equal(
     canAdminForceCancelMilestoneRaffle({ ...base, status: 'draft' }),
+    true,
+    'draft milestone raffle (never published) eligible'
+  )
+
+  assert.equal(
+    canAdminForceCancelMilestoneRaffle({ ...base, status: 'draft', milestoneCount: 0 }),
     false,
-    'draft not force-cancellable via this path'
+    'draft without milestones uses return-prize / edit form only'
   )
 
   assert.equal(
