@@ -94,6 +94,7 @@ import {
 import {
   OWL_SEND_CHAIN_APPROVAL_GAP_MS,
   OWL_SEND_MAX_PER_TX,
+  OWL_SEND_MAX_PER_TX_TOKEN,
   OWL_SEND_MAX_SELECT,
   OWL_SEND_MAX_SPECIAL_PER_TX,
   OWL_SEND_MAX_TOKEN_SCATTER,
@@ -124,9 +125,11 @@ import {
 } from '@/lib/owl-send/confirm'
 import {
   buildOwlSendTokenTransaction,
+  probeOwlSendTokenDestNeedsCreateAta,
   sendOwlSendTokenLines,
   sendOwlSendTokensToOne,
 } from '@/lib/owl-send/send-tokens'
+import { packOwlSendTokenScatterLines } from '@/lib/owl-send/pack-token-scatter'
 import { recordOwlSendLedger } from '@/lib/owl-send/record-ledger'
 import { useOwlSendAdminAccess } from '@/lib/owl-send/use-owl-send-admin-access'
 import {
@@ -1580,7 +1583,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setPendingDraft(null)
   }
 
-  const prepareTokenScatter = () => {
+  const prepareTokenScatter = async () => {
     setTokenError(null)
     setTokenSuccessSig(null)
     setTokenBatches([])
@@ -1617,16 +1620,43 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       setTokenError(`Insufficient balance for ${walletTokenDisplayName(tok)}.`)
       return
     }
-    const chunked = chunkOwlSendBatches(built.lines)
-    setTokenBatches(chunked)
-    setTokenBatchProgress(
-      chunked.map((_, i) => ({
-        index: i,
-        total: chunked.length,
-        status: i === 0 ? 'ready' : 'pending',
-      }))
-    )
-    setTokenActiveBatch(0)
+
+    setTokenBusy(true)
+    try {
+      // Probe dest ATAs so we can pack more transfers per tx when accounts exist.
+      let needsCreateAta: boolean[]
+      try {
+        needsCreateAta = await probeOwlSendTokenDestNeedsCreateAta({
+          connection,
+          mint: tok.mint,
+          recipients: built.lines.map((l) => l.recipient),
+        })
+      } catch {
+        // Conservative: assume every dest needs createATA (smaller packs).
+        needsCreateAta = built.lines.map(() => true)
+      }
+      const chunked = packOwlSendTokenScatterLines(built.lines, needsCreateAta)
+      const newAtaApprox = needsCreateAta.filter(Boolean).length
+      setTokenBatches(chunked)
+      setTokenBatchProgress(
+        chunked.map((_, i) => ({
+          index: i,
+          total: chunked.length,
+          status: i === 0 ? 'ready' : 'pending',
+        }))
+      )
+      setTokenActiveBatch(0)
+      setSessionNotice(
+        chunked.length === 1
+          ? `Packed ${built.lines.length} wallet${built.lines.length === 1 ? '' : 's'} into 1 approval.`
+          : `Packed ${built.lines.length} wallets into ${chunked.length} approvals` +
+              (newAtaApprox > 0
+                ? ` (~${newAtaApprox} new token account${newAtaApprox === 1 ? '' : 's'} to create).`
+                : ' (all dest accounts already exist — denser packs).')
+      )
+    } finally {
+      setTokenBusy(false)
+    }
   }
 
   const recordTokenBatchLedger = (
@@ -1708,6 +1738,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                 owner: publicKey,
                 lines,
                 feeDiscountBps: discountBps,
+                maxPerTx: OWL_SEND_MAX_PER_TX_TOKEN,
               })
               if (!one.ok) throw new Error(one.error)
               built.push({ tx: one.tx, lines, newAtaCount: one.newAtaCount })
@@ -1784,6 +1815,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
           sendTransaction,
           lines,
           feeDiscountBps: discountBps,
+          maxPerTx: OWL_SEND_MAX_PER_TX_TOKEN,
         })
         if (sendCancelledRef.current) return
 
@@ -3048,7 +3080,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                 <p className="text-xs text-muted-foreground">
                   {tokenMode === 'send_to_one'
                     ? `Up to ${OWL_SEND_MAX_PER_TX} token lines per approval · ${formatOwlSendFeeSol(feeSol)} each.`
-                    : `Airdrop one token to many wallets · up to ${OWL_SEND_MAX_TOKEN_SCATTER} recipients · ${OWL_SEND_MAX_PER_TX} per approval · ${formatOwlSendFeeSol(feeSol)} per line.`}
+                    : `Airdrop one token to many wallets · up to ${OWL_SEND_MAX_TOKEN_SCATTER} recipients · ~${OWL_SEND_MAX_PER_TX_TOKEN_NEW_ATA}–${OWL_SEND_MAX_PER_TX_TOKEN} per approval (packs denser when dest accounts exist) · ${formatOwlSendFeeSol(feeSol)} per line.`}
                 </p>
               </div>
 
@@ -3234,29 +3266,35 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       <p className="text-xs text-muted-foreground">
                         {tokenScatterEntries.length} recipient
                         {tokenScatterEntries.length === 1 ? '' : 's'} · max{' '}
-                        {OWL_SEND_MAX_TOKEN_SCATTER} ·{' '}
-                        {Math.ceil(Math.max(1, tokenScatterEntries.length) / OWL_SEND_MAX_PER_TX)}{' '}
-                        approval
-                        {Math.ceil(Math.max(1, tokenScatterEntries.length) / OWL_SEND_MAX_PER_TX) ===
-                        1
-                          ? ''
-                          : 's'}
-                        {tokenScatterEntries.length > OWL_SEND_MAX_PER_TX &&
+                        {OWL_SEND_MAX_TOKEN_SCATTER} · ~
+                        {Math.ceil(
+                          Math.max(1, tokenScatterEntries.length) / OWL_SEND_MAX_PER_TX_TOKEN_NEW_ATA
+                        )}
+                        –
+                        {Math.ceil(
+                          Math.max(1, tokenScatterEntries.length) / OWL_SEND_MAX_PER_TX_TOKEN
+                        )}{' '}
+                        approvals after pack
+                        {tokenScatterEntries.length > OWL_SEND_MAX_PER_TX_TOKEN_NEW_ATA &&
                         walletSupportsOwlSendSignAll(wallet?.adapter ?? null)
-                          ? ` · ~${Math.ceil(
-                              Math.ceil(tokenScatterEntries.length / OWL_SEND_MAX_PER_TX) /
-                                OWL_SEND_TOKEN_SIGN_ALL_WINDOW
-                            )} wallet sheet(s) when you send`
+                          ? ` · sign-all windows of ${OWL_SEND_TOKEN_SIGN_ALL_WINDOW}`
                           : ''}
                       </p>
                     </div>
                     <Button
                       type="button"
                       className="min-h-[44px] w-full touch-manipulation"
-                      onClick={prepareTokenScatter}
+                      onClick={() => void prepareTokenScatter()}
                       disabled={!tokenScatterMint || tokenScatterEntries.length < 1 || tokenSending}
                     >
-                      Review send
+                      {tokenBusy && tokenBatches.length < 1 ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Packing recipients…
+                        </>
+                      ) : (
+                        'Review send'
+                      )}
                     </Button>
 
                     {tokenBatches.length > 0 ? (

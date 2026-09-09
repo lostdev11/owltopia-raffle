@@ -10,6 +10,13 @@ export const OWL_SEND_TX_PACKET_LIMIT = 1232
  */
 export const OWL_SEND_TX_SAFE_BYTES = 900
 
+/**
+ * Token-scatter only (no leftover-CM revoke ixs) — more Lighthouse headroom than NFT scatter.
+ * Measured: 7×(createATA+transfer)+fee+CU ≈ 1011 bytes; 8× ≈ 1099 (too close to the
+ * NFT failure zone at ~1121). Keep ≤1020 so ~7 new-wallet lines fit per approval.
+ */
+export const OWL_SEND_TX_SAFE_BYTES_TOKEN = 1020
+
 export function measureOwlSendTxBytes(tx: Transaction): number {
   try {
     return tx.serialize({ requireAllSignatures: false, verifySignatures: false }).length
