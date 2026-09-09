@@ -19,7 +19,7 @@ function milestone(
     id: 'm1',
     raffle_id: 'r1',
     sort_order: 0,
-    trigger_type: 'ticket_count',
+    trigger_type: 'absolute_tickets',
     trigger_value: 50,
     prize_type: 'crypto',
     prize_amount: 1,
