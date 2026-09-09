@@ -6,6 +6,7 @@ import { calculateOwlVisionScore } from '@/lib/owl-vision'
 import { EditRaffleForm } from '@/components/EditRaffleForm'
 import { AdminRaffleActions } from '@/components/AdminRaffleActions'
 import { getAdminRole } from '@/lib/db/admins'
+import { shouldUseEditRaffleFormAdminView } from '@/lib/admin/raffle-admin-view'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 
 export default async function EditRafflePage({
@@ -31,27 +32,20 @@ export default async function EditRafflePage({
   const milestones = await getMilestonesByRaffleId(raffle.id)
   const hasConfirmedEntries = entries.some((entry) => entry.status === 'confirmed')
 
-  // Draft: show edit form
-  if (status === 'draft') {
+  const useEditForm = shouldUseEditRaffleFormAdminView({
+    status,
+    hasConfirmedEntries,
+    milestoneCount: milestones.length,
+  })
+
+  if (useEditForm) {
     const owlVisionScore = calculateOwlVisionScore(raffle, entries)
     return (
       <EditRaffleForm raffle={raffle} entries={entries} owlVisionScore={owlVisionScore} />
     )
   }
 
-  // Safety override: allow time corrections for live/ready_to_draw only when
-  // there are no confirmed tickets yet.
-  if (
-    (status === 'live' || status === 'ready_to_draw') &&
-    !hasConfirmedEntries
-  ) {
-    const owlVisionScore = calculateOwlVisionScore(raffle, entries)
-    return (
-      <EditRaffleForm raffle={raffle} entries={entries} owlVisionScore={owlVisionScore} />
-    )
-  }
-
-  // Non-draft: show admin actions (return NFT, cancel, refund list, delete)
+  // Non-draft (or live milestone raffles): cancel, milestone escrow return, refunds, delete
   return (
     <AdminRaffleActions
       raffle={raffle}
