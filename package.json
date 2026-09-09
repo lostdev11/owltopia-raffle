@@ -106,7 +106,7 @@
     "copy:governance-keypair": "node scripts/copy-governance-program-keypair.mjs",
     "generate:governance-program-key": "node scripts/generate-governance-program-keypair.mjs",
     "notify:council-discord": "npx --yes tsx scripts/notify-recent-council-proposal-discord.ts",
-    "postinstall": "node scripts/postinstall-next-global-error.js",
+    "postinstall": "node scripts/postinstall-next-global-error.js && node scripts/postinstall-solana-web3-dedupe.js",
     "owlswap:grind-wallets": "npx --yes tsx scripts/grind-owlswap-vanity.ts",
     "owlswap:install-env": "node scripts/merge-owlswap-env.mjs"
   },
@@ -164,7 +164,8 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "lodash": "4.17.23",
-    "elliptic": "6.6.1"
+    "elliptic": "6.6.1",
+    "@solana/web3.js": "1.99.0-beta.0"
   },
   "devDependencies": {
     "@types/bn.js": "^5.2.0",

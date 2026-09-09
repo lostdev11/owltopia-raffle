@@ -22,9 +22,13 @@
         "name": "next"
       }
     ],
+    "baseUrl": ".",
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@solana/web3.js": [
+        "./node_modules/@solana/web3.js"
       ]
     }
   },
