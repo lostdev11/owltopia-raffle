@@ -1229,6 +1229,13 @@ export function AdminRaffleActions({
               <CardDescription>
                 Change who wins each bonus (random / top buyer / creator draw). Prize amount stays the
                 same. Available until a winner is selected.
+                {!terminalForMilestoneReturn ? (
+                  <>
+                    {' '}
+                    Funded crypto bonuses can be returned to the creator after the raffle is cancelled
+                    (use Accept cancellation below, or mark cancelled via admin restore flow).
+                  </>
+                ) : null}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-0">
