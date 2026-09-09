@@ -35,6 +35,7 @@ import {
   formatMilestoneTrigger,
   milestoneWinnerModeLabel,
 } from '@/lib/raffles/milestones/copy'
+import { isMilestoneDepositReturnable } from '@/lib/raffles/milestones/return-eligibility'
 import { getEffectiveDrawThresholdTickets } from '@/lib/raffles/nft-raffle-economics'
 
 const PRIZE_RETURN_REASONS = [
@@ -87,6 +88,7 @@ export function AdminRaffleActions({
   const [blockingPurchases, setBlockingPurchases] = useState(false)
   const [milestones, setMilestones] = useState<RaffleMilestone[]>(milestonesProp)
   const [milestoneModeBusyId, setMilestoneModeBusyId] = useState<string | null>(null)
+  const [milestoneReturnBusyId, setMilestoneReturnBusyId] = useState<string | null>(null)
 
   useEffect(() => {
     setMilestones(milestonesProp)
@@ -176,6 +178,43 @@ export function AdminRaffleActions({
       })
     } finally {
       setMilestoneModeBusyId(null)
+    }
+  }
+
+  const returnMilestoneDeposit = async (milestone: RaffleMilestone) => {
+    setMilestoneReturnBusyId(milestone.id)
+    setMessage(null)
+    try {
+      const res = await fetch(
+        `/api/raffles/${raffle.id}/milestones/${milestone.id}/return-deposit`,
+        { method: 'POST', credentials: 'include' }
+      )
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string
+        transactionSignature?: string
+      }
+      if (!res.ok) {
+        setMessage({
+          type: 'error',
+          text: typeof data.error === 'string' ? data.error : 'Failed to return milestone deposit',
+        })
+        return
+      }
+      setMessage({
+        type: 'success',
+        text:
+          typeof data.transactionSignature === 'string'
+            ? `Milestone deposit returned. TX: ${data.transactionSignature}`
+            : 'Milestone deposit returned to creator.',
+      })
+      router.refresh()
+    } catch (e) {
+      setMessage({
+        type: 'error',
+        text: e instanceof Error ? e.message : 'Failed to return milestone deposit',
+      })
+    } finally {
+      setMilestoneReturnBusyId(null)
     }
   }
 
@@ -481,6 +520,7 @@ export function AdminRaffleActions({
   const cancellationPendingAdmin = cancellationRequested || cancellationFeePaid
   const isCancelled = (raffle.status ?? '').toLowerCase() === 'cancelled'
   const isFailedThreshold = (raffle.status ?? '').toLowerCase() === 'failed_refund_available'
+  const terminalForMilestoneReturn = isCancelled || isFailedThreshold
   const feeApplies = raffleRequiresCancellationFee(raffle)
   /** Treasury fee not recorded; admin can still accept (support override). */
   const postStartFeeMissing = feeApplies && !cancellationFeePaid
@@ -1244,6 +1284,29 @@ export function AdminRaffleActions({
                         Winner mode locked: {milestoneWinnerModeLabel(m.winner_mode)}
                       </p>
                     )}
+                    {terminalForMilestoneReturn &&
+                      isMilestoneDepositReturnable({
+                        milestone: m,
+                        raffleStatus: raffle.status,
+                      }) && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="min-h-[44px] touch-manipulation border-amber-500/50 text-amber-700 dark:text-amber-400"
+                          disabled={milestoneReturnBusyId === m.id}
+                          onClick={() => void returnMilestoneDeposit(m)}
+                        >
+                          {milestoneReturnBusyId === m.id
+                            ? 'Returning…'
+                            : 'Return milestone deposit to creator'}
+                        </Button>
+                      )}
+                    {terminalForMilestoneReturn && m.returned_at && (
+                      <p className="text-xs text-muted-foreground">
+                        Deposit returned{m.return_tx ? ` · TX ${m.return_tx.slice(0, 8)}…` : ''}
+                      </p>
+                    )}
                   </div>
                 )
               })}
@@ -1733,6 +1796,18 @@ export function AdminRaffleActions({
                             token back to the creator&apos;s wallet immediately after cancellation (same path as
                             &quot;Return prize to creator&quot;). If that fails, use manual return or{' '}
                             <strong className="text-foreground">Record manual prize return</strong> below.
+                          </>
+                        ) : null}
+                        {milestones.some(
+                          (m) => m.prize_type === 'crypto' && m.deposit_verified_at && !m.returned_at
+                        ) ? (
+                          <>
+                            {' '}
+                            Funded crypto bonus milestones will be voided and the platform will attempt to
+                            return each prefunded deposit from funds escrow to the creator (same as min-threshold
+                            failure). Retry any failed bonus returns with{' '}
+                            <strong className="text-foreground">Return milestone deposit to creator</strong>{' '}
+                            in the Bonus milestones section.
                           </>
                         ) : null}
                         {postStartFeeMissing ? (
