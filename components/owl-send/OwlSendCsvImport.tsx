@@ -20,10 +20,10 @@ import {
   OWL_SEND_CSV_FORMAT_HINT_TOKEN,
   owlSendCsvEntriesToNftPaste,
   owlSendCsvEntriesToTokenPaste,
+  owlSendCsvMaxEntriesForKind,
   type OwlSendCsvKind,
   type OwlSendCsvParseResult,
 } from '@/lib/owl-send/csv-import'
-import { OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
 
 type Props = {
   kind: OwlSendCsvKind
@@ -46,6 +46,7 @@ export function OwlSendCsvImport({ kind, disabled, onApply, className }: Props) 
   const [fileLabel, setFileLabel] = useState<string | null>(null)
 
   const formatHint = kind === 'nft' ? OWL_SEND_CSV_FORMAT_HINT_NFT : OWL_SEND_CSV_FORMAT_HINT_TOKEN
+  const sessionMax = owlSendCsvMaxEntriesForKind(kind)
 
   const clearLint = () => {
     setLint(null)
@@ -82,7 +83,7 @@ export function OwlSendCsvImport({ kind, disabled, onApply, className }: Props) 
     setFileLabel(file.name)
     try {
       const text = await file.text()
-      const result = lintOwlSendCsv({ raw: text, kind, maxEntries: OWL_SEND_MAX_SELECT })
+      const result = lintOwlSendCsv({ raw: text, kind, maxEntries: sessionMax })
       setLint(result)
       // Clean lint → apply immediately (simple path).
       if (result.ok && result.rowErrors.length === 0 && result.warnings.length === 0) {
@@ -139,7 +140,8 @@ export function OwlSendCsvImport({ kind, disabled, onApply, className }: Props) 
                   {formatHint}
                 </pre>
                 <p className="mt-1 text-zinc-400">
-                  Simple lint before send — max {OWL_SEND_MAX_SELECT} wallets / session.
+                  Simple lint before send — max {sessionMax} wallets / session
+                  {kind === 'token' ? ' (token airdrop)' : ' (NFT select)'}.
                 </p>
               </TooltipContent>
             </Tooltip>

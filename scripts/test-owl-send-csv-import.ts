@@ -154,6 +154,31 @@ assert.equal(isLikelyCsvFile({ name: 'photo.png', type: 'image/png' }), false)
 }
 
 {
+  // Token airdrop session allows hundreds of wallets (NFT select stays at 20).
+  const many = Array.from({ length: 629 }, () => Keypair.generate().publicKey.toBase58())
+  const tokenAirdrop = parseOwlSendCsv({
+    raw: ['wallet,amount', ...many.map((w) => `${w},5`)].join('\n'),
+    kind: 'token',
+  })
+  assert.equal(tokenAirdrop.ok, true)
+  assert.equal(tokenAirdrop.entries.length, 629)
+  assert.equal(tokenAirdrop.truncated, false)
+}
+
+{
+  const nftStillCapped = parseOwlSendCsv({
+    raw: [
+      'wallet',
+      ...Array.from({ length: 25 }, () => Keypair.generate().publicKey.toBase58()),
+    ].join('\n'),
+    kind: 'nft',
+  })
+  assert.equal(nftStillCapped.ok, true)
+  assert.equal(nftStillCapped.entries.length, 20)
+  assert.equal(nftStillCapped.truncated, true)
+}
+
+{
   const badCounts = parseOwlSendCsv({
     raw: `wallet,count\n${w1},0\n${w2},1.5\n`,
     kind: 'nft',

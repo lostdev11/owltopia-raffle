@@ -96,6 +96,8 @@ import {
   OWL_SEND_MAX_PER_TX,
   OWL_SEND_MAX_SELECT,
   OWL_SEND_MAX_SPECIAL_PER_TX,
+  OWL_SEND_MAX_TOKEN_SCATTER,
+  OWL_SEND_TOKEN_SIGN_ALL_WINDOW,
   type OwlSendAssetTab,
   type OwlSendMode,
 } from '@/lib/owl-send/constants'
@@ -112,6 +114,7 @@ import {
 import {
   owlSendBatchesCanSignAll,
   sendOwlSendSignedBatchGroup,
+  sendOwlSendSignedTokenBatchGroup,
   walletSupportsOwlSendSignAll,
 } from '@/lib/owl-send/sign-all'
 import {
@@ -119,7 +122,11 @@ import {
   OWL_SEND_BUILD_TIMEOUT_MS,
   withOwlSendTimeout,
 } from '@/lib/owl-send/confirm'
-import { sendOwlSendTokenLines, sendOwlSendTokensToOne } from '@/lib/owl-send/send-tokens'
+import {
+  buildOwlSendTokenTransaction,
+  sendOwlSendTokenLines,
+  sendOwlSendTokensToOne,
+} from '@/lib/owl-send/send-tokens'
 import { recordOwlSendLedger } from '@/lib/owl-send/record-ledger'
 import { useOwlSendAdminAccess } from '@/lib/owl-send/use-owl-send-admin-access'
 import {
@@ -1622,70 +1629,209 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setTokenActiveBatch(0)
   }
 
+  const recordTokenBatchLedger = (
+    batchIndex: number,
+    signature: string,
+    lines: OwlSendTokenScatterLine[]
+  ) => {
+    if (!publicKey) return
+    void recordOwlSendLedger({
+      fromWallet: publicKey.toBase58(),
+      mode: 'token_scatter',
+      assetKind: 'token',
+      txSignature: signature,
+      batchIndex,
+      feeDiscountBps: discountBps,
+      lines: lines.map((l) => ({
+        recipient: l.recipient,
+        mint: l.mint,
+        symbol: l.symbol ?? null,
+        amount_raw: l.amountRaw.toString(),
+        decimals: l.decimals,
+      })),
+      ensureSiws: ensureLedgerSiws,
+    }).then(() => setLedgerRefreshKey((k) => k + 1))
+  }
+
+  /**
+   * Chain remaining token-scatter approvals from one click.
+   * Wallets that support sign-all get windows of up to
+   * {@link OWL_SEND_TOKEN_SIGN_ALL_WINDOW} txs per sheet; otherwise sequential popups.
+   */
   const runTokenBatch = async (batchIndex: number) => {
     if (!publicKey) return
-    const lines = tokenBatches[batchIndex]
-    if (!lines?.length) return
+    if (!tokenBatches[batchIndex]?.length) return
 
     sendCancelledRef.current = false
     setTokenBusy(true)
     setTokenError(null)
-    setTokenBatchProgress((prev) =>
-      prev.map((b) => (b.index === batchIndex ? { ...b, status: 'sending', error: undefined } : b))
-    )
+
+    let workingIndex = batchIndex
+    let lastSignature = ''
+    let sentLinesInChain = 0
+    let sheetsUsed = 0
+    let preferSequential = false
 
     try {
-      const result = await sendOwlSendTokenLines({
-        connection,
-        owner: publicKey,
-        sendTransaction,
-        lines,
-        feeDiscountBps: discountBps,
-      })
-      if (sendCancelledRef.current) return
-      if (result.ok) {
+      while (workingIndex < tokenBatches.length) {
+        if (sendCancelledRef.current) return
+
+        const remaining = tokenBatches.length - workingIndex
+        const useSignAll =
+          !preferSequential &&
+          remaining >= 2 &&
+          walletSupportsOwlSendSignAll(wallet?.adapter ?? null)
+
+        if (useSignAll) {
+          const windowSize = Math.min(OWL_SEND_TOKEN_SIGN_ALL_WINDOW, remaining)
+          const windowBatches = tokenBatches.slice(workingIndex, workingIndex + windowSize)
+
+          setTokenActiveBatch(workingIndex)
+          setTokenBatchProgress((prev) =>
+            prev.map((b) =>
+              b.index >= workingIndex && b.index < workingIndex + windowSize
+                ? { ...b, status: 'sending', error: undefined }
+                : b
+            )
+          )
+
+          try {
+            const built: Array<{
+              tx: import('@solana/web3.js').Transaction
+              lines: OwlSendTokenScatterLine[]
+              newAtaCount: number
+            }> = []
+            for (const lines of windowBatches) {
+              if (sendCancelledRef.current) return
+              const one = await buildOwlSendTokenTransaction({
+                connection,
+                owner: publicKey,
+                lines,
+                feeDiscountBps: discountBps,
+              })
+              if (!one.ok) throw new Error(one.error)
+              built.push({ tx: one.tx, lines, newAtaCount: one.newAtaCount })
+            }
+
+            const group = await sendOwlSendSignedTokenBatchGroup({
+              connection,
+              owner: publicKey,
+              walletAdapter: wallet?.adapter ?? null,
+              built,
+            })
+            if (sendCancelledRef.current) return
+
+            sheetsUsed += 1
+            for (let i = 0; i < group.length; i++) {
+              const row = group[i]!
+              const lines = windowBatches[i]!
+              const idx = workingIndex + i
+              lastSignature = row.signature
+              sentLinesInChain += lines.length
+              recordTokenBatchLedger(idx, row.signature, lines)
+            }
+            setTokenBatchProgress((prev) =>
+              prev.map((b) => {
+                if (b.index < workingIndex) return b
+                if (b.index >= workingIndex + group.length) {
+                  return b.index === workingIndex + group.length && b.status === 'pending'
+                    ? { ...b, status: 'ready' }
+                    : b
+                }
+                const offset = b.index - workingIndex
+                return {
+                  ...b,
+                  status: 'done' as const,
+                  signature: group[offset]!.signature,
+                  error: undefined,
+                }
+              })
+            )
+            workingIndex += group.length
+            setTokenActiveBatch(Math.min(workingIndex, tokenBatches.length - 1))
+            if (workingIndex < tokenBatches.length) {
+              await new Promise<void>((resolve) =>
+                setTimeout(resolve, OWL_SEND_CHAIN_APPROVAL_GAP_MS)
+              )
+            }
+            continue
+          } catch {
+            preferSequential = true
+            setTokenBatchProgress((prev) =>
+              prev.map((b) =>
+                b.index >= workingIndex && b.status === 'sending'
+                  ? { ...b, status: b.index === workingIndex ? 'ready' : 'pending' }
+                  : b
+              )
+            )
+            // Fall through to sequential for this index.
+          }
+        }
+
+        const lines = tokenBatches[workingIndex]
+        if (!lines?.length) break
+
+        setTokenActiveBatch(workingIndex)
         setTokenBatchProgress((prev) =>
           prev.map((b) =>
-            b.index === batchIndex
+            b.index === workingIndex ? { ...b, status: 'sending', error: undefined } : b
+          )
+        )
+
+        const result = await sendOwlSendTokenLines({
+          connection,
+          owner: publicKey,
+          sendTransaction,
+          lines,
+          feeDiscountBps: discountBps,
+        })
+        if (sendCancelledRef.current) return
+
+        if (!result.ok) {
+          setTokenBatchProgress((prev) =>
+            prev.map((b) =>
+              b.index === workingIndex ? { ...b, status: 'failed', error: result.error } : b
+            )
+          )
+          setTokenError(result.error)
+          return
+        }
+
+        sheetsUsed += 1
+        lastSignature = result.signature
+        sentLinesInChain += lines.length
+        recordTokenBatchLedger(workingIndex, result.signature, lines)
+        setTokenBatchProgress((prev) =>
+          prev.map((b) =>
+            b.index === workingIndex
               ? { ...b, status: 'done', signature: result.signature }
-              : b.index === batchIndex + 1 && b.status === 'pending'
+              : b.index === workingIndex + 1 && b.status === 'pending'
                 ? { ...b, status: 'ready' }
                 : b
           )
         )
-        if (batchIndex + 1 < tokenBatches.length) setTokenActiveBatch(batchIndex + 1)
+        workingIndex += 1
+        setTokenActiveBatch(Math.min(workingIndex, tokenBatches.length - 1))
+        if (workingIndex < tokenBatches.length) {
+          await new Promise<void>((resolve) =>
+            setTimeout(resolve, OWL_SEND_CHAIN_APPROVAL_GAP_MS)
+          )
+        }
+      }
+
+      if (sentLinesInChain > 0 && lastSignature) {
+        const approvalsDone = workingIndex - batchIndex
         setSuccessPopup({
           title:
             tokenBatches.length > 1
-              ? `Token batch ${batchIndex + 1} of ${tokenBatches.length} sent`
+              ? approvalsDone >= tokenBatches.length - batchIndex
+                ? `All ${tokenBatches.length} token approvals sent`
+                : `Token approvals ${batchIndex + 1}–${workingIndex} of ${tokenBatches.length} sent`
               : 'Tokens sent successfully',
-          detail: `${lines.length} transfer${lines.length === 1 ? '' : 's'} · fee paid to Owltopia treasury.`,
-          signature: result.signature,
+          detail: `${sentLinesInChain} transfer${sentLinesInChain === 1 ? '' : 's'} · ${sheetsUsed} wallet sheet${sheetsUsed === 1 ? '' : 's'} · fee paid to Owltopia treasury.`,
+          signature: lastSignature,
         })
-        void recordOwlSendLedger({
-          fromWallet: publicKey.toBase58(),
-          mode: 'token_scatter',
-          assetKind: 'token',
-          txSignature: result.signature,
-          batchIndex,
-          feeDiscountBps: discountBps,
-          lines: lines.map((l) => ({
-            recipient: l.recipient,
-            mint: l.mint,
-            symbol: l.symbol ?? null,
-            amount_raw: l.amountRaw.toString(),
-            decimals: l.decimals,
-          })),
-          ensureSiws: ensureLedgerSiws,
-        }).then(() => setLedgerRefreshKey((k) => k + 1))
         void loadAssets()
-      } else {
-        setTokenBatchProgress((prev) =>
-          prev.map((b) =>
-            b.index === batchIndex ? { ...b, status: 'failed', error: result.error } : b
-          )
-        )
-        setTokenError(result.error)
       }
     } finally {
       if (!sendCancelledRef.current) setTokenBusy(false)
@@ -2902,7 +3048,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                 <p className="text-xs text-muted-foreground">
                   {tokenMode === 'send_to_one'
                     ? `Up to ${OWL_SEND_MAX_PER_TX} token lines per approval · ${formatOwlSendFeeSol(feeSol)} each.`
-                    : `Airdrop one token to many wallets · ${OWL_SEND_MAX_PER_TX} per approval · ${formatOwlSendFeeSol(feeSol)} per line.`}
+                    : `Airdrop one token to many wallets · up to ${OWL_SEND_MAX_TOKEN_SCATTER} recipients · ${OWL_SEND_MAX_PER_TX} per approval · ${formatOwlSendFeeSol(feeSol)} per line.`}
                 </p>
               </div>
 
@@ -3087,14 +3233,21 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       />
                       <p className="text-xs text-muted-foreground">
                         {tokenScatterEntries.length} recipient
-                        {tokenScatterEntries.length === 1 ? '' : 's'} · max {OWL_SEND_MAX_SELECT} ·{' '}
+                        {tokenScatterEntries.length === 1 ? '' : 's'} · max{' '}
+                        {OWL_SEND_MAX_TOKEN_SCATTER} ·{' '}
                         {Math.ceil(Math.max(1, tokenScatterEntries.length) / OWL_SEND_MAX_PER_TX)}{' '}
                         approval
                         {Math.ceil(Math.max(1, tokenScatterEntries.length) / OWL_SEND_MAX_PER_TX) ===
                         1
                           ? ''
-                          : 's'}{' '}
-                        if prepared
+                          : 's'}
+                        {tokenScatterEntries.length > OWL_SEND_MAX_PER_TX &&
+                        walletSupportsOwlSendSignAll(wallet?.adapter ?? null)
+                          ? ` · ~${Math.ceil(
+                              Math.ceil(tokenScatterEntries.length / OWL_SEND_MAX_PER_TX) /
+                                OWL_SEND_TOKEN_SIGN_ALL_WINDOW
+                            )} wallet sheet(s) when you send`
+                          : ''}
                       </p>
                     </div>
                     <Button
@@ -3108,48 +3261,96 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
                     {tokenBatches.length > 0 ? (
                       <div className="space-y-3">
-                        <ol className="space-y-2">
-                          {tokenBatchProgress.map((b) => {
-                            const lines = tokenBatches[b.index] ?? []
-                            return (
-                              <li
-                                key={b.index}
-                                className={cn(
-                                  'rounded-lg border px-3 py-2 text-sm',
-                                  b.status === 'done' && 'border-emerald-500/40 bg-emerald-500/10',
-                                  b.status === 'failed' && 'border-red-500/40 bg-red-500/10',
-                                  b.status === 'ready' && 'border-theme-prime/40 bg-white/[0.03]',
-                                  b.status === 'pending' && 'border-white/10 opacity-70',
-                                  b.status === 'sending' && 'border-sky-500/40 bg-sky-500/10'
-                                )}
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-semibold">
-                                    Approval {b.index + 1} of {b.total}
-                                  </span>
-                                  <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                                    {b.status}
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  {lines.length} wallet{lines.length === 1 ? '' : 's'} ·{' '}
-                                  {formatOwlSendFeeSol(feeSol * lines.length)} fee
-                                </p>
-                                {b.signature ? (
-                                  <div className="mt-2">
-                                    <OwlSendSuccessBanner
-                                      title={`Approval ${b.index + 1} sent`}
-                                      signature={b.signature}
-                                    />
+                        {tokenBatches.length > 12 ? (
+                          <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3 text-sm">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-semibold">
+                                {tokenDoneCount} / {tokenBatches.length} approvals confirmed
+                              </span>
+                              <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                                {tokenSending
+                                  ? 'sending'
+                                  : tokenAllDone
+                                    ? 'done'
+                                    : tokenBatchProgress[tokenActiveBatch]?.status ?? 'ready'}
+                              </span>
+                            </div>
+                            <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                              <div
+                                className="h-full rounded-full bg-emerald-500/80 transition-[width]"
+                                style={{
+                                  width: `${Math.min(
+                                    100,
+                                    (tokenDoneCount / Math.max(1, tokenBatches.length)) * 100
+                                  )}%`,
+                                }}
+                              />
+                            </div>
+                            <p className="mt-2 text-xs text-muted-foreground">
+                              {tokenBatches.reduce((n, b) => n + b.length, 0)} wallets total ·{' '}
+                              {formatOwlSendFeeSol(
+                                feeSol * tokenBatches.reduce((n, b) => n + b.length, 0)
+                              )}{' '}
+                              Owl fee · stay on this page while sheets open
+                            </p>
+                            {tokenBatchProgress[tokenActiveBatch]?.error ? (
+                              <p className="mt-2 text-xs text-red-300">
+                                {tokenBatchProgress[tokenActiveBatch]?.error}
+                              </p>
+                            ) : null}
+                            {tokenBatchProgress[tokenActiveBatch]?.signature ? (
+                              <div className="mt-2">
+                                <OwlSendSuccessBanner
+                                  title={`Approval ${tokenActiveBatch + 1} sent`}
+                                  signature={tokenBatchProgress[tokenActiveBatch]!.signature!}
+                                />
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <ol className="space-y-2">
+                            {tokenBatchProgress.map((b) => {
+                              const lines = tokenBatches[b.index] ?? []
+                              return (
+                                <li
+                                  key={b.index}
+                                  className={cn(
+                                    'rounded-lg border px-3 py-2 text-sm',
+                                    b.status === 'done' && 'border-emerald-500/40 bg-emerald-500/10',
+                                    b.status === 'failed' && 'border-red-500/40 bg-red-500/10',
+                                    b.status === 'ready' && 'border-theme-prime/40 bg-white/[0.03]',
+                                    b.status === 'pending' && 'border-white/10 opacity-70',
+                                    b.status === 'sending' && 'border-sky-500/40 bg-sky-500/10'
+                                  )}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="font-semibold">
+                                      Approval {b.index + 1} of {b.total}
+                                    </span>
+                                    <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                                      {b.status}
+                                    </span>
                                   </div>
-                                ) : null}
-                                {b.error ? (
-                                  <p className="mt-1 text-xs text-red-300">{b.error}</p>
-                                ) : null}
-                              </li>
-                            )
-                          })}
-                        </ol>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {lines.length} wallet{lines.length === 1 ? '' : 's'} ·{' '}
+                                    {formatOwlSendFeeSol(feeSol * lines.length)} fee
+                                  </p>
+                                  {b.signature ? (
+                                    <div className="mt-2">
+                                      <OwlSendSuccessBanner
+                                        title={`Approval ${b.index + 1} sent`}
+                                        signature={b.signature}
+                                      />
+                                    </div>
+                                  ) : null}
+                                  {b.error ? (
+                                    <p className="mt-1 text-xs text-red-300">{b.error}</p>
+                                  ) : null}
+                                </li>
+                              )
+                            })}
+                          </ol>
+                        )}
                         {tokenAllDone ? (
                           <div className="flex items-center gap-2 text-sm text-emerald-300">
                             <CheckCircle2 className="h-4 w-4" /> All token approvals confirmed.
@@ -3174,10 +3375,10 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                                 <Send className="h-4 w-4" />
                               )}
                               {tokenBatchProgress[tokenActiveBatch]?.status === 'failed'
-                                ? `Retry ${tokenActiveBatch + 1} of ${tokenBatches.length}`
+                                ? `Retry from ${tokenActiveBatch + 1} of ${tokenBatches.length}`
                                 : tokenBatches.length === 1
                                   ? 'Are you sure? Send'
-                                  : `Are you sure? Send ${tokenActiveBatch + 1} of ${tokenBatches.length}`}
+                                  : `Are you sure? Send all ${tokenBatches.length - tokenDoneCount} remaining`}
                             </Button>
                             {tokenSending ? (
                               <Button

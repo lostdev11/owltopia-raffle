@@ -69,6 +69,8 @@ import {
   OWL_SEND_MAX_PER_TX_NFT_SCATTER,
   OWL_SEND_MAX_SELECT,
   OWL_SEND_MAX_SPECIAL_PER_TX,
+  OWL_SEND_MAX_TOKEN_SCATTER,
+  OWL_SEND_TOKEN_SIGN_ALL_WINDOW,
   owlSendClassicApprovalSize,
 } from '@/lib/owl-send/constants'
 import {
@@ -94,6 +96,8 @@ assert.equal(owlSendClassicApprovalSize(1), OWL_SEND_MAX_PER_TX_NFT_ONE)
 assert.equal(owlSendClassicApprovalSize(2), OWL_SEND_MAX_PER_TX_NFT_ONE)
 assert.equal(owlSendClassicApprovalSize(5), OWL_SEND_MAX_PER_TX_NFT_SCATTER)
 assert.equal(OWL_SEND_MAX_SELECT, 20)
+assert.equal(OWL_SEND_MAX_TOKEN_SCATTER, 1000)
+assert.equal(OWL_SEND_TOKEN_SIGN_ALL_WINDOW, 8)
 assert.ok(OWL_SEND_TX_SAFE_BYTES < OWL_SEND_TX_PACKET_LIMIT)
 assert.equal(getOwlSendFeeSol(), 0.001)
 assert.equal(getOwlSendFeeLamportsForCount(5), Math.round(0.001 * LAMPORTS_PER_SOL) * 5)
@@ -398,9 +402,28 @@ const tooMany = buildTokenScatterLines({
   tokenAccount: 'ata1',
   decimals: 0,
   defaultAmountUi: '1',
-  entries: Array.from({ length: 21 }, (_, i) => ({ recipient: `r${i}`, amountUi: null })),
+  entries: Array.from({ length: OWL_SEND_MAX_TOKEN_SCATTER + 1 }, (_, i) => ({
+    recipient: `r${i}`,
+    amountUi: null,
+  })),
 })
 assert.equal(tooMany.ok, false)
+
+const largeAirdrop = buildTokenScatterLines({
+  mint: 'mint1',
+  tokenAccount: 'ata1',
+  decimals: 0,
+  defaultAmountUi: '5',
+  entries: Array.from({ length: 629 }, (_, i) => ({ recipient: `r${i}`, amountUi: null })),
+})
+assert.equal(largeAirdrop.ok, true)
+if (largeAirdrop.ok) {
+  assert.equal(largeAirdrop.lines.length, 629)
+  const chunks = chunkOwlSendBatches(largeAirdrop.lines)
+  assert.equal(chunks.length, Math.ceil(629 / OWL_SEND_MAX_PER_TX))
+  assert.equal(chunks[0]!.length, OWL_SEND_MAX_PER_TX)
+  assert.ok(chunks.length > OWL_SEND_TOKEN_SIGN_ALL_WINDOW)
+}
 
   // Badge only for frozen (true nest lock); leftover CM delegates are not nested.
   // pNFT freeze-without-delegate must not look nested.

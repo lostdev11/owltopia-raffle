@@ -11,12 +11,17 @@
  */
 
 import { isValidSolanaPubkey } from '@/lib/solana/validate-pubkey'
-import { OWL_SEND_MAX_SELECT } from '@/lib/owl-send/constants'
+import { OWL_SEND_MAX_SELECT, OWL_SEND_MAX_TOKEN_SCATTER } from '@/lib/owl-send/constants'
 
 export const OWL_SEND_AIRDROP_CSV_FILENAME = 'airdrop.csv'
 export const OWL_SEND_AIRDROP_CSV_HREF = '/owl-send/airdrop.csv'
 
 export type OwlSendCsvKind = 'nft' | 'token'
+
+/** Session cap for CSV apply — NFT select vs token airdrop. */
+export function owlSendCsvMaxEntriesForKind(kind: OwlSendCsvKind): number {
+  return kind === 'token' ? OWL_SEND_MAX_TOKEN_SCATTER : OWL_SEND_MAX_SELECT
+}
 
 export type OwlSendCsvEntry = {
   recipient: string
@@ -145,7 +150,7 @@ export type ParseOwlSendCsvParams = {
  * Returns ok=false on hard failures; ok=true with rowErrors for soft skips.
  */
 export function parseOwlSendCsv(params: ParseOwlSendCsvParams): OwlSendCsvParseResult {
-  const max = params.maxEntries ?? OWL_SEND_MAX_SELECT
+  const max = params.maxEntries ?? owlSendCsvMaxEntriesForKind(params.kind)
   const lines = splitCsvRows(params.raw)
   if (lines.length === 0) {
     return {

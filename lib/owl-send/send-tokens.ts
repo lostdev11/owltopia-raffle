@@ -38,18 +38,21 @@ export type OwlSendTokenLine = {
   recipient?: string
 }
 
-/** Send up to 5 fungible token lines + Owl fee in one approval (one or many recipients). */
-export async function sendOwlSendTokenLines(params: {
+export type OwlSendTokenBuildResult =
+  | { ok: true; tx: Transaction; newAtaCount: number }
+  | { ok: false; error: string }
+
+/** Build (do not send) up to 5 fungible token lines + Owl fee in one transaction. */
+export async function buildOwlSendTokenTransaction(params: {
   connection: Connection
   owner: PublicKey
   /** Default recipient when a line omits `recipient`. */
   recipient?: string
-  sendTransaction: WalletSendTransactionFn
   lines: OwlSendTokenLine[]
   /** Owltopia holder discount (bps). */
   feeDiscountBps?: number
-}): Promise<OwlSendBatchResult> {
-  const { connection, owner, sendTransaction, lines } = params
+}): Promise<OwlSendTokenBuildResult> {
+  const { connection, owner, lines } = params
   if (lines.length < 1) return { ok: false, error: 'Select at least one token amount to send.' }
   if (lines.length > OWL_SEND_MAX_PER_TX) {
     return {
@@ -124,20 +127,42 @@ export async function sendOwlSendTokenLines(params: {
   }
 
   prependOwlSendComputeBudget(tx)
+  return { ok: true, tx, newAtaCount }
+}
+
+/** Send up to 5 fungible token lines + Owl fee in one approval (one or many recipients). */
+export async function sendOwlSendTokenLines(params: {
+  connection: Connection
+  owner: PublicKey
+  /** Default recipient when a line omits `recipient`. */
+  recipient?: string
+  sendTransaction: WalletSendTransactionFn
+  lines: OwlSendTokenLine[]
+  /** Owltopia holder discount (bps). */
+  feeDiscountBps?: number
+}): Promise<OwlSendBatchResult> {
+  const built = await buildOwlSendTokenTransaction({
+    connection: params.connection,
+    owner: params.owner,
+    recipient: params.recipient,
+    lines: params.lines,
+    feeDiscountBps: params.feeDiscountBps,
+  })
+  if (!built.ok) return built
 
   try {
-    const signature = await sendTransaction(tx, connection, {
+    const signature = await params.sendTransaction(built.tx, params.connection, {
       skipPreflight: false,
       preflightCommitment: 'confirmed',
       maxRetries: 3,
     })
     await confirmSignatureSuccessOnChain(
-      connection,
+      params.connection,
       signature,
       OWL_SEND_CONFIRM_TIMEOUT_MS,
       OWL_SEND_CONFIRM_TIMEOUT_HINT
     )
-    return { ok: true, signature, newAtaCount }
+    return { ok: true, signature, newAtaCount: built.newAtaCount }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

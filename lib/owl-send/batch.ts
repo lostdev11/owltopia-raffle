@@ -4,6 +4,7 @@ import {
   OWL_SEND_MAX_PER_TX_NFT_SCATTER,
   OWL_SEND_MAX_SELECT,
   OWL_SEND_MAX_SPECIAL_PER_TX,
+  OWL_SEND_MAX_TOKEN_SCATTER,
   owlSendClassicApprovalSize,
 } from '@/lib/owl-send/constants'
 import {
@@ -399,7 +400,7 @@ export function buildTokenScatterLines(params: {
   entries: TokenScatterEntry[]
   maxSelect?: number
 }): { ok: true; lines: OwlSendTokenScatterLine[] } | { ok: false; error: string } {
-  const max = params.maxSelect ?? OWL_SEND_MAX_SELECT
+  const max = params.maxSelect ?? OWL_SEND_MAX_TOKEN_SCATTER
   if (params.entries.length < 1) {
     return { ok: false, error: 'Paste at least one recipient wallet.' }
   }
