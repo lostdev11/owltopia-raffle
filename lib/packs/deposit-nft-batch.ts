@@ -458,7 +458,7 @@ export async function depositPackInventoryNfts(params: {
 
   for (const nft of special) {
     params.onProgress?.(
-      `Depositing ${nft.name || nft.mint.slice(0, 8)}… (Core/cNFT — 1 approval)`
+      `Depositing ${nft.name || nft.mint.slice(0, 8)}… (Core/cNFT/pNFT — 1 approval)`
     )
     const dep = await depositPrizeNftToEscrowFromWallet({
       connection: params.connection,

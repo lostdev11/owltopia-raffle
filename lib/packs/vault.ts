@@ -29,6 +29,7 @@ import {
   payoutCompressedFromKeypair,
   payoutMplCoreFromKeypair,
 } from '@/lib/solana/payout-nft-from-keypair'
+import { trySendSplNftViaTokenMetadataFromEscrow } from '@/lib/solana/token-metadata-prize-payout'
 import type { PackInventoryPrizeStandard } from '@/lib/packs/types'
 
 function parseSolanaSecretKeyFromEnv(raw: string | undefined): Keypair | null {
@@ -255,6 +256,21 @@ async function payoutSplNftFromPacksVault(
     if (acct.amount < 1n) return { ok: false, error: 'Vault NFT balance is zero' }
   } catch {
     return { ok: false, error: 'Vault does not hold this NFT' }
+  }
+
+  // pNFTs (and many freeze-authority Token Metadata NFTs) fail raw SPL Transfer;
+  // try Metaplex transferV1 first — same path as raffle prize escrow.
+  if (tokenProgram.equals(TOKEN_PROGRAM_ID)) {
+    const tmResult = await trySendSplNftViaTokenMetadataFromEscrow({
+      connection,
+      escrowKeypair: keypair,
+      mint,
+      destinationOwner: recipient,
+      skipPreflight: false,
+    })
+    if (tmResult) {
+      return { ok: true, signature: tmResult.signature }
+    }
   }
 
   const tx = new Transaction()

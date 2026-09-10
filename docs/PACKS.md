@@ -76,7 +76,7 @@ Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payo
    `npm run packs:install-vault-env` → merges into `.env.local` without printing the secret.
    For Vercel Production, add `PACKS_VAULT_SECRET_KEY` and `NEXT_PUBLIC_PACKS_VAULT_WALLET` in the dashboard (or `vercel env add` interactively).
 3. Fund the vault with SOL, OWL, and NFTs. **All pack purchase SOL goes to this wallet**; prize payouts leave from it (house edge stays as residual balance).
-4. Admin → Packs: load wallet NFTs, set floors (0.05+ SOL; grails above 0.5 are allowed), **Deposit & add**. Classic SPL NFTs pack up to **3 per on-chain tx**; Phantom (and other multi-sign wallets) approve **all classic txs in one sheet**. Metaplex Core and compressed still need one approval each; pNFT and frozen/nested assets are not supported. Aim for ~30 NFTs at launch.
+4. Admin → Packs: load wallet NFTs, set floors (0.05+ SOL; grails above 0.5 are allowed), **Deposit & add**. Classic SPL NFTs pack up to **3 per on-chain tx**; Phantom (and other multi-sign wallets) approve **all classic txs in one sheet**. Metaplex Core, compressed, and pNFTs need one approval each; frozen/nested assets are not supported. Aim for ~30 NFTs at launch.
 5. Apply migration **227** (`packs_vrf_and_nft_snapshot`).
 6. Pack VRF is on by default (`owltopia-pack-open-v2-vrf`). Needs `FUNDS_ESCROW_SECRET_KEY` or `PRIZE_ESCROW_SECRET_KEY` for Switchboard fees — same as raffle VRF. Set `PACK_VRF_ENABLED=false` only to fall back to local commit–reveal.
 7. Run `npm run packs:ev-simulator` before going live; set `owl_sol_price` until EV ≈ 0.08 SOL. Use Admin → **Launch checklist**.
