@@ -55,6 +55,14 @@ export type {
   SwitchboardVrfRevealResult,
 } from '@/lib/raffles/draw/vrf-switchboard'
 export {
+  SWITCHBOARD_TX_CU_PRICE,
+  SWITCHBOARD_TX_CU_LIMIT_MULTIPLE,
+  SWITCHBOARD_TX_CU_MIN,
+  SWITCHBOARD_TX_CU_MAX,
+  resolveSwitchboardComputeUnitLimit,
+  isComputeUnitExhaustedError,
+} from '@/lib/raffles/draw/vrf-switchboard-cu'
+export {
   isDrawVrfGloballyEnabled,
   drawVrfPilotRaffleIds,
   raffleUsesDrawVrf,
