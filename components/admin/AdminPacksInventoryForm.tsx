@@ -387,8 +387,8 @@ export function AdminPacksInventoryForm({
           SOL; higher floors = rarer odds), then send them to the packs vault. Classic SPL NFTs
           pack up to {PACK_DEPOSIT_MAX_PER_TX} per on-chain tx; Phantom (and wallets with
           multi-approve) signs all classic txs in <span className="font-medium">one sheet</span>.
-          Core / compressed still need one approval each. Some NFT types (pNFT, frozen, nested)
-          can’t be paid out yet.
+          Core / compressed / pNFT still need one approval each. Frozen or nested
+          assets can’t be deposited.
         </p>
       </div>
 
@@ -450,7 +450,7 @@ export function AdminPacksInventoryForm({
           searchInputId="packs-inventory-nft-search"
           mintInputId="packs-inventory-mint-paste"
           dialogTitle="Select NFTs to deposit"
-          dialogDescription="SPL, Metaplex Core, and compressed NFTs. pNFT and frozen/nested assets cannot be paid out of the packs vault."
+          dialogDescription="SPL, Metaplex Core, compressed, and pNFTs. Frozen or nested assets cannot be deposited."
           problemMints={problemMints}
           statusLabel={(nft) => packsNftBlockReason(nft)}
         />
