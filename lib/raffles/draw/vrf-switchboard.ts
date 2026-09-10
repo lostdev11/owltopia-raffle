@@ -10,6 +10,8 @@ import {
   TransactionInstruction,
   VersionedTransaction,
   SystemProgram,
+  ComputeBudgetProgram,
+  TransactionMessage,
 } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
@@ -22,6 +24,10 @@ import {
   isSwitchboardGatewayTransientError,
   isInvalidVrfSecpSignatureError,
 } from '@/lib/raffles/draw/vrf-retry-policy'
+import {
+  SWITCHBOARD_TX_CU_PRICE,
+  resolveSwitchboardComputeUnitLimit,
+} from '@/lib/raffles/draw/vrf-switchboard-cu'
 
 export const VRF_PROVIDER_SWITCHBOARD = 'switchboard' as const
 
@@ -98,6 +104,61 @@ export function keypairWallet(payer: Keypair) {
 async function loadSbProgram(connection: Connection, payer: Keypair) {
   const sb = await loadSb()
   return sb.AnchorUtils.loadProgramFromConnection(connection, keypairWallet(payer))
+}
+
+/**
+ * Build a Switchboard v0 tx with CU headroom that survives RandomnessCommit
+ * sim under-count. Prefer this over raw `sb.asV0Tx` (1.3×, no floor, ignores sim err).
+ */
+async function asSwitchboardV0Tx(params: {
+  connection: Connection
+  ixs: TransactionInstruction[]
+  signers: Keypair[]
+  computeUnitPrice?: number
+}): Promise<VersionedTransaction> {
+  const payer = params.signers[0]
+  if (!payer) throw new Error('asSwitchboardV0Tx: missing signer / payer')
+
+  const price = params.computeUnitPrice ?? SWITCHBOARD_TX_CU_PRICE
+  const priorityFeeIx = ComputeBudgetProgram.setComputeUnitPrice({
+    microLamports: price,
+  })
+  const simLimitIx = ComputeBudgetProgram.setComputeUnitLimit({
+    units: 1_400_000,
+  })
+  const { blockhash } = await params.connection.getLatestBlockhash('processed')
+  const simMessage = new TransactionMessage({
+    payerKey: payer.publicKey,
+    recentBlockhash: blockhash,
+    instructions: [priorityFeeIx, simLimitIx, ...params.ixs],
+  }).compileToV0Message()
+  const simTx = new VersionedTransaction(simMessage)
+  const simulation = await params.connection.simulateTransaction(simTx, {
+    commitment: 'processed',
+    sigVerify: false,
+  })
+  if (simulation.value.err) {
+    const logs = (simulation.value.logs || []).join('\n')
+    throw new Error(
+      `Switchboard tx simulation failed: ${JSON.stringify(simulation.value.err)}${
+        logs ? `\n${logs}` : ''
+      }`
+    )
+  }
+
+  const computeLimitIx = ComputeBudgetProgram.setComputeUnitLimit({
+    units: resolveSwitchboardComputeUnitLimit({
+      unitsConsumed: simulation.value.unitsConsumed,
+    }),
+  })
+  const message = new TransactionMessage({
+    payerKey: payer.publicKey,
+    recentBlockhash: blockhash,
+    instructions: [priorityFeeIx, computeLimitIx, ...params.ixs],
+  }).compileToV0Message()
+  const tx = new VersionedTransaction(message)
+  tx.sign(params.signers)
+  return tx
 }
 
 function normalizeGatewayUrl(raw: string | null | undefined): string | null {
@@ -285,12 +346,10 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
     }
 
     // Create must land before commit (commitIx accounts assume the account exists).
-    const createTx = await sb.asV0Tx({
+    const createTx = await asSwitchboardV0Tx({
       connection,
       ixs: [createIx],
       signers: [payer, rngKp],
-      computeUnitPrice: 75_000,
-      computeUnitLimitMultiple: 1.3,
     })
     const createSig = await connection.sendTransaction(createTx, {
       skipPreflight: false,
@@ -299,12 +358,10 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
     })
     await connection.confirmTransaction(createSig, 'confirmed')
 
-    const commitTx = await sb.asV0Tx({
+    const commitTx = await asSwitchboardV0Tx({
       connection,
       ixs: [commitIx],
       signers: [payer],
-      computeUnitPrice: 75_000,
-      computeUnitLimitMultiple: 1.3,
     })
     const commitSig = await connection.sendTransaction(commitTx, {
       skipPreflight: false,
@@ -426,12 +483,10 @@ export async function switchboardRevealRandomness(params: {
         const attemptReveal = async (
           revealIx: TransactionInstruction
         ): Promise<SwitchboardVrfRevealResult | null> => {
-          const revealTx = await sb.asV0Tx({
+          const revealTx = await asSwitchboardV0Tx({
             connection,
             ixs: [revealIx],
             signers: [payer],
-            computeUnitPrice: 75_000,
-            computeUnitLimitMultiple: 1.3,
           })
           const revealSig = await connection.sendTransaction(revealTx, {
             skipPreflight: false,
