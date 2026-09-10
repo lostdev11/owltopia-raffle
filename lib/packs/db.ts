@@ -7,6 +7,7 @@ import {
 import type {
   PackInventoryPrizeStandard,
   PackInventoryRow,
+  PackNftOddsTier,
   PackOpenRow,
   PackProductRow,
   PackTicketCreditRow,
