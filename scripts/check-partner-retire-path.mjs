@@ -63,4 +63,8 @@ const adminDiscord = readFileSync(
 assert.ok(adminDiscord.includes("patch.status === 'suspended'"))
 assert.ok(adminDiscord.includes('retirePartnerCommunity'))
 
+const carousel = readFileSync(new URL('../components/PartnerRafflesCarousel.tsx', import.meta.url), 'utf8')
+assert.ok(carousel.includes('mergePartnerSpotlightBrands(fromLiveRaffles, spotlightBrands)'))
+assert.ok(!carousel.includes('!PARTNER_SPOTLIGHT_BRANDS.some'))
+
 console.log('check-partner-retire-path: ok')
