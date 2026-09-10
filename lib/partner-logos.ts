@@ -110,11 +110,15 @@ export function partnerLogoFromCommunityRow(row: {
 }
 
 /**
- * Static brand strip plus dynamic logos from approved partner creators (deduped by src).
+ * Base brand strip plus dynamic logos from approved partner creators (deduped by src).
+ * Pass DB-backed brands as `base` when `partner_spotlight_brands` is available.
  */
-export function mergePartnerSpotlightBrands(extra: PartnerLogo[]): PartnerLogo[] {
-  const seen = new Set(PARTNER_SPOTLIGHT_BRANDS.map((l) => l.src))
-  const out = [...PARTNER_SPOTLIGHT_BRANDS]
+export function mergePartnerSpotlightBrands(
+  extra: PartnerLogo[],
+  base: PartnerLogo[] = PARTNER_SPOTLIGHT_BRANDS
+): PartnerLogo[] {
+  const seen = new Set(base.map((l) => l.src))
+  const out = [...base]
   for (const logo of extra) {
     const src = logo.src.trim()
     if (!src || seen.has(src)) continue

@@ -102,7 +102,27 @@ export async function PATCH(
     if (!updated) {
       return NextResponse.json({ error: 'Update failed' }, { status: 500 })
     }
-    return NextResponse.json({ partner: redactTenant(updated) })
+
+    // Discord → site: suspending a partner tenant removes Partner Spotlight banners / creator allowlist.
+    let retire: Awaited<ReturnType<typeof import('@/lib/partners/retire-partner').retirePartnerCommunity>> | null =
+      null
+    if (patch.status === 'suspended') {
+      const { retirePartnerCommunity } = await import('@/lib/partners/retire-partner')
+      retire = await retirePartnerCommunity({ tenantId: id, skipTenantSuspend: true })
+    }
+
+    return NextResponse.json({
+      partner: redactTenant(updated),
+      ...(retire
+        ? {
+            retire: {
+              deactivatedCreatorWallets: retire.deactivatedCreatorWallets,
+              deactivatedBrandSlugs: retire.deactivatedBrandSlugs,
+              messages: retire.messages,
+            },
+          }
+        : {}),
+    })
   } catch (error) {
     console.error('[admin/discord-giveaway-partners PATCH]', error)
     return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 })
