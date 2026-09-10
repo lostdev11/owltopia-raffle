@@ -212,5 +212,31 @@ export async function handleDiscordApplicationCommand(
     )
   }
 
+  if (sub === 'retire') {
+    if (!access.isFounder) {
+      return ephemeral(
+        'Only Owltopia founders (Owl Vision admins with Discord linked) can retire partners and remove site banners.'
+      )
+    }
+    const name = (strOptions.name ?? '').trim()
+    try {
+      const { retirePartnerCommunity } = await import('@/lib/partners/retire-partner')
+      const result = await retirePartnerCommunity({
+        guildId: name ? undefined : guildId,
+        brandName: name || undefined,
+      })
+      const lines = [
+        '**Partner retire (Discord → site)**',
+        ...result.messages,
+        '',
+        'Partner Spotlight updates within about a minute (API cache).',
+      ]
+      return ephemeral(lines.join('\n'))
+    } catch (e) {
+      console.error('owltopia-partner retire:', e)
+      return ephemeral('Could not retire partner (database error). Check logs / migrations (237_partner_spotlight_brands).')
+    }
+  }
+
   return ephemeral('Unknown subcommand.')
 }

@@ -147,7 +147,30 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ w
     }
 
     clearPartnerCommunityWalletCache()
-    return NextResponse.json({ creator: row })
+
+    // Deactivating a creator should also drop matching Partner Spotlight brands from the site.
+    let retire: Awaited<ReturnType<typeof import('@/lib/partners/retire-partner').retirePartnerCommunity>> | null =
+      null
+    if (patch.is_active === false) {
+      const { retirePartnerCommunity } = await import('@/lib/partners/retire-partner')
+      retire = await retirePartnerCommunity({
+        creatorWallet: workingWallet,
+        brandName: row.display_label,
+        skipTenantSuspend: true,
+      })
+    }
+
+    return NextResponse.json({
+      creator: row,
+      ...(retire
+        ? {
+            retire: {
+              deactivatedBrandSlugs: retire.deactivatedBrandSlugs,
+              messages: retire.messages,
+            },
+          }
+        : {}),
+    })
   } catch (error) {
     console.error('[admin/partner-community-creators PATCH]', error)
     return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 })
@@ -168,9 +191,32 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
       return NextResponse.json({ error: 'Invalid wallet in path' }, { status: 400 })
     }
 
+    const existing = await getPartnerCommunityCreatorByWallet(creator_wallet)
     await deletePartnerCommunityCreator(creator_wallet)
     clearPartnerCommunityWalletCache()
-    return NextResponse.json({ ok: true })
+
+    let retire: Awaited<ReturnType<typeof import('@/lib/partners/retire-partner').retirePartnerCommunity>> | null =
+      null
+    if (existing?.display_label || existing?.discord_partner_tenant_id) {
+      const { retirePartnerCommunity } = await import('@/lib/partners/retire-partner')
+      retire = await retirePartnerCommunity({
+        tenantId: existing.discord_partner_tenant_id,
+        brandName: existing.display_label,
+        skipTenantSuspend: true,
+      })
+    }
+
+    return NextResponse.json({
+      ok: true,
+      ...(retire
+        ? {
+            retire: {
+              deactivatedBrandSlugs: retire.deactivatedBrandSlugs,
+              messages: retire.messages,
+            },
+          }
+        : {}),
+    })
   } catch (error) {
     console.error('[admin/partner-community-creators DELETE]', error)
     return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 })

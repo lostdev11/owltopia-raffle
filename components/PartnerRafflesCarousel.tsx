@@ -284,12 +284,8 @@ export function PartnerRafflesCarousel({
     const fromLiveRaffles = spotlightHrefPool
       .map((item) => getPartnerSpotlightLogo(item.raffle))
       .filter((l): l is PartnerLogo => l != null)
-    // API returns static + DB logos; also fold in any live-raffle stored logos.
-    const dynamicExtras = [
-      ...spotlightBrands.filter((l) => !PARTNER_SPOTLIGHT_BRANDS.some((b) => b.src === l.src)),
-      ...fromLiveRaffles,
-    ]
-    const strip = mergePartnerSpotlightBrands(dynamicExtras)
+    // Prefer API/DB brands (supports Discord retire). Fold in live-raffle logos only.
+    const strip = mergePartnerSpotlightBrands(fromLiveRaffles, spotlightBrands)
 
     return strip.map((logo) => {
       const match = spotlightHrefPool.find((item) => {

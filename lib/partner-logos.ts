@@ -11,9 +11,7 @@ const LOGO_ASSETS = {
   jesterOwl: { src: '/partners/jester-owl-logo.png', alt: 'Jester Owl partner logo' },
   smile: { src: '/partners/smile-logo.png', alt: 'Smile QR partner logo' },
   fuddy: { src: '/partners/fuddy-logo.png', alt: 'Fuddy partner logo' },
-  gearhead: { src: '/partners/gearhead-logo.png', alt: 'Gearhead Coin partner logo' },
   panda: { src: '/partners/panda-partner.png', alt: 'Roaring Panda partner logo' },
-  shonenSol: { src: '/partners/shonen-sol.png', alt: 'Shonen Sol partner logo' },
   communityMark: { src: '/partners/partner-community-mark.png', alt: 'Partner community logo' },
   uglyApeSquad: { src: '/partners/ugly-ape-squad-logo.png', alt: 'Ugly Ape Squad partner logo' },
   uglyMutantApeSquad: {
@@ -22,7 +20,6 @@ const LOGO_ASSETS = {
   },
   shaolinSaga: { src: '/partners/shaolin-saga-logo.png', alt: 'Shaolin Saga partner logo' },
   leSharx: { src: '/partners/lesharx-logo.png', alt: 'LeSharx partner logo' },
-  eapes: { src: '/partners/eapes-logo.png', alt: 'Eapes partner logo' },
   theMisfitsOrder: {
     src: '/partners/the-misfits-order-logo.png',
     alt: 'The Misfits Order partner logo',
@@ -35,15 +32,12 @@ export const PARTNER_SPOTLIGHT_BRANDS: PartnerLogo[] = [
   LOGO_ASSETS.jesterOwl,
   LOGO_ASSETS.smile,
   LOGO_ASSETS.fuddy,
-  LOGO_ASSETS.gearhead,
   LOGO_ASSETS.panda,
-  LOGO_ASSETS.shonenSol,
   LOGO_ASSETS.communityMark,
   LOGO_ASSETS.uglyApeSquad,
   LOGO_ASSETS.uglyMutantApeSquad,
   LOGO_ASSETS.shaolinSaga,
   LOGO_ASSETS.leSharx,
-  LOGO_ASSETS.eapes,
   LOGO_ASSETS.theMisfitsOrder,
 ]
 
@@ -58,14 +52,11 @@ export const PARTNER_SPOTLIGHT_LOGO_BY_WALLET: Record<string, PartnerLogo> = {}
 /** Order matters: first match wins (prefer more specific patterns). */
 const SPOTLIGHT_LABEL_MATCHES: { pattern: RegExp; logo: PartnerLogo }[] = [
   { pattern: /sharky|sharkyfi/i, logo: LOGO_ASSETS.sharkyfi },
-  { pattern: /\bshonen\b|shōnen|shonen\s*sol/i, logo: LOGO_ASSETS.shonenSol },
-  { pattern: /gearhead/i, logo: LOGO_ASSETS.gearhead },
   { pattern: /jester/i, logo: LOGO_ASSETS.jesterOwl },
   { pattern: /roaring\s*panda|panda\s*partner|^panda$/i, logo: LOGO_ASSETS.panda },
   { pattern: /fuddy/i, logo: LOGO_ASSETS.fuddy },
   { pattern: /shaolin\s*saga|\bshaolin\b/i, logo: LOGO_ASSETS.shaolinSaga },
   { pattern: /le\s*sharx|\blesharx\b/i, logo: LOGO_ASSETS.leSharx },
-  { pattern: /\beapes\b/i, logo: LOGO_ASSETS.eapes },
   { pattern: /mis\s*fits\s*order|\bmisfits\b/i, logo: LOGO_ASSETS.theMisfitsOrder },
   { pattern: /ugly\s*mutant\s*ape|mutant\s*ape\s*squad/i, logo: LOGO_ASSETS.uglyMutantApeSquad },
   { pattern: /ugly\s*ape\s*squad|\buas\b/i, logo: LOGO_ASSETS.uglyApeSquad },
@@ -119,11 +110,15 @@ export function partnerLogoFromCommunityRow(row: {
 }
 
 /**
- * Static brand strip plus dynamic logos from approved partner creators (deduped by src).
+ * Base brand strip plus dynamic logos from approved partner creators (deduped by src).
+ * Pass DB-backed brands as `base` when `partner_spotlight_brands` is available.
  */
-export function mergePartnerSpotlightBrands(extra: PartnerLogo[]): PartnerLogo[] {
-  const seen = new Set(PARTNER_SPOTLIGHT_BRANDS.map((l) => l.src))
-  const out = [...PARTNER_SPOTLIGHT_BRANDS]
+export function mergePartnerSpotlightBrands(
+  extra: PartnerLogo[],
+  base: PartnerLogo[] = PARTNER_SPOTLIGHT_BRANDS
+): PartnerLogo[] {
+  const seen = new Set(base.map((l) => l.src))
+  const out = [...base]
   for (const logo of extra) {
     const src = logo.src.trim()
     if (!src || seen.has(src)) continue
@@ -139,15 +134,6 @@ const PLACEHOLDER_SRC = '/partners/partner-slot-placeholder.svg'
 export function partnerSpotlightImageCandidates(primarySrc: string): string[] {
   const slot = PLACEHOLDER_SRC
   // Raster uploads win over bundled SVG when present (checked first).
-  if (primarySrc.includes('shonen-sol')) {
-    return [
-      '/partners/shonen-sol.png',
-      '/partners/shonen-sol.gif',
-      '/partners/shonen-sol.webp',
-      '/partners/shonen-sol.svg',
-      slot,
-    ]
-  }
   if (primarySrc.includes('partner-community-mark')) {
     return [
       '/partners/partner-community-mark.png',

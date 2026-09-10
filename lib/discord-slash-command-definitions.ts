@@ -70,6 +70,21 @@ export const OWLTOPIA_PARTNER_SLASH_COMMAND = {
       description: 'Show partner Discord link, webhook, and API status for this server',
       type: 1,
     },
+    {
+      name: 'retire',
+      description:
+        'Owl Vision founders only — suspend this Discord partner link and remove Partner Spotlight banners on the site',
+      type: 1,
+      options: [
+        {
+          name: 'name',
+          description:
+            'Partner / brand name to retire (optional if retiring the partner linked to this server)',
+          type: 3,
+          required: false,
+        },
+      ],
+    },
   ],
 } as const
 
