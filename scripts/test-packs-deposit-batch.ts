@@ -12,6 +12,10 @@ import {
   rewriteOwlSendCopyForPacks,
   walletNftsToPackDepositLines,
 } from '@/lib/packs/deposit-nft-batch-plan'
+import {
+  formatPackDepositError,
+  PACK_DEPOSIT_RPC_NETWORK_ERROR,
+} from '@/lib/packs/deposit-requirements'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
 
 function nft(
@@ -87,5 +91,19 @@ assert.deepEqual(
   [2, 2]
 )
 assert.deepEqual(halvePackDepositChunk([1]), [[1]])
+
+// RPC flake copy — Gen2 packs inventory screenshot showed raw "Failed to fetch"
+assert.equal(formatPackDepositError('Failed to fetch'), PACK_DEPOSIT_RPC_NETWORK_ERROR)
+assert.equal(formatPackDepositError('TypeError: Failed to fetch'), PACK_DEPOSIT_RPC_NETWORK_ERROR)
+assert.equal(formatPackDepositError('NetworkError when attempting to fetch resource.'), PACK_DEPOSIT_RPC_NETWORK_ERROR)
+assert.equal(
+  formatPackDepositError(PACK_DEPOSIT_RPC_NETWORK_ERROR),
+  PACK_DEPOSIT_RPC_NETWORK_ERROR
+)
+assert.match(
+  formatPackDepositError('Transaction simulation failed: Blockhash not found'),
+  /expired|blockhash|Phantom/i
+)
+assert.equal(formatPackDepositError('Account is frozen'), 'Account is frozen')
 
 console.log('test-packs-deposit-batch: ok')

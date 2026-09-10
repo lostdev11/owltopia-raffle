@@ -14,7 +14,12 @@ import {
   OWL_SEND_BUILD_TIMEOUT_MS,
   withOwlSendTimeout,
 } from '@/lib/owl-send/confirm'
+import { isOwlSendRpcNetworkError } from '@/lib/owl-send/rpc-network-error'
 import { isOwlSendPacketSizeError } from '@/lib/owl-send/tx-size'
+import {
+  formatPackDepositError,
+  PACK_DEPOSIT_RPC_NETWORK_ERROR,
+} from '@/lib/packs/deposit-requirements'
 import { buildOwlSendSplNftTransaction } from '@/lib/owl-send/send-spl-nft-batch'
 import { sendOwlSendSplNftBatch } from '@/lib/owl-send/send-spl-nft-batch'
 import {
@@ -225,40 +230,59 @@ export async function depositPackInventoryNfts(params: {
   }
 
   if (classic.length > 0) {
-    const builtResult = await buildClassicPackTxs({
+    const buildArgs = {
       connection: params.connection,
       owner: params.owner,
       vaultAddress: params.vaultAddress,
       nfts: classic,
       onProgress: params.onProgress,
-    })
+    }
+    // Browser RPC flakes ("Failed to fetch") during Gen2 SPL builds — retry before fallback.
+    let builtResult = await buildClassicPackTxs(buildArgs)
+    for (let rpcAttempt = 0; !builtResult.ok && rpcAttempt < 2; rpcAttempt++) {
+      if (!isOwlSendRpcNetworkError(builtResult.error)) break
+      params.onProgress?.(
+        `Solana RPC flake while building deposit (${rpcAttempt + 1}/2) — retrying…`
+      )
+      await new Promise((r) => setTimeout(r, 700 * (rpcAttempt + 1)))
+      builtResult = await buildClassicPackTxs(buildArgs)
+    }
 
     if (!builtResult.ok) {
-      // Fall back: each classic NFT via the TM/SPL single path so deposit still works.
-      params.onProgress?.(
-        `Batch build failed (${builtResult.error}). Falling back to one-at-a-time…`
-      )
-      for (const nft of classic) {
-        params.onProgress?.(`Depositing ${nft.name || nft.mint.slice(0, 8)}… (single)`)
-        const dep = await depositPrizeNftToEscrowFromWallet({
-          connection: params.connection,
-          publicKey: params.owner,
-          sendTransaction: params.sendTransaction,
-          walletAdapter: params.walletAdapter,
-          selectedNft: nft,
-          prizeMintAddress: nft.mint,
-          escrowAddress: params.vaultAddress,
-          logCtx: {
-            raffleId: 'packs-inventory',
-            nftMint: nft.mint,
-            transferAssetId: nft.mint,
+      const rpcFriendly = formatPackDepositError(builtResult.error)
+      // If RPC is still dead, do not hammer N one-at-a-time deposits with the same error.
+      if (isOwlSendRpcNetworkError(builtResult.error)) {
+        params.onProgress?.(rpcFriendly)
+        for (const nft of classic) {
+          failed.push({ mint: nft.mint, error: PACK_DEPOSIT_RPC_NETWORK_ERROR })
+        }
+      } else {
+        // Fall back: each classic NFT via the TM/SPL single path so deposit still works.
+        params.onProgress?.(
+          `Batch build failed (${builtResult.error}). Falling back to one-at-a-time…`
+        )
+        for (const nft of classic) {
+          params.onProgress?.(`Depositing ${nft.name || nft.mint.slice(0, 8)}… (single)`)
+          const dep = await depositPrizeNftToEscrowFromWallet({
+            connection: params.connection,
+            publicKey: params.owner,
+            sendTransaction: params.sendTransaction,
+            walletAdapter: params.walletAdapter,
+            selectedNft: nft,
+            prizeMintAddress: nft.mint,
             escrowAddress: params.vaultAddress,
-            fromWallet: params.owner.toBase58(),
-          },
-        })
-        if (dep.ok) deposited.push({ mint: nft.mint, signature: dep.signature })
-        else failed.push({ mint: nft.mint, error: dep.error })
-        await new Promise((r) => setTimeout(r, packDepositApprovalGapMs()))
+            logCtx: {
+              raffleId: 'packs-inventory',
+              nftMint: nft.mint,
+              transferAssetId: nft.mint,
+              escrowAddress: params.vaultAddress,
+              fromWallet: params.owner.toBase58(),
+            },
+          })
+          if (dep.ok) deposited.push({ mint: nft.mint, signature: dep.signature })
+          else failed.push({ mint: nft.mint, error: formatPackDepositError(dep.error) })
+          await new Promise((r) => setTimeout(r, packDepositApprovalGapMs()))
+        }
       }
     } else if (builtResult.built.length > 0) {
       const lineBatches = builtResult.built.map((b) => b.lines)

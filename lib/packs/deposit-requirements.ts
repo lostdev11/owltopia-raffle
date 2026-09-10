@@ -1,3 +1,4 @@
+import { isOwlSendRpcNetworkError } from '@/lib/owl-send/rpc-network-error'
 import { PACK_NFT_MAX_FAIR_SOL, PACK_NFT_MIN_FAIR_SOL } from '@/lib/packs/config'
 
 export type PackDepositRequirement = {
@@ -5,6 +6,10 @@ export type PackDepositRequirement = {
   label: string
   met: boolean
 }
+
+/** Actionable copy when browser Solana RPC flakes during packs inventory deposit. */
+export const PACK_DEPOSIT_RPC_NETWORK_ERROR =
+  'Could not reach Solana RPC while building the packs deposit. Refresh and retry in a moment. If it keeps failing, switch Wi‑Fi/mobile data, pause VPN, and confirm Phantom is on the same network as this site.'
 
 export function packDepositRequirements(input: {
   vaultAddress: string | null
@@ -73,6 +78,10 @@ export function packDepositDisabledReason(input: {
 /** Map wallet / RPC errors to actionable copy for pack inventory deposit. */
 export function formatPackDepositError(message: string): string {
   const m = message.toLowerCase()
+  // Check RPC flakes before blockhash/expired — "Failed to fetch" must not stay raw.
+  if (isOwlSendRpcNetworkError(message)) {
+    return PACK_DEPOSIT_RPC_NETWORK_ERROR
+  }
   if (
     m.includes('expired') ||
     m.includes('blockhash') ||

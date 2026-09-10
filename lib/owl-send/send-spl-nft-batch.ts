@@ -52,6 +52,7 @@ import {
 } from '@/lib/solana/phantom-presimulate'
 import { sendTransactionWithTimeout } from '@/lib/solana/send-transaction-with-timeout'
 import { tokenRecordAccountExists } from '@/lib/solana/nft-transfer-lock'
+import { withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
 
 export type OwlSendBatchResult =
   | { ok: true; signature: string; newAtaCount: number; sentMints?: string[] }
@@ -188,9 +189,12 @@ export async function buildOwlSendSplNftTransaction(params: {
   // Fail during "building" if any source ATA is nest-locked frozen — do not enter
   // "Approve in wallet". pNFT rule-set freeze (Token Record) is NOT a nest lock —
   // route those to the Token Metadata special path instead of "Account is frozen".
-  const sourceInfos = await connection.getMultipleAccountsInfo(
-    resolved.map((r) => r.tokenAccount),
-    'processed'
+  // Browser RPC flakes ("Failed to fetch") are common — retry before failing Gen2 packs deposits.
+  const sourceInfos = await withSolanaRpcRetry(() =>
+    connection.getMultipleAccountsInfo(
+      resolved.map((r) => r.tokenAccount),
+      'processed'
+    )
   )
   const frozenCandidates: string[] = []
   const revokeIndexes = new Set<number>()
@@ -267,13 +271,17 @@ export async function buildOwlSendSplNftTransaction(params: {
   }
 
   // One RPC for all destination ATAs (processed = faster; missing → create ATA ix).
-  const destInfos = await connection.getMultipleAccountsInfo(
-    resolved.map((r) => r.destAta),
-    'processed'
+  const destInfos = await withSolanaRpcRetry(() =>
+    connection.getMultipleAccountsInfo(
+      resolved.map((r) => r.destAta),
+      'processed'
+    )
   )
 
   // Attach blockhash once so Phantom/adapter do not hang on getLatestBlockhash during "approve".
-  const { blockhash } = await connection.getLatestBlockhash('processed')
+  const { blockhash } = await withSolanaRpcRetry(() =>
+    connection.getLatestBlockhash('processed')
+  )
 
   const assemble = (count: number, includeRevoke: boolean) => {
     const slice = resolved.slice(0, count)
