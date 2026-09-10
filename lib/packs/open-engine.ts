@@ -321,6 +321,7 @@ export async function confirmAndOpenPack(input: {
         fair_value_sol: Number(r.fair_value_sol),
         name: r.name,
         image_url: r.image_url,
+        odds_tier: r.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard',
       }))
     )
     nftPoolSnapshot = nftPoolSnapshotForStorage(pool)
@@ -350,6 +351,7 @@ export async function confirmAndOpenPack(input: {
           fair_value_sol: Number(r.fair_value_sol),
           name: r.name,
           image_url: r.image_url,
+          odds_tier: r.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard',
         }))
       )
       nftPoolSnapshot = nftPoolSnapshotForStorage(second.pool)

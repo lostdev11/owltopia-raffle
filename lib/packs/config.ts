@@ -3,11 +3,11 @@
  *
  * - Pack price: 0.1 SOL
  * - Every open wins
- * - Categories: 60% OWL / 20% SOL / 20% NFT
- * - Scales: OWL 10–50, SOL 0.02–0.08 (at 0.1 SOL pack), NFT 0.05+ SOL
- * - Target RTP: 80% (EV ≈ 0.08 SOL per open)
+ * - Categories: 30% OWL / 30% SOL / 40% NFT (Gembird retune)
+ * - Scales: OWL 10–50, SOL 0.05–0.5 (at 0.1 SOL pack), NFT 0.05+ SOL
+ * - Target RTP: 80% baseline (EV sim after retune; do not dilute ladder to force it)
  * - OWL wins pay $OWL to the buyer wallet (no separate raffle-ticket credits)
- * - NFT picks: inverse floor-price weights (higher FP = rarer)
+ * - NFT picks: inverse FP within pool; admin `odds_tier=premium_1pct` shares ~1% overall hit
  * - Randomness: Switchboard VRF by default (PACK_VRF_ENABLED=false for local commit–reveal)
  */
 
@@ -28,9 +28,9 @@ export type PackPrizeCategory = PackRegularCategory | 'jackpot'
 
 /** Category weights in basis points (must sum to 10_000; jackpot is a separate pre-roll) */
 export const PACK_CATEGORY_WEIGHTS_BPS: Record<PackRegularCategory, number> = {
-  owl: 6000,
-  sol: 2000,
-  nft: 2000,
+  owl: 3000,
+  sol: 3000,
+  nft: 4000,
 }
 
 /** Default OWL/SOL rate: 10 OWL = 0.1 SOL (0.01 SOL per OWL). Overridable in admin. */
@@ -67,7 +67,7 @@ export type PackNftValueBand = {
 
 /**
  * Bottom-heavy OWL ladder (10 → 50 OWL). At 0.01 SOL/OWL, 10 OWL = pack price.
- * ~98% of OWL wins are 10 OWL so 0.1 SOL pack + 60% OWL category can hit 80% RTP.
+ * ~98% of OWL wins are 10 OWL (category share now 30%).
  */
 export const PACK_OWL_TIERS: PackOwlTier[] = [
   { category: 'owl', amount: 10, weight: 980, fairValueSol: 0.1 },
@@ -75,12 +75,18 @@ export const PACK_OWL_TIERS: PackOwlTier[] = [
   { category: 'owl', amount: 50, weight: 5, fairValueSol: 0.5 },
 ]
 
-/** Bottom-heavy SOL ladder sized for 0.1 SOL pack + 10–50 OWL prizes. */
+/**
+ * Gembird SOL ladder (within-SOL %). Spec summed to 90%; missing 10% absorbed into 0.05.
+ * Weights: 60 / 10 / 10 / 10 / 5 / 3 / 2.
+ */
 export const PACK_SOL_TIERS: PackSolTier[] = [
-  { category: 'sol', amountSol: 0.02, weight: 500 },
-  { category: 'sol', amountSol: 0.04, weight: 300 },
-  { category: 'sol', amountSol: 0.06, weight: 150 },
-  { category: 'sol', amountSol: 0.08, weight: 50 },
+  { category: 'sol', amountSol: 0.05, weight: 60 },
+  { category: 'sol', amountSol: 0.06, weight: 10 },
+  { category: 'sol', amountSol: 0.07, weight: 10 },
+  { category: 'sol', amountSol: 0.08, weight: 10 },
+  { category: 'sol', amountSol: 0.1, weight: 5 },
+  { category: 'sol', amountSol: 0.2, weight: 3 },
+  { category: 'sol', amountSol: 0.5, weight: 2 },
 ]
 
 /**
@@ -136,6 +142,31 @@ export const PACK_OPEN_ALGO_V2_VRF = 'owltopia-pack-open-v2-vrf' as const
 
 /** @deprecated Prefer PACK_OPEN_ALGO_V1 / resolvePackOpenAlgo() */
 export const PACK_OPEN_ALGO = PACK_OPEN_ALGO_V1
+
+
+/** Admin-flagged NFT odds tier (DB: pack_inventory.odds_tier). */
+export type PackNftOddsTier = 'standard' | 'premium_1pct'
+
+export const PACK_NFT_ODDS_TIERS: PackNftOddsTier[] = ['standard', 'premium_1pct']
+
+export function isPackNftOddsTier(value: unknown): value is PackNftOddsTier {
+  return value === 'standard' || value === 'premium_1pct'
+}
+
+/**
+ * Overall chance an open hits the premium NFT pool (100 bps = 1%).
+ * Applied after NFT category: premium roll ≈ overall_bps / nft_category_share.
+ */
+export const PACK_PREMIUM_NFT_OVERALL_BPS = 100
+
+/** Premium roll within NFT category, in bps of that category (overall 1% / 40% NFT = 2.5%). */
+export function packPremiumNftRollBpsWithinNftCategory(
+  overallBps: number = PACK_PREMIUM_NFT_OVERALL_BPS,
+  nftCategoryBps: number = PACK_CATEGORY_WEIGHTS_BPS.nft
+): number {
+  if (!(nftCategoryBps > 0)) return 0
+  return Math.min(10_000, Math.round((overallBps * 10_000) / nftCategoryBps))
+}
 
 export function packPriceLamports(): bigint {
   return BigInt(Math.round(PACK_PRICE_SOL * 1_000_000_000))

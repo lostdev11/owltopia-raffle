@@ -47,10 +47,11 @@ Buying stays off until a full admin turns packs on (`pack_vault_config.paused`):
 |------|--------|
 | Pack price | **0.1 SOL** |
 | Outcome | Every pack wins |
-| Categories | **60% $OWL · 20% SOL · 20% NFT** |
+| Categories | **30% $OWL · 30% SOL · 40% NFT** |
 | OWL scale | **10 → 50** (10 OWL = 0.1 SOL at default rate) |
-| SOL scale | 0.02 → 0.08 SOL (sized for 0.1 SOL pack + 10–50 OWL) |
+| SOL scale | 0.05 → 0.5 SOL (Gembird ladder; 0.1 / 0.2 / 0.5 chase tiers) |
 | NFT fair value | 0.05+ SOL (admin-tagged, up to 50 SOL); **higher FP = rarer** |
+| NFT 1% tier | Admin `odds_tier=premium_1pct` (Owltopia Gen1/Gen2/Coins + optional chase); **~1% overall** shared pool; FP still weights within pool |
 | RTP target | **80%** (EV ≈ 0.08 SOL / open) |
 | OWL win UX | “You won N $OWL — sent to your wallet” |
 | UX | Instant rip (`/packs`) |
@@ -101,3 +102,17 @@ Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payo
 ## Legal / ToS posture
 
 Chance-based paid entertainment. Before public launch: geo restrictions, 18+ copy, and utility framing vs gambling wording are an ops/legal decision. Code surfaces odds disclosure and RTP target; it does not replace counsel review.
+
+
+## Ops: 1% chase inventory
+
+Deposit filler NFTs as **standard** (default). Flag Owltopia Gen1 / Gen2 / Coins — and optional chase partners (Y00ts, Okay Bears, Gainz) — as **1% tier** in Admin → Packs (`odds_tier = premium_1pct`).
+
+Those flagged mints share a **~1% overall** hit rate (independent of floor). Floor still sets inverse-FP weights *inside* the premium pool and *inside* the standard pool.
+
+Before public rip:
+
+1. Fund vault SOL for the Gembird ladder (including rare **0.5 SOL** hits).
+2. Stock standard filler NFTs for the ~39% NFT mass.
+3. Stock at least a few `premium_1pct` NFTs or the 1% roll falls back to standard.
+4. Run `npm run packs:ev-simulator` and `npm run test:packs-open-rng`.

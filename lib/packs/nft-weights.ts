@@ -9,6 +9,7 @@ import {
   PACK_NFT_MIN_FAIR_SOL,
   PACK_NFT_WEIGHT_BASELINE_FAIR_SOL,
   isPackNftFairValueSol,
+  type PackNftOddsTier,
 } from '@/lib/packs/config'
 
 export type NftPoolEntry = {
@@ -17,6 +18,7 @@ export type NftPoolEntry = {
   fair_value_sol: number
   name?: string | null
   image_url?: string | null
+  odds_tier?: PackNftOddsTier
 }
 
 export type WeightedNftPoolEntry = NftPoolEntry & {
@@ -75,12 +77,14 @@ export function nftPoolSnapshotForStorage(pool: WeightedNftPoolEntry[]): {
   mint: string
   fair_value_sol: number
   weight: number
+  odds_tier: PackNftOddsTier
 }[] {
   return pool.map((p) => ({
     id: p.id,
     mint: p.mint_address,
     fair_value_sol: p.fair_value_sol,
     weight: p.weight,
+    odds_tier: p.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard',
   }))
 }
 
@@ -89,6 +93,7 @@ export type NftPoolSnapshotRow = {
   mint: string
   fair_value_sol: number
   weight: number
+  odds_tier?: PackNftOddsTier
 }
 
 export function poolFromSnapshot(snapshot: NftPoolSnapshotRow[]): WeightedNftPoolEntry[] {
@@ -97,5 +102,19 @@ export function poolFromSnapshot(snapshot: NftPoolSnapshotRow[]): WeightedNftPoo
     mint_address: s.mint,
     fair_value_sol: s.fair_value_sol,
     weight: s.weight,
+    odds_tier: s.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard',
   }))
+}
+
+export function splitNftPoolByOddsTier(inventory: NftPoolEntry[]): {
+  premium: NftPoolEntry[]
+  standard: NftPoolEntry[]
+} {
+  const premium: NftPoolEntry[] = []
+  const standard: NftPoolEntry[] = []
+  for (const row of inventory) {
+    if (row.odds_tier === 'premium_1pct') premium.push(row)
+    else standard.push(row)
+  }
+  return { premium, standard }
 }

@@ -7,11 +7,14 @@ import {
   getPackVaultConfig,
   listPackInventory,
   removePackInventoryNft,
+  updatePackInventoryOddsTier,
   updatePackVaultConfig,
 } from '@/lib/packs/db'
 import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
 import { isPackInventoryPrizeStandard } from '@/lib/packs/types'
-import { isPackNftFairValueSol, PACK_NFT_MAX_FAIR_SOL, PACK_NFT_MIN_FAIR_SOL } from '@/lib/packs/config'
+import { isPackNftFairValueSol, PACK_NFT_MAX_FAIR_SOL, PACK_NFT_MIN_FAIR_SOL,
+  isPackNftOddsTier,
+} from '@/lib/packs/config'
 import {
   getPacksVaultPublicKey,
   getPacksVaultSolBalance,
@@ -87,6 +90,18 @@ export async function PATCH(request: NextRequest) {
 
   try {
     const body = await request.json().catch(() => ({}))
+
+    if (typeof body.inventory_id === 'string' && body.odds_tier != null) {
+      if (!isPackNftOddsTier(body.odds_tier)) {
+        return NextResponse.json(
+          { error: 'odds_tier must be standard or premium_1pct' },
+          { status: 400 }
+        )
+      }
+      const item = await updatePackInventoryOddsTier(body.inventory_id.trim(), body.odds_tier)
+      return NextResponse.json({ ok: true, item })
+    }
+
     const patch: Parameters<typeof updatePackVaultConfig>[0] = {}
 
     if (typeof body.paused === 'boolean') patch.paused = body.paused
@@ -170,12 +185,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const oddsTierRaw = body.odds_tier
+    const odds_tier =
+      oddsTierRaw == null || oddsTierRaw === ''
+        ? 'standard'
+        : oddsTierRaw
+    if (!isPackNftOddsTier(odds_tier)) {
+      return NextResponse.json(
+        { error: 'odds_tier must be standard or premium_1pct' },
+        { status: 400 }
+      )
+    }
+
     const row = await addPackInventoryNft({
       mint_address: mint,
       name: typeof body.name === 'string' ? body.name : null,
       image_url: typeof body.image_url === 'string' ? body.image_url : null,
       fair_value_sol: fair,
       prize_standard,
+      odds_tier,
     })
     return NextResponse.json({ ok: true, item: row })
   } catch (e) {
