@@ -67,6 +67,7 @@ export async function GET() {
         fair_value_sol: Number(r.fair_value_sol),
         name: r.name,
         image_url: r.image_url,
+        odds_tier: r.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard',
       })),
     })
 
@@ -85,6 +86,7 @@ export async function GET() {
       odds: {
         owlTiers: oddsPct.owlTiers,
         solTiers: oddsPct.solTiers,
+        premiumNft: oddsPct.premiumNft,
         nftInventory: oddsPct.nftInventory.slice(0, 40),
         nftBands: PACK_NFT_VALUE_BANDS.map((b) => ({
           min: b.minFairValueSol,

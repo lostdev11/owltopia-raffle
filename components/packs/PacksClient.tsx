@@ -62,7 +62,20 @@ type PacksConfig = {
       weight: number
       percentOfCategory: number
       percentOverall: number
+      oddsTier?: 'standard' | 'premium_1pct'
     }[]
+    premiumNft?: {
+      overallPercent: number
+      overallBps: number
+      items: {
+        mint: string
+        name: string | null
+        fairValueSol: number
+        weight: number
+        percentOfPremiumPool: number
+        percentOverall: number
+      }[]
+    }
     nftBands: { min: number; max: number; weight: number }[]
   }
   fairness?: {
@@ -236,7 +249,7 @@ export function PacksClient({
       : null
   const showReveal = phase === 'reveal' && !!result
   const showExperience = phase === 'experience' && !!result
-  const weights = config?.product.categoryWeightsBps ?? { owl: 6000, sol: 2000, nft: 2000 }
+  const weights = config?.product.categoryWeightsBps ?? { owl: 3000, sol: 3000, nft: 4000 }
   const packsOpened = config?.recentOpens?.length ?? 0
   const phaseCaption =
     phase === 'paying'
@@ -664,12 +677,36 @@ export function PacksClient({
                 ))}
               </ul>
             </div>
+            <div className="sm:col-span-2 lg:col-span-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200/90">
+                1% chase NFTs (~{config?.odds.premiumNft?.overallPercent ?? 1}%)
+              </p>
+              <p className="mt-1 text-[11px] text-white/40">
+                Admin-flagged Owltopia / partner grails share this pool (not floor alone).
+              </p>
+              <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-sm text-[#A9CBB9]">
+                {(config?.odds.premiumNft?.items ?? []).length === 0 && (
+                  <li className="text-white/40">No 1% tier NFTs stocked yet</li>
+                )}
+                {(config?.odds.premiumNft?.items ?? []).map((n) => (
+                  <li key={`prem-${n.mint}`} className="flex justify-between gap-2">
+                    <span className="min-w-0 truncate">
+                      {n.name || `${n.mint.slice(0, 4)}…`}{' '}
+                      <span className="text-white/30">({n.fairValueSol} SOL)</span>
+                    </span>
+                    <span className="shrink-0 tabular-nums text-amber-200/80">
+                      {n.percentOverall}%
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00FF9C]/85">
                 NFT ({bpsToPercent(weights.nft)})
               </p>
               <p className="mt-1 text-[11px] text-white/40">
-                Higher floor = rarer. Showing live inventory odds.
+                Standard pool — higher floor = rarer. Live inventory odds.
               </p>
               <details className="group mt-2">
                 <summary

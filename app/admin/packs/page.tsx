@@ -53,6 +53,7 @@ type AdminPacksData = {
     image_url?: string | null
     fair_value_sol: number
     prize_standard?: string | null
+    odds_tier?: string | null
     status: string
   }[]
 }
@@ -142,6 +143,26 @@ export default function AdminPacksPage() {
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Remove failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function setInventoryOddsTier(id: string, odds_tier: 'standard' | 'premium_1pct') {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/admin/packs', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inventory_id: id, odds_tier }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Tier update failed')
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Tier update failed')
     } finally {
       setBusy(false)
     }
@@ -362,19 +383,36 @@ export default function AdminPacksPage() {
                             {item.fair_value_sol} SOL
                             {band ? ` · ${band}` : ''} ·{' '}
                             {packInventoryPrizeStandardLabel(item.prize_standard)} · {item.status}
+                            {item.odds_tier === 'premium_1pct' ? ' · 1% tier' : ''}
                           </p>
                         </div>
                       </div>
                       {item.status === 'available' && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="min-h-[44px] shrink-0 touch-manipulation"
-                          disabled={busy}
-                          onClick={() => void removeNft(item.id)}
-                        >
-                          Remove
-                        </Button>
+                        <div className="flex shrink-0 flex-col items-stretch gap-1 sm:flex-row">
+                          <Button
+                            size="sm"
+                            variant={item.odds_tier === 'premium_1pct' ? 'default' : 'outline'}
+                            className="min-h-[44px] touch-manipulation"
+                            disabled={busy}
+                            onClick={() =>
+                              void setInventoryOddsTier(
+                                item.id,
+                                item.odds_tier === 'premium_1pct' ? 'standard' : 'premium_1pct'
+                              )
+                            }
+                          >
+                            {item.odds_tier === 'premium_1pct' ? '1% on' : '1% off'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="min-h-[44px] touch-manipulation"
+                            disabled={busy}
+                            onClick={() => void removeNft(item.id)}
+                          >
+                            Remove
+                          </Button>
+                        </div>
                       )}
                     </li>
                   )

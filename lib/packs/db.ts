@@ -163,7 +163,9 @@ export async function addPackInventoryNft(input: {
   image_url?: string | null
   fair_value_sol: number
   prize_standard?: PackInventoryPrizeStandard
+  odds_tier?: PackNftOddsTier
 }): Promise<PackInventoryRow> {
+  const odds_tier = input.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard'
   const { data, error } = await getSupabaseAdmin()
     .from('pack_inventory')
     .insert({
@@ -173,6 +175,7 @@ export async function addPackInventoryNft(input: {
       image_url: input.image_url ?? null,
       fair_value_sol: input.fair_value_sol,
       prize_standard: input.prize_standard ?? 'spl',
+      odds_tier,
       status: 'available',
     })
     .select('*')
@@ -191,6 +194,24 @@ export async function removePackInventoryNft(id: string): Promise<void> {
 }
 
 /** Available NFTs eligible for packs open (min fair value enforced; no 0.5 SOL cap). */
+export async function updatePackInventoryOddsTier(
+  id: string,
+  oddsTier: PackNftOddsTier
+): Promise<PackInventoryRow> {
+  const odds_tier = oddsTier === 'premium_1pct' ? 'premium_1pct' : 'standard'
+  const { data, error } = await getSupabaseAdmin()
+    .from('pack_inventory')
+    .update({ odds_tier, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .in('status', ['available', 'reserved'])
+    .select('*')
+    .maybeSingle()
+  if (error) throw error
+  if (!data) throw new Error('Inventory item not found or not editable')
+  return data as PackInventoryRow
+}
+
+
 export async function listAvailableNftsForOpen(): Promise<PackInventoryRow[]> {
   const { data, error } = await getSupabaseAdmin()
     .from('pack_inventory')

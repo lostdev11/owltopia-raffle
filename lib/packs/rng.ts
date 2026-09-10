@@ -2,8 +2,10 @@ import { createHash } from 'node:crypto'
 import {
   PACK_CATEGORY_WEIGHTS_BPS,
   PACK_NFT_VALUE_BANDS,
+  PACK_PREMIUM_NFT_OVERALL_BPS,
   PACK_SOL_TIERS,
   owlTiersWithPrice,
+  packPremiumNftRollBpsWithinNftCategory,
   type PackPrizeCategory,
   type PackRegularCategory,
 } from '@/lib/packs/config'
@@ -11,6 +13,7 @@ import type { WeightedTierPick } from '@/lib/packs/types'
 import {
   buildWeightedNftPool,
   poolFromSnapshot,
+  splitNftPoolByOddsTier,
   type NftPoolEntry,
   type NftPoolSnapshotRow,
   type WeightedNftPoolEntry,
@@ -124,13 +127,39 @@ export function pickNftFromInventory(
   return pool[idx]!
 }
 
+/** True when the open should draw from the premium_1pct NFT pool (~1% overall). */
+export function pickPremiumNftRoll(
+  seed: string,
+  overallBps: number = PACK_PREMIUM_NFT_OVERALL_BPS
+): boolean {
+  const withinNftBps = packPremiumNftRollBpsWithinNftCategory(overallBps)
+  if (!(withinNftBps > 0)) return false
+  return hashMod(seed, 'nft:premium', 10_000) < withinNftBps
+}
+
+/**
+ * NFT category pick: ~1% overall into premium_1pct pool when stocked; else inverse-FP standard.
+ * `pool` is the weighted pool actually used for the pick (for verify snapshot).
+ */
 export function pickNftFromAvailableInventory(
   seed: string,
   inventory: NftPoolEntry[]
-): { pick: WeightedNftPoolEntry; pool: WeightedNftPoolEntry[] } {
-  const pool = buildWeightedNftPool(inventory)
+): {
+  pick: WeightedNftPoolEntry
+  pool: WeightedNftPoolEntry[]
+  usedPremiumPool: boolean
+} {
+  if (inventory.length === 0) throw new Error('No eligible NFTs in inventory')
+  const { premium, standard } = splitNftPoolByOddsTier(inventory)
+  const wantPremium = pickPremiumNftRoll(seed) && premium.length > 0
+  const source = wantPremium ? premium : standard.length > 0 ? standard : inventory
+  const pool = buildWeightedNftPool(source)
   if (pool.length === 0) throw new Error('No eligible NFTs in inventory')
-  return { pick: pickNftFromInventory(seed, pool), pool }
+  return {
+    pick: pickNftFromInventory(seed, pool),
+    pool,
+    usedPremiumPool: wantPremium,
+  }
 }
 
 export function pickNftFromSnapshot(

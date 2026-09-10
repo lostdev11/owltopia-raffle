@@ -49,6 +49,7 @@ export type AdminPacksInventoryItem = {
   image_url?: string | null
   fair_value_sol: number
   prize_standard?: PackInventoryPrizeStandard | string | null
+  odds_tier?: 'standard' | 'premium_1pct' | string | null
   status: string
 }
 
@@ -56,6 +57,8 @@ type DraftRow = {
   nft: WalletNft
   floor: string
   customFloor: boolean
+  /** When true, NFT enters the shared ~1% chase pool */
+  premium1pct: boolean
   depositSig?: string
   registerError?: string
   status: 'pending' | 'deposited' | 'registered' | 'failed'
@@ -83,6 +86,7 @@ async function registerInventoryNft(input: {
   name: string | null
   image_url: string | null
   prize_standard: PackInventoryPrizeStandard
+  odds_tier?: 'standard' | 'premium_1pct'
 }): Promise<void> {
   const res = await fetch('/api/admin/packs', {
     method: 'POST',
@@ -212,7 +216,7 @@ export function AdminPacksInventoryForm({
         if (prev.some((d) => walletNftMintMatches(d.nft.mint, nft.mint))) return prev
         return [
           ...prev,
-          { nft, floor: defaultFloor, customFloor: false, status: 'pending' },
+          { nft, floor: defaultFloor, customFloor: false, premium1pct: false, status: 'pending' },
         ]
       })
     },
@@ -232,7 +236,7 @@ export function AdminPacksInventoryForm({
         setFormError(null)
         return [
           ...prev,
-          { nft, floor: defaultFloor, customFloor: false, status: 'pending' },
+          { nft, floor: defaultFloor, customFloor: false, premium1pct: false, status: 'pending' },
         ]
       })
     },
@@ -345,6 +349,7 @@ export function AdminPacksInventoryForm({
             name: live.nft.name,
             image_url: live.nft.image,
             prize_standard: packsPrizeStandardForNft(live.nft),
+            odds_tier: live.premium1pct ? 'premium_1pct' : 'standard',
           })
           patch(live.nft.mint, {
             status: 'registered',
@@ -517,6 +522,28 @@ export function AdminPacksInventoryForm({
                       className="min-h-[44px] touch-manipulation"
                     />
                   </div>
+                  <label className="flex min-h-[44px] cursor-pointer items-center gap-2 pb-0.5 text-xs text-zinc-300">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 touch-manipulation accent-emerald-400"
+                      checked={row.premium1pct}
+                      disabled={busy || row.status === 'registered'}
+                      onChange={(e) => {
+                        const premium1pct = e.target.checked
+                        setDrafts((prev) =>
+                          prev.map((d) =>
+                            walletNftMintMatches(d.nft.mint, row.nft.mint)
+                              ? { ...d, premium1pct }
+                              : d
+                          )
+                        )
+                      }}
+                    />
+                    <span className="leading-tight">
+                      1% tier
+                      <span className="block text-[10px] text-zinc-500">Owltopia / chase NFTs</span>
+                    </span>
+                  </label>
                   <Button
                     type="button"
                     size="sm"

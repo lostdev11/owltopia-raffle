@@ -1,4 +1,6 @@
-import type { PackPrizeCategory } from '@/lib/packs/config'
+import type { PackNftOddsTier, PackPrizeCategory } from '@/lib/packs/config'
+
+export type { PackNftOddsTier }
 
 export type PackOpenStatus =
   | 'pending_payment'
@@ -73,6 +75,8 @@ export type PackInventoryRow = {
   image_url: string | null
   fair_value_sol: number
   prize_standard: PackInventoryPrizeStandard
+  /** standard = filler pool; premium_1pct = shared ~1% overall chase pool */
+  odds_tier: PackNftOddsTier
   status: PackInventoryStatus
   reserved_open_id: string | null
   paid_open_id: string | null
@@ -88,6 +92,7 @@ export type PackNftPoolSnapshotRow = {
   mint: string
   fair_value_sol: number
   weight: number
+  odds_tier?: PackNftOddsTier
 }
 
 export type PackOpenRow = {
