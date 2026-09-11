@@ -131,6 +131,7 @@ import {
   sendOwlSendTokensToOne,
 } from '@/lib/owl-send/send-tokens'
 import { packOwlSendTokenScatterLines } from '@/lib/owl-send/pack-token-scatter'
+import { withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
 import { recordOwlSendLedger } from '@/lib/owl-send/record-ledger'
 import { useOwlSendAdminAccess } from '@/lib/owl-send/use-owl-send-admin-access'
 import {
@@ -1727,6 +1728,12 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
           )
 
           try {
+            // One blockhash for the whole sign-all window — avoids N getLatestBlockhash
+            // calls that flake as "failed to get recent blockhash: Failed to fetch".
+            const { blockhash: windowBlockhash } = await withSolanaRpcRetry(
+              () => connection.getLatestBlockhash('processed'),
+              { retries: 4, baseDelayMs: 400 }
+            )
             const built: Array<{
               tx: import('@solana/web3.js').Transaction
               lines: OwlSendTokenScatterLine[]
@@ -1740,6 +1747,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                 lines,
                 feeDiscountBps: discountBps,
                 maxPerTx: OWL_SEND_MAX_PER_TX_TOKEN,
+                recentBlockhash: windowBlockhash,
               })
               if (!one.ok) throw new Error(one.error)
               built.push({ tx: one.tx, lines, newAtaCount: one.newAtaCount })
