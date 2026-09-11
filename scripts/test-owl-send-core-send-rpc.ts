@@ -10,6 +10,10 @@ const screenshot =
 
 assert.equal(isOwlSendRpcNetworkError(screenshot), true)
 assert.equal(isOwlSendRpcNetworkError('Failed to fetch'), true)
+assert.equal(
+  isOwlSendRpcNetworkError('failed to get recent blockhash: TypeError: Failed to fetch'),
+  true
+)
 assert.equal(isOwlSendRpcNetworkError('Account is frozen'), false)
 assert.equal(isOwlSendRpcNetworkError('token_metadata: Incorrect account owner'), false)
 
