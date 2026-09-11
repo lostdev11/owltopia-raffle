@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { consumeLaunchWlMints } from '@/lib/db/owl-center-launch-wl-wallets'
-import { partnerPhaseHasRedeemTokenBurn } from '@/lib/owl-center/partner-allowlist-phases'
+import { consumeLaunchWlMints, recordLaunchPhaseMintUsage } from '@/lib/db/owl-center-launch-wl-wallets'
+import { partnerPhaseHasRedeemTokenBurn, resolvePartnerPhaseWalletMintLimit } from '@/lib/owl-center/partner-allowlist-phases'
 import { buildSimpleMintEligibility } from '@/lib/owl-center/simple-mint-eligibility'
 import { getLaunchActiveAllowlistPhase, isLaunchWhitelistWindowOpen } from '@/lib/owl-center/launch-wl-window'
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
@@ -171,11 +171,19 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   }
 
   // Soft-consume launch WL spots after a successful (non-duplicate) confirm during the WL window.
-  // Free Mint Token (tokenBurn) phases skip soft WL — the SPL ticket is the gate.
+  // Free Mint Token (tokenBurn) phases skip soft WL *membership* but still record phase usage so
+  // soft supply (~1500) counts down via sumLaunchWlPhaseUsedMints.
   if (!row.duplicate_tx && isLaunchWhitelistWindowOpen(launch)) {
     const activePhase = getLaunchActiveAllowlistPhase(launch)
-    if (!partnerPhaseHasRedeemTokenBurn(activePhase)) {
-      const consumed = await consumeLaunchWlMints(launch.id, wallet, qty, activePhase?.key ?? 'wl')
+    const phaseKey = activePhase?.key ?? 'wl'
+    if (partnerPhaseHasRedeemTokenBurn(activePhase)) {
+      const allowed = resolvePartnerPhaseWalletMintLimit(activePhase, launch.wallet_mint_limit)
+      const recorded = await recordLaunchPhaseMintUsage(launch.id, wallet, qty, phaseKey, allowed)
+      if (!recorded.ok) {
+        console.error('recordLaunchPhaseMintUsage after confirm', slug, wallet, recorded.error)
+      }
+    } else {
+      const consumed = await consumeLaunchWlMints(launch.id, wallet, qty, phaseKey)
       if (!consumed.ok) {
         console.error('consumeLaunchWlMints after confirm', slug, wallet, consumed.error)
       }

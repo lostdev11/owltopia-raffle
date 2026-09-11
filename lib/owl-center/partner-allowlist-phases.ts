@@ -79,6 +79,15 @@ export function partnerPhaseRedeemTokenAmount(
   return Number.isFinite(n) && n > 0 ? n : 1
 }
 
+/** Soft phase remaining from configured supply vs recorded used mints (incl. FMT usage rows). */
+export function partnerPhaseSoftRemaining(supply: number, usedMints: number): number {
+  const s = Math.max(0, Math.floor(Number(supply) || 0))
+  const u = Math.max(0, Math.floor(Number(usedMints) || 0))
+  if (s < 1) return 0
+  return Math.max(0, s - u)
+}
+
+
 /** True when this phase uses a fixed SOL mint price (not USDC→SOL). */
 export function partnerPhaseHasFixedSolPrice(
   phase: Pick<PartnerAllowlistPhase, 'price_sol' | 'price_usdc'> | null | undefined

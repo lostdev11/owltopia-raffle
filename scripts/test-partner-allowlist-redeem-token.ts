@@ -8,6 +8,7 @@ import {
   formRowsFromPartnerAllowlistPhases,
   partnerAllowlistPhasesFromFormRows,
   partnerPhaseHasRedeemTokenBurn,
+  partnerPhaseSoftRemaining,
   partnerPhaseRedeemTokenAmount,
   parsePartnerAllowlistPhases,
 } from '../lib/owl-center/partner-allowlist-phases'
@@ -62,5 +63,14 @@ const noBurn = parsePartnerAllowlistPhases([
   },
 ])
 assert.equal(partnerPhaseHasRedeemTokenBurn(noBurn[0]), false)
+
+
+// Soft phase supply: used mints (incl. FMT usage rows) vs configured supply
+assert.equal(partnerPhaseSoftRemaining(1500, 0), 1500)
+assert.equal(partnerPhaseSoftRemaining(1500, 1499), 1)
+assert.equal(partnerPhaseSoftRemaining(1500, 1500), 0)
+assert.equal(partnerPhaseSoftRemaining(1500, 2000), 0)
+assert.equal(partnerPhaseSoftRemaining(0, 0), 0)
+assert.equal(partnerPhaseSoftRemaining(-1, 5), 0)
 
 console.log('ok — partner allowlist redeem token')

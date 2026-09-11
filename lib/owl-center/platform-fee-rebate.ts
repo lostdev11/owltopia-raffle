@@ -53,3 +53,43 @@ export function isOwlCenterLaunchMintEndedForRebate(launch: {
   const supply = Number(launch.total_supply ?? 0)
   return supply > 0 && minted >= supply
 }
+
+/** Accrue skip reasons that mean "already recorded" (idempotent confirm). */
+export function isPlatformFeeRebateAccrueDuplicate(skipped: string | null | undefined): boolean {
+  return skipped === 'duplicate'
+}
+
+/**
+ * State transition when mint ends: locked → releasable.
+ * Returns null when no transition applies.
+ */
+export function platformFeeRebateStateAfterMintEnd(
+  state: OwlCenterPlatformFeeRebateState
+): OwlCenterPlatformFeeRebateState | null {
+  return state === 'locked' ? 'releasable' : null
+}
+
+/**
+ * Admin forfeit override: locked or releasable → forfeited.
+ * Returns null when the row cannot be forfeited from its current state.
+ */
+export function platformFeeRebateStateAfterAdminForfeit(
+  state: OwlCenterPlatformFeeRebateState
+): OwlCenterPlatformFeeRebateState | null {
+  if (state === 'locked' || state === 'releasable') return 'forfeited'
+  return null
+}
+
+/**
+ * Admin release: releasable (or locked if force) → released.
+ */
+export function platformFeeRebateStateAfterAdminRelease(
+  state: OwlCenterPlatformFeeRebateState,
+  opts?: { includeLocked?: boolean }
+): OwlCenterPlatformFeeRebateState | null {
+  if (state === 'releasable') return 'released'
+  if (opts?.includeLocked && state === 'locked') return 'released'
+  return null
+}
+
+

@@ -186,6 +186,67 @@ export async function consumeLaunchWlMints(
   return { ok: true, used_mints: nextUsed }
 }
 
+
+/**
+ * Record phase mint usage without requiring a pre-pasted soft WL row.
+ * Used by Free Mint Token (tokenBurn) phases so phase soft supply (~1500) still counts down
+ * via sumLaunchWlPhaseUsedMints, while membership stays gated by the SPL ticket.
+ */
+export async function recordLaunchPhaseMintUsage(
+  launchId: string,
+  wallet: string,
+  quantity: number,
+  phaseKey: string = 'wl',
+  allowedMints: number = 1
+): Promise<{ ok: true; used_mints: number } | { ok: false; error: string }> {
+  const w = normalizeSolanaWalletAddress(wallet)
+  const pk = normalizePhaseKey(phaseKey) || 'wl'
+  const qty = Math.floor(quantity)
+  const allowed = Math.max(1, Math.floor(Number(allowedMints) || 1))
+  if (!w || qty < 1) return { ok: false, error: 'Invalid wallet or quantity' }
+
+  const db = getSupabaseAdmin()
+  const now = new Date().toISOString()
+  let row = await getLaunchWlWallet(launchId, w, pk)
+
+  if (!row) {
+    const { error: upsertErr } = await db.from('owl_center_launch_wl_wallets').upsert(
+      {
+        launch_id: launchId,
+        phase_key: pk,
+        wallet: w,
+        allowed_mints: allowed,
+        used_mints: 0,
+        note: 'fmt_usage',
+        created_by_wallet: null,
+        updated_at: now,
+      },
+      { onConflict: 'launch_id,phase_key,wallet' }
+    )
+    if (upsertErr) return { ok: false, error: upsertErr.message }
+    row = await getLaunchWlWallet(launchId, w, pk)
+    if (!row) return { ok: false, error: 'Failed to create phase usage row' }
+  }
+
+  const nextAllowed = Math.max(row.allowed_mints, allowed, row.used_mints + qty)
+  const nextUsed = row.used_mints + qty
+
+  const { error } = await db
+    .from('owl_center_launch_wl_wallets')
+    .update({
+      used_mints: nextUsed,
+      allowed_mints: nextAllowed,
+      updated_at: now,
+    })
+    .eq('launch_id', launchId)
+    .eq('phase_key', pk)
+    .eq('wallet', w)
+    .eq('used_mints', row.used_mints)
+
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, used_mints: nextUsed }
+}
+
 export function parseWlWalletText(raw: string): string[] {
   const parts = raw
     .split(/[\s,;]+/g)

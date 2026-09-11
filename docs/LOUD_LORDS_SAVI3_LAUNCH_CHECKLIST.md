@@ -18,6 +18,8 @@ Ops notes for onboarding **Loud Lords Revival** on Owltopia `public_simple` (Par
 1. Enable allowlist phases; add a phase labeled **Free Mint Token** (preset key `fmt` available).
 2. Set phase supply ~1500, price `0`, wallet mint limit as agreed.
 3. Paste Savi3’s Free Mint Token **SPL mint** into **Free Mint Token (SPL mint)**. Soft WL wallet paste is **not** required for that phase — holding the token is the ticket.
+
+Soft phase supply (~1,500) is tracked after each confirmed mint via usage rows (no wallet paste list required for Free Mint Token); eligibility stops the phase when used ≥ supply.
 4. Set Public start so the Free Mint Token window ends when public opens.
 5. Deploy / sync Candy Guards so on-chain groups include `tokenBurn` for that phase.
 

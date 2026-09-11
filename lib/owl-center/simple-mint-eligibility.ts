@@ -10,7 +10,7 @@ import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { launchScheduledPublicReason } from '@/lib/owl-center/launch-mint-open'
 import { resolvePartnerMintUnitPrice, publicSimpleSolMintLamports } from '@/lib/owl-center/partner-mint-phase-schedule'
-import { resolvePartnerPhaseWalletMintLimit, partnerPhaseHasRedeemTokenBurn, partnerPhaseRedeemTokenAmount } from '@/lib/owl-center/partner-allowlist-phases'
+import { resolvePartnerPhaseWalletMintLimit, partnerPhaseHasRedeemTokenBurn, partnerPhaseRedeemTokenAmount, partnerPhaseSoftRemaining } from '@/lib/owl-center/partner-allowlist-phases'
 import {
   formatAllowlistOpensReason,
   getLaunchActiveAllowlistPhase,
@@ -259,7 +259,7 @@ export async function buildSimpleMintEligibility(
       const phaseKey = activePhase?.key ?? 'wl'
       const phaseSupply = Math.max(0, Math.floor(Number(activePhase?.supply ?? 0) || 0))
       const phaseUsed = await sumLaunchWlPhaseUsedMints(launch.id, phaseKey)
-      const phaseRemaining = phaseSupply > 0 ? Math.max(0, phaseSupply - phaseUsed) : 0
+      const phaseRemaining = partnerPhaseSoftRemaining(phaseSupply, phaseUsed)
 
       if (phaseSupply < 1) {
         max_mintable = 0

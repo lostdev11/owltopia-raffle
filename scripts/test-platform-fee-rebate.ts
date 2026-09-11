@@ -9,7 +9,11 @@ import {
   clampPlatformFeeRebateBps,
   computePlatformFeeRebateLamports,
   isOwlCenterLaunchMintEndedForRebate,
+  isPlatformFeeRebateAccrueDuplicate,
   isPlatformFeeRebateEnabled,
+  platformFeeRebateStateAfterAdminForfeit,
+  platformFeeRebateStateAfterAdminRelease,
+  platformFeeRebateStateAfterMintEnd,
 } from '../lib/owl-center/platform-fee-rebate'
 
 assert.equal(OWL_CENTER_DEFAULT_PARTNER_PLATFORM_FEE_REBATE_BPS, 2000)
@@ -58,5 +62,27 @@ assert.equal(
   isOwlCenterLaunchMintEndedForRebate({ active_phase: 'PUBLIC', minted_count: 50, total_supply: 100 }),
   false
 )
+
+
+// Idempotent accrue skip
+assert.equal(isPlatformFeeRebateAccrueDuplicate('duplicate'), true)
+assert.equal(isPlatformFeeRebateAccrueDuplicate('rebate_disabled'), false)
+assert.equal(isPlatformFeeRebateAccrueDuplicate(undefined), false)
+
+// State transitions: locked → releasable on mint end; admin release/forfeit
+assert.equal(platformFeeRebateStateAfterMintEnd('locked'), 'releasable')
+assert.equal(platformFeeRebateStateAfterMintEnd('releasable'), null)
+assert.equal(platformFeeRebateStateAfterMintEnd('released'), null)
+assert.equal(platformFeeRebateStateAfterMintEnd('forfeited'), null)
+
+assert.equal(platformFeeRebateStateAfterAdminRelease('releasable'), 'released')
+assert.equal(platformFeeRebateStateAfterAdminRelease('locked'), null)
+assert.equal(platformFeeRebateStateAfterAdminRelease('locked', { includeLocked: true }), 'released')
+assert.equal(platformFeeRebateStateAfterAdminRelease('released'), null)
+
+assert.equal(platformFeeRebateStateAfterAdminForfeit('locked'), 'forfeited')
+assert.equal(platformFeeRebateStateAfterAdminForfeit('releasable'), 'forfeited')
+assert.equal(platformFeeRebateStateAfterAdminForfeit('released'), null)
+assert.equal(platformFeeRebateStateAfterAdminForfeit('forfeited'), null)
 
 console.log('ok — platform fee rebate')
