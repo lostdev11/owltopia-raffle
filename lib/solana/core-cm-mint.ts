@@ -82,6 +82,9 @@ function coreGuardMintArgs(guards: DefaultGuardSet): {
   if (isSome(guards.mintLimit)) {
     mintArgs.mintLimit = some({ id: guards.mintLimit.value.id })
   }
+  if (isSome(guards.tokenBurn)) {
+    mintArgs.tokenBurn = some({ mint: guards.tokenBurn.value.mint })
+  }
   return {
     mintArgs: Object.keys(mintArgs).length > 0 ? mintArgs : undefined,
     mintPriceLamports,

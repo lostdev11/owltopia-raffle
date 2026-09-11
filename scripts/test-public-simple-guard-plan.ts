@@ -155,6 +155,37 @@ async function main() {
   )
   assert.equal(missingDest.ok, false)
 
+  // Free Mint Token phase: price 0 + tokenBurn, no soft-WL solPayment
+  const FMT_MINT = 'So11111111111111111111111111111111111111112'
+  const freeMintToken = await buildPublicSimpleGuardPlan(
+    launch({
+      partner_allowlist_phases: [
+        {
+          key: 'fmt',
+          label: 'Free Mint Token',
+          starts_at: '2026-08-24T11:48:00.000Z',
+          supply: 1500,
+          price_usdc: 0,
+          price_sol: null,
+          wallet_mint_limit: 1,
+          redeem_token_mint: FMT_MINT,
+          redeem_token_amount: 1,
+          redeem_mode: 'burn',
+        },
+      ],
+    }),
+    { quoteUsdc }
+  )
+  if (!freeMintToken.ok) throw new Error(freeMintToken.error)
+  const fmt = freeMintToken.plan.groups.find((g) => g.label === 'fmt')
+  assert.ok(fmt)
+  assert.equal(fmt.solLamports, 0n)
+  assert.deepEqual(fmt.tokenBurn, { mint: FMT_MINT, amount: 1 })
+  assert.equal(fmt.walletMintLimit, 1)
+
+  // Without redeem mint → no tokenBurn on paid WL
+  assert.equal(wl.tokenBurn ?? null, null)
+
   console.log('ok — public simple guard plan')
 }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { consumeLaunchWlMints } from '@/lib/db/owl-center-launch-wl-wallets'
+import { partnerPhaseHasRedeemTokenBurn } from '@/lib/owl-center/partner-allowlist-phases'
 import { buildSimpleMintEligibility } from '@/lib/owl-center/simple-mint-eligibility'
 import { getLaunchActiveAllowlistPhase, isLaunchWhitelistWindowOpen } from '@/lib/owl-center/launch-wl-window'
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
@@ -170,11 +171,49 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   }
 
   // Soft-consume launch WL spots after a successful (non-duplicate) confirm during the WL window.
+  // Free Mint Token (tokenBurn) phases skip soft WL — the SPL ticket is the gate.
   if (!row.duplicate_tx && isLaunchWhitelistWindowOpen(launch)) {
     const activePhase = getLaunchActiveAllowlistPhase(launch)
-    const consumed = await consumeLaunchWlMints(launch.id, wallet, qty, activePhase?.key ?? 'wl')
-    if (!consumed.ok) {
-      console.error('consumeLaunchWlMints after confirm', slug, wallet, consumed.error)
+    if (!partnerPhaseHasRedeemTokenBurn(activePhase)) {
+      const consumed = await consumeLaunchWlMints(launch.id, wallet, qty, activePhase?.key ?? 'wl')
+      if (!consumed.ok) {
+        console.error('consumeLaunchWlMints after confirm', slug, wallet, consumed.error)
+      }
+    }
+  }
+
+  // Accrue partner platform-fee rebate (locked) when configured — buyer still paid 100% to treasury.
+  if (!row.duplicate_tx && shouldRequireOwlCenterPlatformMintFeeServer()) {
+    try {
+      const { resolveOwlCenterPlatformMintFeeLamports } = await import(
+        '@/lib/solana/owl-center-platform-mint-fee'
+      )
+      const { accrueOwlCenterPlatformFeeRebate, unlockOwlCenterPlatformFeeRebatesAfterMintEnd } =
+        await import('@/lib/db/owl-center-platform-fee-rebates')
+      const feeQuote = await resolveOwlCenterPlatformMintFeeLamports()
+      if (feeQuote.ok) {
+        const feeLamports = feeQuote.lamports * BigInt(qty)
+        const accrued = await accrueOwlCenterPlatformFeeRebate({
+          launch,
+          mintTxSignature: txSig,
+          minterWallet: wallet,
+          feeLamports,
+          quantity: qty,
+        })
+        if (!accrued.ok) {
+          console.error('accrueOwlCenterPlatformFeeRebate', slug, accrued.error)
+        }
+      }
+      // If this confirm sold out the launch, mark locked rebates releasable and attempt payout.
+      const launchForUnlock = await getOwlCenterLaunchBySlugAdmin(slug)
+      if (launchForUnlock) {
+        const unlocked = await unlockOwlCenterPlatformFeeRebatesAfterMintEnd(launchForUnlock)
+        if (!unlocked.ok) {
+          console.error('unlockOwlCenterPlatformFeeRebatesAfterMintEnd', slug, unlocked.error)
+        }
+      }
+    } catch (e) {
+      console.error('platform fee rebate post-confirm', slug, e)
     }
   }
 

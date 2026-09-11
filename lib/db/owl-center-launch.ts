@@ -180,6 +180,11 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
     freeze_thawed_at: data.freeze_thawed_at != null ? String(data.freeze_thawed_at) : null,
     freeze_progress: parseFreezeProgress(data.freeze_progress),
     partner_allowlist_phases: parsePartnerAllowlistPhases(data.partner_allowlist_phases),
+    platform_fee_rebate_bps: Number(data.platform_fee_rebate_bps ?? 0) || 0,
+    platform_fee_rebate_wallet:
+      data.platform_fee_rebate_wallet != null && String(data.platform_fee_rebate_wallet).trim()
+        ? String(data.platform_fee_rebate_wallet).trim()
+        : null,
   }
 }
 
@@ -436,6 +441,8 @@ export async function updateOwlCenterLaunchByIdAdmin(
     slug: string
     mint_standard: 'token_metadata' | 'core'
     partner_allowlist_phases: import('@/lib/owl-center/partner-allowlist-phases').PartnerAllowlistPhase[]
+    platform_fee_rebate_bps: number
+    platform_fee_rebate_wallet: string | null
   }>
 ): Promise<OwlCenterLaunchPublic | null> {
   const db = getSupabaseAdmin()
