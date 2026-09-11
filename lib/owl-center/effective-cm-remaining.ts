@@ -1,7 +1,8 @@
 import {
-  fetchCandyMachineOnChainSupply,
-  type CandyMachineSupplySnapshot,
-} from '@/lib/solana/candy-machine-supply'
+  computeCmSupplyIntegrity,
+  type CmSupplyIntegrity,
+} from '@/lib/owl-center/cm-supply-integrity'
+import type { CandyMachineSupplySnapshot } from '@/lib/solana/candy-machine-supply'
 import type { OwlMintNetwork } from '@/lib/solana/network'
 
 export type EffectiveCmRemaining = {
@@ -14,6 +15,35 @@ export type EffectiveCmRemaining = {
    * shows leftovers — UI must treat this as sold out even if `minted_count` lags.
    */
   onChainSoldOut: boolean
+  /** Prefer on-chain redeemed so progress never under-counts orphan/test mints. */
+  displayMinted: number
+  /** itemsRedeemed - minted_count when chain is ahead of the ledger. */
+  ledgerLag: number
+  /** CM loaded and remaining === 0. */
+  cmFullyRedeemed: boolean
+  /** CM still has unminted config lines. */
+  cmHasUnminted: boolean
+  supplyMismatch: boolean
+}
+
+function withIntegrity(
+  totalSupply: number,
+  mintedCount: number,
+  base: Omit<
+    EffectiveCmRemaining,
+    'displayMinted' | 'ledgerLag' | 'cmFullyRedeemed' | 'cmHasUnminted' | 'supplyMismatch'
+  >,
+  supply: CandyMachineSupplySnapshot | null
+): EffectiveCmRemaining {
+  const integrity: CmSupplyIntegrity = computeCmSupplyIntegrity(totalSupply, mintedCount, supply)
+  return {
+    ...base,
+    displayMinted: integrity.displayMinted,
+    ledgerLag: integrity.ledgerLag,
+    cmFullyRedeemed: integrity.cmFullyRedeemed,
+    cmHasUnminted: integrity.cmHasUnminted,
+    supplyMismatch: integrity.supplyMismatch,
+  }
 }
 
 /** Pure remaining math (exported for unit tests). */
@@ -24,21 +54,31 @@ export function computeEffectiveCmRemaining(
 ): EffectiveCmRemaining {
   const dbRemaining = Math.max(0, totalSupply - mintedCount)
   if (!supply?.ok) {
-    return {
-      dbRemaining,
-      onChainRemaining: null,
-      remaining: dbRemaining,
-      onChainSoldOut: false,
-    }
+    return withIntegrity(
+      totalSupply,
+      mintedCount,
+      {
+        dbRemaining,
+        onChainRemaining: null,
+        remaining: dbRemaining,
+        onChainSoldOut: false,
+      },
+      supply
+    )
   }
 
   const onChainRemaining = supply.remaining
-  return {
-    dbRemaining,
-    onChainRemaining,
-    remaining: Math.min(dbRemaining, onChainRemaining),
-    onChainSoldOut: supply.itemsLoaded > 0 && onChainRemaining === 0 && dbRemaining > 0,
-  }
+  return withIntegrity(
+    totalSupply,
+    mintedCount,
+    {
+      dbRemaining,
+      onChainRemaining,
+      remaining: Math.min(dbRemaining, onChainRemaining),
+      onChainSoldOut: supply.itemsLoaded > 0 && onChainRemaining === 0 && dbRemaining > 0,
+    },
+    supply
+  )
 }
 
 /**
@@ -56,6 +96,8 @@ export async function resolveEffectiveCmRemaining(args: {
     return computeEffectiveCmRemaining(args.totalSupply, args.mintedCount, null)
   }
 
+  // Lazy import keeps pure unit tests free of Solana/umi runtime deps.
+  const { fetchCandyMachineOnChainSupply } = await import('@/lib/solana/candy-machine-supply')
   const supply = await fetchCandyMachineOnChainSupply(cmId, args.network)
   return computeEffectiveCmRemaining(args.totalSupply, args.mintedCount, supply)
 }

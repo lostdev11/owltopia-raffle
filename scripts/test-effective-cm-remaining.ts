@@ -38,6 +38,36 @@ console.log('Effective CM remaining:')
   check('CM empty + DB leftovers → remaining 0', r.remaining === 0)
   check('CM empty + DB leftovers → onChainSoldOut', r.onChainSoldOut === true)
   check('team backstop max would be 0', Math.min(25, r.remaining) === 0)
+  check('CM empty + DB lag → displayMinted prefers chain', r.displayMinted === 2000)
+  check('CM empty + DB lag → ledgerLag 2', r.ledgerLag === 2)
+  check('CM empty → cmFullyRedeemed', r.cmFullyRedeemed === true)
+}
+
+{
+  // Partner stranded slots (accurate DB): mintable remaining still follows min(DB, chain).
+  const r = computeEffectiveCmRemaining(222, 220, {
+    ok: true,
+    itemsLoaded: 222,
+    itemsRedeemed: 220,
+    remaining: 2,
+  })
+  check('stranded CM slots → remaining 2', r.remaining === 2)
+  check('stranded CM slots → cmHasUnminted', r.cmHasUnminted === true)
+  check('stranded CM slots → not onChainSoldOut', r.onChainSoldOut === false)
+  check('stranded CM slots → displayMinted 220', r.displayMinted === 220)
+}
+
+{
+  // Partner stranded slots with DB over-count: still show on-chain minted/remaining truth.
+  const r = computeEffectiveCmRemaining(222, 222, {
+    ok: true,
+    itemsLoaded: 222,
+    itemsRedeemed: 220,
+    remaining: 2,
+  })
+  check('DB over-count stranded → displayMinted prefers chain 220', r.displayMinted === 220)
+  check('DB over-count stranded → cmHasUnminted', r.cmHasUnminted === true)
+  check('DB over-count stranded → mintable remaining 0 (DB exhausted)', r.remaining === 0)
 }
 
 {

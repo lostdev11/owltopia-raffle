@@ -10,6 +10,7 @@ import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-l
 import { ensureSelloutMarketplacePrepIfNeeded } from '@/lib/owl-center/sellout-marketplace-prep'
 import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/sync-launch-sold-out'
 import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
+import { computeCmSupplyIntegrity } from '@/lib/owl-center/cm-supply-integrity'
 import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
 import { getLaunchCandyMachineId, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
@@ -80,11 +81,15 @@ export async function buildCollectionMintState(
     .slice(0, 50)
 
   const mint_network = resolveLaunchMintNetwork(launch)
-  const dbRemaining = Math.max(0, launch.total_supply - launch.minted_count)
   const cmId = getLaunchCandyMachineId(launch, mint_network)
   const onChainSupply = cmId ? await fetchCandyMachineOnChainSupply(cmId, mint_network) : { ok: false as const }
+  const integrity = computeCmSupplyIntegrity(launch.total_supply, launch.minted_count, onChainSupply)
   const onChainRemaining = onChainSupply.ok ? onChainSupply.remaining : null
-  const remaining = onChainRemaining != null ? Math.min(dbRemaining, onChainRemaining) : dbRemaining
+  // Mintable remaining still mins DB vs chain; displayed minted prefers on-chain redeemed.
+  const remaining = onChainRemaining != null
+    ? Math.min(Math.max(0, launch.total_supply - launch.minted_count), onChainRemaining)
+    : Math.max(0, launch.total_supply - launch.minted_count)
+  const displayMinted = integrity.displayMinted
   if (
     onChainRemaining === 0 &&
     launch.active_phase !== 'SOLD_OUT' &&
@@ -103,7 +108,7 @@ export async function buildCollectionMintState(
       }
     }
   }
-  const pct = launch.total_supply > 0 ? ((launch.total_supply - remaining) / launch.total_supply) * 100 : 0
+  const pct = launch.total_supply > 0 ? (displayMinted / launch.total_supply) * 100 : 0
   const mp = mpRow.data as {
     trading_links_active?: boolean
     magic_eden_url?: string | null
@@ -138,9 +143,12 @@ export async function buildCollectionMintState(
     },
     supply: {
       total: launch.total_supply,
-      minted: launch.minted_count,
+      minted: displayMinted,
       remaining,
       percent_minted: pct,
+      ledger_lag: integrity.ledgerLag,
+      cm_fully_redeemed: integrity.cmFullyRedeemed,
+      cm_has_unminted: integrity.cmHasUnminted,
     },
     prices_usdc: { public: launch.public_price_usdc },
     prices_lamports: { public: prices_lamports.public },
