@@ -68,7 +68,13 @@ export function isLaunchMarketplaceListingUnlockedForCm(
 export async function resolveLaunchCmFullyRedeemed(
   launch: Pick<
     OwlCenterLaunchPublic,
-    'slug' | 'mint_mode' | 'mint_network' | 'candy_machine_id' | 'devnet_candy_machine_id'
+    | 'slug'
+    | 'mint_mode'
+    | 'mint_network'
+    | 'candy_machine_id'
+    | 'collection_mint'
+    | 'devnet_candy_machine_id'
+    | 'devnet_collection_mint'
   >
 ): Promise<boolean | null> {
   const network = resolveLaunchMintNetwork(launch)
