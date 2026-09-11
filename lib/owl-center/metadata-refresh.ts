@@ -129,7 +129,7 @@ function updateAuthorityMismatchReason(params: {
       : candyMachineAuthority
         ? ` (CM deploy wallet ${candyMachineAuthority.slice(0, 8)}…)`
         : ''
-  return `Update authority is ${onChainAuthority.slice(0, 8)}… — server IRYS signer is ${serverSigner.slice(0, 8)}…. Set IRYS_PRIVATE_KEY to the Candy Machine deploy wallet${cmHint}.`
+  return `Update authority is ${onChainAuthority.slice(0, 8)}… — server IRYS signer is ${serverSigner.slice(0, 8)}…. For Core, platform must be UpdateDelegate; for Token Metadata set IRYS_PRIVATE_KEY to the Candy Machine deploy wallet${cmHint}.`
 }
 
 function resolveTokenIndex(
@@ -305,6 +305,33 @@ export async function getMetadataRefreshStatusForLaunch(launchId: string): Promi
   let mints: MetadataRefreshMintPreview[] = []
   let collectionPreview: MetadataRefreshStatus['collection'] | undefined
   if (enabled && arweaveReady && Boolean(collectionMint) && mintAddresses.length > 0 && job) {
+    if (launch.mint_standard === 'core') {
+      const { createIrysDeployerCoreUmi } = await import('@/lib/owl-center/core-cm-deploy-onchain')
+      const { coreCollectionAllowsUmiUpdates } = await import('@/lib/owl-center/core-ua-authority')
+      const network = resolveLaunchMintNetwork(launch)
+      const umi = createIrysDeployerCoreUmi(network)
+      const allowed = await coreCollectionAllowsUmiUpdates(umi, collectionMint!)
+      collectionPreview = {
+        current_name: null,
+        target_name: launch.name ?? 'Collection',
+        needs_refresh: allowed.ok,
+        skip_reason: allowed.ok
+          ? null
+          : allowed.reason,
+      }
+      mints = mintAddresses.map((mint) => ({
+        mint,
+        token_index: null,
+        current_name: null,
+        current_uri: null,
+        target_name: null,
+        target_uri: null,
+        needs_refresh: allowed.ok,
+        skip_reason: allowed.ok
+          ? 'Core preview — run refresh to update via UpdateDelegate'
+          : allowed.reason,
+      }))
+    } else {
     const pkg = buildSugarDeployPackageFromJob(job, launch)
     const network = resolveLaunchMintNetwork(launch)
     const umi = createIrysDeployerUmi(network)
@@ -340,6 +367,7 @@ export async function getMetadataRefreshStatusForLaunch(launchId: string): Promi
         umi,
         candyMachineAuthority,
       })
+    }
     }
   }
 
@@ -384,6 +412,11 @@ export async function runMetadataRefreshForLaunch(
   const launch = await getOwlCenterLaunchByIdAdmin(launchId)
   const job = await getLatestAssetUploadJobForLaunch(launchId)
   if (!launch || !job) return { ok: false, error: 'Launch or upload job not found', code: 'not_found' }
+
+  if (launch.mint_standard === 'core') {
+    const { runCoreMetadataRefreshForLaunch } = await import('@/lib/owl-center/core-metadata-refresh')
+    return runCoreMetadataRefreshForLaunch(launchId, opts)
+  }
 
   const requested = (opts?.mints?.length ? opts.mints : status.mint_addresses).map((m) => m.trim()).filter(Boolean)
   const previews = status.mints.filter((m) => requested.includes(m.mint))

@@ -195,7 +195,7 @@ export async function fixOnChainMintWalletSafeMetadata(params: {
 
   const serverSigner = String(umi.identity.publicKey)
   if (String(md.updateAuthority) !== serverSigner) {
-    return { mint, ok: false, error: `update_authority_mismatch:${String(md.updateAuthority)}` }
+    return { mint, ok: false, error: `update_authority_mismatch:${String(md.updateAuthority)} (Token Metadata path — Core collections use UpdateDelegate ops)` }
   }
 
   const currentUri = md.uri?.trim()

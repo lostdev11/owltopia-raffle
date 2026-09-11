@@ -29,7 +29,7 @@ const AUTOMATED_STEPS: Step[] = [
 const MANUAL_STEPS: Step[] = [
   {
     label: 'List collection on Orbis',
-    detail: 'Open Orbis List Your Collection, paste your collection mint, verify as update authority.',
+    detail: 'Open Orbis List Your Collection, paste your collection mint, verify as update authority (Core only — claim UA first if still on Owltopia).',
   },
   {
     label: 'Submit hash list on Magic Eden (optional)',

@@ -94,6 +94,7 @@
     "test:discord-wl-campaigns": "npx --yes tsx scripts/test-discord-wl-campaigns.ts",
     "test:discord-partner-command-access": "npx --yes tsx scripts/test-discord-partner-command-access.ts",
     "test:creator-launch-setup-checklist": "npx --yes tsx scripts/test-creator-launch-setup-checklist.ts",
+    "test:creator-ua-handoff": "npx --yes tsx scripts/test-creator-ua-handoff.ts",
     "test:owl-center-presale-pricing": "npx --yes tsx scripts/test-owl-center-presale-pricing.ts",
     "test:coin-art-upgrade-fee-split": "npx --yes tsx scripts/test-coin-art-upgrade-fee-split.ts",
     "test:filter-browse-host": "npx --yes tsx scripts/test-filter-browse-host.ts",

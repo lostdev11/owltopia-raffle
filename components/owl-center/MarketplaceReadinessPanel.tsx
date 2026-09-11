@@ -228,6 +228,14 @@ export function MarketplaceReadinessPanel({
           launchId={launchId}
           hashListApiPath={hashApi}
           collectionMint={collectionMint || null}
+          mintStandard={launchProp?.mint_standard}
+          creatorOwnsUpdateAuthority={
+            Boolean(
+              launchProp?.creator_wallet &&
+                launchProp?.onchain_update_authority &&
+                launchProp.creator_wallet === launchProp.onchain_update_authority
+            )
+          }
           onCollectionMint={(mint) => {
             if (mint && !collectionMint.trim()) setCollectionMint(mint)
           }}

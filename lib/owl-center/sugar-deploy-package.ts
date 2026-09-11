@@ -138,17 +138,34 @@ export function buildSugarDeployPackageFromJob(
   return { config, cacheItems, configLines, collectionMetadataUri, supply }
 }
 
+export type OnchainDeployStatus =
+  | 'running'
+  | 'cm_ready'
+  | 'ua_handed_off'
+  | 'completed'
+  | 'failed'
+
 export function parseOnchainDeployState(progress: AssetUploadProgress) {
   const raw = (progress as AssetUploadProgress & { onchain_deploy?: unknown }).onchain_deploy
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
   const status = o.status
-  if (status !== 'running' && status !== 'completed' && status !== 'failed') return null
+  if (
+    status !== 'running' &&
+    status !== 'cm_ready' &&
+    status !== 'ua_handed_off' &&
+    status !== 'completed' &&
+    status !== 'failed'
+  ) {
+    return null
+  }
   return {
-    status,
+    status: status as OnchainDeployStatus,
     candy_machine_id: typeof o.candy_machine_id === 'string' ? o.candy_machine_id : null,
     collection_mint: typeof o.collection_mint === 'string' ? o.collection_mint : null,
     candy_guard_id: typeof o.candy_guard_id === 'string' ? o.candy_guard_id : null,
+    onchain_update_authority: typeof o.onchain_update_authority === 'string' ? o.onchain_update_authority : null,
+    platform_update_delegate: typeof o.platform_update_delegate === 'string' ? o.platform_update_delegate : null,
     error: typeof o.error === 'string' ? o.error : null,
     completed_at: typeof o.completed_at === 'string' ? o.completed_at : null,
   }

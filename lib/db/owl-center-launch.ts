@@ -118,6 +118,8 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
       data.devnet_candy_machine_id != null ? String(data.devnet_candy_machine_id) : null,
     devnet_collection_mint: data.devnet_collection_mint != null ? String(data.devnet_collection_mint) : null,
     mint_standard: String(data.mint_standard ?? 'core'),
+    onchain_update_authority: data.onchain_update_authority != null ? String(data.onchain_update_authority) : null,
+    platform_update_delegate: data.platform_update_delegate != null ? String(data.platform_update_delegate) : null,
     total_supply: Number(data.total_supply ?? 0),
     minted_count: Number(data.minted_count ?? 0),
     active_phase: String(data.active_phase) as OwlCenterPhase,
@@ -440,6 +442,8 @@ export async function updateOwlCenterLaunchByIdAdmin(
     unfreeze_date: string | null
     slug: string
     mint_standard: 'token_metadata' | 'core'
+    onchain_update_authority: string | null
+    platform_update_delegate: string | null
     partner_allowlist_phases: import('@/lib/owl-center/partner-allowlist-phases').PartnerAllowlistPhase[]
     platform_fee_rebate_bps: number
     platform_fee_rebate_wallet: string | null

@@ -8,6 +8,7 @@ import { CreatorLaunchSetupChecklist } from '@/components/owl-center/CreatorLaun
 import { CreatorWlWalletsPanel } from '@/components/owl-center/CreatorWlWalletsPanel'
 import { LaunchMintConfigPanel } from '@/components/owl-center/LaunchMintConfigPanel'
 import { LaunchPresaleOveragePanel } from '@/components/owl-center/LaunchPresaleOveragePanel'
+import { ClaimUpdateAuthorityPanel } from '@/components/owl-center/ClaimUpdateAuthorityPanel'
 import { MarketplaceReadinessPanel } from '@/components/owl-center/MarketplaceReadinessPanel'
 import { MetadataRefreshPanel } from '@/components/owl-center/MetadataRefreshPanel'
 import { MintShareLinkPanel } from '@/components/owl-center/MintShareLinkPanel'
@@ -20,6 +21,7 @@ import {
   creatorMetadataRefreshApiPath,
   creatorMintConfigApiPath,
   creatorRevealDayApiPath,
+  creatorClaimUpdateAuthorityApiPath,
 } from '@/lib/owl-center/creator-api-paths'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
@@ -51,6 +53,7 @@ type Props = {
   marketplaceCompact?: boolean
   marketplaceCreatorMode?: boolean
   marketplaceApiPath?: string
+  claimUaApiPath?: string
   hashListApiPath?: string
   /** Creator-only delete section at bottom of card. */
   deletable?: boolean
@@ -78,6 +81,7 @@ export function CollectionLaunchOpsCard({
   marketplaceCompact = false,
   marketplaceCreatorMode = false,
   marketplaceApiPath,
+  claimUaApiPath,
   hashListApiPath,
   deletable = false,
   redirectAfterDelete,
@@ -150,6 +154,15 @@ export function CollectionLaunchOpsCard({
         />
       ) : null}
 
+      {launch.mint_standard === 'core' && launch.collection_mint ? (
+        <ClaimUpdateAuthorityPanel
+          launchId={launchId}
+          launch={launch}
+          apiPath={claimUaApiPath}
+          onClaimed={onSaved}
+        />
+      ) : null}
+
       {showMarketplace ? (
         <MarketplaceReadinessPanel
           embedded
@@ -188,6 +201,7 @@ export function creatorLaunchOpsCardProps(launchId: string, launch: OwlCenterLau
     marketplaceApiPath: creatorMarketplaceApiPath(launchId),
     hashListApiPath: creatorHashListApiPath(launchId),
     coreThawApiPath: creatorCoreThawApiPath(launchId),
+    claimUaApiPath: creatorClaimUpdateAuthorityApiPath(launchId),
     coreRoyaltiesApiPath: creatorCoreRoyaltiesApiPath(launchId),
     marketplaceCreatorMode: true,
     showSetupChecklist: true,

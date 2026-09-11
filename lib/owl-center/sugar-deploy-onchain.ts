@@ -76,14 +76,28 @@ export type OnchainSugarDeployInput = {
   collectionName: string
 }
 
+export type OnchainSugarDeployUaPhase = 'skipped' | 'cm_ready' | 'ua_handed_off'
+
 export type OnchainSugarDeployResult =
   | {
       ok: true
       candyMachineId: string
       collectionMint: string
       candyGuardId: string
+      onchainUpdateAuthority?: string | null
+      platformUpdateDelegate?: string | null
+      uaHandoffPhase?: OnchainSugarDeployUaPhase
     }
-  | { ok: false; error: string }
+  | {
+      ok: false
+      error: string
+      partial?: {
+        candyMachineId: string
+        collectionMint: string
+        candyGuardId: string
+        phase: 'cm_ready'
+      }
+    }
 
 function parseIrysDeployerSecretKey(): Uint8Array {
   const raw = process.env.IRYS_PRIVATE_KEY?.trim()

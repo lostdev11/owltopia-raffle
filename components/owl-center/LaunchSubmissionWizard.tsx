@@ -7,6 +7,7 @@ import { CheckCircle2 } from 'lucide-react'
 
 import { AssetStepForm } from '@/components/owl-center/AssetStepForm'
 import { emptyAssetStepValues, type AssetStepValues } from '@/lib/owl-center/asset-step-values'
+import { AuthorityModelCard } from '@/components/owl-center/AuthorityModelCard'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import { FinishedArtZipUpload } from '@/components/owl-center/FinishedArtZipUpload'
@@ -460,7 +461,21 @@ export function LaunchSubmissionWizard() {
               </p>
             </div>
 
-            <p className="mt-4 text-xs text-[#5C6773]">
+            
+            <div className="mt-4">
+              <AuthorityModelCard
+                compact
+                launch={{
+                  mint_standard: mintDetails.mint_standard,
+                  creator_wallet: creatorWallet.trim() || null,
+                  onchain_update_authority: null,
+                  platform_update_delegate: null,
+                  collection_mint: null,
+                }}
+              />
+            </div>
+
+<p className="mt-4 text-xs text-[#5C6773]">
               Submitting sends your collection to the Owltopia team for review. Nothing goes on-chain until we approve
               your launch.
             </p>
