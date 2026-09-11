@@ -5,10 +5,13 @@ import {
   suggestTensorCollectionUrl,
 } from '@/lib/owl-center/marketplace-urls'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
+import { evaluateSelloutMarketplacePrepGate } from '@/lib/owl-center/cm-supply-integrity'
 import {
   isLaunchSoldOutPhase,
   isLaunchSupplyExhausted,
 } from '@/lib/owl-center/launch-marketplace-eligibility'
+import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
+import { getLaunchCandyMachineId } from '@/lib/solana/launch-cm'
 import {
   getMarketplaceReadinessByLaunchId,
   syncLaunchMarketplaceFieldsFromRow,
@@ -79,6 +82,27 @@ export async function runSelloutMarketplacePrep(
 
   const mints = await collectMintedNftMintsForLaunch(launch.id)
   const hashListText = formatHashListText(mints)
+
+  const networkForCm = resolveLaunchMintNetwork(launch)
+  const cmId = getLaunchCandyMachineId(launch, networkForCm)
+  let cmFullyRedeemed: boolean | null = null
+  let itemsRedeemed: number | null = null
+  if (cmId) {
+    const supply = await fetchCandyMachineOnChainSupply(cmId, networkForCm)
+    if (supply.ok) {
+      cmFullyRedeemed = supply.itemsLoaded > 0 && supply.remaining === 0
+      itemsRedeemed = supply.itemsRedeemed
+    }
+  }
+  const gate = evaluateSelloutMarketplacePrepGate({
+    dbOrPhaseSoldOut: true,
+    cmFullyRedeemed,
+    hashListCount: mints.length,
+    itemsRedeemed,
+  })
+  if (!gate.ok) {
+    return { ok: false, skipped: true, reason: gate.reason }
+  }
   const network = resolveLaunchMintNetwork(launch)
   const collectionMint =
     getLaunchCollectionMint(launch, network) || launch.collection_mint?.trim() || ''

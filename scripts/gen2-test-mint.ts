@@ -59,6 +59,15 @@ function loadAuthorityUmi(): Umi {
   return umi
 }
 
+async function assertTestMintAllowed(networkHint: string) {
+  const isMainnet = /mainnet/i.test(networkHint) || process.env.NEXT_PUBLIC_SOLANA_NETWORK === 'mainnet-beta'
+  if (isMainnet && process.env.ALLOW_MAINNET_TEST_MINT !== '1') {
+    throw new Error(
+      'Refusing mainnet Gen2 test mint without ALLOW_MAINNET_TEST_MINT=1. Test mints consume real CM slots and historically caused sold-out counters to lag by those slots.'
+    )
+  }
+}
+
 async function main() {
   const confirm = process.argv.includes('--confirm')
   const DEST = getGen2MintProceedsWalletAddress()
@@ -77,6 +86,7 @@ async function main() {
   }
 
   const remaining = Number(cm.itemsLoaded) - Number(cm.itemsRedeemed)
+  await assertTestMintAllowed(process.env.NEXT_PUBLIC_SOLANA_NETWORK || process.env.SOLANA_NETWORK || "mainnet")
   console.log(`test mint plan: minter=${minter} group=${TEST_GROUP} freezeDest=${DEST} remaining=${remaining}`)
   if (!confirm) {
     console.log('(dry-run) re-run with --confirm to mint 1 (consumes 1 of 2000).')
@@ -123,7 +133,7 @@ async function main() {
     if (!frozen) {
       console.log('⚠️  NFT minted but NOT frozen — investigate before launch.')
     } else {
-      console.log('✅ 0-lamport freeze works end-to-end. Drop the test group: gen2-cm-setup.ts guards --confirm')
+      console.log('✅ 0-lamport freeze works end-to-end. Drop the test group: gen2-cm-setup.ts guards --confirm. Then run: npx tsx --env-file=.env.local scripts/reconcile-gen2-mint-ledger.ts')
     }
   } catch (e) {
     console.log('could not read token account state:', e instanceof Error ? e.message : e)

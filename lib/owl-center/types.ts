@@ -220,7 +220,7 @@ export type CollectionMintStateResponse = {
     sellout_prepared_at: string | null
     mint_addresses_recorded: number
   }
-  supply: { total: number; minted: number; remaining: number; percent_minted: number }
+  supply: { total: number; minted: number; remaining: number; percent_minted: number; ledger_lag?: number; cm_fully_redeemed?: boolean; cm_has_unminted?: boolean }
   prices_usdc: { public: number | null }
   prices_lamports: { public: string | null }
   mint_network: 'devnet' | 'mainnet'

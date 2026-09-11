@@ -8,6 +8,7 @@ import { gen2PhasePoolCap, gen2PublicPhaseSupplyDisplay, gen2PublicPoolCap, gen2
 import { OWL_CENTER_MINTABLE_PHASES } from '@/lib/owl-center/phase-schedule'
 import { reconcileLaunchMintedCount } from '@/lib/owl-center/reconcile-gen2-minted-count'
 import { resolveEffectiveCmRemaining } from '@/lib/owl-center/effective-cm-remaining'
+import { reconcileGen2LaunchMintsFromChain } from '@/lib/owl-center/reconcile-gen2-wallet-mints'
 import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/sync-launch-sold-out'
 import { isGen2PresaleSoldOut } from '@/lib/gen2-presale/purchase-availability'
 import { buildGen2PresalePublicStats } from '@/lib/gen2-presale/public-stats'
@@ -89,7 +90,24 @@ export async function GET(request: NextRequest) {
     candyMachineId: getGen2CandyMachineId(launch),
     network,
   })
+  // Heal Gen2 ledger lag (test/orphan mints) before treating CM-empty as terminal sold-out.
+  if (cmRemaining.ledgerLag > 0 || cmRemaining.onChainSoldOut) {
+    const healed = await reconcileGen2LaunchMintsFromChain(launch, { maxSignatures: 1000 })
+    if (healed.recorded > 0) {
+      const refreshed = await reconcileLaunchMintedCount(launch.id, network)
+      launch.minted_count = refreshed
+      // Recompute remaining after backfill so UI/supply match chain.
+      const again = await resolveEffectiveCmRemaining({
+        totalSupply: launch.total_supply,
+        mintedCount: refreshed,
+        candyMachineId: getGen2CandyMachineId(launch),
+        network,
+      })
+      Object.assign(cmRemaining, again)
+    }
+  }
   const remaining = cmRemaining.remaining
+  const mintedDisplay = cmRemaining.displayMinted
   if (cmRemaining.onChainSoldOut) {
     const synced = await syncLaunchSoldOutPhaseIfExhausted(launch.id, {
       force: true,
@@ -102,7 +120,7 @@ export async function GET(request: NextRequest) {
   }
   const pct =
     launch.total_supply > 0
-      ? ((launch.total_supply - remaining) / launch.total_supply) * 100
+      ? (mintedDisplay / launch.total_supply) * 100
       : 0
 
   const { data: mpRow } = await db
@@ -194,9 +212,12 @@ export async function GET(request: NextRequest) {
     },
     supply: {
       total: launch.total_supply,
-      minted,
+      minted: mintedDisplay,
       remaining,
       percent_minted: pct,
+      ledger_lag: cmRemaining.ledgerLag,
+      cm_fully_redeemed: cmRemaining.cmFullyRedeemed,
+      cm_has_unminted: cmRemaining.cmHasUnminted,
     },
     phases: {
       airdrop: launch.airdrop_supply,

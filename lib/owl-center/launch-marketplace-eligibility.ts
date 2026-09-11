@@ -1,4 +1,7 @@
+import { isLaunchMarketplaceListingUnlockedWithCm as cmAwareUnlock } from '@/lib/owl-center/cm-supply-integrity'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
+import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
+import { getLaunchCandyMachineId, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 
 /** Minimal launch fields for marketplace gating (API rows may use plain strings). */
 export type LaunchMarketplaceListingInput = {
@@ -47,4 +50,37 @@ export function isLaunchMarketplaceListingUnlocked(
   launch: LaunchMarketplaceListingInput
 ): boolean {
   return isLaunchSoldOutPhase(launch) || isLaunchSupplyExhausted(launch)
+}
+
+/**
+ * Sold-out / DB-exhausted unlock, optionally gated on Candy Machine being fully redeemed.
+ * Pass `cmFullyRedeemed=false` to block marketplace prep while CM still has unminted slots.
+ * Pass `null` when CM supply is unknown (keeps legacy unlock).
+ */
+export function isLaunchMarketplaceListingUnlockedForCm(
+  launch: LaunchMarketplaceListingInput,
+  cmFullyRedeemed: boolean | null
+): boolean {
+  return cmAwareUnlock(isLaunchMarketplaceListingUnlocked(launch), cmFullyRedeemed)
+}
+
+/** Read whether the launch CM is fully redeemed (`null` if CM missing/unreadable). */
+export async function resolveLaunchCmFullyRedeemed(
+  launch: Pick<
+    OwlCenterLaunchPublic,
+    | 'slug'
+    | 'mint_mode'
+    | 'mint_network'
+    | 'candy_machine_id'
+    | 'collection_mint'
+    | 'devnet_candy_machine_id'
+    | 'devnet_collection_mint'
+  >
+): Promise<boolean | null> {
+  const network = resolveLaunchMintNetwork(launch)
+  const cmId = getLaunchCandyMachineId(launch, network)
+  if (!cmId) return null
+  const supply = await fetchCandyMachineOnChainSupply(cmId, network)
+  if (!supply.ok) return null
+  return supply.itemsLoaded > 0 && supply.remaining === 0
 }

@@ -1,9 +1,10 @@
 import { Connection, PublicKey } from '@solana/web3.js'
 
 import { parseCandyMachineMintFromTransaction } from '@/lib/owl-center/parse-candy-machine-mint-tx'
+import { shouldReconcileOrphanMints } from '@/lib/owl-center/cm-supply-integrity'
 import { ensureSelloutMarketplacePrepIfNeeded } from '@/lib/owl-center/sellout-marketplace-prep'
 import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/sync-launch-sold-out'
-import type { OwlCenterLaunchPublic, OwlCenterPhase } from '@/lib/owl-center/types'
+import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import { verifyGen2MintTransaction } from '@/lib/owl-center/verify-gen2-mint-tx'
 import { getOwlCenterLaunchBySlugAdmin } from '@/lib/db/owl-center-launch'
 import { fetchParsedTransactionConfirmed } from '@/lib/gen2-presale/verify-payment'
@@ -14,13 +15,6 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 
 export { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/sync-launch-sold-out'
 
-const MINTABLE_PHASES = new Set<OwlCenterPhase>([
-  'AIRDROP',
-  'PRESALE',
-  'PRESALE_OVERAGE',
-  'WHITELIST',
-  'PUBLIC',
-])
 
 export type ReconcileLaunchMintsResult = {
   recorded: number
@@ -118,7 +112,7 @@ export async function reconcileOrphanCandyMachineMints(
   const db = getSupabaseAdmin()
   let recorded = 0
 
-  if (supply.itemsRedeemed > launch.minted_count && MINTABLE_PHASES.has(launch.active_phase)) {
+  if (shouldReconcileOrphanMints(supply.itemsRedeemed, launch.minted_count)) {
     // Paginate past PostgREST's 1000-row default cap; otherwise once a launch has >1000 mint
     // events the dedupe set is incomplete and already-recorded signatures get re-recorded,
     // inflating minted_count.

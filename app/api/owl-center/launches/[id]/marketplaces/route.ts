@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { requireLaunchMintEditorSession } from '@/lib/owl-center/creator-access'
-import { isLaunchMarketplaceListingUnlocked } from '@/lib/owl-center/launch-marketplace-eligibility'
+import {
+  isLaunchMarketplaceListingUnlockedForCm,
+  resolveLaunchCmFullyRedeemed,
+} from '@/lib/owl-center/launch-marketplace-eligibility'
 import { ensureSelloutMarketplacePrepIfNeeded } from '@/lib/owl-center/sellout-marketplace-prep'
 import {
   ensureMarketplaceRow,
@@ -37,7 +40,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   const editor = await requireLaunchMintEditorSession(request, launch)
   if (editor instanceof NextResponse) return editor
 
-  const listingUnlocked = isLaunchMarketplaceListingUnlocked(launch)
+  const cmFullyRedeemed = await resolveLaunchCmFullyRedeemed(launch)
+  const listingUnlocked = isLaunchMarketplaceListingUnlockedForCm(launch, cmFullyRedeemed)
   if (listingUnlocked) {
     await ensureSelloutMarketplacePrepIfNeeded(launch)
   }
@@ -50,6 +54,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     launch: launchFresh,
     marketplaceReadiness: row,
     listing_unlocked: listingUnlocked,
+    cm_fully_redeemed: cmFullyRedeemed,
   })
 }
 
@@ -68,9 +73,12 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   const editor = await requireLaunchMintEditorSession(request, launch)
   if (editor instanceof NextResponse) return editor
 
-  if (!isLaunchMarketplaceListingUnlocked(launch)) {
+  const cmFullyRedeemed = await resolveLaunchCmFullyRedeemed(launch)
+  if (!isLaunchMarketplaceListingUnlockedForCm(launch, cmFullyRedeemed)) {
     return jsonError(
-      'Marketplace listing unlocks after sell-out. Finish minting your collection first.',
+      cmFullyRedeemed === false
+        ? 'Marketplace listing unlocks only after the Candy Machine is fully minted (no stranded slots).'
+        : 'Marketplace listing unlocks after sell-out. Finish minting your collection first.',
       403
     )
   }
@@ -131,6 +139,12 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     body.confirm_trading_transition === true || body.confirm_trading_transition === 'true'
   if (confirmTrading && updated.trading_links_active) {
     if (launch.status === 'SOLD_OUT' || launch.active_phase === 'SOLD_OUT') {
+      if (cmFullyRedeemed === false) {
+        return jsonError(
+          'Candy Machine still has unminted slots. Mint remaining supply before trading goes live.',
+          400
+        )
+      }
       const nextStatus: OwlCenterStatus = 'TRADING_ACTIVE'
       const nextPhase: OwlCenterPhase = 'TRADING_ACTIVE'
       await updateOwlCenterLaunchByIdAdmin(id, { status: nextStatus, active_phase: nextPhase })
