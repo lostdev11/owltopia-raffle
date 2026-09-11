@@ -57,6 +57,16 @@ function isoUnixSeconds(iso: string | null | undefined): string {
   return String(Math.floor(ms / 1000))
 }
 
+type TokenBurnOpt =
+  | Option<{ amount: number | bigint; mint: unknown }>
+  | null
+  | undefined
+
+function optionTokenBurn(opt: TokenBurnOpt): string {
+  if (!opt || !isSome(opt)) return 'none'
+  return `${opt.value.amount}:${String(opt.value.mint)}`
+}
+
 function guardFingerprint(input: {
   mintLimit: Option<{ id: number; limit: number }> | null | undefined
   startDate: DateOpt
@@ -69,6 +79,7 @@ function guardFingerprint(input: {
       endDate: DateOpt
       solPayment: PayOpt
       mintLimit?: Option<{ id: number; limit: number }> | null | undefined
+      tokenBurn?: TokenBurnOpt
     }
   }>
 }): string {
@@ -83,7 +94,7 @@ function guardFingerprint(input: {
         g.guards.mintLimit && isSome(g.guards.mintLimit)
           ? `${g.guards.mintLimit.value.id}:${g.guards.mintLimit.value.limit}`
           : 'none'
-      return `${g.label}|${optionUnixSeconds(g.guards.startDate)}|${optionUnixSeconds(g.guards.endDate)}|${optionSolPayment(g.guards.solPayment)}|${ml}`
+      return `${g.label}|${optionUnixSeconds(g.guards.startDate)}|${optionUnixSeconds(g.guards.endDate)}|${optionSolPayment(g.guards.solPayment)}|${ml}|${optionTokenBurn(g.guards.tokenBurn)}`
     })
     .join(';')
   return [
@@ -110,7 +121,11 @@ function planMatchesOnChain(current: string, plan: PublicSimpleGuardPlan): boole
       const pay =
         g.solLamports > 0n && plan.destination ? `${g.solLamports}:${plan.destination}` : 'none'
       const ml = `${g.mintLimitId}:${g.walletMintLimit}`
-      return `${g.label}|${isoUnixSeconds(g.startDateIso)}|${isoUnixSeconds(g.endDateIso)}|${pay}|${ml}`
+      const burn =
+        g.tokenBurn?.mint && g.tokenBurn.amount > 0
+          ? `${g.tokenBurn.amount}:${g.tokenBurn.mint}`
+          : 'none'
+      return `${g.label}|${isoUnixSeconds(g.startDateIso)}|${isoUnixSeconds(g.endDateIso)}|${pay}|${ml}|${burn}`
     })
     .join(';')
 
@@ -170,6 +185,7 @@ export async function syncPublicSimpleCandyGuards(
             endDate: g.guards.endDate,
             solPayment: g.guards.solPayment,
             mintLimit: g.guards.mintLimit,
+            tokenBurn: g.guards.tokenBurn,
           },
         })),
       })
@@ -215,6 +231,7 @@ export async function syncPublicSimpleCandyGuards(
           endDate: g.guards.endDate,
           solPayment: g.guards.solPayment,
           mintLimit: g.guards.mintLimit,
+          tokenBurn: g.guards.tokenBurn,
         },
       })),
     })

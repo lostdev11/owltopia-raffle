@@ -98,6 +98,20 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     Object.assign(patch, mintPatch)
   }
 
+  if (body.platform_fee_rebate_bps != null) {
+    const n = Math.floor(Number(body.platform_fee_rebate_bps))
+    if (!Number.isFinite(n) || n < 0 || n > 10_000) {
+      return jsonError('platform_fee_rebate_bps must be 0–10000', 400)
+    }
+    patch.platform_fee_rebate_bps = n
+  }
+  if (body.platform_fee_rebate_wallet === null) {
+    patch.platform_fee_rebate_wallet = null
+  } else if (typeof body.platform_fee_rebate_wallet === 'string') {
+    const w = body.platform_fee_rebate_wallet.trim()
+    patch.platform_fee_rebate_wallet = w || null
+  }
+
   const updated = await updateOwlCenterLaunchByIdAdmin(id, patch)
   if (!updated) return jsonError('Update failed', 500)
 

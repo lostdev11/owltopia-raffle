@@ -6,6 +6,7 @@
 export const PARTNER_ALLOWLIST_PRESETS = [
   { key: 'team', label: 'Team' },
   { key: 'og', label: 'OG' },
+  { key: 'fmt', label: 'Free Mint Token' },
   { key: 'wl', label: 'Whitelist' },
   { key: 'wl2', label: 'WL 2' },
   { key: 'wl3', label: 'WL 3' },
@@ -34,6 +35,15 @@ export type PartnerAllowlistPhase = {
    * Null / omit = inherit launch.wallet_mint_limit (public / legacy default).
    */
   wallet_mint_limit?: number | null
+  /**
+   * Free Mint Token — SPL mint burned on mint (Candy Guard `tokenBurn`).
+   * When set, soft WL wallet list is optional; holding/burning the token is the ticket.
+   */
+  redeem_token_mint?: string | null
+  /** Raw token amount to burn (default 1). Respect mint decimals (0-decimal tickets ⇒ 1). */
+  redeem_token_amount?: number | null
+  /** Only `burn` supported for v1. */
+  redeem_mode?: 'burn' | null
 }
 
 export type PartnerAllowlistPhaseFormRow = {
@@ -47,7 +57,36 @@ export type PartnerAllowlistPhaseFormRow = {
   price_currency?: 'SOL' | 'USDC'
   /** Empty / omit = inherit public / launch wallet_mint_limit. */
   wallet_mint_limit?: string
+  /** Free Mint Token SPL mint address (optional). */
+  redeem_token_mint?: string
+  /** Raw burn amount (default 1). */
+  redeem_token_amount?: string
 }
+
+/** True when phase redeems via SPL Free Mint Token burn (no soft WL required). */
+export function partnerPhaseHasRedeemTokenBurn(
+  phase: Pick<PartnerAllowlistPhase, 'redeem_token_mint' | 'redeem_mode'> | null | undefined
+): boolean {
+  const mint = phase?.redeem_token_mint?.trim()
+  return Boolean(mint && mint.length >= 32 && (phase?.redeem_mode == null || phase.redeem_mode === 'burn'))
+}
+
+export function partnerPhaseRedeemTokenAmount(
+  phase: Pick<PartnerAllowlistPhase, 'redeem_token_amount' | 'redeem_token_mint'> | null | undefined
+): number {
+  if (!phase?.redeem_token_mint?.trim()) return 0
+  const n = Math.floor(Number(phase.redeem_token_amount ?? 1))
+  return Number.isFinite(n) && n > 0 ? n : 1
+}
+
+/** Soft phase remaining from configured supply vs recorded used mints (incl. FMT usage rows). */
+export function partnerPhaseSoftRemaining(supply: number, usedMints: number): number {
+  const s = Math.max(0, Math.floor(Number(supply) || 0))
+  const u = Math.max(0, Math.floor(Number(usedMints) || 0))
+  if (s < 1) return 0
+  return Math.max(0, s - u)
+}
+
 
 /** True when this phase uses a fixed SOL mint price (not USDC→SOL). */
 export function partnerPhaseHasFixedSolPrice(
@@ -135,6 +174,21 @@ export function parsePartnerAllowlistPhases(raw: unknown): PartnerAllowlistPhase
       limitRaw != null && limitRaw !== '' && Number.isFinite(Number(limitRaw))
         ? clampPartnerWalletMintLimit(Number(limitRaw))
         : null
+    const redeemMintRaw =
+      typeof row.redeem_token_mint === 'string' ? row.redeem_token_mint.trim() : ''
+    const redeem_token_mint = redeemMintRaw.length >= 32 ? redeemMintRaw : null
+    const redeemAmtRaw = row.redeem_token_amount
+    const redeem_token_amount =
+      redeem_token_mint &&
+      redeemAmtRaw != null &&
+      redeemAmtRaw !== '' &&
+      Number.isFinite(Number(redeemAmtRaw)) &&
+      Number(redeemAmtRaw) > 0
+        ? Math.floor(Number(redeemAmtRaw))
+        : redeem_token_mint
+          ? 1
+          : null
+    const redeem_mode = redeem_token_mint ? ('burn' as const) : null
     out.push({
       key,
       label,
@@ -143,6 +197,9 @@ export function parsePartnerAllowlistPhases(raw: unknown): PartnerAllowlistPhase
       price_usdc,
       price_sol,
       wallet_mint_limit,
+      redeem_token_mint,
+      redeem_token_amount,
+      redeem_mode,
     })
     if (out.length >= PARTNER_ALLOWLIST_MAX_PHASES) break
   }
@@ -331,6 +388,13 @@ export function formRowsFromPartnerAllowlistPhases(
             : '',
       price_currency: sol != null ? 'SOL' : 'USDC',
       wallet_mint_limit: p.wallet_mint_limit != null ? String(p.wallet_mint_limit) : '',
+      redeem_token_mint: p.redeem_token_mint ?? '',
+      redeem_token_amount:
+        p.redeem_token_amount != null && p.redeem_token_amount > 0
+          ? String(p.redeem_token_amount)
+          : p.redeem_token_mint
+            ? '1'
+            : '',
     }
   })
 }
@@ -370,6 +434,18 @@ export function partnerAllowlistPhasesFromFormRows(
       limitTrim && Number.isFinite(Number(limitTrim))
         ? clampPartnerWalletMintLimit(Number(limitTrim))
         : null
+    const redeemMint = (row.redeem_token_mint ?? '').trim()
+    const redeem_token_mint = redeemMint.length >= 32 ? redeemMint : null
+    const redeemAmtTrim = (row.redeem_token_amount ?? '').trim()
+    const redeem_token_amount =
+      redeem_token_mint &&
+      redeemAmtTrim &&
+      Number.isFinite(Number(redeemAmtTrim)) &&
+      Number(redeemAmtTrim) > 0
+        ? Math.floor(Number(redeemAmtTrim))
+        : redeem_token_mint
+          ? 1
+          : null
     built.push({
       key,
       label,
@@ -378,6 +454,9 @@ export function partnerAllowlistPhasesFromFormRows(
       price_usdc,
       price_sol,
       wallet_mint_limit,
+      redeem_token_mint,
+      redeem_token_amount,
+      redeem_mode: redeem_token_mint ? 'burn' : null,
     })
   }
   return sortPartnerAllowlistPhases(built)

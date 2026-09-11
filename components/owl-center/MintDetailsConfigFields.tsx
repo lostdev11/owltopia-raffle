@@ -456,6 +456,46 @@ export function MintDetailsConfigFields({
                 />
               </label>
               <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
+                Free Mint Token (SPL mint · optional)
+                <input
+                  value={phase.redeem_token_mint ?? ''}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    const mint = e.target.value.trim()
+                    next[idx] = {
+                      ...phase,
+                      redeem_token_mint: e.target.value,
+                      label:
+                        mint.length >= 32 && (!phase.label || phase.label === 'Whitelist')
+                          ? 'Free Mint Token'
+                          : phase.label,
+                      price: mint.length >= 32 && !phase.price ? '0' : phase.price,
+                    }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  placeholder="Partner Free Mint Token mint address"
+                  spellCheck={false}
+                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm text-[#F4FBF8]"
+                />
+              </label>
+              {(phase.redeem_token_mint ?? '').trim().length >= 32 ? (
+                <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                  Tokens burned per NFT
+                  <input
+                    type="number"
+                    min={1}
+                    value={phase.redeem_token_amount ?? '1'}
+                    onChange={(e) => {
+                      const next = [...values.allowlist_phases]
+                      next[idx] = { ...phase, redeem_token_amount: e.target.value }
+                      onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                    }}
+                    placeholder="1"
+                    className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+                  />
+                </label>
+              ) : null}
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
                 Phase starts
                 <input
                   type="datetime-local"
@@ -517,7 +557,8 @@ export function MintDetailsConfigFields({
             Set Public start above so the last allowlist window ends when public mint opens. Phase supply is a hard
             cap (mints stop for that phase when used). Max per wallet defaults Spots per wallet when you paste lists
             below; leave blank to inherit the public per-wallet limit. Price currency: USDC is re-quoted to SOL as the
-            market moves; SOL stays fixed on-chain (same as public SOL mint).
+            market moves; SOL stays fixed on-chain (same as public SOL mint). Free Mint Token: set the SPL mint to
+            require burning that ticket on mint (no wallet paste list needed for that phase); use price 0.
           </p>
         </div>
       ) : null}

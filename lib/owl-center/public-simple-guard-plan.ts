@@ -8,6 +8,8 @@ import {
   resolvePartnerAllowlistPhases,
   resolvePartnerPhaseWalletMintLimit,
   partnerPhasePriceSol,
+  partnerPhaseHasRedeemTokenBurn,
+  partnerPhaseRedeemTokenAmount,
 } from '@/lib/owl-center/partner-allowlist-phases'
 import { publicSimpleSolMintPrice } from '@/lib/owl-center/partner-mint-phase-schedule'
 import {
@@ -61,6 +63,8 @@ export type PublicSimpleGuardGroupPlan = {
   /** Per-phase on-chain mintLimit (unique id per group). */
   mintLimitId: number
   walletMintLimit: number
+  /** Free Mint Token burn — SPL mint + raw amount (omit/null = no tokenBurn). */
+  tokenBurn?: { mint: string; amount: number } | null
 }
 
 export type PublicSimpleGuardPlan = {
@@ -189,6 +193,13 @@ export async function buildPublicSimpleGuardPlan(
         label: phase.label,
       })
       if (!priced.ok) return priced
+      const tokenBurn =
+        partnerPhaseHasRedeemTokenBurn(phase) && phase.redeem_token_mint
+          ? {
+              mint: phase.redeem_token_mint.trim(),
+              amount: partnerPhaseRedeemTokenAmount(phase),
+            }
+          : null
       groups.push({
         key: phase.key,
         label: labels[i]!,
@@ -197,6 +208,7 @@ export async function buildPublicSimpleGuardPlan(
         solLamports: priced.lamports,
         mintLimitId: publicSimpleAllowlistMintLimitId(i),
         walletMintLimit: resolvePartnerPhaseWalletMintLimit(phase, walletMintLimit),
+        tokenBurn,
       })
     }
 

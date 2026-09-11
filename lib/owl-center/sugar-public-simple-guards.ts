@@ -56,6 +56,18 @@ function mintLimitGuard(id: number, limit: number): DefaultGuardSetArgs['mintLim
   return some({ id, limit })
 }
 
+function tokenBurnGuard(
+  burn: { mint: string; amount: number } | null | undefined
+): DefaultGuardSetArgs['tokenBurn'] {
+  const mint = burn?.mint?.trim()
+  const amount = Math.floor(Number(burn?.amount ?? 0))
+  if (!mint || amount <= 0) return none()
+  return some({
+    mint: publicKey(mint),
+    amount,
+  })
+}
+
 function botTaxOnly() {
   return {
     botTax: some({ lamports: sol(0.001), lastInstruction: false }),
@@ -104,6 +116,7 @@ export function publicSimpleCandyGuardUmiGroupsFromPlan(
       endDate: endDateGuard(group.endDateIso),
       solPayment: solPaymentGuard(group.solLamports, plan.destination),
       mintLimit: mintLimitGuard(group.mintLimitId, group.walletMintLimit),
+      tokenBurn: tokenBurnGuard(group.tokenBurn),
     },
   }))
 }
@@ -179,6 +192,12 @@ export function publicSimpleSugarGuardsConfigFromPlan(plan: PublicSimpleGuardPla
     if (end) guards.endDate = end
     const pay = sugarSolPayment(group.solLamports, plan.destination)
     if (pay) guards.solPayment = pay
+    if (group.tokenBurn?.mint && group.tokenBurn.amount > 0) {
+      guards.tokenBurn = {
+        mint: group.tokenBurn.mint,
+        amount: group.tokenBurn.amount,
+      }
+    }
     groups[group.label] = { guards }
   }
   return { default: defaultGuards, groups }

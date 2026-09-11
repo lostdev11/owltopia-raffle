@@ -7,6 +7,7 @@ import { ArrowLeft, ExternalLink, Loader2, Rocket, Settings2 } from 'lucide-reac
 
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { AdminOwlCenterViewModePanel } from '@/components/admin/AdminOwlCenterViewModePanel'
+import { OwlCenterFeeRebatesAdminPanel } from '@/components/admin/OwlCenterFeeRebatesAdminPanel'
 import { ActivityLog } from '@/components/owl-center/ActivityLog'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
@@ -39,6 +40,7 @@ export function LaunchpadHubClient() {
   const [err, setErr] = useState<string | null>(null)
   const [advanceMsg, setAdvanceMsg] = useState<string | null>(null)
   const [advancing, setAdvancing] = useState(false)
+  const [rebateLaunchId, setRebateLaunchId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -293,6 +295,13 @@ export function LaunchpadHubClient() {
                           <Link href={l.admin_href} className="text-[#00FF9C] hover:underline">
                             Admin
                           </Link>
+                          <button
+                            type="button"
+                            className="text-[#5C6773] hover:text-[#9BA8B4]"
+                            onClick={() => setRebateLaunchId(l.id)}
+                          >
+                            Fee rebate
+                          </button>
                           {l.public_mint_href ? (
                             <Link href={l.public_mint_href} className="text-[#5C6773] hover:text-[#9BA8B4]">
                               Public
@@ -305,6 +314,12 @@ export function LaunchpadHubClient() {
                 </tbody>
               </table>
             </div>
+          </CommandCard>
+        ) : null}
+
+        {rebateLaunchId ? (
+          <CommandCard label="platform_fee_rebate.sys">
+            <OwlCenterFeeRebatesAdminPanel launchId={rebateLaunchId} />
           </CommandCard>
         ) : null}
 

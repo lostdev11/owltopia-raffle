@@ -159,6 +159,10 @@ export type OwlCenterLaunchPublic = {
    * Empty = legacy single WL via creator_wl_enabled + phase_schedule.WHITELIST.
    */
   partner_allowlist_phases: import('@/lib/owl-center/partner-allowlist-phases').PartnerAllowlistPhase[]
+  /** Partner share of ~$1 platform mint fee in bps (2000 = 20%). 0 = off. */
+  platform_fee_rebate_bps: number
+  /** Partner wallet receiving platform fee rebate after mint ends / admin release. */
+  platform_fee_rebate_wallet: string | null
 }
 
 export type SimpleMintEligibilityResponse = {

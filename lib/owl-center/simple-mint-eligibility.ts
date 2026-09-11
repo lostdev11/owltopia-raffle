@@ -1,4 +1,5 @@
 import { Connection, PublicKey } from '@solana/web3.js'
+import { getAccount, getAssociatedTokenAddress } from '@solana/spl-token'
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
 import { isSome, publicKey } from '@metaplex-foundation/umi'
 import type { DefaultGuardSet } from '@metaplex-foundation/mpl-core-candy-machine'
@@ -9,7 +10,7 @@ import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { launchScheduledPublicReason } from '@/lib/owl-center/launch-mint-open'
 import { resolvePartnerMintUnitPrice, publicSimpleSolMintLamports } from '@/lib/owl-center/partner-mint-phase-schedule'
-import { resolvePartnerPhaseWalletMintLimit } from '@/lib/owl-center/partner-allowlist-phases'
+import { resolvePartnerPhaseWalletMintLimit, partnerPhaseHasRedeemTokenBurn, partnerPhaseRedeemTokenAmount, partnerPhaseSoftRemaining } from '@/lib/owl-center/partner-allowlist-phases'
 import {
   formatAllowlistOpensReason,
   getLaunchActiveAllowlistPhase,
@@ -258,7 +259,7 @@ export async function buildSimpleMintEligibility(
       const phaseKey = activePhase?.key ?? 'wl'
       const phaseSupply = Math.max(0, Math.floor(Number(activePhase?.supply ?? 0) || 0))
       const phaseUsed = await sumLaunchWlPhaseUsedMints(launch.id, phaseKey)
-      const phaseRemaining = phaseSupply > 0 ? Math.max(0, phaseSupply - phaseUsed) : 0
+      const phaseRemaining = partnerPhaseSoftRemaining(phaseSupply, phaseUsed)
 
       if (phaseSupply < 1) {
         max_mintable = 0
@@ -269,29 +270,66 @@ export async function buildSimpleMintEligibility(
         max_mintable = 0
         reason = `${activePhase?.label ?? 'Allowlist'} phase is sold out (${phaseUsed}/${phaseSupply})`
       } else {
-        const wlRow = await getLaunchWlWallet(launch.id, wallet, phaseKey)
-        if (!wlRow) {
-          on_allowlist = false
-          allowlist_spots_remaining = 0
-          max_mintable = 0
-          reason = activePhase
-            ? `Not on the ${activePhase.label} list — wait for the next phase or public`
-            : 'Wallet is not on this collection whitelist'
-        } else {
+        const redeemBurn = partnerPhaseHasRedeemTokenBurn(activePhase)
+        const redeemMint = activePhase?.redeem_token_mint?.trim() ?? ''
+        const redeemAmount = partnerPhaseRedeemTokenAmount(activePhase)
+
+        if (redeemBurn && redeemMint) {
+          // Free Mint Token phase — token burn is the ticket; soft WL optional.
           on_allowlist = true
-          reported_wallet_minted = Math.max(wlRow.used_mints, onChainWalletMinted ?? 0)
-          const phaseWalletRemaining = Math.max(0, effectiveWalletLimit - reported_wallet_minted)
-          const wlRemaining = Math.max(0, wlRow.allowed_mints - reported_wallet_minted)
-          allowlist_spots_remaining = Math.min(wlRemaining, phaseWalletRemaining, phaseRemaining)
-          if (phaseWalletRemaining <= 0) {
+          try {
+            const owner = new PublicKey(wallet)
+            const mintPk = new PublicKey(redeemMint)
+            const conn = new Connection(getLaunchSolanaRpcUrl(mint_network), 'confirmed')
+            const ata = await getAssociatedTokenAddress(mintPk, owner, false)
+            const acct = await getAccount(conn, ata, 'confirmed')
+            const bal = Number(acct.amount)
+            if (bal < redeemAmount) {
+              max_mintable = 0
+              allowlist_spots_remaining = 0
+              reason = `Need ${redeemAmount} Free Mint Token${redeemAmount === 1 ? '' : 's'} to mint (wallet has ${bal})`
+            } else {
+              const byTokens = Math.floor(bal / redeemAmount)
+              const phaseWalletRemaining = Math.max(0, effectiveWalletLimit - reported_wallet_minted)
+              allowlist_spots_remaining = Math.min(byTokens, phaseWalletRemaining, phaseRemaining)
+              max_mintable = Math.min(max_mintable, allowlist_spots_remaining)
+              reason =
+                max_mintable > 0
+                  ? `Eligible for ${activePhase?.label ?? 'Free Mint Token'} · up to ${max_mintable} mint${max_mintable === 1 ? '' : 's'}`
+                  : phaseWalletRemaining <= 0
+                    ? `Wallet limit reached (${effectiveWalletLimit} per wallet for ${activePhase?.label ?? 'this phase'})`
+                    : `${activePhase?.label ?? 'Free Mint Token'} phase is sold out`
+            }
+          } catch {
             max_mintable = 0
-            reason = `Wallet limit reached (${effectiveWalletLimit} per wallet for ${activePhase?.label ?? 'this phase'})`
-          } else if (wlRemaining <= 0) {
+            allowlist_spots_remaining = 0
+            reason = `No Free Mint Token account found — you need ${redeemAmount} token${redeemAmount === 1 ? '' : 's'} to mint`
+          }
+        } else {
+          const wlRow = await getLaunchWlWallet(launch.id, wallet, phaseKey)
+          if (!wlRow) {
+            on_allowlist = false
+            allowlist_spots_remaining = 0
             max_mintable = 0
-            reason = `${activePhase?.label ?? 'Whitelist'} mint allocation exhausted`
+            reason = activePhase
+              ? `Not on the ${activePhase.label} list — wait for the next phase or public`
+              : 'Wallet is not on this collection whitelist'
           } else {
-            max_mintable = Math.min(max_mintable, wlRemaining, phaseWalletRemaining, phaseRemaining)
-            reason = `Eligible for ${activePhase?.label ?? 'allowlist'} · up to ${max_mintable} mint${max_mintable === 1 ? '' : 's'}`
+            on_allowlist = true
+            reported_wallet_minted = Math.max(wlRow.used_mints, onChainWalletMinted ?? 0)
+            const phaseWalletRemaining = Math.max(0, effectiveWalletLimit - reported_wallet_minted)
+            const wlRemaining = Math.max(0, wlRow.allowed_mints - reported_wallet_minted)
+            allowlist_spots_remaining = Math.min(wlRemaining, phaseWalletRemaining, phaseRemaining)
+            if (phaseWalletRemaining <= 0) {
+              max_mintable = 0
+              reason = `Wallet limit reached (${effectiveWalletLimit} per wallet for ${activePhase?.label ?? 'this phase'})`
+            } else if (wlRemaining <= 0) {
+              max_mintable = 0
+              reason = `${activePhase?.label ?? 'Whitelist'} mint allocation exhausted`
+            } else {
+              max_mintable = Math.min(max_mintable, wlRemaining, phaseWalletRemaining, phaseRemaining)
+              reason = `Eligible for ${activePhase?.label ?? 'allowlist'} · up to ${max_mintable} mint${max_mintable === 1 ? '' : 's'}`
+            }
           }
         }
       }
