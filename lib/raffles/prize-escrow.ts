@@ -47,10 +47,17 @@ import { fetchAsset, fetchAssetV1, transferV1 } from '@metaplex-foundation/mpl-c
 import { getRaffleById, updateRaffle } from '@/lib/db/raffles'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { Raffle } from '@/lib/types'
-import { getPartnerPrizeTokenByCurrency, isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
+import {
+  getPartnerPrizeTokenByCurrency,
+  isPartnerSplPrizeRaffle,
+  WSOL_MINT_MAINNET,
+} from '@/lib/partner-prize-tokens'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
 
 const NFT_AMOUNT = 1n
+
+/** Keep enough native SOL in escrow for a simple SystemProgram.transfer fee. */
+const NATIVE_SOL_PRIZE_TRANSFER_FEE_BUFFER_LAMPORTS = 5000n
 
 /** SPL Token custom error 0x11 = account frozen; simulation logs often say "Account is frozen". */
 function humanizeSplPrizeTransferError(message: string): string {
@@ -580,12 +587,13 @@ export async function payoutNativeSolFromEscrowToRecipient(
     return { ok: false, error: 'Prize amount is too large for native SOL transfer encoding.' }
   }
   const escrowBalance = await connection.getBalance(keypair.publicKey, 'confirmed')
-  const needed = lamports + 5000n // keep enough for a simple transfer fee
+  const needed = lamports + NATIVE_SOL_PRIZE_TRANSFER_FEE_BUFFER_LAMPORTS
   if (BigInt(escrowBalance) < needed) {
+    const haveSol = (Number(escrowBalance) / 1e9).toFixed(4)
+    const needSol = (Number(needed) / 1e9).toFixed(4)
     return {
       ok: false,
-      error:
-        'Escrow SOL balance is below the prize amount (plus transfer fee). If you just transferred, wait for confirmation and retry.',
+      error: `Escrow SOL balance is below the prize amount (have ~${haveSol} SOL, need ~${needSol} SOL including transfer fee). SOL crypto prizes are deposited as native SOL into the shared prize escrow wallet; NFT escrow rent and fees can reduce the available balance before the winner claims. If you just transferred, wait for confirmation and retry — otherwise contact support so an admin can top up prize escrow and retry the claim.`,
     }
   }
 
@@ -619,6 +627,47 @@ export async function payoutNativeSolFromEscrowToRecipient(
     const message = err instanceof Error ? err.message : String(err)
     return { ok: false, error: message }
   }
+}
+
+function splSolPayoutFailureShouldTryNativeFallback(error: string | undefined): boolean {
+  if (!error) return false
+  return (
+    error.includes('Escrow does not hold this token') ||
+    error.includes('Could not read the escrow token account') ||
+    error.includes('Escrow token account balance is below')
+  )
+}
+
+/**
+ * SOL partner/crypto prize payout. Creators deposit native SOL (see RaffleDetailClient), so try native
+ * first, then wrapped SOL in the escrow ATA.
+ */
+export async function payoutSolPartnerPrizeFromEscrowToRecipient(
+  recipientWallet: string,
+  amount: bigint
+): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  const nativeResult = await payoutNativeSolFromEscrowToRecipient(recipientWallet, amount)
+  if (nativeResult.ok) return nativeResult
+
+  const wsolResult = await payoutFungibleSplFromEscrowToRecipient(
+    WSOL_MINT_MAINNET,
+    recipientWallet,
+    amount
+  )
+  if (wsolResult.ok) return wsolResult
+
+  if (
+    !wsolResult.ok &&
+    splSolPayoutFailureShouldTryNativeFallback(wsolResult.error) &&
+    !nativeResult.error?.includes('Escrow SOL balance is below')
+  ) {
+    return nativeResult
+  }
+
+  if (nativeResult.error?.includes('Escrow SOL balance is below')) {
+    return nativeResult
+  }
+  return wsolResult.error ? wsolResult : nativeResult
 }
 
 /**
@@ -965,19 +1014,14 @@ export async function transferPartnerSplPrizeToWinner(raffleId: string): Promise
     }
   }
 
-  let transferResult = await payoutFungibleSplFromEscrowToRecipient(
-    partner.mint,
-    raffle.winner_wallet.trim(),
-    raw
-  )
-  if (
-    !transferResult.ok &&
-    partner.currencyCode === 'SOL' &&
-    typeof transferResult.error === 'string' &&
-    transferResult.error.includes('Escrow does not hold this token')
-  ) {
-    transferResult = await payoutNativeSolFromEscrowToRecipient(raffle.winner_wallet.trim(), raw)
-  }
+  const transferResult =
+    partner.currencyCode === 'SOL'
+      ? await payoutSolPartnerPrizeFromEscrowToRecipient(raffle.winner_wallet.trim(), raw)
+      : await payoutFungibleSplFromEscrowToRecipient(
+          partner.mint,
+          raffle.winner_wallet.trim(),
+          raw
+        )
   if (!transferResult.ok || !transferResult.signature) {
     if (!transferResult.ok) {
       console.error(`Partner SPL prize escrow transfer failed for raffle ${raffleId}:`, transferResult.error)
@@ -1572,15 +1616,10 @@ export async function transferPartnerSplPrizeToCreator(
     return { ok: false, error: 'Invalid prize amount for this partner token' }
   }
 
-  let transferResult = await payoutFungibleSplFromEscrowToRecipient(partner.mint, creatorWallet, raw)
-  if (
-    !transferResult.ok &&
-    partner.currencyCode === 'SOL' &&
-    typeof transferResult.error === 'string' &&
-    transferResult.error.includes('Escrow does not hold this token')
-  ) {
-    transferResult = await payoutNativeSolFromEscrowToRecipient(creatorWallet, raw)
-  }
+  const transferResult =
+    partner.currencyCode === 'SOL'
+      ? await payoutSolPartnerPrizeFromEscrowToRecipient(creatorWallet, raw)
+      : await payoutFungibleSplFromEscrowToRecipient(partner.mint, creatorWallet, raw)
   if (!transferResult.ok || !transferResult.signature) {
     return transferResult
   }
@@ -1644,7 +1683,8 @@ export async function checkEscrowHoldsPartnerSplPrize(raffle: Raffle): Promise<{
   if (partner.currencyCode === 'SOL') {
     try {
       const lamports = await connection.getBalance(keypair.publicKey, 'confirmed')
-      return { holds: BigInt(lamports) >= raw }
+      const needed = raw + NATIVE_SOL_PRIZE_TRANSFER_FEE_BUFFER_LAMPORTS
+      return { holds: BigInt(lamports) >= needed }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return { holds: false, error: msg }

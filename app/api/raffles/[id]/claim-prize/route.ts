@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import {
   acquireNftPrizeClaimLock,
   clearNftPrizeClaimLock,
-  getRaffleById,
   maybeCompleteRaffleAfterClaims,
 } from '@/lib/db/raffles'
+import { getRaffleByIdOrSlug } from '@/lib/raffles/resolve-raffle-route-param'
 import { requireSession } from '@/lib/auth-server'
 import { safeErrorMessage } from '@/lib/safe-error'
 import {
@@ -37,7 +37,7 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid raffle id' }, { status: 400 })
     }
 
-    const raffle = await getRaffleById(raffleId)
+    const raffle = await getRaffleByIdOrSlug(raffleId)
     if (!raffle) {
       return NextResponse.json({ error: 'Raffle not found' }, { status: 404 })
     }

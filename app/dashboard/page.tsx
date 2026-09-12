@@ -225,7 +225,7 @@ function canClaimMilestoneBonus(milestone: RaffleMilestone): boolean {
 
 function canClaimEscrowPrize(raffle: EntryWithRaffle['raffle'], wallet: string): boolean {
   const w = wallet.trim()
-  if (!w || !raffle.winner_wallet?.trim() || raffle.winner_wallet.trim() !== w) return false
+  if (!w || !raffle.winner_wallet?.trim() || !walletsEqualSolana(raffle.winner_wallet, w)) return false
   const partnerSpl = isPartnerSplPrizeRaffle(
     raffle as Pick<FullRaffle, 'prize_type' | 'prize_currency'>
   )
@@ -1715,7 +1715,7 @@ export default function DashboardPage() {
     const byId = new Map<string, EntryWithRaffle['raffle']>()
     for (const { raffle } of myEntriesForMemo) {
       const w = walletForMemo.trim()
-      if (!raffle.winner_wallet?.trim() || raffle.winner_wallet.trim() !== w) continue
+      if (!raffle.winner_wallet?.trim() || !walletsEqualSolana(raffle.winner_wallet, w)) continue
       if (raffle.prize_type === 'nft') continue
       if (!byId.has(raffle.id)) byId.set(raffle.id, raffle)
     }
