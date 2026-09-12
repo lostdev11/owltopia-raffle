@@ -16,6 +16,10 @@ type HashListPayload = {
 }
 
 type Props = {
+  /** When false, do not tell creators to complete Orbis listing steps (TM / unclaimed Core). */
+  creatorOwnsUpdateAuthority?: boolean
+  mintStandard?: string
+
   launchId: string
   /** Defaults to creator API; admin panels pass admin path. */
   hashListApiPath?: string
@@ -34,6 +38,8 @@ export function OrbisListingPanel({
   onCollectionMint,
   compact = false,
   embedded = false,
+  creatorOwnsUpdateAuthority,
+  mintStandard,
 }: Props) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -81,7 +87,7 @@ export function OrbisListingPanel({
       await navigator.clipboard.writeText(mint)
       window.open(listUrl, '_blank', 'noopener,noreferrer')
       setMsg(
-        'Collection mint copied · Orbis opened — paste the mint in List Your Collection, verify as UA, then paste the live Orbis URL back here when indexed.'
+        'Collection mint copied · Orbis opened — paste the mint in List Your Collection, complete Orbis listing steps, then paste the live Orbis URL back here when indexed.'
       )
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'orbis_prep_failed')
@@ -96,7 +102,14 @@ export function OrbisListingPanel({
     <>
       <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
         Orbis lists from your on-chain collection mint (not a hash list). Owl Center copies the mint and opens Orbis
-        List Your Collection so you can submit and verify as update authority.
+        List Your Collection.
+        {mintStandard !== 'core' && mintStandard != null
+          ? ' Owltopia holds update authority for Token Metadata — contact support for marketplace verify (no self-serve claim in v1).'
+          : creatorOwnsUpdateAuthority === false
+            ? ' Claim update authority first (Manage collection), then verify on Orbis with your creator wallet.'
+            : creatorOwnsUpdateAuthority
+              ? ' Sign Orbis with your creator wallet (on-chain update authority).'
+              : ' For Core, verify as update authority only after you own UA (new deploy handoff or Claim).'}
         {resolvedMint ? ` · mint ${resolvedMint.slice(0, 4)}…${resolvedMint.slice(-4)}` : ''}
       </p>
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">

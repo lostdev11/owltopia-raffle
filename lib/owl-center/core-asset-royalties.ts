@@ -10,6 +10,7 @@ import {
   type CoreRoyaltiesPluginArgs,
 } from '@/lib/owl-center/metadata-royalty'
 import { createIrysDeployerCoreUmi } from '@/lib/owl-center/core-cm-deploy-onchain'
+import { coreCollectionAllowsUmiUpdates } from '@/lib/owl-center/core-ua-authority'
 import { getOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { isIrysUploadConfigured } from '@/lib/owl-center/irys-config'
@@ -55,6 +56,10 @@ export async function ensureCoreAssetRoyaltiesPlugin(params: {
 
   try {
     const umi = createIrysDeployerCoreUmi(params.network)
+    const allowed = await coreCollectionAllowsUmiUpdates(umi, collectionMint)
+    if (!allowed.ok) {
+      return { mint, status: 'failed', error: allowed.reason }
+    }
     const assetPk = publicKey(mint)
     const collectionPk = publicKey(collectionMint)
     // Collection royalties inherit in default fetchAsset; explorers/DAS read asset plugins only.

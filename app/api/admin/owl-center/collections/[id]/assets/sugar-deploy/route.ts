@@ -34,12 +34,15 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   return NextResponse.json({
     arweave_ready: status.arweave_ready,
     can_deploy: status.can_deploy,
+    can_retry_handoff: status.can_retry_handoff,
     onchain_deploy_enabled: status.onchain_deploy_enabled,
     server_deploy_max_supply: status.server_deploy_max_supply,
     candy_machine_id: status.candy_machine_id,
     collection_mint: status.collection_mint,
     deploy_state: status.deploy_state,
     mint_mode: status.launch.mint_mode,
+    mint_standard: status.mint_standard,
+    creator_wallet: status.creator_wallet,
     terminal_command: `npm run sugar:deploy -- collections/${sanitizeFolderHint(status.launch.name)}`,
   })
 }

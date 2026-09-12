@@ -554,6 +554,7 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
         launchId={launchId}
         launch={launch}
         label={`${launch.status} · LAUNCH_OPS`}
+        claimUaApiPath={`/api/admin/owl-center/collections/${launchId}/claim-update-authority`}
         onSaved={(saved) => {
           if (saved) {
             setBundle((prev) => (prev ? { ...prev, launch: saved } : prev))

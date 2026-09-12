@@ -92,6 +92,10 @@ export type OwlCenterLaunchPublic = {
   devnet_candy_machine_id: string | null
   devnet_collection_mint: string | null
   mint_standard: string
+  /** On-chain Core collection update authority after handoff (creator wallet). */
+  onchain_update_authority: string | null
+  /** IRYS deployer retained as Core UpdateDelegate. */
+  platform_update_delegate: string | null
   total_supply: number
   minted_count: number
   active_phase: OwlCenterPhase

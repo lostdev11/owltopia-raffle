@@ -17,6 +17,13 @@ import {
   isOwlCenterOnchainCmDeployEnabled,
   OWL_CENTER_SERVER_CM_DEPLOY_MAX_SUPPLY,
 } from '@/lib/owl-center/sugar-deploy-onchain'
+import {
+  handOffCoreCollectionUpdateAuthority,
+  isOwlCenterCreatorUaHandoffEnabled,
+} from '@/lib/owl-center/core-collection-ua-handoff'
+import { createIrysDeployerCoreUmi } from '@/lib/owl-center/core-cm-deploy-onchain'
+import { resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
+import { updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { isValidSolanaPubkey, sanitizeLaunchMintPubkey, validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
 
@@ -61,6 +68,15 @@ export async function getSugarDeployStatusForLaunch(launchId: string) {
     sanitizeLaunchMintPubkey(deployState?.collection_mint) ||
     null
 
+  const handoffPending =
+    Boolean(launch) &&
+    launch!.mint_standard === 'core' &&
+    isOwlCenterCreatorUaHandoffEnabled() &&
+    job?.status === 'completed' &&
+    Boolean(cmId && colMint) &&
+    (deployState?.status === 'cm_ready' ||
+      (deployState?.status === 'failed' && Boolean(deployState.candy_machine_id && deployState.collection_mint)))
+
   return {
     launch,
     job,
@@ -71,6 +87,8 @@ export async function getSugarDeployStatusForLaunch(launchId: string) {
     onchain_deploy_enabled: isOwlCenterOnchainCmDeployEnabled(),
     server_deploy_max_supply: OWL_CENTER_SERVER_CM_DEPLOY_MAX_SUPPLY,
     arweave_ready: job?.status === 'completed',
+    mint_standard: launch?.mint_standard ?? null,
+    creator_wallet: launch?.creator_wallet ?? null,
     can_deploy:
       Boolean(launch) &&
       launch!.mint_mode === 'public_simple' &&
@@ -78,6 +96,7 @@ export async function getSugarDeployStatusForLaunch(launchId: string) {
       !cmId &&
       deployState?.status !== 'running' &&
       isOwlCenterOnchainCmDeployEnabled(),
+    can_retry_handoff: handoffPending && deployState?.status !== 'running',
   }
 }
 
@@ -100,7 +119,10 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
     return { ok: false, error: 'Complete Phase B Arweave upload before deploying the Candy Machine.', code: 'arweave_incomplete' }
   }
 
+
   const existing = parseOnchainDeployState(job.upload_progress)
+
+  // Fully complete — re-persist IDs only.
   if (
     existing?.status === 'completed' &&
     existing.candy_machine_id &&
@@ -124,8 +146,106 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
       go_live,
     }
   }
+
   if (existing?.status === 'running') {
     return { ok: false, error: 'Deploy already in progress — wait and refresh.', code: 'in_progress' }
+  }
+
+  // Resume authority handoff when CM already exists (cm_ready / failed-after-CM).
+  const resumeCm =
+    (existing?.status === 'cm_ready' || existing?.status === 'failed' || existing?.status === 'ua_handed_off') &&
+    existing.candy_machine_id &&
+    existing.collection_mint &&
+    isValidSolanaPubkey(existing.candy_machine_id) &&
+    isValidSolanaPubkey(existing.collection_mint)
+
+  if (resumeCm && launch.mint_standard === 'core' && isOwlCenterCreatorUaHandoffEnabled()) {
+    const creatorWallet = launch.creator_wallet?.trim()
+    if (!creatorWallet) {
+      return { ok: false, error: 'creator_wallet is required to finish Core update-authority handoff.', code: 'missing_creator' }
+    }
+
+    await updateAssetUploadJob(job.id, {
+      upload_progress: withDeployState(job.upload_progress, {
+        status: 'cm_ready',
+        candy_machine_id: existing.candy_machine_id,
+        collection_mint: existing.collection_mint,
+        candy_guard_id: existing.candy_guard_id ?? null,
+        onchain_update_authority: existing.onchain_update_authority ?? null,
+        platform_update_delegate: existing.platform_update_delegate ?? null,
+        error: null,
+        completed_at: null,
+      }),
+    })
+
+    const network = resolveLaunchMintNetwork(launch)
+    const umi = createIrysDeployerCoreUmi(network)
+    const handoff = await handOffCoreCollectionUpdateAuthority({
+      umi,
+      collectionAddress: existing.collection_mint!,
+      creatorWallet,
+    })
+    if (!handoff.ok) {
+      await updateAssetUploadJob(job.id, {
+        upload_progress: withDeployState(job.upload_progress, {
+          status: 'failed',
+          candy_machine_id: existing.candy_machine_id,
+          collection_mint: existing.collection_mint,
+          candy_guard_id: existing.candy_guard_id ?? null,
+          onchain_update_authority: existing.onchain_update_authority ?? null,
+          platform_update_delegate: existing.platform_update_delegate ?? null,
+          error: handoff.error,
+          completed_at: new Date().toISOString(),
+        }),
+      })
+      return { ok: false, error: handoff.error, code: 'ua_handoff_failed' }
+    }
+
+    await updateOwlCenterLaunchByIdAdmin(launchId, {
+      onchain_update_authority: handoff.updateAuthority,
+      platform_update_delegate: handoff.platformDelegate,
+    })
+
+    const completedAt = new Date().toISOString()
+    await updateAssetUploadJob(job.id, {
+      upload_progress: withDeployState(job.upload_progress, {
+        status: 'ua_handed_off',
+        candy_machine_id: existing.candy_machine_id,
+        collection_mint: existing.collection_mint,
+        candy_guard_id: existing.candy_guard_id ?? null,
+        onchain_update_authority: handoff.updateAuthority,
+        platform_update_delegate: handoff.platformDelegate,
+        error: null,
+        completed_at: null,
+      }),
+    })
+    await updateAssetUploadJob(job.id, {
+      upload_progress: withDeployState(job.upload_progress, {
+        status: 'completed',
+        candy_machine_id: existing.candy_machine_id,
+        collection_mint: existing.collection_mint,
+        candy_guard_id: existing.candy_guard_id ?? null,
+        onchain_update_authority: handoff.updateAuthority,
+        platform_update_delegate: handoff.platformDelegate,
+        error: null,
+        completed_at: completedAt,
+      }),
+    })
+
+    const go_live = await persistDeployIds(
+      launchId,
+      job.id,
+      existing.candy_machine_id!,
+      existing.collection_mint!,
+      existing.candy_guard_id
+    )
+    return {
+      ok: true,
+      candy_machine_id: existing.candy_machine_id!,
+      collection_mint: existing.collection_mint!,
+      candy_guard_id: existing.candy_guard_id ?? '',
+      go_live,
+    }
   }
 
   const pkg = buildSugarDeployPackageFromJob(job, launch)
@@ -139,6 +259,8 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
       candy_machine_id: null,
       collection_mint: null,
       candy_guard_id: null,
+      onchain_update_authority: null,
+      platform_update_delegate: null,
       error: null,
       completed_at: null,
     }),
@@ -152,17 +274,31 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
   })
 
   if (!result.ok) {
+    const partial = result.partial
     await updateAssetUploadJob(job.id, {
       upload_progress: withDeployState(job.upload_progress, {
-        status: 'failed',
-        candy_machine_id: existing?.candy_machine_id ?? null,
-        collection_mint: existing?.collection_mint ?? null,
-        candy_guard_id: existing?.candy_guard_id ?? null,
+        status: partial?.phase === 'cm_ready' ? 'cm_ready' : 'failed',
+        candy_machine_id: partial?.candyMachineId ?? existing?.candy_machine_id ?? null,
+        collection_mint: partial?.collectionMint ?? existing?.collection_mint ?? null,
+        candy_guard_id: partial?.candyGuardId ?? existing?.candy_guard_id ?? null,
+        onchain_update_authority: null,
+        platform_update_delegate: null,
         error: result.error,
         completed_at: new Date().toISOString(),
       }),
     })
-    return { ok: false, error: result.error, code: 'deploy_failed' }
+    return {
+      ok: false,
+      error: result.error,
+      code: partial?.phase === 'cm_ready' ? 'ua_handoff_pending' : 'deploy_failed',
+    }
+  }
+
+  if (result.onchainUpdateAuthority) {
+    await updateOwlCenterLaunchByIdAdmin(launchId, {
+      onchain_update_authority: result.onchainUpdateAuthority,
+      platform_update_delegate: result.platformUpdateDelegate ?? null,
+    })
   }
 
   const completedAt = new Date().toISOString()
@@ -172,6 +308,8 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
       candy_machine_id: result.candyMachineId,
       collection_mint: result.collectionMint,
       candy_guard_id: result.candyGuardId,
+      onchain_update_authority: result.onchainUpdateAuthority ?? null,
+      platform_update_delegate: result.platformUpdateDelegate ?? null,
       error: null,
       completed_at: completedAt,
     }),
@@ -257,6 +395,9 @@ export async function registerManualSugarDeployIds(
         candy_guard_id: candyGuardId?.trim() || null,
         error: null,
         completed_at: new Date().toISOString(),
+      
+        onchain_update_authority: null,
+        platform_update_delegate: null,
       }),
     })
     go_live = await persistDeployIds(launchId, job.id, cm, col, candyGuardId)

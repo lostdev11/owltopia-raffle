@@ -39,6 +39,10 @@ import {
   parseIrysDeployerSecretKeyForCore,
   type OnchainSugarDeployResult,
 } from '@/lib/owl-center/sugar-deploy-onchain'
+import {
+  isOwlCenterCreatorUaHandoffEnabled,
+  handOffCoreCollectionUpdateAuthority,
+} from '@/lib/owl-center/core-collection-ua-handoff'
 
 const CONFIG_LINES_PER_TX = 10
 
@@ -123,9 +127,25 @@ export async function deployPublicSimpleCoreCandyMachineOnchain(
   const supply = configLines.length
   const royaltyBps = launchSellerFeeBasisPoints(launch)
 
+  const handoffEnabled = isOwlCenterCreatorUaHandoffEnabled()
   let creatorAddress = umi.identity.publicKey
   const creatorWallet = launch.creator_wallet?.trim()
-  if (creatorWallet) {
+  if (handoffEnabled) {
+    if (!creatorWallet) {
+      return {
+        ok: false,
+        error: 'creator_wallet is required for Core deploys so update authority can be handed to the creator.',
+      }
+    }
+    const creatorCheck = validateSolanaPubkeyInput(creatorWallet, 'Creator wallet')
+    if (!creatorCheck.ok) {
+      return {
+        ok: false,
+        error: `${creatorCheck.error} Fix creator_wallet on the launch before deploying.`,
+      }
+    }
+    creatorAddress = publicKey(creatorCheck.pubkey)
+  } else if (creatorWallet) {
     const creatorCheck = validateSolanaPubkeyInput(creatorWallet, 'Creator wallet')
     if (!creatorCheck.ok) {
       return {
@@ -152,6 +172,13 @@ export async function deployPublicSimpleCoreCandyMachineOnchain(
       ruleSet: ruleSet('None'),
     },
   ]
+  if (handoffEnabled) {
+    // Keep IRYS as UpdateDelegate before transferring root UA to the creator.
+    plugins.push({
+      type: 'UpdateDelegate',
+      additionalDelegates: [umi.identity.publicKey],
+    })
+  }
   if (launch.freeze_enabled) {
     plugins.push({
       type: 'PermanentFreezeDelegate',
@@ -199,12 +226,48 @@ export async function deployPublicSimpleCoreCandyMachineOnchain(
     }
 
     const candyGuard = findCandyGuardPda(umi, { base: candyMachine.publicKey })
+    const candyMachineId = String(candyMachine.publicKey)
+    const collectionMint = String(collection.publicKey)
+    const candyGuardId = String(candyGuard)
+
+    if (!handoffEnabled) {
+      return {
+        ok: true,
+        candyMachineId,
+        collectionMint,
+        candyGuardId,
+        onchainUpdateAuthority: String(umi.identity.publicKey),
+        platformUpdateDelegate: null,
+        uaHandoffPhase: 'skipped' as const,
+      }
+    }
+
+    const handoff = await handOffCoreCollectionUpdateAuthority({
+      umi,
+      collectionAddress: collectionMint,
+      creatorWallet: String(creatorAddress),
+    })
+    if (!handoff.ok) {
+      return {
+        ok: false,
+        error: handoff.error,
+        partial: {
+          candyMachineId,
+          collectionMint,
+          candyGuardId,
+          phase: 'cm_ready',
+        },
+      }
+    }
 
     return {
       ok: true,
-      candyMachineId: String(candyMachine.publicKey),
-      collectionMint: String(collection.publicKey),
-      candyGuardId: String(candyGuard),
+      candyMachineId,
+      collectionMint,
+      candyGuardId,
+      onchainUpdateAuthority: handoff.updateAuthority,
+      platformUpdateDelegate: handoff.platformDelegate,
+      uaHandoffPhase: 'ua_handed_off' as const,
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

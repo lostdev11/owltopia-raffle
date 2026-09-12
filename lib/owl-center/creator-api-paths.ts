@@ -43,3 +43,7 @@ export function creatorCoreRoyaltiesApiPath(launchId: string): string {
 export function publicHashListDownloadPath(slug: string): string {
   return `/api/owl-center/collections/${encodeURIComponent(slug)}/hash-list`
 }
+
+export function creatorClaimUpdateAuthorityApiPath(launchId: string): string {
+  return `/api/owl-center/launches/${launchId}/claim-update-authority`
+}

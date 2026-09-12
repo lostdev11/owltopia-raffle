@@ -9,6 +9,7 @@ import { DeployButton } from '@/components/owl-center/DeployButton'
 type DeployStatus = {
   arweave_ready: boolean
   can_deploy: boolean
+  can_retry_handoff?: boolean
   onchain_deploy_enabled: boolean
   server_deploy_max_supply: number
   candy_machine_id: string | null
@@ -19,7 +20,32 @@ type DeployStatus = {
     candy_guard_id?: string | null
   } | null
   mint_mode: string
+  mint_standard?: string | null
+  creator_wallet?: string | null
   terminal_command: string
+}
+
+function deployPhaseLabel(status: string | undefined | null): string | null {
+  switch (status) {
+    case 'running':
+      return 'Phase: uploading / creating Candy Machine…'
+    case 'cm_ready':
+      return 'Phase: CM live — handing off update authority to creator…'
+    case 'ua_handed_off':
+      return 'Phase: authority handed off — finalizing…'
+    case 'completed':
+      return 'Phase: complete'
+    case 'failed':
+      return 'Phase: failed'
+    default:
+      return null
+  }
+}
+
+function shortPk(pk: string | null | undefined): string {
+  const s = pk?.trim() || ''
+  if (s.length < 10) return s || '—'
+  return `${s.slice(0, 4)}…${s.slice(-4)}`
 }
 
 type GoLiveSummary = {
@@ -234,9 +260,28 @@ export function SugarDeployPanel({
         </dl>
       ) : null}
 
+      {status?.mint_standard === 'core' && status.creator_wallet && (status.can_deploy || status.can_retry_handoff) ? (
+        <p className="mb-4 rounded border border-[#FFD769]/30 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#FFD769]">
+          Creator wallet <span className="font-mono">{shortPk(status.creator_wallet)}</span> becomes root update
+          authority after deploy. Use a wallet you will keep (hardware / multisig recommended). Owltopia keeps
+          UpdateDelegate for reveal / refresh / thaw — we cannot move UA later without the creator&apos;s signature.
+        </p>
+      ) : null}
+
+      {deployPhaseLabel(status?.deploy_state?.status) ? (
+        <p className="mb-3 font-mono text-xs text-[#9BA8B4]">{deployPhaseLabel(status?.deploy_state?.status)}</p>
+      ) : null}
+
       {status?.deploy_state?.status === 'failed' && status.deploy_state.error ? (
         <p className="mb-4 rounded border border-[#FF9C9C]/30 bg-[#FF9C9C]/10 px-3 py-2 text-sm text-[#FF9C9C]">
           Last deploy failed: {status.deploy_state.error}
+        </p>
+      ) : null}
+
+      {status?.deploy_state?.status === 'cm_ready' ? (
+        <p className="mb-4 rounded border border-[#FFD769]/30 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#FFD769]">
+          Candy Machine exists; authority handoff incomplete
+          {status.deploy_state.error ? `: ${status.deploy_state.error}` : ''}. Retry to finish handoff (idempotent).
         </p>
       ) : null}
 
@@ -250,6 +295,19 @@ export function SugarDeployPanel({
               </>
             ) : (
               'Deploy CM + guard (server)'
+            )}
+          </DeployButton>
+        ) : null}
+
+        {status?.can_retry_handoff ? (
+          <DeployButton type="button" className="min-h-[44px] touch-manipulation" disabled={busy} onClick={() => void deployOnchain()}>
+            {busy ? (
+              <>
+                <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+                Finishing handoff…
+              </>
+            ) : (
+              'Retry authority handoff'
             )}
           </DeployButton>
         ) : null}

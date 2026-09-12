@@ -119,6 +119,11 @@ export function MintDetailsConfigFields({
             <option value="token_metadata">Token Metadata (legacy)</option>
           </select>
         </label>
+        <p className="text-xs leading-relaxed text-[#9BA8B4]">
+          {values.mint_standard === 'core'
+            ? 'Core: your creator wallet becomes on-chain update authority after deploy (Orbis verify). Owltopia keeps an UpdateDelegate for reveal / refresh / thaw.'
+            : 'Token Metadata: Owltopia keeps update authority in v1 — contact support for marketplace verify (no self-serve claim).'}
+        </p>
         <label className="flex items-start gap-3 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
           <input
             type="checkbox"
