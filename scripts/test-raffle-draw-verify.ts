@@ -26,6 +26,7 @@ import {
   vrfRevealRetryDelayMs,
   shouldAutoForceNewVrfRequest,
   resolveAdminVrfForceNewRequest,
+  resolveSwitchboardOracleRpcUrl,
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
   DRAW_ALGO_V3_VRF,
@@ -350,6 +351,22 @@ assert.equal(
     false
   )
   assert.equal(resolveAdminVrfForceNewRequest({ draw_vrf_account: null }), true)
+
+  // Oracle gateways must not receive private Helius/API-key RPCs (causes InvalidSecpSignature).
+  const prevOracleRpc = process.env.SWITCHBOARD_ORACLE_RPC_URL
+  delete process.env.SWITCHBOARD_ORACLE_RPC_URL
+  assert.equal(
+    resolveSwitchboardOracleRpcUrl('https://mainnet.helius-rpc.com/?api-key=secret'),
+    'https://api.mainnet-beta.solana.com'
+  )
+  assert.equal(
+    resolveSwitchboardOracleRpcUrl('https://api.devnet.solana.com'),
+    'https://api.devnet.solana.com'
+  )
+  process.env.SWITCHBOARD_ORACLE_RPC_URL = 'https://solana.drpc.org'
+  assert.equal(resolveSwitchboardOracleRpcUrl('https://mainnet.helius-rpc.com/?api-key=x'), 'https://solana.drpc.org')
+  if (prevOracleRpc === undefined) delete process.env.SWITCHBOARD_ORACLE_RPC_URL
+  else process.env.SWITCHBOARD_ORACLE_RPC_URL = prevOracleRpc
 }
 
 const v3Draw = performDraw(entries, { algo: DRAW_ALGO_V3_VRF, drawSeed: vrfSeed })
