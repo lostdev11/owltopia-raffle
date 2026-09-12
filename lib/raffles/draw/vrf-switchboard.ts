@@ -31,6 +31,28 @@ import {
 
 export const VRF_PROVIDER_SWITCHBOARD = 'switchboard' as const
 
+/** Public cluster RPCs Switchboard oracle gateways can call without our API keys. */
+const SWITCHBOARD_ORACLE_RPC_MAINNET = 'https://api.mainnet-beta.solana.com'
+const SWITCHBOARD_ORACLE_RPC_DEVNET = 'https://api.devnet.solana.com'
+
+/**
+ * RPC URL passed to Switchboard oracle gateways during RandomnessReveal.
+ *
+ * Gateways fetch slot state from this URL from *their* servers. Passing a private
+ * Helius/QuickNode URL (API key / IP allowlist) often yields signatures that fail
+ * on-chain as InvalidSecpSignature (6016 / 0x1780). Always prefer a public cluster
+ * endpoint the oracles can reach.
+ */
+export function resolveSwitchboardOracleRpcUrl(clusterRpcHint?: string): string {
+  const override = (process.env.SWITCHBOARD_ORACLE_RPC_URL || '').trim()
+  if (override) {
+    const sanitized = override.replace(/\/$/, '')
+    if (sanitized) return sanitized
+  }
+  const hint = (clusterRpcHint ?? resolveServerSolanaRpcUrl()).trim()
+  return isDevnetRpc(hint) ? SWITCHBOARD_ORACLE_RPC_DEVNET : SWITCHBOARD_ORACLE_RPC_MAINNET
+}
+
 export type SwitchboardVrfRequestResult =
   | {
       ok: true
@@ -425,9 +447,14 @@ export async function switchboardRevealRandomness(params: {
 
   try {
     const sb = await loadSb()
+    // Paid / primary RPC for simulate + send. Oracle gateways get a public URL separately.
     const connection = getSolanaConnection()
-    const rpcUrl = connection.rpcEndpoint
     const program = await loadSbProgram(connection, payer)
+    const oracleRpcUrl = resolveSwitchboardOracleRpcUrl(connection.rpcEndpoint)
+    // Separate program bound to a public RPC so SDK revealIx passes a reachable `rpc`
+    // to fetchRandomnessReveal (private Helius URLs → InvalidSecpSignature).
+    const oracleConnection = new Connection(oracleRpcUrl, 'confirmed')
+    const oracleProgram = await loadSbProgram(oracleConnection, payer)
     const bs58 = (await import('bs58')).default
     const rngKp = Keypair.fromSecretKey(bs58.decode(params.randomnessSecretKeyBase58.trim()))
     const accountPk = new PublicKey(params.randomnessAccount.trim())
@@ -440,6 +467,7 @@ export async function switchboardRevealRandomness(params: {
     }
 
     const randomness = new sb.Randomness(program, accountPk)
+    const oracleRandomness = new sb.Randomness(oracleProgram, accountPk)
 
     const readRevealedValue = async (
       revealTx: string
@@ -502,7 +530,7 @@ export async function switchboardRevealRandomness(params: {
           try {
             const inspected = await sb.inspectSolanaRandomness({
               randomnessId: accountPk,
-              solanaRPCUrl: rpcUrl,
+              solanaRPCUrl: connection.rpcEndpoint,
             })
             const valueHex =
               (inspected as { state?: { valueHex?: string } })?.state?.valueHex ||
@@ -529,10 +557,13 @@ export async function switchboardRevealRandomness(params: {
           return null
         }
 
-        // Primary path: SDK revealIx uses the assigned oracle gateway (matches Switchboard docs).
+        // Primary: SDK revealIx against a public-RPC program (assigned oracle gateway +
+        // oracle-reachable rpc param). Private RPC here caused persistent 6016 Secp failures.
         let sdkSecpFailure = false
         try {
-          const sdkResult = await attemptReveal(await randomness.revealIx(payer.publicKey))
+          const sdkResult = await attemptReveal(
+            await oracleRandomness.revealIx(payer.publicKey)
+          )
           if (sdkResult) return sdkResult
         } catch (sdkErr) {
           lastErr = sdkErr instanceof Error ? sdkErr.message : 'SDK revealIx failed'
@@ -541,6 +572,7 @@ export async function switchboardRevealRandomness(params: {
 
         // Fallback: try gateways in oracle-first order when SDK path fails (503 / timeout).
         // Skip on Secp — oracle not ready yet; wrong gateways only produce more Secp failures.
+        // Always pass oracleRpcUrl so gateway signatures verify on-chain.
         if (!sdkSecpFailure) {
           if (!gatewayUrls) {
             const data = await randomness.loadData()
@@ -555,7 +587,7 @@ export async function switchboardRevealRandomness(params: {
                   randomness,
                   payer: payer.publicKey,
                   gatewayUrl,
-                  rpcUrl,
+                  rpcUrl: oracleRpcUrl,
                 })
               )
               if (gatewayResult) return gatewayResult
