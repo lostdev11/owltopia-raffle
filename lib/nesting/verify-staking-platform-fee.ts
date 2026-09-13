@@ -58,9 +58,14 @@ export async function verifyStakingPlatformFeeTransaction(params: {
   fromWallet: string
   treasuryWallet: string
   minUnits?: number
+  /** Override per-unit lamports (e.g. early unstake 0.2 SOL). Defaults to nesting platform fee. */
+  unitLamports?: number
   parsed?: ParsedTransactionWithMeta | null
 }): Promise<VerifyStakingPlatformFeeResult> {
-  const unitLamports = getStakingPlatformFeeLamports()
+  const unitLamports =
+    typeof params.unitLamports === 'number' && params.unitLamports > 0
+      ? Math.floor(params.unitLamports)
+      : getStakingPlatformFeeLamports()
   if (unitLamports <= 0) {
     return { ok: false, error: 'Platform fee is not configured.' }
   }

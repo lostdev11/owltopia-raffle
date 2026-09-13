@@ -6,8 +6,14 @@ import {
 } from '@/lib/solana/platform-fee-treasury-wallet'
 
 const DEFAULT_FEE_SOL = 0.001
+const DEFAULT_EARLY_UNSTAKE_FEE_SOL = 0.2
 
-export type StakingPlatformFeeAction = 'stake' | 'unstake' | 'claim' | 'rev_share_claim'
+export type StakingPlatformFeeAction =
+  | 'stake'
+  | 'unstake'
+  | 'claim'
+  | 'rev_share_claim'
+  | 'early_unstake'
 
 function readFeeSolFromEnv(raw: string | undefined, fallback: number): number {
   if (!raw) return fallback
@@ -35,6 +41,52 @@ export function getStakingPlatformFeeLamports(): number {
   const sol = getStakingPlatformFeeSol()
   if (sol <= 0) return 0
   return Math.round(sol * LAMPORTS_PER_SOL)
+}
+
+/** Early-unstake fee in SOL (default 0.2). Env: `NESTING_EARLY_UNSTAKE_FEE_SOL`. */
+export function getEarlyUnstakeFeeSol(): number {
+  const raw =
+    typeof process !== 'undefined'
+      ? process.env.NESTING_EARLY_UNSTAKE_FEE_SOL?.trim() ||
+        process.env.NEXT_PUBLIC_NESTING_EARLY_UNSTAKE_FEE_SOL?.trim()
+      : undefined
+  return readFeeSolFromEnv(raw, DEFAULT_EARLY_UNSTAKE_FEE_SOL)
+}
+
+export function getEarlyUnstakeFeeLamports(): number {
+  const sol = getEarlyUnstakeFeeSol()
+  if (sol <= 0) return 0
+  return Math.round(sol * LAMPORTS_PER_SOL)
+}
+
+/** Early leave fee uses the same treasury as nesting platform fees. */
+export function isEarlyUnstakeFeeEnabled(): boolean {
+  if (isStakingPlatformFeeEnvDisabled()) return false
+  const lamports = getEarlyUnstakeFeeLamports()
+  return lamports > 0 && !!getPlatformFeeTreasuryWalletAddress()
+}
+
+export function isEarlyUnstakeFeeEnabledClient(): boolean {
+  if (typeof process !== 'undefined' && readBoolean(process.env.NEXT_PUBLIC_NESTING_PLATFORM_FEE_DISABLED)) {
+    return false
+  }
+  const lamports = getEarlyUnstakeFeeLamports()
+  return lamports > 0 && !!getPlatformFeeTreasuryWalletAddressClient()
+}
+
+export function formatEarlyUnstakeFeeLabel(): string {
+  const sol = getEarlyUnstakeFeeSol()
+  if (sol <= 0) return 'No early-unstake fee'
+  const str = sol >= 0.01 ? sol.toFixed(3) : sol.toFixed(4)
+  return `${str} SOL early leave fee`
+}
+
+/** Per-nest unit lamports for a platform-fee action (early unstake uses 0.2 SOL). */
+export function getStakingPlatformFeeUnitLamportsForAction(
+  action: StakingPlatformFeeAction
+): number {
+  if (action === 'early_unstake') return getEarlyUnstakeFeeLamports()
+  return getStakingPlatformFeeLamports()
 }
 
 export function isStakingPlatformFeeEnvDisabled(): boolean {

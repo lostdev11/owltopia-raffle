@@ -7,8 +7,11 @@ import { safeErrorMessage } from '@/lib/safe-error'
 import { getNestingNftFreezeDelegateAddress } from '@/lib/nesting/nft-freeze'
 import { getNestingActionsPauseBreakdown } from '@/lib/nesting/policy'
 import {
+  getEarlyUnstakeFeeLamports,
+  getEarlyUnstakeFeeSol,
   getStakingPlatformFeeLamports,
   getStakingPlatformFeeSol,
+  isEarlyUnstakeFeeEnabled,
   isStakingPlatformFeeEnabled,
 } from '@/lib/nesting/staking-platform-fee'
 import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
@@ -36,7 +39,11 @@ export async function GET() {
       nesting_platform_fee_sol: isStakingPlatformFeeEnabled() ? getStakingPlatformFeeSol() : 0,
       nesting_platform_fee_lamports: isStakingPlatformFeeEnabled() ? getStakingPlatformFeeLamports() : 0,
       nesting_platform_fee_treasury:
-        isStakingPlatformFeeEnabled() ? getPlatformFeeTreasuryWalletAddress() : null,
+        isStakingPlatformFeeEnabled() || isEarlyUnstakeFeeEnabled()
+          ? getPlatformFeeTreasuryWalletAddress()
+          : null,
+      early_unstake_fee_sol: isEarlyUnstakeFeeEnabled() ? getEarlyUnstakeFeeSol() : 0,
+      early_unstake_fee_lamports: isEarlyUnstakeFeeEnabled() ? getEarlyUnstakeFeeLamports() : 0,
     })
   } catch (e) {
     console.error('[staking/pools]', e)
