@@ -37,7 +37,11 @@ export const mockStakingAdapter: StakingMutationAdapter = {
   },
 
   async unstakePosition(input) {
-    const position = await markPositionUnstaked(input.positionId, input.wallet)
+    const position = await markPositionUnstaked(
+      input.positionId,
+      input.wallet,
+      input.earlyUnstake ? { early_unstake: true } : {}
+    )
     return { position }
   },
 
