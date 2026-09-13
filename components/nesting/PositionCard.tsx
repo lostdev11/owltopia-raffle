@@ -456,6 +456,23 @@ export function PositionNestRow({
                 : 'Leave nest'
             : nestingTxPhaseLabel(unstakePhase)}
         </Button>
+        {lockedUntilUnlock && earlyUnstakeEnabled && !cancelOpeningAllowed ? (
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            Early leave ends this nest&apos;s lock, rewards, and nest holder discounts.
+            {claimable > 1e-12 ? (
+              <>
+                {' '}
+                Pending{' '}
+                <span className="tabular-nums font-medium text-foreground/90">
+                  {claimAmountLabel} {rewardToken}
+                </span>{' '}
+                is auto-sent with no extra claim fee.
+              </>
+            ) : (
+              <> No claim fee — only the early leave fee above.</>
+            )}
+          </p>
+        ) : null}
       </div>
     </>
   )
