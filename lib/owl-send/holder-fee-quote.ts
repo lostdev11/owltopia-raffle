@@ -3,11 +3,11 @@
  */
 
 import { getOwlSendFeeLamports, getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
-import { getOwlSendHolderCounts } from '@/lib/owl-send/holder-counts'
 import {
   quoteOwlSendHolderDiscount,
   type OwlSendHolderDiscountQuote,
 } from '@/lib/owl-send/holder-discount'
+import { getOwlSendNestedHolderCounts } from '@/lib/owl-send/nested-holder-counts'
 
 export type OwlSendHolderFeeQuote = OwlSendHolderDiscountQuote & {
   baseFeeLamportsPerLine: number
@@ -24,7 +24,9 @@ export async function resolveOwlSendHolderFeeQuote(params: {
   skipCache?: boolean
 }): Promise<OwlSendHolderFeeQuote> {
   const lineCount = Math.max(0, Math.floor(params.lineCount))
-  const counts = await getOwlSendHolderCounts(params.wallet, { skipCache: params.skipCache })
+  // Discounts require active Gen1/Gen2 nests (not wallet hold alone).
+  const counts = await getOwlSendNestedHolderCounts(params.wallet)
+  void params.skipCache
   const discount = quoteOwlSendHolderDiscount({
     gen1Count: counts.gen1Count,
     gen2Count: counts.gen2Count,

@@ -48,7 +48,7 @@ export function OwlSwapFeeBreakdown({
                   {roleName ? ` (${roleName})` : ''}
                 </p>
               ) : (
-                <p className="text-xs text-zinc-500">No holder discount applied.</p>
+                <p className="text-xs text-zinc-500">No nest holder discount applied.</p>
               )}
             </>
           ) : (

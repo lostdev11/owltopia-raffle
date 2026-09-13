@@ -74,6 +74,10 @@ export type PositionNestRowProps = {
   nftAssetSingular?: string
   /** Scroll to nest form and pre-select this coin (pending open only). */
   onResumeOpening?: () => void
+  /** When true, Leave nest is allowed before unlock_at (pays early-unstake fee). */
+  earlyUnstakeEnabled?: boolean
+  /** e.g. "0.200 SOL" — shown on the Early leave button. */
+  earlyUnstakeFeeLabel?: string | null
 }
 
 type PositionNestRowVariant = 'standalone' | 'embedded'
@@ -96,6 +100,8 @@ export function PositionNestRow({
   claimsPaused,
   nftAssetSingular = 'Owltopia coin',
   onResumeOpening,
+  earlyUnstakeEnabled = false,
+  earlyUnstakeFeeLabel = null,
 }: PositionNestRowProps & { variant?: PositionNestRowVariant }) {
   const claimBlocked = claimsPaused ?? nestingPaused
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -141,10 +147,15 @@ export function PositionNestRow({
     position.status === 'active' &&
     (paysOwlRewards ? meetsMinOwlClaimThreshold(claimable) : claimable > 1e-12)
 
+  const lockedUntilUnlock =
+    position.status === 'active' &&
+    Boolean(position.unlock_at) &&
+    new Date(position.unlock_at!).getTime() > nowMs
+
   const canUnstake =
     cancelOpeningAllowed ||
     (position.status === 'active' &&
-      (!position.unlock_at || new Date(position.unlock_at).getTime() <= nowMs))
+      (!position.unlock_at || new Date(position.unlock_at).getTime() <= nowMs || earlyUnstakeEnabled))
 
   const claimAmountInput = claimable
   const claimAmountLabel = claimable.toLocaleString(undefined, { maximumFractionDigits: 6 })
@@ -438,7 +449,11 @@ export function PositionNestRow({
           {unstakePhase === 'idle'
             ? cancelOpeningAllowed
               ? 'Cancel opening nest'
-              : 'Leave nest'
+              : lockedUntilUnlock && earlyUnstakeEnabled
+                ? earlyUnstakeFeeLabel
+                  ? `Early leave · ${earlyUnstakeFeeLabel}`
+                  : 'Early leave'
+                : 'Leave nest'
             : nestingTxPhaseLabel(unstakePhase)}
         </Button>
       </div>

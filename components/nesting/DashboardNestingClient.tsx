@@ -223,6 +223,10 @@ export function DashboardNestingClient() {
     lamports: number
     treasury: string | null
   }>({ sol: 0, lamports: 0, treasury: null })
+  const [earlyUnstakeFeeConfig, setEarlyUnstakeFeeConfig] = useState<{
+    sol: number
+    lamports: number
+  }>({ sol: 0, lamports: 0 })
   const [positions, setPositions] = useState<StakingPositionRow[]>([])
   const [claimLedgerEvents, setClaimLedgerEvents] = useState<StakingRewardEventRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -341,6 +345,19 @@ export function DashboardNestingClient() {
     [platformFeeConfig]
   )
 
+  const earlyUnstakeFeeActive = useMemo(
+    () =>
+      earlyUnstakeFeeConfig.lamports > 0 && !!platformFeeConfig.treasury?.trim(),
+    [earlyUnstakeFeeConfig, platformFeeConfig.treasury]
+  )
+
+  const earlyUnstakeFeeLabel = useMemo(() => {
+    if (!earlyUnstakeFeeActive) return null
+    const sol = earlyUnstakeFeeConfig.sol
+    const str = sol >= 0.01 ? sol.toFixed(3) : sol.toFixed(4)
+    return `${str} SOL`
+  }, [earlyUnstakeFeeActive, earlyUnstakeFeeConfig.sol])
+
   const platformFeeTxConfig = useMemo((): StakingPlatformFeeTxConfig | null => {
     if (!platformFeeActive || !platformFeeConfig.treasury?.trim()) return null
     return {
@@ -373,6 +390,12 @@ export function DashboardNestingClient() {
           typeof json.nesting_platform_fee_treasury === 'string' && json.nesting_platform_fee_treasury.trim()
             ? json.nesting_platform_fee_treasury.trim()
             : null,
+      })
+      const earlyLamports = Number(json.early_unstake_fee_lamports)
+      const earlySol = Number(json.early_unstake_fee_sol)
+      setEarlyUnstakeFeeConfig({
+        lamports: Number.isFinite(earlyLamports) && earlyLamports > 0 ? earlyLamports : 0,
+        sol: Number.isFinite(earlySol) && earlySol > 0 ? earlySol : 0,
       })
     } catch {
       /* ignore */
@@ -2930,8 +2953,28 @@ export function DashboardNestingClient() {
       await runNestingTxAction({
         onPhase: (p) => setPosSubPhase(positionId, 'unstake', p),
         async execute() {
+          const position = positions.find((p) => p.id === positionId)
+          const unlockMs = position?.unlock_at ? new Date(position.unlock_at).getTime() : NaN
+          const isEarly =
+            position?.status === 'active' &&
+            Number.isFinite(unlockMs) &&
+            Date.now() < unlockMs
+
           let platformFeeSig: string | null = null
-          if (platformFeeActive) {
+          if (isEarly && earlyUnstakeFeeActive && platformFeeTxConfig) {
+            setPosSubPhase(positionId, 'unstake', 'awaiting_wallet_signature')
+            platformFeeSig = await sendStakingPlatformFeeTransaction({
+              connection,
+              sendTransaction: sendTransaction!,
+              publicKey,
+              units: 1,
+              feeConfig: {
+                treasury: platformFeeTxConfig.treasury,
+                unitLamports: earlyUnstakeFeeConfig.lamports,
+              },
+            })
+            setPosSubPhase(positionId, 'unstake', 'submitting')
+          } else if (!isEarly && platformFeeActive) {
             setPosSubPhase(positionId, 'unstake', 'awaiting_wallet_signature')
             platformFeeSig = await sendStakingPlatformFee(1)
             // Fee is signed/confirmed; the wallet is done. Reflect server-side work so
@@ -4868,6 +4911,8 @@ export function DashboardNestingClient() {
                   positions={g.positions}
                   nestingWalletMintHints={nestingWalletMintHints}
                   onUnstake={handleUnstake}
+                    earlyUnstakeEnabled={earlyUnstakeFeeActive}
+                    earlyUnstakeFeeLabel={earlyUnstakeFeeLabel}
                   onClaim={handleClaim}
                   posPhases={posPhases}
                   freezeRequired={g.pool.asset_type === 'nft' && g.pool.adapter_mode === 'onchain_enabled'}
@@ -4891,6 +4936,8 @@ export function DashboardNestingClient() {
                         : null
                     }
                     onUnstake={handleUnstake}
+                    earlyUnstakeEnabled={earlyUnstakeFeeActive}
+                    earlyUnstakeFeeLabel={earlyUnstakeFeeLabel}
                     onClaim={handleClaim}
                     claimPhase={posPhases[pos.id]?.claim ?? 'idle'}
                     unstakePhase={posPhases[pos.id]?.unstake ?? 'idle'}

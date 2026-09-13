@@ -2116,18 +2116,18 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               </span>
             </>
           ) : null}
-          . Owltopia Gen1/Gen2 holders get up to 50% off. Solana rent is shown separately when a
+          . Nested Owltopia Gen1/Gen2 get up to 50% off. Solana rent is shown separately when a
           recipient needs a new token account.
         </p>
         {connected && publicKey && (holderFeeLoading || holderFee) ? (
           <p className="text-xs text-muted-foreground">
             {holderFeeLoading
-              ? 'Checking Owltopia holder discount…'
+              ? 'Checking nest holder discount…'
               : holderFee && discountBps > 0
                 ? `Holder rate: ${formatOwlSendFeeSol(feeSol)} / send (was ${formatOwlSendFeeSol(baseFeeSol)}) · Gen1 ${holderFee.gen1Count} · Gen2 ${holderFee.gen2Count}`
                 : holderFee && !holderFee.checkAvailable
                   ? 'Holder discount check unavailable — standard Owl fee applies.'
-                  : `Standard Owl fee ${formatOwlSendFeeSol(baseFeeSol)} / send · hold Gen1 or Gen2 for up to 50% off.`}
+                  : `Standard Owl fee ${formatOwlSendFeeSol(baseFeeSol)} / send · nest Gen1 or Gen2 for up to 50% off.`}
           </p>
         ) : null}
         {showAdminPreview ? (
