@@ -275,15 +275,20 @@ export async function executeUnstake(params: {
     }
   }
 
-  // Record fee after successful auto-claim (if any), before closing the nest.
-  await commitStakingPlatformFeeLinked(feeParams)
-
+  // Close the nest first. Only record the platform fee after a successful unstake so a
+  // failed thaw / adapter error cannot charge SOL without actually unnesting the NFT.
   const adapter = resolveMutationAdapter(pool)
   const unstakeResult = await adapter.unstakePosition({
     wallet: params.wallet,
     positionId: position_id,
     earlyUnstake: isEarlyUnstake,
   })
+  try {
+    await commitStakingPlatformFeeLinked(feeParams)
+  } catch (feeErr) {
+    // Nest is already closed — do not roll back the leave if fee ledger write fails.
+    console.error('[nesting] commit unstake platform fee after close:', feeErr)
+  }
   return earlyClaim ? { ...unstakeResult, early_claim: earlyClaim } : unstakeResult
 }
 

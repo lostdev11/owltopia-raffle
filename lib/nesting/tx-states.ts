@@ -40,7 +40,17 @@ const CLAIM_PHASE_LABEL: Record<NestingTxPhase, string> = {
   failed: 'Claim failed — try again',
 }
 
-export type NestingTxPhaseLabelContext = 'default' | 'claim'
+const UNSTAKE_PHASE_LABEL: Record<NestingTxPhase, string> = {
+  idle: '',
+  preparing: 'Preparing to leave this nest…',
+  awaiting_wallet_signature: 'Approve the leave fee in your wallet — we unnest your NFT right after.',
+  submitting: 'Unnesting your NFT…',
+  confirming: 'Confirming unnest on-chain…',
+  syncing: 'Updating your nest on Owltopia…',
+  failed: 'Leave nest failed — try again (you may not be charged again)',
+}
+
+export type NestingTxPhaseLabelContext = 'default' | 'claim' | 'unstake'
 
 export function nestingTxPhaseLabel(
   phase: NestingTxPhase,
@@ -48,6 +58,9 @@ export function nestingTxPhaseLabel(
 ): string {
   if (context === 'claim') {
     return CLAIM_PHASE_LABEL[phase] ?? phase
+  }
+  if (context === 'unstake') {
+    return UNSTAKE_PHASE_LABEL[phase] ?? phase
   }
   return PHASE_LABEL[phase] ?? phase
 }
