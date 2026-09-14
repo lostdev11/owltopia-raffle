@@ -454,7 +454,7 @@ export function PositionNestRow({
                   ? `Early leave · ${earlyUnstakeFeeLabel}`
                   : 'Early leave'
                 : 'Leave nest'
-            : nestingTxPhaseLabel(unstakePhase)}
+            : nestingTxPhaseLabel(unstakePhase, 'unstake')}
         </Button>
         {lockedUntilUnlock && earlyUnstakeEnabled && !cancelOpeningAllowed ? (
           <p className="text-[11px] leading-snug text-muted-foreground">
