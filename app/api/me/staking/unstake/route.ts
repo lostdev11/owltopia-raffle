@@ -27,14 +27,25 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => null)
     const position_id = typeof body?.position_id === 'string' ? body.position_id.trim() : ''
 
-    const { position, nest_delegate_revoke } = await executeUnstake({
+    const result = await executeUnstake({
       wallet: session.wallet,
       position_id,
       platform_fee_signature: body?.platform_fee_signature,
     })
+    const { position, nest_delegate_revoke, early_claim: earlyClaim } = result as typeof result & {
+      early_claim?: { claimed?: number; claimed_rewards_total?: number } | null
+    }
 
     return NextResponse.json({
       position,
+      ...(earlyClaim
+        ? {
+            early_claim: {
+              claimed: earlyClaim.claimed,
+              claimed_rewards_total: earlyClaim.claimed_rewards_total,
+            },
+          }
+        : {}),
       execution: {
         path: position.unstake_signature ? ('onchain_token_transfer' as const) : ('database_mock' as const),
         ...(nest_delegate_revoke?.mint
