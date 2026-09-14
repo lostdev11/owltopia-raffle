@@ -28,13 +28,13 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { isOwlCenterMintGloballyDisabled, isOwlCenterMintOperational } from '@/lib/owl-center/mint-policy'
 import { getPhaseStartsAt, isGen1AirdropWindowOpen, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import {
-  OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS,
   formatOwlCenterPlatformMintFeeSolLabel,
   isOwlCenterPlatformMintFeeEnabled,
   owlCenterPlatformMintFeeUsd,
 } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 import { resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
+import { getOwlCenterMintRentReservePerNftLamports } from '@/lib/solana/owl-center-mint-rent'
 import { resolveEffectiveCmRemaining } from '@/lib/owl-center/effective-cm-remaining'
 import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/sync-launch-sold-out'
 import { getLaunchSolanaRpcUrl } from '@/lib/solana/launch-cm'
@@ -180,9 +180,10 @@ export async function buildGen2Eligibility(
       wallet_sol_balance_lamports = null
     }
   }
+  const rentReservePerNft = await getOwlCenterMintRentReservePerNftLamports(network, 'gen2_full')
   const mint_sol_needed_lamports =
     platformFeeEnabled && platformFeeQuote?.ok === true
-      ? String(platformFeeQuote.lamports + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS)
+      ? String(platformFeeQuote.lamports + rentReservePerNft)
       : null
 
   const base: Gen2EligibilityResponse = {

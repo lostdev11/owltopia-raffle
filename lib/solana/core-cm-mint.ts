@@ -21,7 +21,6 @@ import { setComputeUnitLimit, setComputeUnitPrice } from '@metaplex-foundation/m
 import type { DefaultGuardSet, DefaultGuardSetMintArgs } from '@metaplex-foundation/mpl-core-candy-machine'
 
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
-import { OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS } from '@/lib/owl-center/platform-mint-fee'
 import {
   createMintSessionDeadline,
   MINT_RECOVERY_RESERVE_MS,
@@ -47,6 +46,7 @@ import {
   assertOwlCenterPlatformMintFeeSolBalance,
   resolveOwlCenterPlatformMintFeeLamports,
 } from '@/lib/solana/owl-center-platform-mint-fee'
+import { getOwlCenterMintRentReserveLamports } from '@/lib/solana/owl-center-mint-rent'
 import {
   extractTxSignatureFromUnknownError,
   pollTransactionSignatureStatus,
@@ -264,13 +264,14 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
             rpcUrl,
             quantity,
             prefetchedWalletBalanceLamports,
-            mintPriceLamports
+            mintPriceLamports,
+            'public_simple'
           ),
         MINT_SOLANA_RPC_RETRY
       )
       if (!feeBal.ok) return { ok: false, error: feeBal.error }
     } else if (prefetchedWalletBalanceLamports != null) {
-      const needed = OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS * BigInt(quantity)
+      const needed = await getOwlCenterMintRentReserveLamports(network, 'public_simple', quantity, rpcUrl)
       if (prefetchedWalletBalanceLamports < needed) {
         return {
           ok: false,
