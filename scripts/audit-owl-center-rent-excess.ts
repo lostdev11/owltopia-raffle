@@ -8,7 +8,7 @@
  *
  * `--execute` sends SPL Token WithdrawExcessLamports for controlled mint accounts only
  * (requires IRYS_PRIVATE_KEY or GEN2_GUARD_AUTHORITY_SECRET_KEY matching mint authority).
- * Never touches user wallets.
+ * Never touches user wallets. Candy Machine / Candy Guard rows are always report-only.
  */
 import bs58 from 'bs58'
 import {
@@ -23,6 +23,13 @@ import { getMint } from '@solana/spl-token'
 
 import { getGen2MintProceedsWalletAddress } from '@/lib/owl-center/gen2-mint-proceeds'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
+import {
+  auditCandyMachineLaunchCandidate,
+  CM_GUARD_RECLAIM_DISCLAIMER,
+  dedupeCmCandidates,
+  formatCmGuardRentRow,
+  type OwlCenterCmAuditCandidate,
+} from '@/lib/solana/owl-center-cm-rent-audit'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import {
   auditAccountRentExcess,
@@ -54,16 +61,29 @@ function addUnique(set: Set<string>, value: string | null | undefined): void {
   set.add(v)
 }
 
-async function collectAuditAddresses(): Promise<{ addresses: string[]; controlled: Set<string> }> {
+type AuditCollectResult = {
+  addresses: string[]
+  controlled: Set<string>
+  cmCandidates: OwlCenterCmAuditCandidate[]
+}
+
+async function collectAuditTargets(): Promise<AuditCollectResult> {
   const addresses = new Set<string>()
   const controlled = new Set<string>()
+  const cmCandidates: OwlCenterCmAuditCandidate[] = []
+
+  const pushCm = (id: string | null | undefined, network: 'mainnet' | 'devnet', launchSlug?: string) => {
+    const v = id?.trim()
+    if (!v) return
+    cmCandidates.push({ candyMachineId: v, network, launchSlug })
+  }
 
   addUnique(addresses, getOwlCenterPlatformTreasuryWallet())
   addUnique(addresses, getGen2MintProceedsWalletAddress())
   addUnique(addresses, process.env.NEXT_PUBLIC_GEN2_COLLECTION_MINT)
-  addUnique(addresses, process.env.NEXT_PUBLIC_GEN2_CANDY_MACHINE_ID)
+  pushCm(process.env.NEXT_PUBLIC_GEN2_CANDY_MACHINE_ID, 'mainnet', 'env-gen2')
+  pushCm(process.env.GEN2_CANDY_MACHINE_ID, 'mainnet', 'env-gen2')
   addUnique(addresses, process.env.GEN2_COLLECTION_MINT)
-  addUnique(addresses, process.env.GEN2_CANDY_MACHINE_ID)
 
   const extra = process.env.OWL_CENTER_RENT_AUDIT_EXTRA_ADDRS?.split(/[\s,]+/) ?? []
   for (const a of extra) addUnique(addresses, a)
@@ -78,18 +98,22 @@ async function collectAuditAddresses(): Promise<{ addresses: string[]; controlle
   try {
     const { data: launches } = await getSupabaseAdmin()
       .from('owl_center_launches')
-      .select('slug,candy_machine_id,collection_mint,devnet_candy_machine_id,devnet_collection_mint')
+      .select('slug,candy_machine_id,collection_mint,devnet_candy_machine_id,devnet_collection_mint,mint_network')
     for (const row of launches ?? []) {
-      addUnique(addresses, row.candy_machine_id)
+      pushCm(row.candy_machine_id, 'mainnet', row.slug ?? undefined)
+      pushCm(row.devnet_candy_machine_id, 'devnet', row.slug ? `${row.slug}-devnet` : undefined)
       addUnique(addresses, row.collection_mint)
-      addUnique(addresses, row.devnet_candy_machine_id)
       addUnique(addresses, row.devnet_collection_mint)
     }
   } catch (e) {
     console.warn('Could not load owl_center_launches from Supabase — using env addresses only.', e)
   }
 
-  return { addresses: [...addresses], controlled }
+  const dedupedCm = dedupeCmCandidates(cmCandidates)
+  const cmIdSet = new Set(dedupedCm.map((c) => c.candyMachineId))
+  for (const id of cmIdSet) addresses.delete(id)
+
+  return { addresses: [...addresses], controlled, cmCandidates: dedupedCm }
 }
 
 function printRow(row: RentExcessAccountRow): void {
@@ -127,10 +151,53 @@ async function main() {
   const execute = process.argv.includes('--execute')
   const rpc = resolveServerSolanaRpcUrl()
   const connection = new Connection(rpc, 'confirmed')
-  const { addresses, controlled } = await collectAuditAddresses()
+  const { addresses, controlled, cmCandidates } = await collectAuditTargets()
 
-  console.log(`Owl Center rent excess audit (${execute ? 'EXECUTE' : 'dry-run'})`)
+  console.log(`Owl Center rent excess audit (${execute ? 'EXECUTE (SPL mints only)' : 'dry-run'})`)
   console.log(`RPC: ${rpc}`)
+  console.log('')
+
+  console.log('=== Candy Machine / Candy Guard (Metaplex — report only) ===')
+  console.log(CM_GUARD_RECLAIM_DISCLAIMER)
+  console.log('')
+  console.log(`CM candidates: ${cmCandidates.length}`)
+  console.log('')
+
+  let cmGuardExcess = 0n
+  let cmGuardRows = 0
+
+  for (const candidate of cmCandidates) {
+    const bundle = await auditCandyMachineLaunchCandidate(connection, candidate)
+    if (bundle.error) {
+      console.log(
+        `  CM ${bundle.candyMachineId} (${candidate.network})${bundle.launchSlug ? ` [${bundle.launchSlug}]` : ''}  — could not decode: ${bundle.error}`
+      )
+      continue
+    }
+    if (bundle.rows.length === 0) {
+      console.log(`  CM ${bundle.candyMachineId} (${bundle.flavor}, ${candidate.network}) — no on-chain accounts found`)
+      continue
+    }
+    console.log(
+      `--- CM ${bundle.candyMachineId}  flavor=${bundle.flavor}  network=${candidate.network}${bundle.launchSlug ? `  launch=${bundle.launchSlug}` : ''} ---`
+    )
+    for (const row of bundle.rows) {
+      console.log(`  ${formatCmGuardRentRow(row)}`)
+      cmGuardExcess += row.excessLamports
+      cmGuardRows += 1
+    }
+    console.log('')
+  }
+
+  console.log(
+    `CM/guard excess subtotal: ~${(Number(cmGuardExcess) / LAMPORTS_PER_SOL).toFixed(6)} SOL across ${cmGuardRows} Metaplex account(s)`
+  )
+  console.log(
+    'Next step when mint is fully done: close via Metaplex (deleteCandyMachine / withdraw + separate guard close) — not automated here.'
+  )
+  console.log('')
+
+  console.log('=== Other platform addresses (treasury, collection mints, etc.) ===')
   console.log(`Accounts to scan: ${addresses.length}`)
   console.log('')
 
@@ -152,17 +219,13 @@ async function main() {
 
   console.log('')
   console.log(
-    `Total excess observed: ~${(Number(totalExcess) / LAMPORTS_PER_SOL).toFixed(6)} SOL across ${rows.length} accounts`
+    `Other-address excess: ~${(Number(totalExcess) / LAMPORTS_PER_SOL).toFixed(6)} SOL across ${rows.length} accounts`
   )
   console.log(
-    `SPL mint reclaim candidates (controlled set): ~${(Number(reclaimableSpl) / LAMPORTS_PER_SOL).toFixed(6)} SOL`
-  )
-  console.log('')
-  console.log(
-    'Notes: Candy Machine / Core program accounts need their update authority to withdraw excess.',
+    `SPL mint WithdrawExcessLamports candidates (controlled set): ~${(Number(reclaimableSpl) / LAMPORTS_PER_SOL).toFixed(6)} SOL`
   )
   console.log(
-    'Large wins are often collection NFT mints + CM accounts funded pre-SIMD-0437 — verify authority before --execute.',
+    `Combined excess (CM/guard + other): ~${(Number(cmGuardExcess + totalExcess) / LAMPORTS_PER_SOL).toFixed(6)} SOL`
   )
 
   if (!execute) {
@@ -181,7 +244,7 @@ async function main() {
       : authority.publicKey
 
   console.log('')
-  console.log(`Executing SPL withdraw excess → ${destination.toBase58()}`)
+  console.log(`Executing SPL withdraw excess → ${destination.toBase58()} (CM/guard skipped)`)
   for (const row of rows) {
     await tryExecuteSplWithdraw(connection, row, authority, destination)
   }
