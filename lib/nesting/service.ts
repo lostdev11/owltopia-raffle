@@ -12,6 +12,7 @@ import {
 } from '@/lib/db/staking-positions'
 import {
   estimateAccruedRewards,
+  isPositiveOwlClaimSlice,
   isValidOwlClaimPayoutAmount,
   meetsMinOwlClaimThreshold,
   MIN_OWL_CLAIMABLE_TO_CLAIM,
@@ -60,6 +61,7 @@ import {
   resolveStakingPlatformFeeSignature,
   validateStakingPlatformFeeLinked,
 } from '@/lib/nesting/link-staking-platform-fee'
+import { isEarlyUnstakeFeeEnabled } from '@/lib/nesting/staking-platform-fee'
 
 export async function executeStake(params: {
   wallet: string
@@ -205,13 +207,20 @@ export async function executeUnstake(params: {
     })
   }
 
-  if (existing.status === 'active' && existing.unlock_at) {
-    const unlockMs = new Date(existing.unlock_at).getTime()
-    if (!Number.isNaN(unlockMs) && Date.now() < unlockMs) {
-      throw new StakingUserError('Lock period not ended', 400, {
-        unlock_at: existing.unlock_at,
-      })
-    }
+  const unlockMs =
+    existing.status === 'active' && existing.unlock_at
+      ? new Date(existing.unlock_at).getTime()
+      : NaN
+  const isEarlyUnstake =
+    existing.status === 'active' &&
+    Number.isFinite(unlockMs) &&
+    !Number.isNaN(unlockMs) &&
+    Date.now() < unlockMs
+
+  if (isEarlyUnstake && !isEarlyUnstakeFeeEnabled()) {
+    throw new StakingUserError('Lock period not ended', 400, {
+      unlock_at: existing.unlock_at,
+    })
   }
 
   if (
@@ -232,17 +241,50 @@ export async function executeUnstake(params: {
     }
   }
 
-  const adapter = resolveMutationAdapter(pool)
-  await requireStakingPlatformFeeLinked({
+  const feeAction = isEarlyUnstake ? ('early_unstake' as const) : ('unstake' as const)
+  const feeParams = {
     wallet: params.wallet,
-    action: 'unstake',
+    action: feeAction,
     feeSignature: params.platform_fee_signature,
     positionIds: [position_id],
-  })
-  return adapter.unstakePosition({
+  }
+  // Validate fee before auto-claim / close so a bad signature does not pay OWL then fail.
+  await validateStakingPlatformFeeLinked(feeParams)
+
+  // Early leave: auto-claim pending rewards with no claim platform fee, then close the nest.
+  let earlyClaim: Awaited<ReturnType<typeof executeClaim>> | null = null
+  if (isEarlyUnstake && existing.status === 'active') {
+    const stakedAtMs = new Date(existing.staked_at).getTime()
+    const asOfMs = Date.now()
+    const accruedNow = estimateAccruedRewards({
+      amount: Number(existing.amount),
+      rewardRateSnapshot: Number(existing.reward_rate_snapshot),
+      rewardRateUnitSnapshot: existing.reward_rate_unit_snapshot as RewardRateUnit,
+      stakedAtMs,
+      asOfMs,
+    })
+    const claimableNow = Math.max(0, accruedNow - Number(existing.claimed_rewards))
+    if (claimableNow > 1e-12) {
+      earlyClaim = await executeClaim({
+        wallet: params.wallet,
+        position_id,
+        rawAmount: claimableNow,
+        skipPlatformFee: true,
+        allowBelowMinOwl: true,
+      })
+    }
+  }
+
+  // Record fee after successful auto-claim (if any), before closing the nest.
+  await commitStakingPlatformFeeLinked(feeParams)
+
+  const adapter = resolveMutationAdapter(pool)
+  const unstakeResult = await adapter.unstakePosition({
     wallet: params.wallet,
     positionId: position_id,
+    earlyUnstake: isEarlyUnstake,
   })
+  return earlyClaim ? { ...unstakeResult, early_claim: earlyClaim } : unstakeResult
 }
 
 /**
@@ -301,6 +343,10 @@ export async function executeClaim(params: {
   position_id: string
   rawAmount: unknown
   platform_fee_signature?: unknown
+  /** Bundled with early unstake — do not charge the claim platform fee. */
+  skipPlatformFee?: boolean
+  /** Early unstake may pay dust below the normal 1 OWL claim floor. */
+  allowBelowMinOwl?: boolean
 }) {
   assertNestingClaimsAllowed()
   const position_id = params.position_id.trim()
@@ -347,11 +393,15 @@ export async function executeClaim(params: {
   const claimableNow = Math.max(0, accruedNow - oldClaimed)
   const paysOwlRewards = (row.reward_token_snapshot ?? '').trim().toUpperCase() === 'OWL'
 
-  if (paysOwlRewards && !meetsMinOwlClaimThreshold(claimableNow)) {
+  if (paysOwlRewards && !params.allowBelowMinOwl && !meetsMinOwlClaimThreshold(claimableNow)) {
     throw new StakingUserError(minOwlClaimThresholdMessage(), 400, {
       claimable: claimableNow,
       min_owl: MIN_OWL_CLAIMABLE_TO_CLAIM,
     })
+  }
+
+  if (paysOwlRewards && params.allowBelowMinOwl && !isPositiveOwlClaimSlice(claimableNow)) {
+    throw new StakingUserError('No rewards to claim yet for this nest.', 400, { claimable: claimableNow })
   }
 
   if (!paysOwlRewards && claimableNow <= 1e-12) {
@@ -406,21 +456,35 @@ export async function executeClaim(params: {
   const payoutAmount = isFullClaim ? claimableNow : amount
   const newClaimedTotal = isFullClaim ? accruedNow : oldClaimed + amount
 
-  if (paysOwlRewards && !isValidOwlClaimPayoutAmount(payoutAmount)) {
+  if (
+    paysOwlRewards &&
+    !params.allowBelowMinOwl &&
+    !isValidOwlClaimPayoutAmount(payoutAmount)
+  ) {
     throw new StakingUserError(minOwlClaimPayoutRejectedMessage(payoutAmount), 400, {
       payout: payoutAmount,
       claimable: claimableNow,
       min_owl: MIN_OWL_CLAIMABLE_TO_CLAIM,
     })
   }
+  if (paysOwlRewards && params.allowBelowMinOwl && !isPositiveOwlClaimSlice(payoutAmount)) {
+    throw new StakingUserError(minOwlClaimPayoutRejectedMessage(payoutAmount), 400, {
+      payout: payoutAmount,
+      claimable: claimableNow,
+    })
+  }
 
-  const feeParams = await resolveStakingPlatformFeeSignature({
-    wallet: params.wallet,
-    action: 'claim' as const,
-    feeSignature: params.platform_fee_signature,
-    positionIds: [position_id],
-  })
-  await validateStakingPlatformFeeLinked(feeParams)
+  const feeParams = params.skipPlatformFee
+    ? null
+    : await resolveStakingPlatformFeeSignature({
+        wallet: params.wallet,
+        action: 'claim' as const,
+        feeSignature: params.platform_fee_signature,
+        positionIds: [position_id],
+      })
+  if (feeParams) {
+    await validateStakingPlatformFeeLinked(feeParams)
+  }
 
   const adapter = resolveMutationAdapter(pool)
   const result = await adapter.claimPositionRewards({
@@ -430,7 +494,9 @@ export async function executeClaim(params: {
     newClaimedTotal,
   })
 
-  await commitStakingPlatformFeeLinked(feeParams)
+  if (feeParams) {
+    await commitStakingPlatformFeeLinked(feeParams)
+  }
   return result
 }
 

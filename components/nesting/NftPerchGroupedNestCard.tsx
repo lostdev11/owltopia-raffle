@@ -29,6 +29,8 @@ type Props = {
   nestingPaused: boolean
   claimsPaused?: boolean
   onResumeOpening?: (position: StakingPositionRow) => void
+  earlyUnstakeEnabled?: boolean
+  earlyUnstakeFeeLabel?: string | null
 }
 
 const COLLAPSED_THUMB_MAX = 5
@@ -47,6 +49,8 @@ export function NftPerchGroupedNestCard({
   nestingPaused,
   claimsPaused,
   onResumeOpening,
+  earlyUnstakeEnabled = false,
+  earlyUnstakeFeeLabel = null,
 }: Props) {
   const pending = positions.filter((p) => p.status === 'pending').length
   const needsWalletLock = positions.filter(
@@ -235,6 +239,8 @@ export function NftPerchGroupedNestCard({
                   poolName={poolName}
                   stakedAssetHint={mint ? nestingWalletMintHints.get(mint) ?? null : null}
                   onUnstake={onUnstake}
+                  earlyUnstakeEnabled={earlyUnstakeEnabled}
+                  earlyUnstakeFeeLabel={earlyUnstakeFeeLabel}
                   onClaim={onClaim}
                   claimPhase={posPhases[pos.id]?.claim ?? 'idle'}
                   unstakePhase={posPhases[pos.id]?.unstake ?? 'idle'}

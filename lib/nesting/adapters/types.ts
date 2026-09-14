@@ -42,6 +42,8 @@ export type UnstakePositionInput = {
    * and only verifies MPL Core on-chain ownership — for recovery when `collection_key` / DAS mismatch.
    */
   adminRecoveryUnstake?: boolean
+  /** When true, mark the closed nest as an early unstake (forfeits Gen Owl rev share). */
+  earlyUnstake?: boolean
 }
 
 export type ClaimPositionInput = {

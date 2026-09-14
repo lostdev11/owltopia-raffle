@@ -107,6 +107,7 @@ export const solanaStakingAdapterStub: StakingMutationAdapter = {
         sync_status: 'confirmed',
         last_synced_at: new Date().toISOString(),
         last_transaction_error: null,
+        ...(input.earlyUnstake ? { early_unstake: true } : {}),
       })
       return { position }
     }
@@ -132,6 +133,7 @@ export const solanaStakingAdapterStub: StakingMutationAdapter = {
       last_synced_at: new Date().toISOString(),
       last_transaction_error: null,
       external_reference: externalReference,
+      ...(input.earlyUnstake ? { early_unstake: true } : {}),
     })
     const nest_delegate_revoke =
       thawed.needsOwnerRevoke && thawed.revokeMint

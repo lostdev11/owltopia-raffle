@@ -32,6 +32,8 @@ export interface StakingPositionRow {
   last_synced_at?: string | null
   last_transaction_error?: string | null
   external_reference?: string | null
+  /** True when closed via Early Unstake (before unlock_at). Forfeits Gen Owl rev share. */
+  early_unstake?: boolean
 }
 
 /** Active + pending nests for a pool (one row per NFT / stake unit). Server-only aggregate. */

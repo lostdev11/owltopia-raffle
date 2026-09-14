@@ -29,6 +29,9 @@ export function isPositionEligibleForRevSharePeriod(
   position: StakingPositionRow,
   periodMonth: string
 ): boolean {
+  // Early unstake forfeits Gen Owl rev share for this nest (amounts auto-recalc over remaining nests).
+  if (position.early_unstake) return false
+
   const end = endOfPeriodMonthUtc(periodMonth)
   if (!end) return false
   const endMs = end.getTime()

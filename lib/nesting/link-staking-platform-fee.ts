@@ -6,7 +6,10 @@ import {
 import { StakingUserError } from '@/lib/nesting/errors'
 import { findReusableClaimPlatformFeeSignature } from '@/lib/nesting/find-reusable-claim-platform-fee'
 import {
+  formatEarlyUnstakeFeeLabel,
   formatStakingPlatformFeePerNestLabel,
+  getStakingPlatformFeeUnitLamportsForAction,
+  isEarlyUnstakeFeeEnabled,
   isStakingPlatformFeeEnabled,
   type StakingPlatformFeeAction,
 } from '@/lib/nesting/staking-platform-fee'
@@ -38,19 +41,31 @@ function validatePositionIds(positionIds: string[]): string[] {
   return ids
 }
 
+function isPlatformFeeActionEnabled(action: StakingPlatformFeeAction): boolean {
+  if (action === 'early_unstake') return isEarlyUnstakeFeeEnabled()
+  return isStakingPlatformFeeEnabled()
+}
+
+function feeLabelForAction(action: StakingPlatformFeeAction): string {
+  if (action === 'early_unstake') return formatEarlyUnstakeFeeLabel()
+  return formatStakingPlatformFeePerNestLabel()
+}
+
 function parseStakingPlatformFeeLinkParams(params: StakingPlatformFeeLinkParams) {
-  if (!isStakingPlatformFeeEnabled()) {
+  if (!isPlatformFeeActionEnabled(params.action)) {
     return null
   }
 
   const wallet = params.wallet.trim()
   const feeSignature = parseFeeSignature(params.feeSignature)
   const positionIds = validatePositionIds(params.positionIds)
-  const feeLabel = formatStakingPlatformFeePerNestLabel()
+  const feeLabel = feeLabelForAction(params.action)
 
   if (!feeSignature) {
     throw new StakingUserError(
-      `Platform fee required: ${feeLabel} for each nested NFT ${params.action}. Approve the fee in your wallet and try again.`,
+      params.action === 'early_unstake'
+        ? `Early leave fee required: ${feeLabel}. Approve the fee in your wallet and try again.`
+        : `Platform fee required: ${feeLabel} for each nested NFT ${params.action}. Approve the fee in your wallet and try again.`,
       400
     )
   }
@@ -60,7 +75,14 @@ function parseStakingPlatformFeeLinkParams(params: StakingPlatformFeeLinkParams)
     throw new StakingUserError('Platform fee treasury is not configured.', 503)
   }
 
-  return { wallet, feeSignature, positionIds, treasury, action: params.action }
+  return {
+    wallet,
+    feeSignature,
+    positionIds,
+    treasury,
+    action: params.action,
+    unitLamports: getStakingPlatformFeeUnitLamportsForAction(params.action),
+  }
 }
 
 /**
@@ -71,7 +93,7 @@ function parseStakingPlatformFeeLinkParams(params: StakingPlatformFeeLinkParams)
 export async function resolveStakingPlatformFeeSignature(
   params: StakingPlatformFeeLinkParams
 ): Promise<StakingPlatformFeeLinkParams> {
-  if (!isStakingPlatformFeeEnabled()) return params
+  if (!isPlatformFeeActionEnabled(params.action)) return params
   if (params.action !== 'claim' && params.action !== 'rev_share_claim') return params
 
   const provided = parseFeeSignature(params.feeSignature)
@@ -98,7 +120,7 @@ export async function validateStakingPlatformFeeLinked(
   const parsed = parseStakingPlatformFeeLinkParams(params)
   if (!parsed) return
 
-  const { wallet, feeSignature, positionIds, treasury, action } = parsed
+  const { wallet, feeSignature, positionIds, treasury, action, unitLamports } = parsed
 
   const existing = await getStakingPlatformFeePaymentBySignature(feeSignature)
   if (existing) {
@@ -130,6 +152,7 @@ export async function validateStakingPlatformFeeLinked(
     fromWallet: wallet,
     treasuryWallet: treasury,
     minUnits: positionIds.length,
+    unitLamports,
   })
   if (!verified.ok) {
     throw new StakingUserError(verified.error, 400)
@@ -150,7 +173,7 @@ export async function commitStakingPlatformFeeLinked(params: StakingPlatformFeeL
   const parsed = parseStakingPlatformFeeLinkParams(params)
   if (!parsed) return
 
-  const { wallet, feeSignature, positionIds, treasury, action } = parsed
+  const { wallet, feeSignature, positionIds, treasury, action, unitLamports } = parsed
 
   const existing = await getStakingPlatformFeePaymentBySignature(feeSignature)
   if (existing) {
@@ -163,6 +186,7 @@ export async function commitStakingPlatformFeeLinked(params: StakingPlatformFeeL
     fromWallet: wallet,
     treasuryWallet: treasury,
     minUnits: positionIds.length,
+    unitLamports,
   })
   if (!verified.ok) {
     throw new StakingUserError(verified.error, 400)
