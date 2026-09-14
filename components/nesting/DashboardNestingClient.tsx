@@ -60,6 +60,14 @@ import {
   PENDING_CLAIM_FEE_STORAGE_KEY,
   type PendingClaimPlatformFee,
 } from '@/lib/nesting/pending-claim-platform-fee'
+import {
+  clearPendingUnstakePlatformFee,
+  pendingUnstakePlatformFeeMatches,
+  readPendingUnstakePlatformFee,
+  unstakeRetryWithoutRepayMessage,
+  writePendingUnstakePlatformFee,
+  type PendingUnstakePlatformFee,
+} from '@/lib/nesting/pending-unstake-platform-fee'
 
 const PENDING_CLAIM_LEDGER_STORAGE_KEY = 'owl_pending_claim_ledger_sync_v1'
 
@@ -1836,6 +1844,45 @@ export function DashboardNestingClient() {
     }
   }, [])
 
+  const readPendingUnstakeFeeSig = useCallback(
+    (positionId: string, action: PendingUnstakePlatformFee['action']): string | null => {
+      if (typeof window === 'undefined' || !publicKey) return null
+      const fee = readPendingUnstakePlatformFee()
+      if (
+        !fee ||
+        !pendingUnstakePlatformFeeMatches({
+          fee,
+          wallet: publicKey.toBase58(),
+          positionId,
+          action,
+        })
+      ) {
+        return null
+      }
+      return fee.signature
+    },
+    [publicKey]
+  )
+
+  const savePendingUnstakeFee = useCallback(
+    (positionId: string, action: PendingUnstakePlatformFee['action'], signature: string) => {
+      if (typeof window === 'undefined' || !publicKey) return
+      writePendingUnstakePlatformFee({
+        wallet: publicKey.toBase58(),
+        signature: signature.trim(),
+        positionId,
+        action,
+        units: 1,
+        savedAtMs: Date.now(),
+      })
+    },
+    [publicKey]
+  )
+
+  const clearPendingUnstakeFee = useCallback(() => {
+    clearPendingUnstakePlatformFee()
+  }, [])
+
   const sendMplCoreFreezeDelegateApproval = useCallback(
     async (
       assetId: string,
@@ -2949,37 +2996,54 @@ export function DashboardNestingClient() {
   const handleUnstake = async (positionId: string) => {
     if (!publicKey) return
     setActionError(null)
+    setSuccessNotice(null)
+    const position = positions.find((p) => p.id === positionId)
+    const unlockMs = position?.unlock_at ? new Date(position.unlock_at).getTime() : NaN
+    const isEarly =
+      position?.status === 'active' &&
+      Number.isFinite(unlockMs) &&
+      Date.now() < unlockMs
+    const feeAction: PendingUnstakePlatformFee['action'] = isEarly ? 'early_unstake' : 'unstake'
+    let platformFeeSig: string | null = null
     try {
       await runNestingTxAction({
         onPhase: (p) => setPosSubPhase(positionId, 'unstake', p),
         async execute() {
-          const position = positions.find((p) => p.id === positionId)
-          const unlockMs = position?.unlock_at ? new Date(position.unlock_at).getTime() : NaN
-          const isEarly =
-            position?.status === 'active' &&
-            Number.isFinite(unlockMs) &&
-            Date.now() < unlockMs
-
-          let platformFeeSig: string | null = null
           if (isEarly && earlyUnstakeFeeActive && platformFeeTxConfig) {
-            setPosSubPhase(positionId, 'unstake', 'awaiting_wallet_signature')
-            platformFeeSig = await sendStakingPlatformFeeTransaction({
-              connection,
-              sendTransaction: sendTransaction!,
-              publicKey,
-              units: 1,
-              feeConfig: {
-                treasury: platformFeeTxConfig.treasury,
-                unitLamports: earlyUnstakeFeeConfig.lamports,
-              },
-            })
-            setPosSubPhase(positionId, 'unstake', 'submitting')
+            const reused = readPendingUnstakeFeeSig(positionId, feeAction)
+            if (reused) {
+              platformFeeSig = reused
+              setPosSubPhase(positionId, 'unstake', 'submitting')
+            } else {
+              setPosSubPhase(positionId, 'unstake', 'awaiting_wallet_signature')
+              platformFeeSig = await sendStakingPlatformFeeTransaction({
+                connection,
+                sendTransaction: sendTransaction!,
+                publicKey,
+                units: 1,
+                feeConfig: {
+                  treasury: platformFeeTxConfig.treasury,
+                  unitLamports: earlyUnstakeFeeConfig.lamports,
+                },
+              })
+              savePendingUnstakeFee(positionId, feeAction, platformFeeSig)
+              // Fee is signed/confirmed; the wallet is done. Reflect server-side work so
+              // the user does not think another wallet approval is pending and re-pay the fee.
+              setPosSubPhase(positionId, 'unstake', 'submitting')
+            }
           } else if (!isEarly && platformFeeActive) {
-            setPosSubPhase(positionId, 'unstake', 'awaiting_wallet_signature')
-            platformFeeSig = await sendStakingPlatformFee(1)
-            // Fee is signed/confirmed; the wallet is done. Reflect server-side work so
-            // the user does not think another wallet approval is pending and re-pay the fee.
-            setPosSubPhase(positionId, 'unstake', 'submitting')
+            const reused = readPendingUnstakeFeeSig(positionId, feeAction)
+            if (reused) {
+              platformFeeSig = reused
+              setPosSubPhase(positionId, 'unstake', 'submitting')
+            } else {
+              setPosSubPhase(positionId, 'unstake', 'awaiting_wallet_signature')
+              platformFeeSig = await sendStakingPlatformFee(1)
+              savePendingUnstakeFee(positionId, feeAction, platformFeeSig)
+              // Fee is signed/confirmed; the wallet is done. Reflect server-side work so
+              // the user does not think another wallet approval is pending and re-pay the fee.
+              setPosSubPhase(positionId, 'unstake', 'submitting')
+            }
           }
 
           const postUnstake = async () => {
@@ -3001,6 +3065,7 @@ export function DashboardNestingClient() {
               mint?: string
               needs_owner_thaw?: boolean
               execution?: { nest_delegate_revoke?: { mint?: string } | null }
+              early_claim?: { claimed?: number } | null
             }
             return { res, json }
           }
@@ -3021,10 +3086,12 @@ export function DashboardNestingClient() {
                 ? json.mint.trim()
                 : positions.find((p) => p.id === positionId)?.asset_identifier?.trim() || ''
             if (!adapter || !positionAsset) {
-              setActionError(
+              const err =
                 typeof json.error === 'string'
                   ? json.error
                   : 'Approve a wallet thaw for this NFT, then try Leave nest again.'
+              setActionError(
+                platformFeeSig ? `${err} ${unstakeRetryWithoutRepayMessage(isEarly)}` : err
               )
               throw new Error('unstake')
             }
@@ -3048,9 +3115,23 @@ export function DashboardNestingClient() {
                 : typeof json.error === 'string'
                   ? json.error
                   : 'Unstake failed'
-            setActionError(err)
+            const feeRejected =
+              err.toLowerCase().includes('platform fee') ||
+              err.toLowerCase().includes('early leave fee') ||
+              err.toLowerCase().includes('fee payment') ||
+              err.toLowerCase().includes('fee transaction')
+            if (feeRejected) {
+              clearPendingUnstakeFee()
+              setActionError(err)
+            } else {
+              setActionError(
+                platformFeeSig ? `${err} ${unstakeRetryWithoutRepayMessage(isEarly)}` : err
+              )
+            }
             throw new Error('unstake')
           }
+
+          clearPendingUnstakeFee()
 
           const revokeMint = json.execution?.nest_delegate_revoke?.mint?.trim()
           if (revokeMint) {
@@ -3060,16 +3141,42 @@ export function DashboardNestingClient() {
             } catch (revokeErr) {
               // Nest is already closed on Owltopia; leftover Approve is optional cleanup.
               console.warn('[nesting] nest delegate revoke after unstake', revokeErr)
+              const claimed =
+                typeof json.early_claim?.claimed === 'number' &&
+                Number.isFinite(json.early_claim.claimed) &&
+                json.early_claim.claimed > 0
+                  ? json.early_claim.claimed
+                  : null
               setSuccessNotice({
                 placement: 'modal',
                 tone: 'info',
                 title: 'Nest closed',
-                message:
-                  'Your nest is closed. Your wallet may still show a leftover nest Approve on that owl.',
-                hint: 'Approve Revoke if your wallet asks, or it will clear the next time you nest and leave that owl.',
+                message: claimed
+                  ? `Your NFT is unnested and ${claimed.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL was sent with early leave.`
+                  : 'Your NFT is unnested and this nest is closed.',
+                hint: 'Your wallet may still show a leftover nest Approve on that owl. Approve Revoke if asked, or it will clear the next time you nest and leave that owl.',
               })
+              return
             }
           }
+
+          const claimed =
+            typeof json.early_claim?.claimed === 'number' &&
+            Number.isFinite(json.early_claim.claimed) &&
+            json.early_claim.claimed > 0
+              ? json.early_claim.claimed
+              : null
+          setSuccessNotice({
+            placement: 'modal',
+            tone: 'success',
+            title: isEarly ? 'Early leave complete' : 'Nest closed',
+            message: claimed
+              ? `Your NFT is unnested. ${claimed.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL was auto-sent with no claim fee.`
+              : 'Your NFT is unnested and this nest is closed.',
+            hint: isEarly
+              ? 'Pending rewards were claimed automatically. Your nest list will refresh next.'
+              : 'Your nest list will refresh next.',
+          })
         },
         afterSuccess: async () => {
           await loadPositions()
@@ -3077,7 +3184,10 @@ export function DashboardNestingClient() {
       })
     } catch (e) {
       if (e instanceof Error && e.message === 'unstake') throw e
-      setActionError(formatNestingApiFetchError(e, 'generic'))
+      setActionError(
+        formatNestingApiFetchError(e, 'generic') +
+          (platformFeeSig ? ` ${unstakeRetryWithoutRepayMessage(isEarly)}` : '')
+      )
     }
   }
 
