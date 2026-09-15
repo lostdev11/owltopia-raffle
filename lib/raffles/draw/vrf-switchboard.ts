@@ -47,6 +47,44 @@ export const SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES = [
 
 const SWITCHBOARD_ORACLE_RPC_DEVNET = 'https://api.devnet.solana.com'
 
+/** Slots after the committed seed slot before we start reveal polls. */
+export const SWITCHBOARD_SEED_SLOT_MATURITY = 15
+
+/**
+ * Wait until `seedSlot + maturity` is behind the confirmed tip (or minWait elapses).
+ * Reveal signatures signed too early against an unstable tip fail Secp on-chain.
+ */
+export async function waitForSwitchboardSeedSlot(params: {
+  connection: Connection
+  seedSlot?: number
+  minWaitMs?: number
+  maxWaitMs?: number
+  maturitySlots?: number
+}): Promise<void> {
+  const minWaitMs = params.minWaitMs ?? 8_000
+  const maxWaitMs = params.maxWaitMs ?? 20_000
+  const maturity = params.maturitySlots ?? SWITCHBOARD_SEED_SLOT_MATURITY
+  const started = Date.now()
+  while (Date.now() - started < maxWaitMs) {
+    const elapsed = Date.now() - started
+    try {
+      const slot = await params.connection.getSlot('confirmed')
+      if (
+        typeof params.seedSlot === 'number' &&
+        Number.isFinite(params.seedSlot) &&
+        slot >= params.seedSlot + maturity &&
+        elapsed >= minWaitMs
+      ) {
+        return
+      }
+    } catch {
+      // ignore tip read flakes
+    }
+    if (elapsed >= minWaitMs && params.seedSlot == null) return
+    await new Promise((r) => setTimeout(r, 1_000))
+  }
+}
+
 /**
  * RPC URL passed to Switchboard oracle gateways during RandomnessReveal.
  *
@@ -63,9 +101,26 @@ export function resolveSwitchboardOracleRpcUrl(clusterRpcHint?: string): string 
 export function resolveSwitchboardOracleRpcCandidates(clusterRpcHint?: string): string[] {
   const override = (process.env.SWITCHBOARD_ORACLE_RPC_URL || '').trim().replace(/\/$/, '')
   if (override) return [override]
-  const hint = (clusterRpcHint ?? resolveServerSolanaRpcUrl()).trim()
+
+  const hint = (clusterRpcHint ?? resolveServerSolanaRpcUrl()).trim().replace(/\/$/, '')
   if (isDevnetRpc(hint)) return [SWITCHBOARD_ORACLE_RPC_DEVNET]
-  return [...SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES]
+
+  const out: string[] = []
+  const add = (url: string) => {
+    const cleaned = url.trim().replace(/\/$/, '')
+    if (!cleaned || out.includes(cleaned)) return
+    out.push(cleaned)
+  }
+
+  // Prefer the same HTTPS RPC used for commit/simulate (e.g. Helius with api-key).
+  // Switchboard oracle servers can call API-key URLs; matching SlotHashes to the
+  // bank that verifies the reveal is required to avoid persistent 6016 Secp failures
+  // when signing on a public tip and simulating on a paid RPC (or vice versa).
+  if (/^https:\/\//i.test(hint) && !/localhost|127\.0\.0\.1/i.test(hint)) {
+    add(hint)
+  }
+  for (const candidate of SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES) add(candidate)
+  return out
 }
 
 export type SwitchboardVrfRequestResult =
@@ -472,10 +527,6 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
       built: commitBuilt,
     })
 
-    // Oracle needs time after commit before reveal signatures validate on-chain.
-    // 4s was too short under load — Secp 6016 often means "oracle not ready yet".
-    await new Promise((r) => setTimeout(r, 8_000))
-
     let seedSlot: number | undefined
     try {
       const data = await randomness.loadData()
@@ -484,6 +535,10 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
     } catch {
       // optional
     }
+
+    // Wait until the seed slot is comfortably behind the tip so SlotHashes is stable
+    // for oracle signing. Fixed sleeps alone still produced Secp 6016 under load.
+    await waitForSwitchboardSeedSlot({ connection, seedSlot, minWaitMs: 8_000, maxWaitMs: 20_000 })
 
     const bs58 = (await import('bs58')).default
     return {

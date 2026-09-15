@@ -1,5 +1,6 @@
 import {
   PACK_PRICE_SOL,
+  PACK_OPEN_ALGO_V1,
   solToLamports,
 } from '@/lib/packs/config'
 import {
@@ -45,6 +46,7 @@ import {
 } from '@/lib/packs/vault'
 import { isPackVrfEnabled, resolvePackOpenAlgo } from '@/lib/packs/vrf-config'
 import { runPackOpenVrf } from '@/lib/packs/vrf-open-flow'
+import { resolvePackSeedFromVrfResult } from '@/lib/packs/seed-after-payment'
 
 function rowToResult(
   row: PackOpenRow,
@@ -184,22 +186,33 @@ export async function confirmAndOpenPack(input: {
   }
 
   const config = await getPackVaultConfig()
-  const algo = resolvePackOpenAlgo()
+  let algo = resolvePackOpenAlgo()
 
   let seed: string
   if (isPackVrfEnabled()) {
     open = await updatePackOpen(open.id, { status: 'rolling', open_algo: algo })
     const vrf = await runPackOpenVrf(open.id)
-    if (!vrf.ok) {
-      await updatePackOpen(open.id, {
-        status: 'refund_needed',
-        error_message: `VRF failed: ${vrf.error}`,
-      })
-      throw new Error(
-        `Pack randomness (VRF) failed. Pack marked for refund — contact support. (${vrf.error})`
+    const resolved = resolvePackSeedFromVrfResult({
+      vrfOk: vrf.ok,
+      vrfOpenSeed: vrf.ok ? vrf.openSeed : undefined,
+      vrfError: vrf.ok ? undefined : vrf.error,
+      localSeed: generatePackOpenSeed(),
+    })
+    seed = resolved.seed
+    algo = resolved.algo
+    if (resolved.usedVrfFallback) {
+      // Payment already confirmed — never leave the buyer without a rip.
+      console.error(
+        '[packs] Switchboard VRF failed after payment; completing with local seed fallback',
+        resolved.vrfError
       )
+      await updatePackOpen(open.id, {
+        open_algo: PACK_OPEN_ALGO_V1,
+        open_vrf_status: 'failed',
+        open_vrf_error: `VRF failed; completed with local seed fallback: ${resolved.vrfError}`,
+        error_message: null,
+      } as Parameters<typeof updatePackOpen>[1])
     }
-    seed = vrf.openSeed
   } else {
     seed = generatePackOpenSeed()
   }
