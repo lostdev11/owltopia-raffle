@@ -5,6 +5,7 @@
 
 import type { ParsedTransactionWithMeta } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 function tokenAmountForOwnerMint(
   balances: NonNullable<ParsedTransactionWithMeta['meta']>['preTokenBalances'],
@@ -78,14 +79,14 @@ export async function verifyOwlSwapDepositTransaction(params: {
 
   const connection = getSolanaConnection()
   let tx = await connection.getParsedTransaction(sig, {
-    maxSupportedTransactionVersion: 0,
+    maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
     commitment: 'confirmed',
   })
   if (!tx) {
     // brief retry — tx may still be landing
     await new Promise((r) => setTimeout(r, 800))
     tx = await connection.getParsedTransaction(sig, {
-      maxSupportedTransactionVersion: 0,
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
       commitment: 'confirmed',
     })
   }
