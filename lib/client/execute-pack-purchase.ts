@@ -57,25 +57,46 @@ export type ExecutePackPurchaseOptions = {
   }) => void
 }
 
+/** Client abort for /api/packs/open — under route maxDuration (120s) so UI never spins forever. */
+export const PACK_OPEN_CLIENT_TIMEOUT_MS = 110_000
+
+export const PACK_OPEN_CLIENT_TIMEOUT_MESSAGE =
+  'Prize resolution timed out after payment. Your pack is queued for support/refund — contact support with your payment signature.'
+
 async function confirmPackOpen(input: {
   openId: string
   wallet: string
   paymentSignature: string
 }): Promise<{ ok: true; result: PackOpenClientResult } | { ok: false; error: string }> {
-  const openRes = await fetch('/api/packs/open', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      openId: input.openId,
-      wallet: input.wallet,
-      paymentSignature: input.paymentSignature,
-    }),
-  })
-  const openData = await openRes.json().catch(() => ({}))
-  if (!openRes.ok) {
-    return { ok: false, error: openData.error || 'Pack open failed after payment' }
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), PACK_OPEN_CLIENT_TIMEOUT_MS)
+  try {
+    const openRes = await fetch('/api/packs/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        openId: input.openId,
+        wallet: input.wallet,
+        paymentSignature: input.paymentSignature,
+      }),
+      signal: controller.signal,
+    })
+    const openData = await openRes.json().catch(() => ({}))
+    if (!openRes.ok) {
+      return { ok: false, error: openData.error || 'Pack open failed after payment' }
+    }
+    return { ok: true, result: openData.result as PackOpenClientResult }
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      return { ok: false, error: PACK_OPEN_CLIENT_TIMEOUT_MESSAGE }
+    }
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : 'Pack open failed after payment',
+    }
+  } finally {
+    clearTimeout(timeoutId)
   }
-  return { ok: true, result: openData.result as PackOpenClientResult }
 }
 
 async function readBalanceLamports(

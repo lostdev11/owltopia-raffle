@@ -88,6 +88,8 @@ export function isRetryableVrfRevealError(error: string | null | undefined): boo
     isVrfRevealTimeoutError(msg) ||
     isSwitchboardGatewayTransientError(msg) ||
     isBlockhashNotFoundError(msg) ||
+    /tx confirm timed out/i.test(msg) ||
+    /confirm timed out after/i.test(msg) ||
     /Randomness not ready/i.test(msg) ||
     /Reveal attempt failed/i.test(msg) ||
     /oracle did not produce/i.test(msg)
