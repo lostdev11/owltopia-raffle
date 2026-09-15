@@ -6,7 +6,6 @@ import { Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js'
 
 import {
   isOwlCenterPlatformMintFeeEnabled,
-  OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS,
   owlCenterPlatformMintFeeLamports,
   owlCenterPlatformMintFeeUsd,
 } from '@/lib/owl-center/platform-mint-fee'
@@ -15,8 +14,10 @@ import {
   getOwlCenterPlatformTreasuryWalletClient,
 } from '@/lib/owl-center/platform-treasury'
 import { collectParsedTransactionAccountKeys } from '@/lib/gen2-presale/verify-payment'
+import type { OwlCenterMintMode } from '@/lib/owl-center/types'
 import type { OwlMintNetwork } from '@/lib/solana/network'
 import { getLaunchSolanaRpcUrl } from '@/lib/solana/launch-cm'
+import { getOwlCenterMintRentReserveLamports } from '@/lib/solana/owl-center-mint-rent'
 
 export function shouldCollectOwlCenterPlatformMintFeeClient(): boolean {
   return isOwlCenterPlatformMintFeeEnabled() && !!getOwlCenterPlatformTreasuryWalletClient()
@@ -64,7 +65,8 @@ export async function assertOwlCenterPlatformMintFeeSolBalance(
   rpcUrl?: string,
   mintQuantity = 1,
   prefetchedBalanceLamports?: bigint | null,
-  mintPriceLamportsPerNft: bigint = 0n
+  mintPriceLamportsPerNft: bigint = 0n,
+  mintMode: OwlCenterMintMode = 'gen2_full'
 ): Promise<{ ok: true; balance: bigint } | { ok: false; error: string; balance: bigint }> {
   const pricePerNft = mintPriceLamportsPerNft > 0n ? mintPriceLamportsPerNft : 0n
   if ((!isOwlCenterPlatformMintFeeEnabled() || feeLamports <= 0n) && pricePerNft <= 0n) {
@@ -81,11 +83,12 @@ export async function assertOwlCenterPlatformMintFeeSolBalance(
     const conn = new Connection(rpcUrl?.trim() || getLaunchSolanaRpcUrl(network), 'confirmed')
     const balance =
       prefetchedBalanceLamports ?? BigInt(await conn.getBalance(owner, 'confirmed'))
-    const needed = totalFee + totalPrice + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS * BigInt(qty)
+    const rentReserve = await getOwlCenterMintRentReserveLamports(network, mintMode, qty, rpcUrl)
+    const needed = totalFee + totalPrice + rentReserve
     if (balance < needed) {
       const priceSol = Number(totalPrice) / LAMPORTS_PER_SOL
       const feeSol = Number(totalFee) / LAMPORTS_PER_SOL
-      const reserveSol = (Number(OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS) * qty) / LAMPORTS_PER_SOL
+      const reserveSol = Number(rentReserve) / LAMPORTS_PER_SOL
       const haveSol = Number(balance) / LAMPORTS_PER_SOL
       const usd = owlCenterPlatformMintFeeUsd()
       const perNft = qty > 1 ? ` (${qty} NFTs)` : ''
