@@ -29,6 +29,7 @@ import {
   SWITCHBOARD_TX_CU_PRICE,
   resolveSwitchboardComputeUnitLimit,
 } from '@/lib/raffles/draw/vrf-switchboard-cu'
+import { confirmTxWithTimeout } from '@/lib/solana/confirm-tx-with-timeout'
 
 export const VRF_PROVIDER_SWITCHBOARD = 'switchboard' as const
 
@@ -146,12 +147,18 @@ export const SWITCHBOARD_SIMULATE_OPTS = {
  * \"BlockhashNotFound\"" → refund_needed). The sendable tx always gets a fresh
  * `confirmed` blockhash after a successful sim.
  */
+type SwitchboardBuiltTx = {
+  tx: VersionedTransaction
+  blockhash: string
+  lastValidBlockHeight: number
+}
+
 async function asSwitchboardV0Tx(params: {
   connection: Connection
   ixs: TransactionInstruction[]
   signers: Keypair[]
   computeUnitPrice?: number
-}): Promise<VersionedTransaction> {
+}): Promise<SwitchboardBuiltTx> {
   const payer = params.signers[0]
   if (!payer) throw new Error('asSwitchboardV0Tx: missing signer / payer')
 
@@ -198,7 +205,7 @@ async function asSwitchboardV0Tx(params: {
       }
 
       // Fresh confirmed blockhash for the sendable tx (sim replacement is not reusable).
-      const { blockhash } = await params.connection.getLatestBlockhash('confirmed')
+      const latest = await params.connection.getLatestBlockhash('confirmed')
       const computeLimitIx = ComputeBudgetProgram.setComputeUnitLimit({
         units: resolveSwitchboardComputeUnitLimit({
           unitsConsumed: simulation.value.unitsConsumed,
@@ -206,12 +213,16 @@ async function asSwitchboardV0Tx(params: {
       })
       const message = new TransactionMessage({
         payerKey: payer.publicKey,
-        recentBlockhash: blockhash,
+        recentBlockhash: latest.blockhash,
         instructions: [priorityFeeIx, computeLimitIx, ...params.ixs],
       }).compileToV0Message()
       const tx = new VersionedTransaction(message)
       tx.sign(params.signers)
-      return tx
+      return {
+        tx,
+        blockhash: latest.blockhash,
+        lastValidBlockHeight: latest.lastValidBlockHeight,
+      }
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e))
       lastErr = err
@@ -223,6 +234,27 @@ async function asSwitchboardV0Tx(params: {
     }
   }
   throw lastErr ?? new Error('asSwitchboardV0Tx: exhausted retries')
+}
+
+/** Send + confirm with a hard timeout so pack opens cannot hang on "Resolving prize…". */
+async function sendAndConfirmSwitchboardTx(params: {
+  connection: Connection
+  built: SwitchboardBuiltTx
+  confirmTimeoutMs?: number
+}): Promise<string> {
+  const signature = await params.connection.sendTransaction(params.built.tx, {
+    skipPreflight: false,
+    preflightCommitment: 'processed',
+    maxRetries: 3,
+  })
+  await confirmTxWithTimeout(params.connection, {
+    signature,
+    blockhash: params.built.blockhash,
+    lastValidBlockHeight: params.built.lastValidBlockHeight,
+    commitment: 'confirmed',
+    timeoutMs: params.confirmTimeoutMs,
+  })
+  return signature
 }
 
 function normalizeGatewayUrl(raw: string | null | undefined): string | null {
@@ -410,29 +442,22 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
     }
 
     // Create must land before commit (commitIx accounts assume the account exists).
-    const createTx = await asSwitchboardV0Tx({
+    const createBuilt = await asSwitchboardV0Tx({
       connection,
       ixs: [createIx],
       signers: [payer, rngKp],
     })
-    const createSig = await connection.sendTransaction(createTx, {
-      skipPreflight: false,
-      preflightCommitment: 'processed',
-      maxRetries: 3,
-    })
-    await connection.confirmTransaction(createSig, 'confirmed')
+    await sendAndConfirmSwitchboardTx({ connection, built: createBuilt })
 
-    const commitTx = await asSwitchboardV0Tx({
+    const commitBuilt = await asSwitchboardV0Tx({
       connection,
       ixs: [commitIx],
       signers: [payer],
     })
-    const commitSig = await connection.sendTransaction(commitTx, {
-      skipPreflight: false,
-      preflightCommitment: 'processed',
-      maxRetries: 3,
+    const commitSig = await sendAndConfirmSwitchboardTx({
+      connection,
+      built: commitBuilt,
     })
-    await connection.confirmTransaction(commitSig, 'confirmed')
 
     // Oracle needs a moment after commit before reveal signatures validate on-chain.
     await new Promise((r) => setTimeout(r, 4000))
@@ -553,17 +578,17 @@ export async function switchboardRevealRandomness(params: {
         const attemptReveal = async (
           revealIx: TransactionInstruction
         ): Promise<SwitchboardVrfRevealResult | null> => {
-          const revealTx = await asSwitchboardV0Tx({
+          const remainingMs = Math.max(5_000, maxWaitMs - (Date.now() - started))
+          const revealBuilt = await asSwitchboardV0Tx({
             connection,
             ixs: [revealIx],
             signers: [payer],
           })
-          const revealSig = await connection.sendTransaction(revealTx, {
-            skipPreflight: false,
-            preflightCommitment: 'processed',
-            maxRetries: 3,
+          const revealSig = await sendAndConfirmSwitchboardTx({
+            connection,
+            built: revealBuilt,
+            confirmTimeoutMs: Math.min(45_000, remainingMs),
           })
-          await connection.confirmTransaction(revealSig, 'confirmed')
           lastRevealSig = revealSig
 
           const fromChain = await readRevealedValue(revealSig)

@@ -43,6 +43,24 @@ export function resolvePackVrfAttemptRevealWaitMs(totalBudgetMs?: number): numbe
   return Math.max(20_000, Math.min(45_000, Math.floor(total * 0.55)))
 }
 
+/**
+ * Wall-clock budget for the whole pack VRF path (commit + reveal + optional recommit).
+ * Must stay under route maxDuration (120s) with margin for prize payout after VRF.
+ */
+export const PACK_VRF_WALL_CLOCK_MS = 100_000
+
+/** Minimum remaining wall time required to start a fresh recommit+reveal. */
+export const PACK_VRF_RECOMMIT_MIN_REMAINING_MS = 28_000
+
+export function shouldStartPackVrfRecommit(params: {
+  wallClockMs: number
+  elapsedMs: number
+  minRemainingMs?: number
+}): boolean {
+  const minRemaining = params.minRemainingMs ?? PACK_VRF_RECOMMIT_MIN_REMAINING_MS
+  return params.wallClockMs - params.elapsedMs >= minRemaining
+}
+
 async function commitAndRevealOnce(params: {
   openId: string
   revealWaitMs: number
@@ -111,23 +129,42 @@ async function commitAndRevealOnce(params: {
  * (caller should set refund_needed).
  */
 export async function runPackOpenVrf(openId: string): Promise<PackVrfResult> {
+  const wallStarted = Date.now()
   const totalBudgetMs = resolvePackVrfRevealWaitMs()
   const attemptWaitMs = resolvePackVrfAttemptRevealWaitMs(totalBudgetMs)
 
   const first = await commitAndRevealOnce({ openId, revealWaitMs: attemptWaitMs })
   if (first.ok) return first
 
-  // One fresh commit+reveal for transient oracle Secp / gateway / blockhash failures before refund.
+  // One fresh commit+reveal for transient oracle Secp / gateway / blockhash / confirm-timeout
+  // failures before refund — but only if enough wall-clock remains under maxDuration.
   if (!isRetryableVrfRevealError(first.error)) {
     return first
   }
+
+  const elapsedMs = Date.now() - wallStarted
+  if (!shouldStartPackVrfRecommit({ wallClockMs: PACK_VRF_WALL_CLOCK_MS, elapsedMs })) {
+    await updatePackOpen(openId, {
+      open_vrf_status: 'failed',
+      open_vrf_error: `${first.error} (skipped recommit — insufficient time remaining)`,
+    } as Parameters<typeof updatePackOpen>[1])
+    return {
+      ok: false,
+      error: `${first.error} (skipped recommit — insufficient time remaining)`,
+      requestTx: first.requestTx,
+      randomnessAccount: first.randomnessAccount,
+    }
+  }
+
+  const remainingMs = Math.max(20_000, PACK_VRF_WALL_CLOCK_MS - elapsedMs)
+  const secondWaitMs = resolvePackVrfAttemptRevealWaitMs(remainingMs)
 
   await updatePackOpen(openId, {
     open_vrf_status: 'pending',
     open_vrf_error: `Retrying with fresh Switchboard commit after: ${first.error}`,
   } as Parameters<typeof updatePackOpen>[1])
 
-  const second = await commitAndRevealOnce({ openId, revealWaitMs: attemptWaitMs })
+  const second = await commitAndRevealOnce({ openId, revealWaitMs: secondWaitMs })
   if (second.ok) return second
 
   // Prefer the second attempt's error (fresher), keep audit trail of first account in message.

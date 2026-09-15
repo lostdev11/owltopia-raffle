@@ -260,6 +260,7 @@ assert.equal(
   assert.equal(isBlockhashNotFoundError('Transaction simulation failed: Blockhash not found'), true)
   assert.equal(isRetryableVrfRevealError('Switchboard tx simulation failed: "BlockhashNotFound"'), true)
   assert.equal(isBlockhashNotFoundError('InvalidSecpSignature'), false)
+  assert.equal(isRetryableVrfRevealError('tx confirm timed out after 45000ms (abcd1234…)'), true)
   assert.equal(SWITCHBOARD_SIMULATE_OPTS.replaceRecentBlockhash, true)
   assert.equal(SWITCHBOARD_SIMULATE_OPTS.sigVerify, false)
   assert.equal(SWITCHBOARD_SIMULATE_OPTS.commitment, 'confirmed')
