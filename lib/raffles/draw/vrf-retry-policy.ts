@@ -68,6 +68,17 @@ export function isInvalidVrfSecpSignatureError(error: string | null | undefined)
   )
 }
 
+/**
+ * RPC bank tip / load-balanced node does not know the tx blockhash yet (or it expired).
+ * Common during Switchboard CU sim when `replaceRecentBlockhash` is off and the tip is
+ * fetched at `processed` — pack opens were refund_needed with this exact string.
+ */
+export function isBlockhashNotFoundError(error: string | null | undefined): boolean {
+  const msg = (error ?? '').trim()
+  if (!msg) return false
+  return /BlockhashNotFound/i.test(msg) || /blockhash not found/i.test(msg)
+}
+
 /** Transient reveal failures that are safe to auto-retry (poll / re-commit when stale). */
 export function isRetryableVrfRevealError(error: string | null | undefined): boolean {
   const msg = (error ?? '').trim()
@@ -76,6 +87,7 @@ export function isRetryableVrfRevealError(error: string | null | undefined): boo
     isInvalidVrfSecpSignatureError(msg) ||
     isVrfRevealTimeoutError(msg) ||
     isSwitchboardGatewayTransientError(msg) ||
+    isBlockhashNotFoundError(msg) ||
     /Randomness not ready/i.test(msg) ||
     /Reveal attempt failed/i.test(msg) ||
     /oracle did not produce/i.test(msg)

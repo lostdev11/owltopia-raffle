@@ -21,12 +21,14 @@ import {
   isSwitchboardGatewayTransientError,
   isVrfRevealTimeoutError,
   isInvalidVrfSecpSignatureError,
+  isBlockhashNotFoundError,
   isRetryableVrfRevealError,
   resolveVrfRevealWaitMs,
   vrfRevealRetryDelayMs,
   shouldAutoForceNewVrfRequest,
   resolveAdminVrfForceNewRequest,
   resolveSwitchboardOracleRpcUrl,
+  SWITCHBOARD_SIMULATE_OPTS,
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
   DRAW_ALGO_V3_VRF,
@@ -253,6 +255,14 @@ assert.equal(
     ),
     true
   )
+  // Pack open prod cliff: CU sim without replaceRecentBlockhash → BlockhashNotFound.
+  assert.equal(isBlockhashNotFoundError('Switchboard tx simulation failed: "BlockhashNotFound"'), true)
+  assert.equal(isBlockhashNotFoundError('Transaction simulation failed: Blockhash not found'), true)
+  assert.equal(isRetryableVrfRevealError('Switchboard tx simulation failed: "BlockhashNotFound"'), true)
+  assert.equal(isBlockhashNotFoundError('InvalidSecpSignature'), false)
+  assert.equal(SWITCHBOARD_SIMULATE_OPTS.replaceRecentBlockhash, true)
+  assert.equal(SWITCHBOARD_SIMULATE_OPTS.sigVerify, false)
+  assert.equal(SWITCHBOARD_SIMULATE_OPTS.commitment, 'confirmed')
   assert.equal(
     resolveAdminVrfForceNewRequest({
       draw_vrf_account: 'Rand111111111111111111111111111111111111111',

@@ -26,6 +26,11 @@ function main() {
     ),
     true
   )
+  // Commit-time BlockhashNotFound (prod: charged SOL, no animation) → recommit, not instant refund.
+  assert.equal(
+    isRetryableVrfRevealError('Switchboard tx simulation failed: "BlockhashNotFound"'),
+    true
+  )
   assert.equal(isRetryableVrfRevealError('No escrow key configured for VRF fees'), false)
 
   console.log(

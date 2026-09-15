@@ -23,6 +23,7 @@ import {
   vrfRevealRetryDelayMs,
   isSwitchboardGatewayTransientError,
   isInvalidVrfSecpSignatureError,
+  isBlockhashNotFoundError,
 } from '@/lib/raffles/draw/vrf-retry-policy'
 import {
   SWITCHBOARD_TX_CU_PRICE,
@@ -128,9 +129,22 @@ async function loadSbProgram(connection: Connection, payer: Keypair) {
   return sb.AnchorUtils.loadProgramFromConnection(connection, keypairWallet(payer))
 }
 
+/** Simulate config that never fails solely because the tip blockhash is unknown to the bank. */
+export const SWITCHBOARD_SIMULATE_OPTS = {
+  commitment: 'confirmed' as const,
+  sigVerify: false as const,
+  replaceRecentBlockhash: true as const,
+}
+
 /**
  * Build a Switchboard v0 tx with CU headroom that survives RandomnessCommit
  * sim under-count. Prefer this over raw `sb.asV0Tx` (1.3×, no floor, ignores sim err).
+ *
+ * Simulation uses `replaceRecentBlockhash: true` so load-balanced RPCs do not
+ * return BlockhashNotFound for a `processed` tip the sim bank does not know yet
+ * (prod pack opens: charged SOL, then "Switchboard tx simulation failed:
+ * \"BlockhashNotFound\"" → refund_needed). The sendable tx always gets a fresh
+ * `confirmed` blockhash after a successful sim.
  */
 async function asSwitchboardV0Tx(params: {
   connection: Connection
@@ -148,39 +162,67 @@ async function asSwitchboardV0Tx(params: {
   const simLimitIx = ComputeBudgetProgram.setComputeUnitLimit({
     units: 1_400_000,
   })
-  const { blockhash } = await params.connection.getLatestBlockhash('processed')
-  const simMessage = new TransactionMessage({
-    payerKey: payer.publicKey,
-    recentBlockhash: blockhash,
-    instructions: [priorityFeeIx, simLimitIx, ...params.ixs],
-  }).compileToV0Message()
-  const simTx = new VersionedTransaction(simMessage)
-  const simulation = await params.connection.simulateTransaction(simTx, {
-    commitment: 'processed',
-    sigVerify: false,
-  })
-  if (simulation.value.err) {
-    const logs = (simulation.value.logs || []).join('\n')
-    throw new Error(
-      `Switchboard tx simulation failed: ${JSON.stringify(simulation.value.err)}${
-        logs ? `\n${logs}` : ''
-      }`
-    )
-  }
 
-  const computeLimitIx = ComputeBudgetProgram.setComputeUnitLimit({
-    units: resolveSwitchboardComputeUnitLimit({
-      unitsConsumed: simulation.value.unitsConsumed,
-    }),
-  })
-  const message = new TransactionMessage({
-    payerKey: payer.publicKey,
-    recentBlockhash: blockhash,
-    instructions: [priorityFeeIx, computeLimitIx, ...params.ixs],
-  }).compileToV0Message()
-  const tx = new VersionedTransaction(message)
-  tx.sign(params.signers)
-  return tx
+  const maxAttempts = 3
+  let lastErr: Error | null = null
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      // Placeholder hash for the sim message only — bank replaces it when
+      // replaceRecentBlockhash is set. Still fetch something valid for encode.
+      const { blockhash: simBlockhash } = await params.connection.getLatestBlockhash(
+        'confirmed'
+      )
+      const simMessage = new TransactionMessage({
+        payerKey: payer.publicKey,
+        recentBlockhash: simBlockhash,
+        instructions: [priorityFeeIx, simLimitIx, ...params.ixs],
+      }).compileToV0Message()
+      const simTx = new VersionedTransaction(simMessage)
+      const simulation = await params.connection.simulateTransaction(
+        simTx,
+        SWITCHBOARD_SIMULATE_OPTS
+      )
+      if (simulation.value.err) {
+        const logs = (simulation.value.logs || []).join('\n')
+        const err = new Error(
+          `Switchboard tx simulation failed: ${JSON.stringify(simulation.value.err)}${
+            logs ? `\n${logs}` : ''
+          }`
+        )
+        if (isBlockhashNotFoundError(err.message) && attempt < maxAttempts - 1) {
+          lastErr = err
+          await new Promise((r) => setTimeout(r, 250 * (attempt + 1)))
+          continue
+        }
+        throw err
+      }
+
+      // Fresh confirmed blockhash for the sendable tx (sim replacement is not reusable).
+      const { blockhash } = await params.connection.getLatestBlockhash('confirmed')
+      const computeLimitIx = ComputeBudgetProgram.setComputeUnitLimit({
+        units: resolveSwitchboardComputeUnitLimit({
+          unitsConsumed: simulation.value.unitsConsumed,
+        }),
+      })
+      const message = new TransactionMessage({
+        payerKey: payer.publicKey,
+        recentBlockhash: blockhash,
+        instructions: [priorityFeeIx, computeLimitIx, ...params.ixs],
+      }).compileToV0Message()
+      const tx = new VersionedTransaction(message)
+      tx.sign(params.signers)
+      return tx
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e))
+      lastErr = err
+      if (isBlockhashNotFoundError(err.message) && attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 250 * (attempt + 1)))
+        continue
+      }
+      throw err
+    }
+  }
+  throw lastErr ?? new Error('asSwitchboardV0Tx: exhausted retries')
 }
 
 function normalizeGatewayUrl(raw: string | null | undefined): string | null {
