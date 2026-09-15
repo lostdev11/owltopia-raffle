@@ -49,6 +49,7 @@ export {
   switchboardRevealRandomness,
   switchboardClusterHint,
   resolveSwitchboardOracleRpcUrl,
+  SWITCHBOARD_SIMULATE_OPTS,
   VRF_PROVIDER_SWITCHBOARD,
 } from '@/lib/raffles/draw/vrf-switchboard'
 export type {
@@ -76,6 +77,7 @@ export {
   isSwitchboardGatewayTransientError,
   isVrfRevealTimeoutError,
   isInvalidVrfSecpSignatureError,
+  isBlockhashNotFoundError,
   isRetryableVrfRevealError,
   vrfRevealRetryDelayMs,
   vrfRequestAgeMs,

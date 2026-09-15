@@ -3,9 +3,9 @@
  * Reuses raffle Switchboard helpers; stores VRF audit fields on pack_opens.
  *
  * Pack opens cannot wait for raffle-style cron re-commit (user is mid-checkout).
- * On retryable reveal failures (InvalidSecpSignature / gateway 503 / timeout) we
- * perform one fresh Switchboard commit+reveal inside the same request before
- * marking refund_needed.
+ * On retryable failures (InvalidSecpSignature / gateway 503 / timeout /
+ * BlockhashNotFound on commit or reveal) we perform one fresh Switchboard
+ * commit+reveal inside the same request before marking refund_needed.
  */
 
 import {
@@ -117,7 +117,7 @@ export async function runPackOpenVrf(openId: string): Promise<PackVrfResult> {
   const first = await commitAndRevealOnce({ openId, revealWaitMs: attemptWaitMs })
   if (first.ok) return first
 
-  // One fresh commit+reveal for transient oracle Secp / gateway failures before refund.
+  // One fresh commit+reveal for transient oracle Secp / gateway / blockhash failures before refund.
   if (!isRetryableVrfRevealError(first.error)) {
     return first
   }
