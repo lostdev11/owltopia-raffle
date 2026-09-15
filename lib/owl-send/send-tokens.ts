@@ -26,6 +26,7 @@ import { getOwlSendFeeLamportsForCount } from '@/lib/owl-send/fee'
 import { OWL_SEND_MAX_PER_TX, OWL_SEND_MAX_PER_TX_TOKEN } from '@/lib/owl-send/constants'
 import { isOwlSendRpcNetworkError } from '@/lib/owl-send/rpc-network-error'
 import { resolveMintTokenProgram } from '@/lib/owl-send/resolve-spl-holder'
+import { friendlyOwlSendInsufficientSolError } from '@/lib/owl-send/sol-affordability'
 import type { OwlSendBatchResult } from '@/lib/owl-send/send-spl-nft-batch'
 
 export type OwlSendTokenLine = {
@@ -49,6 +50,8 @@ const OWL_SEND_TOKEN_ACCOUNT_INFO_CHUNK = 100
 const OWL_SEND_TOKEN_RPC_RETRY = { retries: 4, baseDelayMs: 400 } as const
 
 function owlSendTokenRpcFailureMessage(error: unknown, fallback: string): string {
+  const solShort = friendlyOwlSendInsufficientSolError(error)
+  if (solShort) return solShort
   const raw = error instanceof Error ? error.message : String(error)
   if (
     isOwlSendRpcNetworkError(raw) ||
@@ -58,6 +61,14 @@ function owlSendTokenRpcFailureMessage(error: unknown, fallback: string): string
       'Solana RPC dropped while preparing this approval (blockhash / account read). ' +
       'Wait a few seconds and tap Retry — your list and progress are kept. ' +
       'On mobile, try Wi‑Fi or switch networks if it keeps failing.'
+    )
+  }
+  // Hide verbose simulate program logs when we could not map to a SOL shortfall.
+  if (/Program \w+ invoke/i.test(raw) || raw.length > 280) {
+    return (
+      raw.includes('insufficient') || /custom program error:\s*0x1\b/i.test(raw)
+        ? 'This approval needs more SOL (Owl fee and/or new token-account rent). Add SOL and retry.'
+        : fallback
     )
   }
   return raw || fallback
