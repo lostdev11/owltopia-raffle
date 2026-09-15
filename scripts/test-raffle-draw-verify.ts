@@ -365,16 +365,19 @@ assert.equal(
   )
   assert.equal(resolveAdminVrfForceNewRequest({ draw_vrf_account: null }), true)
 
-  // Oracle gateways must sign against a public RPC; reveal must simulate on that SAME RPC.
+  // Prefer the app's paid HTTPS RPC first so oracle signatures match the verify bank.
   const prevOracleRpc = process.env.SWITCHBOARD_ORACLE_RPC_URL
   delete process.env.SWITCHBOARD_ORACLE_RPC_URL
   assert.equal(
     resolveSwitchboardOracleRpcUrl('https://mainnet.helius-rpc.com/?api-key=secret'),
-    SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES[0]
+    'https://mainnet.helius-rpc.com/?api-key=secret'
   )
   assert.deepEqual(
     resolveSwitchboardOracleRpcCandidates('https://mainnet.helius-rpc.com/?api-key=secret'),
-    [...SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES]
+    [
+      'https://mainnet.helius-rpc.com/?api-key=secret',
+      ...SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES,
+    ]
   )
   assert.equal(
     resolveSwitchboardOracleRpcUrl('https://api.devnet.solana.com'),
