@@ -17,11 +17,11 @@ import {
 import { isTxConfirmTimeoutError } from '../lib/solana/confirm-tx-with-timeout'
 
 function main() {
-  // Two attempts must fit in ~120s serverless budget with commit overhead.
-  assert.equal(resolvePackVrfAttemptRevealWaitMs(75_000), 41_250)
-  assert.equal(resolvePackVrfAttemptRevealWaitMs(45_000), 24_750)
-  assert.equal(resolvePackVrfAttemptRevealWaitMs(20_000), 20_000) // floor
-  assert.equal(resolvePackVrfAttemptRevealWaitMs(200_000), 45_000) // cap
+  // Longer first poll so InvalidSecpSignature can clear before recommit.
+  assert.equal(resolvePackVrfAttemptRevealWaitMs(75_000), 54_000)
+  assert.equal(resolvePackVrfAttemptRevealWaitMs(45_000), 32_400)
+  assert.equal(resolvePackVrfAttemptRevealWaitMs(20_000), 25_000) // floor
+  assert.equal(resolvePackVrfAttemptRevealWaitMs(200_000), 55_000) // cap
 
   // Pack recommit triggers on the same transient classes as raffle auto-recovery.
   assert.equal(

@@ -49,6 +49,8 @@ export {
   switchboardRevealRandomness,
   switchboardClusterHint,
   resolveSwitchboardOracleRpcUrl,
+  resolveSwitchboardOracleRpcCandidates,
+  SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES,
   SWITCHBOARD_SIMULATE_OPTS,
   VRF_PROVIDER_SWITCHBOARD,
 } from '@/lib/raffles/draw/vrf-switchboard'

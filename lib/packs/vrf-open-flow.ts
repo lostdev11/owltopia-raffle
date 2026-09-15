@@ -40,7 +40,9 @@ export function resolvePackVrfAttemptRevealWaitMs(totalBudgetMs?: number): numbe
       ? Math.floor(totalBudgetMs)
       : resolvePackVrfRevealWaitMs()
   // Two attempts share the serverless window; leave headroom for commit txs (~10–15s each).
-  return Math.max(20_000, Math.min(45_000, Math.floor(total * 0.55)))
+  // Bias toward a longer first poll — InvalidSecpSignature often clears with time on the
+  // same account; a short 41s window was failing both attempts in prod.
+  return Math.max(25_000, Math.min(55_000, Math.floor(total * 0.72)))
 }
 
 /**

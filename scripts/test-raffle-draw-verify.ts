@@ -28,6 +28,8 @@ import {
   shouldAutoForceNewVrfRequest,
   resolveAdminVrfForceNewRequest,
   resolveSwitchboardOracleRpcUrl,
+  resolveSwitchboardOracleRpcCandidates,
+  SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES,
   SWITCHBOARD_SIMULATE_OPTS,
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
@@ -363,12 +365,16 @@ assert.equal(
   )
   assert.equal(resolveAdminVrfForceNewRequest({ draw_vrf_account: null }), true)
 
-  // Oracle gateways must not receive private Helius/API-key RPCs (causes InvalidSecpSignature).
+  // Oracle gateways must sign against a public RPC; reveal must simulate on that SAME RPC.
   const prevOracleRpc = process.env.SWITCHBOARD_ORACLE_RPC_URL
   delete process.env.SWITCHBOARD_ORACLE_RPC_URL
   assert.equal(
     resolveSwitchboardOracleRpcUrl('https://mainnet.helius-rpc.com/?api-key=secret'),
-    'https://api.mainnet-beta.solana.com'
+    SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES[0]
+  )
+  assert.deepEqual(
+    resolveSwitchboardOracleRpcCandidates('https://mainnet.helius-rpc.com/?api-key=secret'),
+    [...SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES]
   )
   assert.equal(
     resolveSwitchboardOracleRpcUrl('https://api.devnet.solana.com'),
