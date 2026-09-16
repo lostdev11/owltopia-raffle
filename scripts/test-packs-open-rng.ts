@@ -158,5 +158,26 @@ assert.equal(odds.categories.find((c) => c.category === 'nft')?.percent, 40)
 assert.equal(odds.premiumNft.overallBps, 100)
 assert.equal(odds.premiumNft.items.length, 1)
 assert.equal(odds.premiumNft.items[0]!.mint, 'MintB')
+assert.equal(odds.premiumNft.items[0]!.tierPercentOverall, 1)
+assert.equal(odds.premiumNft.items[0]!.percentOverall, 1)
+
+const oddsMulti = computePackOddsPercentages({
+  nftInventory: [
+    { id: 'a', mint_address: 'MintA', fair_value_sol: 0.05, name: 'A', odds_tier: 'standard' },
+    { id: 'b', mint_address: 'MintB', fair_value_sol: 0.2, name: 'B', odds_tier: 'premium_1pct' },
+    { id: 'c', mint_address: 'MintC', fair_value_sol: 0.2, name: 'C', odds_tier: 'premium_1pct' },
+  ],
+})
+assert.equal(oddsMulti.premiumNft.items.length, 2)
+for (const item of oddsMulti.premiumNft.items) {
+  assert.equal(item.tierPercentOverall, 1)
+  assert.ok(item.percentOverall > 0 && item.percentOverall < 1)
+}
+assert.ok(
+  Math.abs(
+    oddsMulti.premiumNft.items.reduce((s, i) => s + i.percentOverall, 0) -
+      oddsMulti.premiumNft.overallPercent
+  ) < 0.05
+)
 
 console.log('packs-open-rng: ok')
