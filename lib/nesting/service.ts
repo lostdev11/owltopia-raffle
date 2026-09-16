@@ -331,14 +331,17 @@ export async function executeUnstakeAdminOverride(params: { position_id: string 
 /**
  * Full-admin support: force-leave eligible open nests for a holder wallet (oldest first, bounded batch).
  * Same per-nest path as {@link executeUnstakeAdminOverride}.
+ * Optional `pool_id` scopes the batch to one perch/project (partners nested with us).
  */
 export async function executeUnstakeAdminOverrideForWallet(params: {
   wallet_address: string
   limit?: number
+  pool_id?: string | null
 }) {
   return executeUnstakeAdminOverrideByWallet({
     wallet_address: params.wallet_address,
     limit: params.limit,
+    pool_id: params.pool_id,
     unstakeOne: (position_id) => executeUnstakeAdminOverride({ position_id }),
   })
 }
