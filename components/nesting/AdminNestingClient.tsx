@@ -27,7 +27,7 @@ import { AdminWalletNestAssetsPanel } from '@/components/nesting/AdminWalletNest
 import type { NestingWalletNestAsset } from '@/lib/nesting/admin-wallet-diagnostics'
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { PoolOnChainSettingsForm } from '@/components/nesting/PoolOnChainSettingsForm'
-import { NESTING_RECONCILE_MAX_BATCH } from '@/lib/nesting/rpc-policy'
+import { NESTING_RECONCILE_MAX_BATCH, NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH } from '@/lib/nesting/rpc-policy'
 import {
   buildQuickNftPoolDescription,
   isProbableSolanaPubkey,
@@ -109,6 +109,8 @@ export function AdminNestingClient() {
   const [forceUnstakeWallet, setForceUnstakeWallet] = useState('')
   /** Empty = all projects; otherwise a staking_pools.id perch. */
   const [forceUnstakePoolId, setForceUnstakePoolId] = useState('')
+  /** Max nests to close this run (1–NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH). */
+  const [forceUnstakeLimit, setForceUnstakeLimit] = useState(String(NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH))
   const [forceUnstaking, setForceUnstaking] = useState(false)
   const [forceUnstakeMsg, setForceUnstakeMsg] = useState<string | null>(null)
 
@@ -876,6 +878,12 @@ export function AdminNestingClient() {
     return partner ? `${pool.name} (${partner})` : pool.name || pool.slug || pool.id
   })()
 
+  const parsedForceUnstakeLimit = (() => {
+    const n = Number.parseInt(forceUnstakeLimit.trim(), 10)
+    if (!Number.isFinite(n) || n < 1) return null
+    return Math.min(Math.floor(n), NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH)
+  })()
+
   const runForceUnstake = async () => {
     setForceUnstakeMsg(null)
     setSaveError(null)
@@ -890,10 +898,15 @@ export function AdminNestingClient() {
         setSaveError('Wallet address does not look like a Solana pubkey.')
         return
       }
+      if (parsedForceUnstakeLimit == null) {
+        setSaveError(`Enter how many nests to leave this run (1–${NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH}).`)
+        return
+      }
 
       const poolScope = forceUnstakePoolId.trim() || null
       const walletBody = {
         wallet_address: wallet,
+        limit: parsedForceUnstakeLimit,
         ...(poolScope ? { pool_id: poolScope } : {}),
       }
 
@@ -926,11 +939,16 @@ export function AdminNestingClient() {
           )
           return
         }
+        const toClose = Math.min(parsedForceUnstakeLimit, eligible)
         const projectNote = forceUnstakePoolLabel
           ? ` on project “${forceUnstakePoolLabel}”`
           : ' across all projects'
+        const countNote =
+          toClose < eligible
+            ? `up to ${toClose} of ${eligible} eligible`
+            : `${eligible} eligible`
         const ok = window.confirm(
-          `Force leave ${eligible} open nest(s) for ${wallet}${projectNote}? This bypasses lock timers and cannot be undone from this panel.`
+          `Force leave ${countNote} open nest(s) for ${wallet}${projectNote}? Oldest nests first. This bypasses lock timers and cannot be undone from this panel.`
         )
         if (!ok) return
 
@@ -980,7 +998,7 @@ export function AdminNestingClient() {
             : ''
         const remainNote =
           remaining > 0
-            ? ` ${remaining} still eligible — run Force leave again to continue the batch.`
+            ? ` ${remaining} still eligible — raise Max nests or run Force leave again to continue.`
             : ''
         const scopeNote =
           typeof json?.pool_name === 'string' && json.pool_name.trim()
@@ -988,8 +1006,10 @@ export function AdminNestingClient() {
             : poolScope
               ? ' (selected project)'
               : ''
+        const limitUsed =
+          typeof json?.limit === 'number' && json.limit > 0 ? json.limit : parsedForceUnstakeLimit
         setForceUnstakeMsg(
-          `Closed ${closed} nest(s) for ${typeof json?.wallet === 'string' ? json.wallet : wallet}${scopeNote}.${failNote}${thawNote}${remainNote}`
+          `Closed ${closed} nest(s) for ${typeof json?.wallet === 'string' ? json.wallet : wallet}${scopeNote} (limit ${limitUsed}).${failNote}${thawNote}${remainNote}`
         )
         if (remaining === 0 && failed === 0) {
           setForceUnstakeWallet('')
@@ -1994,9 +2014,9 @@ export function AdminNestingClient() {
             <p className="text-xs text-muted-foreground leading-relaxed">
               For NFT perches with freeze locks, the server signs thaw with your configured freeze authority. For token
               vaults, tokens return to the holder wallet on record. Use position id for a single nest; use holder wallet
-              to unstake eligible open nests (up to 25 per run — re-run if more remain). Choose a project to limit
-              force leave to that perch only (e.g. a partner collection nested with us); leave All projects to match
-              prior behavior.
+              to unstake eligible open nests. Choose a project to limit force leave to that perch only; set Max nests
+              this run (e.g. 5 or 10) for a partial leave — oldest first, hard cap {NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH}{' '}
+              per request (re-run if more remain).
             </p>
             <div
               className="grid grid-cols-2 gap-1 rounded-xl border border-white/[0.08] bg-black/25 p-1"
@@ -2093,6 +2113,50 @@ export function AdminNestingClient() {
                     behavior.
                   </p>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="force-unstake-limit">Max nests this run</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {[5, 10, NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH].map((n) => (
+                      <Button
+                        key={n}
+                        type="button"
+                        variant={
+                          parsedForceUnstakeLimit === n &&
+                          forceUnstakeLimit.trim() === String(n)
+                            ? 'default'
+                            : 'outline'
+                        }
+                        className="min-h-[44px] touch-manipulation px-4"
+                        onClick={() => {
+                          setForceUnstakeLimit(String(n))
+                          setForceUnstakeMsg(null)
+                        }}
+                      >
+                        {n === NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH ? `${n} (max)` : String(n)}
+                      </Button>
+                    ))}
+                    <Input
+                      id="force-unstake-limit"
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH}
+                      step={1}
+                      value={forceUnstakeLimit}
+                      onChange={(e) => {
+                        setForceUnstakeLimit(e.target.value)
+                        setForceUnstakeMsg(null)
+                      }}
+                      className="w-24 min-h-[44px] touch-manipulation font-mono text-sm"
+                      aria-describedby="force-unstake-limit-hint"
+                    />
+                  </div>
+                  <p id="force-unstake-limit-hint" className="text-xs text-muted-foreground">
+                    Closes the oldest eligible nests first, up to this count (hard cap{' '}
+                    {NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH} per request). Use 5 or 10 for partial recovery instead of
+                    clearing every nest on the wallet/project.
+                  </p>
+                </div>
               </div>
             )}
             <div className="flex flex-wrap items-center gap-3">
@@ -2104,15 +2168,18 @@ export function AdminNestingClient() {
                   forceUnstaking ||
                   (forceUnstakeMode === 'position'
                     ? !forceUnstakePositionId.trim()
-                    : !forceUnstakeWallet.trim())
+                    : !forceUnstakeWallet.trim() || parsedForceUnstakeLimit == null)
                 }
                 onClick={() => void runForceUnstake()}
               >
                 {forceUnstaking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 {forceUnstakeMode === 'wallet'
-                  ? forceUnstakePoolId
-                    ? 'Force leave project nests'
-                    : 'Force leave all nests'
+                  ? parsedForceUnstakeLimit != null &&
+                    parsedForceUnstakeLimit < NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH
+                    ? `Force leave up to ${parsedForceUnstakeLimit}`
+                    : forceUnstakePoolId
+                      ? 'Force leave project nests'
+                      : 'Force leave all nests'
                   : 'Force leave nest'}
               </Button>
               {forceUnstakeMsg ? (

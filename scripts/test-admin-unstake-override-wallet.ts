@@ -244,6 +244,20 @@ async function testBatchRunner() {
   assert.equal(result.failed[0]?.position_id, 'a')
   assert.equal(result.remaining_eligible, 2, 'failed + not-attempted remain eligible')
   assert.equal(result.eligible_total, 3)
+
+  const partial = await runAdminOverrideUnstakeBatch({
+    wallet: WALLET,
+    candidates,
+    limit: 1,
+    unstakeOne: async () => ({
+      position: { unstake_signature: null },
+      nest_owner_thaw: null,
+    }),
+  })
+  assert.equal(partial.attempted, 1, 'limit 1 only attempts the oldest nest')
+  assert.equal(partial.closed.length, 1)
+  assert.equal(partial.closed[0]?.position_id, 'a')
+  assert.equal(partial.remaining_eligible, 2, 'limit leaves later nests eligible for another run')
 }
 
 void testBatchRunner().then(() => {
