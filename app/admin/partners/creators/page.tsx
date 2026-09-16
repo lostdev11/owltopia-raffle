@@ -281,8 +281,13 @@ export default function AdminPartnerCreatorsPage() {
           Partner Nesting
         </Link>{' '}
         after they are allowlisted here. Wallets here get the <strong className="text-foreground">2%</strong> partner
-        fee tier (including the $0 partner program) and appear in the partner spotlight on{' '}
-        <Link href="/raffles?tab=partner-raffles" className="text-primary underline-offset-4 hover:underline">Raffles</Link>.
+        fee tier (including the $0 partner program), appear in the partner spotlight on{' '}
+        <Link href="/raffles?tab=partner-raffles" className="text-primary underline-offset-4 hover:underline">Raffles</Link>
+        , and are synced to{' '}
+        <Link href="/admin/owl-center/partners" className="text-primary underline-offset-4 hover:underline">
+          Owl Center launchpad partners
+        </Link>{' '}
+        when active (revoked on deactivate).
         If you set a <strong className="text-foreground">Discord partner tenant id</strong> (from{' '}
         <Link href="/admin/partners/discord" className="text-primary underline-offset-4 hover:underline">
           Discord partners

@@ -163,8 +163,9 @@ export default function AdminPartnerApplicationsPage() {
         Partner applications
       </h1>
       <p className="mb-6 text-sm text-muted-foreground">
-        Approve to allowlist the wallet as a partner (tier + logo from their answers). Pro and white-label apps may
-        include a Discord or project link. Then use{' '}
+        Approve to allowlist the wallet as a partner (tier + logo from their answers) and grant Owl Center
+        launchpad access for the same wallet. Pro and white-label apps may include a Discord or project link.
+        Then use{' '}
         <Link href="/admin/partners" className="text-primary underline-offset-4 hover:underline">
           Partners overview
         </Link>{' '}
@@ -174,9 +175,13 @@ export default function AdminPartnerApplicationsPage() {
       {lastProvisioned ? (
         <p className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
           <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
-          Application #{lastProvisioned.id} approved — wallet added to partners.{' '}
+          Application #{lastProvisioned.id} approved — partner allowlist + Owl Center launchpad synced.{' '}
           <Link href="/admin/partners/creators" className="font-medium underline-offset-4 hover:underline">
             View partner creators
+          </Link>
+          {' · '}
+          <Link href="/admin/owl-center/partners" className="font-medium underline-offset-4 hover:underline">
+            Owl Center partners
           </Link>
         </p>
       ) : null}

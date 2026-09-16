@@ -30,6 +30,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       return NextResponse.json({
         application: result.application,
         creator_wallet: result.creator_wallet,
+        owl_center_granted: result.owl_center_granted,
         provisioned: true,
       })
     }
