@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import type { StakingPositionRow } from '../lib/db/staking-positions'
 import type { StakingPoolRow } from '../lib/db/staking-pools'
 import {
+  filterOpenPositionsByPoolId,
   runAdminOverrideUnstakeBatch,
   selectAdminOverrideUnstakeCandidates,
 } from '../lib/nesting/admin-unstake-override-select'
@@ -48,6 +49,12 @@ const tokenPool: PoolShape = {
   adapter_mode: 'mock',
   name: 'OWL nest',
   slug: 'owl',
+}
+const partnerPool: PoolShape = {
+  asset_type: 'nft',
+  adapter_mode: 'onchain_enabled',
+  name: 'Partner Nest',
+  slug: 'partner-nest',
 }
 
 {
@@ -116,6 +123,67 @@ const tokenPool: PoolShape = {
   ]
   const selected = selectAdminOverrideUnstakeCandidates(positions, pools)
   assert.equal(selected.length, 1, 'awaiting_nft_freeze is abortable even on mock adapter')
+}
+
+{
+  const pools = new Map<string, PoolShape>([
+    ['pool-nft', nftPool],
+    ['pool-token', tokenPool],
+    ['pool-partner', partnerPool],
+  ])
+  const positions = [
+    mockPos({
+      id: 'token-active',
+      status: 'active',
+      pool_id: 'pool-token',
+      asset_identifier: null,
+      amount: 100,
+      staked_at: '2026-05-09T00:00:00.000Z',
+    }),
+    mockPos({
+      id: 'partner-1',
+      status: 'active',
+      pool_id: 'pool-partner',
+      staked_at: '2026-05-08T00:00:00.000Z',
+    }),
+    mockPos({
+      id: 'partner-2',
+      status: 'active',
+      pool_id: 'pool-partner',
+      staked_at: '2026-05-12T00:00:00.000Z',
+    }),
+    mockPos({ id: 'nft-1', status: 'active', staked_at: '2026-05-10T00:00:00.000Z' }),
+  ]
+
+  assert.deepEqual(
+    filterOpenPositionsByPoolId(positions, null).map((p) => p.id),
+    positions.map((p) => p.id),
+    'null pool filter is a no-op'
+  )
+  assert.deepEqual(
+    filterOpenPositionsByPoolId(positions, '  ').map((p) => p.id),
+    positions.map((p) => p.id),
+    'blank pool filter is a no-op'
+  )
+  assert.deepEqual(
+    filterOpenPositionsByPoolId(positions, 'pool-partner').map((p) => p.id),
+    ['partner-1', 'partner-2']
+  )
+
+  const scoped = selectAdminOverrideUnstakeCandidates(positions, pools, {
+    pool_id: 'pool-partner',
+  })
+  assert.deepEqual(
+    scoped.map((c) => c.position_id),
+    ['partner-1', 'partner-2'],
+    'pool_id scopes force-leave candidates to one project/perch'
+  )
+  assert.ok(scoped.every((c) => c.pool_id === 'pool-partner' && c.pool_slug === 'partner-nest'))
+
+  const none = selectAdminOverrideUnstakeCandidates(positions, pools, {
+    pool_id: 'pool-missing',
+  })
+  assert.equal(none.length, 0, 'unknown pool_id yields empty candidates')
 }
 
 async function testBatchRunner() {

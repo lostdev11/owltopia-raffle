@@ -16,6 +16,7 @@ export const dynamic = 'force-dynamic'
  * Single nest: `{ position_id: string }` — UUID of `staking_positions.id`.
  * All nests for a holder: `{ wallet_address: string, unstake_all: true }` — closes up to 25
  * eligible open nests per call (re-run if `remaining_eligible` > 0).
+ * Optional project scope: `{ pool_id: string }` with preview / unstake_all — only nests on that perch.
  * Preview only: `{ wallet_address: string, preview: true }` — lists candidates, no mutations.
  *
  * Runs the same adapter path as the holder "Leave nest" (thaw NFT or return tokens from vault),
@@ -34,28 +35,41 @@ export async function POST(request: NextRequest) {
     const position_id = typeof body?.position_id === 'string' ? body.position_id.trim() : ''
     const wallet_address =
       typeof body?.wallet_address === 'string' ? body.wallet_address.trim() : ''
+    const pool_id = typeof body?.pool_id === 'string' ? body.pool_id.trim() : ''
     const preview = body?.preview === true
     const unstake_all = body?.unstake_all === true
 
     if (wallet_address && (preview || unstake_all)) {
+      const poolScope = pool_id || null
+
       if (preview && !unstake_all) {
-        const listed = await listAdminOverrideUnstakeCandidates(wallet_address)
+        const listed = await listAdminOverrideUnstakeCandidates(wallet_address, {
+          pool_id: poolScope,
+        })
         return NextResponse.json({
           preview: true,
           wallet: listed.wallet,
           candidates: listed.candidates,
           eligible_count: listed.candidates.length,
           open_position_count: listed.open_position_count,
+          pool_id: listed.pool_id,
+          pool_name: listed.pool_name,
+          pool_slug: listed.pool_slug,
           admin_override: true,
         })
       }
 
-      const result = await executeUnstakeAdminOverrideForWallet({ wallet_address })
+      const result = await executeUnstakeAdminOverrideForWallet({
+        wallet_address,
+        pool_id: poolScope,
+      })
 
       console.warn('[admin/staking/unstake-override]', {
         admin_wallet: session.wallet,
         mode: 'wallet_unstake_all',
         holder_wallet: result.wallet,
+        pool_id: result.pool_id,
+        pool_slug: result.pool_slug,
         closed: result.closed.length,
         failed: result.failed.length,
         remaining_eligible: result.remaining_eligible,
