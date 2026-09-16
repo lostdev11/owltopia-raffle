@@ -4,6 +4,7 @@ import {
   PACK_PRICE_SOL,
   PACK_RTP_BPS,
 } from '@/lib/packs/config'
+import { expectedJackpotPoolSol } from '@/lib/packs/jackpot'
 import type {
   PackInventoryPrizeStandard,
   PackInventoryRow,
@@ -124,6 +125,50 @@ export async function resolvePackJackpotForOpen(input: {
     poolBeforeSol: poolBefore,
     poolAfterSol: poolWithContribution,
     jackpotPayoutSol: null,
+  }
+}
+
+/**
+ * Recompute jackpot_pool_sol from pack_opens history (completed + paid unfinished).
+ * Use after stuck paid opens or manual corrections so the visible pool matches purchases.
+ */
+export async function recalculatePackJackpotPool(): Promise<{
+  previousPoolSol: number
+  expectedPoolSol: number
+  completedContribSol: number
+  paidUnfinishedContribSol: number
+  completedOpens: number
+  paidUnfinishedOpens: number
+  sinceJackpotWinAt: string | null
+}> {
+  const config = await getPackVaultConfig()
+  const { data, error } = await getSupabaseAdmin()
+    .from('pack_opens')
+    .select(
+      'status, payment_signature, jackpot_contribution_sol, is_jackpot_win, completed_at, created_at'
+    )
+  if (error) throw error
+
+  const accounting = expectedJackpotPoolSol({
+    contributionSol: Number(config.jackpot_contribution_sol ?? 0.02),
+    opens: (data ?? []) as {
+      status: string
+      payment_signature: string | null
+      jackpot_contribution_sol: number | null
+      is_jackpot_win: boolean | null
+      completed_at: string | null
+      created_at: string
+    }[],
+  })
+
+  const previousPoolSol = Number(config.jackpot_pool_sol ?? 0)
+  if (previousPoolSol !== accounting.expectedPoolSol) {
+    await updatePackVaultConfig({ jackpot_pool_sol: accounting.expectedPoolSol })
+  }
+
+  return {
+    previousPoolSol,
+    ...accounting,
   }
 }
 

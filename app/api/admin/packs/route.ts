@@ -9,6 +9,7 @@ import {
   removePackInventoryNft,
   updatePackInventoryOddsTier,
   updatePackVaultConfig,
+  recalculatePackJackpotPool,
 } from '@/lib/packs/db'
 import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
 import { isPackInventoryPrizeStandard } from '@/lib/packs/types'
@@ -100,6 +101,23 @@ export async function PATCH(request: NextRequest) {
       }
       const item = await updatePackInventoryOddsTier(body.inventory_id.trim(), body.odds_tier)
       return NextResponse.json({ ok: true, item })
+    }
+
+    if (body.recalculate_jackpot === true) {
+      const result = await recalculatePackJackpotPool()
+      return NextResponse.json({
+        ok: true,
+        jackpot: {
+          previousPoolSol: result.previousPoolSol,
+          poolSol: result.expectedPoolSol,
+          poolLabel: formatJackpotPoolSol(result.expectedPoolSol),
+          completedContribSol: result.completedContribSol,
+          paidUnfinishedContribSol: result.paidUnfinishedContribSol,
+          completedOpens: result.completedOpens,
+          paidUnfinishedOpens: result.paidUnfinishedOpens,
+          sinceJackpotWinAt: result.sinceJackpotWinAt,
+        },
+      })
     }
 
     const patch: Parameters<typeof updatePackVaultConfig>[0] = {}

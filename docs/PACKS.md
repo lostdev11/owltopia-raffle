@@ -51,7 +51,7 @@ Buying stays off until a full admin turns packs on (`pack_vault_config.paused`):
 | OWL scale | **10 → 50** (10 OWL = 0.1 SOL at default rate) |
 | SOL scale | 0.05 → 0.5 SOL (Gembird ladder; 0.1 / 0.2 / 0.5 chase tiers) |
 | NFT fair value | 0.05+ SOL (admin-tagged, up to 50 SOL); **higher FP = rarer** |
-| NFT 1% tier | Admin `odds_tier=premium_1pct` (Owltopia Gen1/Gen2/Coins + optional chase); **~1% overall** shared pool; FP still weights within pool |
+| NFT 1% tier | Admin `odds_tier=premium_1pct` (Owltopia Gen1/Gen2/Coins + optional chase); **~1% overall** shared pool; UI shows **1%** per chase mint (tier rate); FP still weights which chase mint wins *inside* the pool |
 | RTP target | **80%** (EV ≈ 0.08 SOL / open) |
 | OWL win UX | “You won N $OWL — sent to your wallet” |
 | UX | Instant rip (`/packs`) |
@@ -61,6 +61,8 @@ Buying stays off until a full admin turns packs on (`pack_vault_config.paused`):
 ## Jackpot
 
 Each **0.1 SOL** pack contributes **0.02 SOL** to a visible accumulating jackpot pool (~**0.2%** win chance per open by default). On a jackpot hit, the buyer receives the **full pool** in SOL and the pool resets to zero. Regular OWL/SOL/NFT prizes apply when the jackpot roll misses.
+
+Paid opens that never finished (e.g. historical VRF `refund_needed`) still count toward the pool when recalculated. Admins can sync with `PATCH /api/admin/packs` `{ "recalculate_jackpot": true }`.
 
 Apply migration **229** (`packs_jackpot`) and **232** (`packs_launch_mode_and_test_wallets`) alongside prior pack migrations.
 
