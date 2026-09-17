@@ -2217,14 +2217,35 @@ export async function selectWinner(
   }
   const winnerWallet = draw.winnerWallet
 
-  // Compute settlement amounts (fee + creator payout) at settlement time
-  const revenue = getRaffleRevenue(entries)
+  // Compute settlement amounts (fee + creator payout) at settlement time.
+  // Use the same unrefunded confirmed set as the draw — refunded ticket SOL already left escrow.
+  const revenue = getRaffleRevenue(confirmedEntries)
   const revenueCurrency = normalizeRaffleTicketCurrency(raffle.currency || 'SOL')
   const grossRevenue = revenueInCurrency(revenue, revenueCurrency)
 
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   const { feeBps, reason } = await getCreatorFeeTier(creatorWallet, { skipCache: true })
   const { platformFee, creatorPayout } = calculateSettlement(grossRevenue, feeBps)
+
+  // Best-effort solvency signal: do not block the NFT draw on RPC failure / shortfall.
+  if (raffleUsesFundsEscrow(raffle)) {
+    try {
+      const { warnIfFundsEscrowShortForSettlement } = await import(
+        '@/lib/raffles/funds-escrow-liability-service'
+      )
+      await warnIfFundsEscrowShortForSettlement({
+        raffleId,
+        currency: revenueCurrency,
+        creatorPayout,
+        platformFee,
+      })
+    } catch (e) {
+      console.warn(
+        `[selectWinner] funds-escrow solvency warning skipped for ${raffleId}:`,
+        e instanceof Error ? e.message : e
+      )
+    }
+  }
 
   const drawStatus = raffleUsesFundsEscrow(raffle)
     ? 'successful_pending_claims'
