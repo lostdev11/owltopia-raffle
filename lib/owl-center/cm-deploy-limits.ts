@@ -13,10 +13,14 @@ export function owlCenterCoreServerCmDeployMaxSupply(): number {
   return Math.min(n, 50_000)
 }
 
-/** Wall-clock budget for one Core config-line loading invocation (under route maxDuration 300s). */
+/**
+ * Wall-clock budget for one Core config-line loading invocation.
+ * Kept well under route maxDuration (300s) and typical browser/proxy idle limits
+ * so the admin UI gets continue_loading checkpoints with live progress.
+ */
 export function owlCenterCoreDeployLoadTimeBudgetMs(): number {
   const raw = process.env.OWL_CENTER_CORE_DEPLOY_LOAD_TIME_BUDGET_MS
   const n = raw ? Number.parseInt(raw, 10) : NaN
   if (Number.isFinite(n) && n >= 10_000) return Math.min(n, 280_000)
-  return 250_000
+  return 90_000
 }
