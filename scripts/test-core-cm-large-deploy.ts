@@ -78,7 +78,7 @@ describe('core CM large deploy checkpoints', () => {
     const prev = process.env.OWL_CENTER_CORE_DEPLOY_LOAD_TIME_BUDGET_MS
     delete process.env.OWL_CENTER_CORE_DEPLOY_LOAD_TIME_BUDGET_MS
     const ms = owlCenterCoreDeployLoadTimeBudgetMs()
-    assert.ok(ms >= 10_000)
+    assert.equal(ms, 90_000)
     assert.ok(ms <= 280_000)
     if (prev === undefined) delete process.env.OWL_CENTER_CORE_DEPLOY_LOAD_TIME_BUDGET_MS
     else process.env.OWL_CENTER_CORE_DEPLOY_LOAD_TIME_BUDGET_MS = prev
