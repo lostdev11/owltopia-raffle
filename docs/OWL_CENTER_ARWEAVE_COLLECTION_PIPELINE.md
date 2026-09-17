@@ -37,7 +37,7 @@ Admins stage a **Sugar export ZIP** on `/admin/owl-center/collections/{launch_id
 2. **Push to Arweave** — requires `IRYS_PRIVATE_KEY` (funded Solana wallet). Uploads PNGs then rewritten JSONs via Irys in batches (`OWL_CENTER_ASSET_UPLOAD_BATCH`, cron every 2 min).
 3. **Mark ready for Candy Machine** — then **Deploy CM + guard** in admin (`mint_standard=core` → Core collection + Core CM + botTax guard + config lines; optional PermanentFreezeDelegate when freeze enabled).
 
-Migration: `143_owl_center_asset_upload_jobs.sql`. Cron: `/api/cron/owl-center-asset-upload`. On-chain deploy API: `POST .../assets/sugar-deploy` with `{ "action": "deploy_onchain" }` (uses `IRYS_PRIVATE_KEY`; cap 250 supply on server).
+Migration: `143_owl_center_asset_upload_jobs.sql`. Cron: `/api/cron/owl-center-asset-upload`. On-chain deploy API: `POST .../assets/sugar-deploy` with `{ "action": "deploy_onchain" }` (uses `IRYS_PRIVATE_KEY`). **Core** deploys are resumable (`loading_items` checkpoint) for large supply; **Token Metadata** one-shot cap remains 250 (use Sugar CLI above that).
 
 Until Irys env is set, Phase B still handles **staging + validate**; Arweave push is manual via admin button or cron after env is configured.
 

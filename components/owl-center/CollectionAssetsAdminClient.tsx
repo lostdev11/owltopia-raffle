@@ -249,8 +249,9 @@ export function CollectionAssetsAdminClient({ launchId }: { launchId: string }) 
               <strong className="font-normal text-[#E8EEF2]">Mark ready for Candy Machine</strong>.
             </li>
             <li>
-              Deploy CM (server button or <span className="text-[#E8EEF2]">npm run sugar:deploy</span>) — IDs sync automatically.
-              Sugar CLI: use <span className="text-[#E8EEF2]">Import cache.json</span> in the deploy panel, or{' '}
+              Deploy CM via the server button (Core supports large supplies with resumable loading). Token Metadata
+              over 250 items: use <span className="text-[#E8EEF2]">npm run sugar:deploy</span>, then{' '}
+              <span className="text-[#E8EEF2]">Import cache.json</span> or{' '}
               <span className="text-[#E8EEF2]">npm run sugar:sync-ids</span>.
             </li>
           </ol>

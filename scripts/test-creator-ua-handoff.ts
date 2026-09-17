@@ -9,6 +9,7 @@ function parseDeployStatus(raw: unknown): string | null {
   const status = (raw as { status?: unknown }).status
   if (
     status !== 'running' &&
+    status !== 'loading_items' &&
     status !== 'cm_ready' &&
     status !== 'ua_handed_off' &&
     status !== 'completed' &&
@@ -59,8 +60,9 @@ describe('creator UA handoff helpers', () => {
     else process.env.OWL_CENTER_CREATOR_UA_HANDOFF = prev
   })
 
-  it('accepts cm_ready and ua_handed_off checkpoint statuses', () => {
+  it('accepts cm_ready, loading_items, and ua_handed_off checkpoint statuses', () => {
     assert.equal(parseDeployStatus({ status: 'cm_ready' }), 'cm_ready')
+    assert.equal(parseDeployStatus({ status: 'loading_items' }), 'loading_items')
     assert.equal(parseDeployStatus({ status: 'ua_handed_off' }), 'ua_handed_off')
     assert.equal(parseDeployStatus({ status: 'nope' }), null)
   })
