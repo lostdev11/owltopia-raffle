@@ -57,6 +57,55 @@ export function getFundsEscrowPublicKey(): string | null {
   return kp ? kp.publicKey.toBase58() : null
 }
 
+/**
+ * Ticket deposits may have been verified against `funds_escrow_address_snapshot`.
+ * Payouts always sign with the live `FUNDS_ESCROW_SECRET_KEY` keypair — if they differ,
+ * funds are almost certainly on the old address.
+ */
+export function fundsEscrowSnapshotMismatchError(
+  snapshot: string | null | undefined,
+  livePubkey: string
+): string | null {
+  const snap = (snapshot ?? '').trim()
+  if (!snap) return null
+  if (snap === livePubkey) return null
+  return (
+    `Funds escrow key mismatch for this raffle: ticket proceeds were deposited to ` +
+    `${snap}, but the server is signing with ${livePubkey}. ` +
+    `Restore the matching FUNDS_ESCROW_SECRET_KEY or move funds to the live escrow, then try again.`
+  )
+}
+
+async function assertGlobalFundsEscrowCoverage(): Promise<string | null> {
+  try {
+    const { assertFundsEscrowOutstandingLiabilityCovered } = await import(
+      '@/lib/raffles/funds-escrow-liability-service'
+    )
+    const result = await assertFundsEscrowOutstandingLiabilityCovered()
+    if (!result.ok) {
+      logFundsEscrowFailure('global liability coverage short', {
+        error: result.error,
+        required: result.snapshot.liability.required,
+        hold: {
+          sol: result.snapshot.pool.sol,
+          usdc: result.snapshot.pool.usdc,
+          owl: result.snapshot.pool.owl,
+        },
+        escrow: result.snapshot.pool.address,
+      })
+      return result.error
+    }
+    return null
+  } catch (e) {
+    // Do not block payouts on liability loader failures — per-payout shortfall still applies.
+    console.warn(
+      '[funds-escrow] global coverage check skipped:',
+      e instanceof Error ? e.message : e
+    )
+    return null
+  }
+}
+
 async function getFundsEscrowTokenProgramForMint(
   mint: PublicKey,
   escrowOwner: PublicKey
@@ -164,6 +213,9 @@ async function findEscrowSolShortfall(params: {
     escrow: escrowPubkey.toBase58(),
     requiredLamports: needed,
     balanceLamports: balance,
+    requiredSol: needed / LAMPORTS_PER_SOL,
+    balanceSol: balance / LAMPORTS_PER_SOL,
+    note: 'shared funds-escrow wallet — check outstanding liability / other outflows',
   })
   return (
     `Funds escrow is short of SOL for this payout: it needs about ` +
@@ -184,6 +236,22 @@ export async function payoutCreatorAndPlatformFromFundsEscrow(raffle: Raffle): P
   if (!kp) {
     return { ok: false, error: 'Funds escrow is not configured (FUNDS_ESCROW_SECRET_KEY).' }
   }
+
+  const mismatch = fundsEscrowSnapshotMismatchError(
+    raffle.funds_escrow_address_snapshot,
+    kp.publicKey.toBase58()
+  )
+  if (mismatch) {
+    logFundsEscrowFailure('claim-proceeds: escrow snapshot mismatch', {
+      snapshot: raffle.funds_escrow_address_snapshot,
+      live: kp.publicKey.toBase58(),
+      raffleId: raffle.id,
+    })
+    return { ok: false, error: mismatch }
+  }
+
+  const coverageError = await assertGlobalFundsEscrowCoverage()
+  if (coverageError) return { ok: false, error: coverageError }
 
   const creatorWallet = (raffle.creator_wallet || raffle.created_by || '').trim()
   if (!creatorWallet) {
@@ -366,6 +434,23 @@ export async function refundEntryFromFundsEscrow(
     return { ok: false, error: 'Funds escrow is not configured (FUNDS_ESCROW_SECRET_KEY).' }
   }
 
+  const mismatch = fundsEscrowSnapshotMismatchError(
+    raffle.funds_escrow_address_snapshot,
+    kp.publicKey.toBase58()
+  )
+  if (mismatch) {
+    logFundsEscrowFailure('entry-refund: escrow snapshot mismatch', {
+      snapshot: raffle.funds_escrow_address_snapshot,
+      live: kp.publicKey.toBase58(),
+      raffleId: raffle.id,
+      entryId: entry.id,
+    })
+    return { ok: false, error: mismatch }
+  }
+
+  const coverageError = await assertGlobalFundsEscrowCoverage()
+  if (coverageError) return { ok: false, error: coverageError }
+
   const amount = Number(entry.amount_paid ?? 0)
   if (!Number.isFinite(amount) || amount <= 0) {
     return { ok: false, error: 'Invalid entry amount.' }
@@ -497,6 +582,9 @@ export async function payoutCryptoFromFundsEscrow(params: {
   if (!kp) {
     return { ok: false, error: 'Funds escrow is not configured (FUNDS_ESCROW_SECRET_KEY).' }
   }
+
+  const coverageError = await assertGlobalFundsEscrowCoverage()
+  if (coverageError) return { ok: false, error: coverageError }
 
   const amount = Number(params.amount)
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -634,6 +722,9 @@ export async function payoutBuyoutAcceptanceFromFundsEscrow(params: {
   if (!kp) {
     return { ok: false, error: 'Funds escrow is not configured (FUNDS_ESCROW_SECRET_KEY).' }
   }
+
+  const coverageError = await assertGlobalFundsEscrowCoverage()
+  if (coverageError) return { ok: false, error: coverageError }
 
   const treasury = treasuryWalletFromEnv()
   if (!treasury) {
@@ -788,6 +879,9 @@ export async function refundOfferBidFromFundsEscrow(
   if (!kp) {
     return { ok: false, error: 'Funds escrow is not configured (FUNDS_ESCROW_SECRET_KEY).' }
   }
+
+  const coverageError = await assertGlobalFundsEscrowCoverage()
+  if (coverageError) return { ok: false, error: coverageError }
 
   const amount = Number(offer.amount ?? 0)
   if (!Number.isFinite(amount) || amount <= 0) {

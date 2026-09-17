@@ -1,6 +1,6 @@
 /**
  * Switchboard On-Demand randomness (commit → reveal) for owltopia-draw-v3-vrf.
- * Platform pays via funds/prize escrow keypair. Pure client path — no custom raffle program yet.
+ * Platform pays via VRF_FEE_PAYER_SECRET_KEY (preferred), else prize/funds escrow. Pure client path — no custom raffle program yet.
  */
 import {
   Keypair,
@@ -15,8 +15,7 @@ import {
 } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
-import { getFundsEscrowKeypair } from '@/lib/raffles/funds-escrow'
-import { getPrizeEscrowKeypair } from '@/lib/raffles/prize-escrow'
+import { resolveVrfOrRevealFeePayer } from '@/lib/raffles/vrf-fee-payer'
 import { seedFromVrfHex, extractVrfValueHex, isSwitchboardRandomnessRevealed } from '@/lib/raffles/draw/vrf-seed'
 import {
   resolveVrfRevealWaitMs,
@@ -147,7 +146,7 @@ export type SwitchboardVrfRevealResult =
   | { ok: false; error: string; retryable: boolean }
 
 function resolveVrfPayer(): Keypair | null {
-  return getFundsEscrowKeypair() ?? getPrizeEscrowKeypair() ?? null
+  return resolveVrfOrRevealFeePayer()
 }
 
 function isDevnetRpc(url: string): boolean {
@@ -466,7 +465,7 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
     return {
       ok: false,
       error:
-        'No escrow key configured for VRF fees (set FUNDS_ESCROW_SECRET_KEY or PRIZE_ESCROW_SECRET_KEY)',
+        'No fee-payer key configured for VRF (set VRF_FEE_PAYER_SECRET_KEY, or PRIZE_ESCROW_SECRET_KEY / FUNDS_ESCROW_SECRET_KEY as fallback)',
     }
   }
 

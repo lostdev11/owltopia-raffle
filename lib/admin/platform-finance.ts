@@ -1,6 +1,8 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { getRevShareSchedule } from '@/lib/db/rev-share-schedule'
 import { listGenOwlRevSharePeriods } from '@/lib/db/gen-owl-rev-share-periods'
+import { loadFundsEscrowLiabilityWithCoverage } from '@/lib/raffles/funds-escrow-liability-service'
+import type { FundsEscrowCurrencyBucket } from '@/lib/raffles/funds-escrow-liability'
 
 export type CurrencyBucket = {
   sol: number
@@ -13,6 +15,25 @@ export type CurrencyBucketWithCount = CurrencyBucket & { count: number }
 export type TicketActivityBucket = CurrencyBucket & {
   ticketsSold: number
   confirmedEntries: number
+}
+
+export type FundsEscrowSolvencyPayload = {
+  configured: boolean
+  address: string | null
+  covered: boolean | null
+  error: string | null
+  hold: { sol: number | null; usdc: number | null; owl: number | null }
+  required: FundsEscrowCurrencyBucket
+  shortfall: FundsEscrowCurrencyBucket
+  feeReserveSol: number
+  counts: {
+    unclaimedRaffleSettlements: number
+    refundableTicketEntries: number
+    openBuyoutDeposits: number
+    unclaimedAuctionSettlements: number
+    openAuctionBids: number
+    milestoneCryptoHeld: number
+  }
 }
 
 export type PlatformFinancePayload = {
@@ -48,6 +69,7 @@ export type PlatformFinancePayload = {
       liabilityUsdc: number
     }>
   }
+  fundsEscrowSolvency: FundsEscrowSolvencyPayload
 }
 
 function emptyBucket(): CurrencyBucket {
@@ -312,6 +334,44 @@ export async function getPlatformFinance(): Promise<PlatformFinancePayload> {
     liabilityTotal.usdc += p.liabilityUsdc
   }
 
+  let fundsEscrowSolvency: FundsEscrowSolvencyPayload = {
+    configured: false,
+    address: null,
+    covered: null,
+    error: null,
+    hold: { sol: null, usdc: null, owl: null },
+    required: { sol: 0, usdc: 0, owl: 0, bamboo: 0, goats: 0 },
+    shortfall: { sol: 0, usdc: 0, owl: 0, bamboo: 0, goats: 0 },
+    feeReserveSol: 0,
+    counts: {
+      unclaimedRaffleSettlements: 0,
+      refundableTicketEntries: 0,
+      openBuyoutDeposits: 0,
+      unclaimedAuctionSettlements: 0,
+      openAuctionBids: 0,
+      milestoneCryptoHeld: 0,
+    },
+  }
+  try {
+    const snap = await loadFundsEscrowLiabilityWithCoverage()
+    fundsEscrowSolvency = {
+      configured: snap.pool.configured,
+      address: snap.pool.address,
+      covered: snap.pool.sol == null ? null : snap.coverage.covered,
+      error: snap.coverage.error,
+      hold: { sol: snap.pool.sol, usdc: snap.pool.usdc, owl: snap.pool.owl },
+      required: snap.liability.required,
+      shortfall: snap.coverage.shortfall,
+      feeReserveSol: snap.feeReserveSol,
+      counts: snap.liability.counts,
+    }
+  } catch (e) {
+    console.warn(
+      '[platform-finance] funds escrow solvency skipped:',
+      e instanceof Error ? e.message : e
+    )
+  }
+
   return {
     raffleSettlementFees: {
       accrued: raffleAccrued,
@@ -334,5 +394,6 @@ export async function getPlatformFinance(): Promise<PlatformFinancePayload> {
       unclaimedLiability: liabilityTotal,
       periods: revPeriods,
     },
+    fundsEscrowSolvency,
   }
 }

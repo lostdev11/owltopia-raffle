@@ -121,7 +121,11 @@ function roundForProfitDisplay(n: number, currency: RaffleCurrency): number {
  * Sum confirmed entry payments by currency for a raffle.
  */
 export function getRaffleRevenue(entries: Entry[]): RaffleRevenue {
-  const confirmed = entries.filter(e => e.status === 'confirmed')
+  // Exclude refunded confirmed rows — those SOL/tokens already left funds escrow (or never
+  // settle into creator_payout). Settlement and profit bars must match unrefunded liability.
+  const confirmed = entries.filter(
+    (e) => e.status === 'confirmed' && !(e.refunded_at != null && String(e.refunded_at).trim() !== '')
+  )
   let usdc = 0
   let sol = 0
   let owl = 0

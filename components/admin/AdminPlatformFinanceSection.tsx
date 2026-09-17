@@ -89,7 +89,8 @@ export function AdminPlatformFinanceSection({ wallet, refreshTick = 0 }: Props) 
     >
       <CardDescription className="mb-4">
         Real treasury inflows: raffle/auction fees collected when creators claim proceeds, cancellation fees, and Gen
-        Owl rev-share deposits vs payouts. Ticket totals are volume only — not platform revenue.
+        Owl rev-share deposits vs payouts. Funds escrow solvency compares on-chain balance to outstanding claim /
+        refund / bid liability. Ticket totals are volume only — not platform revenue.
       </CardDescription>
 
       {error && !data ? (
@@ -112,6 +113,82 @@ export function AdminPlatformFinanceSection({ wallet, refreshTick = 0 }: Props) 
         </p>
       ) : (
         <div className="space-y-6">
+          {/* Funds escrow solvency */}
+          {data.fundsEscrowSolvency ? (
+            <div>
+              <h3 className="text-sm font-semibold text-muted-foreground mb-1 flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4" />
+                Funds escrow solvency
+              </h3>
+              <p className="text-xs text-muted-foreground mb-3">
+                Shared ticket / bid / milestone wallet. Top up when under-covered before hosts hit claim-proceeds
+                shortfalls. VRF fees should use VRF_FEE_PAYER_SECRET_KEY, not this wallet.
+              </p>
+              {!data.fundsEscrowSolvency.configured ? (
+                <p className="text-sm text-destructive">FUNDS_ESCROW_SECRET_KEY is not configured.</p>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs font-mono break-all text-muted-foreground">
+                    {data.fundsEscrowSolvency.address}
+                  </p>
+                  <div
+                    className={`rounded-lg border p-4 space-y-2 ${
+                      data.fundsEscrowSolvency.covered === false
+                        ? 'border-destructive/40 bg-destructive/5'
+                        : data.fundsEscrowSolvency.covered === true
+                          ? 'border-emerald-500/30 bg-emerald-500/5'
+                          : 'bg-muted/30'
+                    }`}
+                  >
+                    <p className="text-sm font-medium">
+                      {data.fundsEscrowSolvency.covered === false
+                        ? 'Under-covered — top up funds escrow'
+                        : data.fundsEscrowSolvency.covered === true
+                          ? 'Covered'
+                          : 'Balance unread (RPC) — liability still shown'}
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1">On-chain hold</p>
+                        <p className="tabular-nums">
+                          <span className="font-semibold">
+                            {data.fundsEscrowSolvency.hold.sol == null
+                              ? '—'
+                              : fmtSol(data.fundsEscrowSolvency.hold.sol)}
+                          </span>{' '}
+                          SOL ·{' '}
+                          <span className="font-semibold">
+                            {data.fundsEscrowSolvency.hold.usdc == null
+                              ? '—'
+                              : fmtUsdc(data.fundsEscrowSolvency.hold.usdc)}
+                          </span>{' '}
+                          USDC
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-1">
+                          Required (+ {fmtSol(data.fundsEscrowSolvency.feeReserveSol)} fee reserve)
+                        </p>
+                        <CurrencyLine b={data.fundsEscrowSolvency.required} />
+                      </div>
+                    </div>
+                    {data.fundsEscrowSolvency.covered === false && data.fundsEscrowSolvency.error ? (
+                      <p className="text-xs text-destructive">{data.fundsEscrowSolvency.error}</p>
+                    ) : null}
+                    <p className="text-xs text-muted-foreground">
+                      Pending: {data.fundsEscrowSolvency.counts.unclaimedRaffleSettlements} raffle claims ·{' '}
+                      {data.fundsEscrowSolvency.counts.refundableTicketEntries} ticket refunds ·{' '}
+                      {data.fundsEscrowSolvency.counts.openBuyoutDeposits} buyouts ·{' '}
+                      {data.fundsEscrowSolvency.counts.unclaimedAuctionSettlements} auction claims ·{' '}
+                      {data.fundsEscrowSolvency.counts.openAuctionBids} auction bids ·{' '}
+                      {data.fundsEscrowSolvency.counts.milestoneCryptoHeld} milestones
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+
           {/* Raffle settlement fees */}
           <div>
             <h3 className="text-sm font-semibold text-muted-foreground mb-1">Raffle settlement fees</h3>
