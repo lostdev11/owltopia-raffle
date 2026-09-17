@@ -5,6 +5,9 @@ import {
   getPrizeEscrowPublicKey,
   isPrizeEscrowFrozenSplVerifyBypassEnabled,
 } from '@/lib/raffles/prize-escrow'
+import { getFundsEscrowKeypair, getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
+import { getVrfFeePayerKeypair, getVrfFeePayerPublicKey } from '@/lib/raffles/vrf-fee-payer'
+import { loadFundsEscrowLiabilityWithCoverage } from '@/lib/raffles/funds-escrow-liability-service'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
@@ -25,33 +28,85 @@ function redactUrl(url: string | null): string | null {
   }
 }
 
+function envKeyMeta(raw: string) {
+  return {
+    envPresent: raw.length > 0,
+    envLooksJsonArray: raw.startsWith('[') && raw.endsWith(']'),
+    envLength: raw.length,
+  }
+}
+
 /**
  * GET /api/admin/escrow-health
- * Full-admin only. Returns whether prize escrow is configured and what the server believes the escrow pubkey is.
- * This is used to debug "pending escrow deposit" issues in production without leaking secrets.
+ * Full-admin only. Prize escrow + funds escrow liability coverage + VRF fee payer config.
+ * Used to debug pending deposits / claim-proceeds shortfalls without leaking secrets.
  */
 export async function GET(request: NextRequest) {
   try {
     const session = await requireAdminSession(request)
     if (session instanceof NextResponse) return session
 
-    const raw = process.env.PRIZE_ESCROW_SECRET_KEY?.trim() ?? ''
-    const keypair = getPrizeEscrowKeypair()
-    const address = getPrizeEscrowPublicKey()
+    const prizeRaw = process.env.PRIZE_ESCROW_SECRET_KEY?.trim() ?? ''
+    const fundsRaw = process.env.FUNDS_ESCROW_SECRET_KEY?.trim() ?? ''
+    const vrfRaw = process.env.VRF_FEE_PAYER_SECRET_KEY?.trim() ?? ''
+    const prizeKeypair = getPrizeEscrowKeypair()
+    const prizeAddress = getPrizeEscrowPublicKey()
+    const fundsKeypair = getFundsEscrowKeypair()
+    const fundsAddress = getFundsEscrowPublicKey()
+    const vrfKeypair = getVrfFeePayerKeypair()
+    const vrfAddress = getVrfFeePayerPublicKey()
 
     const rpcUrl = resolveServerSolanaRpcUrl()
     const cluster = /devnet/i.test(rpcUrl) ? 'devnet' : 'mainnet'
+
+    let fundsLiability: Awaited<ReturnType<typeof loadFundsEscrowLiabilityWithCoverage>> | null =
+      null
+    let fundsLiabilityError: string | null = null
+    try {
+      fundsLiability = await loadFundsEscrowLiabilityWithCoverage()
+    } catch (e) {
+      fundsLiabilityError = e instanceof Error ? e.message : String(e)
+    }
 
     return NextResponse.json({
       ok: true,
       viewer: session.wallet,
       escrow: {
-        configured: Boolean(keypair && address),
-        publicKey: address,
-        // Useful for debugging env formatting issues (extra quotes/newlines)
-        envPresent: raw.length > 0,
-        envLooksJsonArray: raw.startsWith('[') && raw.endsWith(']'),
-        envLength: raw.length,
+        configured: Boolean(prizeKeypair && prizeAddress),
+        publicKey: prizeAddress,
+        ...envKeyMeta(prizeRaw),
+      },
+      fundsEscrow: {
+        configured: Boolean(fundsKeypair && fundsAddress),
+        publicKey: fundsAddress,
+        ...envKeyMeta(fundsRaw),
+        liability: fundsLiability
+          ? {
+              covered: fundsLiability.coverage.covered,
+              shortfall: fundsLiability.coverage.shortfall,
+              error: fundsLiability.coverage.error,
+              required: fundsLiability.liability.required,
+              buckets: fundsLiability.liability.buckets,
+              counts: fundsLiability.liability.counts,
+              hold: {
+                sol: fundsLiability.pool.sol,
+                usdc: fundsLiability.pool.usdc,
+                owl: fundsLiability.pool.owl,
+                bamboo: fundsLiability.pool.bamboo,
+                goats: fundsLiability.pool.goats,
+              },
+              feeReserveSol: fundsLiability.feeReserveSol,
+            }
+          : null,
+        liabilityError: fundsLiabilityError,
+      },
+      vrfFeePayer: {
+        configured: Boolean(vrfKeypair && vrfAddress),
+        publicKey: vrfAddress,
+        ...envKeyMeta(vrfRaw),
+        note: vrfAddress
+          ? 'Preferred Switchboard / reveal memo fee payer'
+          : 'Unset — falls back to prize escrow, then funds escrow',
       },
       frozenSplDepositVerifyBypass: {
         enabled: isPrizeEscrowFrozenSplVerifyBypassEnabled(),
@@ -73,4 +128,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: safeErrorMessage(e) }, { status: 500 })
   }
 }
-
