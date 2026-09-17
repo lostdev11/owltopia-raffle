@@ -6,8 +6,7 @@ import { Transaction, TransactionInstruction, sendAndConfirmTransaction } from '
 import type { Keypair } from '@solana/web3.js'
 import { SIGN_IN_MEMO_PROGRAM_ID } from '@/lib/auth-tx-sign-in'
 import { getSolanaConnection } from '@/lib/solana/connection'
-import { getFundsEscrowKeypair } from '@/lib/raffles/funds-escrow'
-import { getPrizeEscrowKeypair } from '@/lib/raffles/prize-escrow'
+import { resolveVrfOrRevealFeePayer } from '@/lib/raffles/vrf-fee-payer'
 import { encodeDrawRevealMemo } from '@/lib/raffles/draw/memo'
 import type { DrawRevealMemoParts } from '@/lib/raffles/draw/types'
 
@@ -16,7 +15,7 @@ export type SendDrawRevealResult =
   | { ok: false; error: string; memo: string }
 
 function resolveRevealFeePayer(): Keypair | null {
-  return getFundsEscrowKeypair() ?? getPrizeEscrowKeypair() ?? null
+  return resolveVrfOrRevealFeePayer()
 }
 
 export async function sendDrawRevealMemoTransaction(
@@ -36,7 +35,7 @@ export async function sendDrawRevealMemoTransaction(
     return {
       ok: false,
       error:
-        'No escrow key configured to sign reveal (set FUNDS_ESCROW_SECRET_KEY or PRIZE_ESCROW_SECRET_KEY)',
+        'No fee-payer key configured to sign reveal (set VRF_FEE_PAYER_SECRET_KEY, or PRIZE_ESCROW_SECRET_KEY / FUNDS_ESCROW_SECRET_KEY as fallback)',
       memo,
     }
   }
