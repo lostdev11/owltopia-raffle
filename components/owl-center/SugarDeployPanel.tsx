@@ -9,15 +9,24 @@ import { DeployButton } from '@/components/owl-center/DeployButton'
 type DeployStatus = {
   arweave_ready: boolean
   can_deploy: boolean
+  can_continue_loading?: boolean
   can_retry_handoff?: boolean
   onchain_deploy_enabled: boolean
   server_deploy_max_supply: number
+  tm_server_deploy_max_supply?: number
+  config_line_count?: number | null
+  over_server_cap?: boolean
+  fully_deployed?: boolean
   candy_machine_id: string | null
   collection_mint: string | null
+  in_progress_candy_machine_id?: string | null
+  in_progress_collection_mint?: string | null
   deploy_state: {
     status: string
     error?: string | null
     candy_guard_id?: string | null
+    config_lines_loaded?: number | null
+    config_lines_total?: number | null
   } | null
   mint_mode: string
   mint_standard?: string | null
@@ -28,7 +37,9 @@ type DeployStatus = {
 function deployPhaseLabel(status: string | undefined | null): string | null {
   switch (status) {
     case 'running':
-      return 'Phase: uploading / creating Candy Machine…'
+      return 'Phase: creating Candy Machine…'
+    case 'loading_items':
+      return 'Phase: loading config lines on-chain…'
     case 'cm_ready':
       return 'Phase: CM live — handing off update authority to creator…'
     case 'ua_handed_off':
@@ -59,6 +70,9 @@ type DeployActionResult = {
   collection_mint: string
   candy_guard_id: string
   already_deployed?: boolean
+  continue_loading?: boolean
+  config_lines_loaded?: number
+  config_lines_total?: number
   go_live?: GoLiveSummary
 }
 
@@ -89,6 +103,7 @@ export function SugarDeployPanel({
   const [manualCm, setManualCm] = useState('')
   const [manualCol, setManualCol] = useState('')
   const cacheInputRef = useRef<HTMLInputElement>(null)
+  const autoContinueRef = useRef(false)
 
   const load = useCallback(async () => {
     try {
@@ -113,32 +128,55 @@ export function SugarDeployPanel({
     void load()
   }, [load])
 
+  async function postDeployOnchain(): Promise<DeployActionResult> {
+    const res = await fetch(`/api/admin/owl-center/collections/${launchId}/assets/sugar-deploy`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'deploy_onchain' }),
+    })
+    const j = (await res.json()) as {
+      ok?: boolean
+      error?: string
+      result?: DeployActionResult
+    }
+    if (!res.ok || !j.ok || !j.result) {
+      throw new Error(j.error || 'deploy_failed')
+    }
+    return j.result
+  }
+
   async function deployOnchain() {
     setBusy(true)
     setErr(null)
     setMsg(null)
+    autoContinueRef.current = true
     try {
-      const res = await fetch(`/api/admin/owl-center/collections/${launchId}/assets/sugar-deploy`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'deploy_onchain' }),
-      })
-      const j = (await res.json()) as {
-        ok?: boolean
-        error?: string
-        result?: DeployActionResult
+      let rounds = 0
+      // Large Core collections load config lines across multiple server invocations.
+      while (autoContinueRef.current && rounds < 40) {
+        rounds += 1
+        const result = await postDeployOnchain()
+        if (result.continue_loading) {
+          const loaded = result.config_lines_loaded ?? 0
+          const total = result.config_lines_total ?? status?.config_line_count ?? '?'
+          setMsg(`Loading items on-chain… ${loaded}/${total} (round ${rounds}). Continuing automatically.`)
+          await load()
+          continue
+        }
+        const prefix = result.already_deployed
+          ? 'Candy Machine already deployed — IDs synced.'
+          : `Deployed · CM ${result.candy_machine_id?.slice(0, 8)}… · guard attached.`
+        setMsg(formatGoLiveMessage(result.go_live, prefix))
+        onApplied()
+        await load()
+        break
       }
-      if (!res.ok || !j.ok) throw new Error(j.error || 'deploy_failed')
-      const prefix = j.result?.already_deployed
-        ? 'Candy Machine already deployed — IDs synced.'
-        : `Deployed · CM ${j.result?.candy_machine_id?.slice(0, 8)}… · guard attached.`
-      setMsg(formatGoLiveMessage(j.result?.go_live, prefix))
-      onApplied()
-      await load()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'deploy_failed')
+      await load()
     } finally {
+      autoContinueRef.current = false
       setBusy(false)
     }
   }
@@ -224,20 +262,53 @@ export function SugarDeployPanel({
     )
   }
 
-  const deployed = Boolean(status?.candy_machine_id && status?.collection_mint)
+  const isCore = status?.mint_standard === 'core'
+  const deployed = Boolean(status?.fully_deployed ?? (status?.candy_machine_id && status?.collection_mint))
+  const loaded = status?.deploy_state?.config_lines_loaded
+  const total = status?.deploy_state?.config_lines_total ?? status?.config_line_count
+  const showLoadProgress =
+    status?.deploy_state?.status === 'loading_items' ||
+    (typeof loaded === 'number' && typeof total === 'number' && loaded < total && !deployed)
+  const tmCap = status?.tm_server_deploy_max_supply ?? 250
 
   return (
     <CommandCard label="phase_b.sys · DEPLOY CM + GUARD">
       <p className="mb-4 text-xs leading-relaxed text-[#9BA8B4]">
-        After Arweave upload, use <strong className="font-normal text-[#E8EEF2]">Deploy CM + guard</strong> (≤
-        {status?.server_deploy_max_supply ?? 250} items) or Sugar CLI below. IDs sync to marketplace automatically and
-        trigger go-live when metadata is ready. Use base58 addresses from <code className="text-[#7D8A93]">cache.json</code>
-        — not the launch UUID from the admin URL.
+        After Arweave upload, deploy the Candy Machine
+        {isCore ? (
+          <>
+            {' '}
+            with <strong className="font-normal text-[#E8EEF2]">Deploy CM + guard</strong>. Large Core collections
+            load items in rounds automatically (server time budget).
+          </>
+        ) : (
+          <>
+            {' '}
+            with <strong className="font-normal text-[#E8EEF2]">Deploy CM + guard</strong> (≤{tmCap} items) or Sugar
+            CLI below.
+          </>
+        )}{' '}
+        IDs sync to marketplace automatically and trigger go-live when metadata is ready. Use base58 addresses from{' '}
+        <code className="text-[#7D8A93]">cache.json</code> — not the launch UUID from the admin URL.
       </p>
 
       {!status?.arweave_ready ? (
         <p className="rounded border border-[#FFD769]/30 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#FFD769]">
           Finish <strong className="font-normal">Push to Arweave</strong> above before deploying.
+        </p>
+      ) : null}
+
+      {status?.over_server_cap ? (
+        <p className="mb-4 rounded border border-[#FFD769]/30 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#FFD769]">
+          Supply {status.config_line_count} exceeds the Token Metadata server deploy cap ({tmCap}). Use Sugar CLI
+          below, then import <code className="text-[#7D8A93]">cache.json</code>.
+        </p>
+      ) : null}
+
+      {isCore && status?.config_line_count && status.config_line_count > tmCap ? (
+        <p className="mb-4 rounded border border-[#00FF9C]/25 bg-[#00FF9C]/5 px-3 py-2 text-sm text-[#9BA8B4]">
+          Supply {status.config_line_count} — Core in-app deploy supports large collections via resumable item
+          loading (Sugar CLI cannot deploy Core Candy Machines).
         </p>
       ) : null}
 
@@ -260,7 +331,21 @@ export function SugarDeployPanel({
         </dl>
       ) : null}
 
-      {status?.mint_standard === 'core' && status.creator_wallet && (status.can_deploy || status.can_retry_handoff) ? (
+      {showLoadProgress ? (
+        <p className="mb-4 rounded border border-[#00FF9C]/25 bg-[#00FF9C]/5 px-3 py-2 font-mono text-xs text-[#C5D0D8]">
+          Config lines on-chain: {loaded ?? 0}/{total ?? '…'}
+          {status?.in_progress_candy_machine_id ? (
+            <>
+              {' '}
+              · CM {shortPk(status.in_progress_candy_machine_id)}
+            </>
+          ) : null}
+        </p>
+      ) : null}
+
+      {status?.mint_standard === 'core' &&
+      status.creator_wallet &&
+      (status.can_deploy || status.can_continue_loading || status.can_retry_handoff) ? (
         <p className="mb-4 rounded border border-[#FFD769]/30 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#FFD769]">
           Creator wallet <span className="font-mono">{shortPk(status.creator_wallet)}</span> becomes root update
           authority after deploy. Use a wallet you will keep (hardware / multisig recommended). Owltopia keeps
@@ -299,6 +384,19 @@ export function SugarDeployPanel({
           </DeployButton>
         ) : null}
 
+        {status?.can_continue_loading ? (
+          <DeployButton type="button" className="min-h-[44px] touch-manipulation" disabled={busy} onClick={() => void deployOnchain()}>
+            {busy ? (
+              <>
+                <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+                Loading items…
+              </>
+            ) : (
+              `Continue loading items${typeof loaded === 'number' && typeof total === 'number' ? ` (${loaded}/${total})` : ''}`
+            )}
+          </DeployButton>
+        ) : null}
+
         {status?.can_retry_handoff ? (
           <DeployButton type="button" className="min-h-[44px] touch-manipulation" disabled={busy} onClick={() => void deployOnchain()}>
             {busy ? (
@@ -317,44 +415,60 @@ export function SugarDeployPanel({
         ) : null}
       </div>
 
-      <details className="mt-4 rounded border border-[#1A222B] bg-[#0B0F13] px-3 py-2">
-        <summary className="cursor-pointer touch-manipulation py-2 font-mono text-xs uppercase tracking-wide text-[#9BA8B4]">
-          Terminal fallback (Sugar CLI)
-        </summary>
-        <p className="mt-2 text-xs text-[#9BA8B4]">
-          For collections over {status?.server_deploy_max_supply ?? 250} items or if server deploy fails. The deploy
-          script auto-syncs IDs to Owl Center when <code className="text-[#7D8A93]">config.json</code> includes{' '}
-          <code className="text-[#7D8A93]">owlCenter.launchId</code> (added by prepare script).
+      {!isCore ? (
+        <details
+          className="mt-4 rounded border border-[#1A222B] bg-[#0B0F13] px-3 py-2"
+          open={Boolean(status?.over_server_cap)}
+        >
+          <summary className="cursor-pointer touch-manipulation py-2 font-mono text-xs uppercase tracking-wide text-[#9BA8B4]">
+            Terminal fallback (Sugar CLI)
+          </summary>
+          <p className="mt-2 text-xs text-[#9BA8B4]">
+            For Token Metadata collections over {tmCap} items or if server deploy fails. The deploy script auto-syncs
+            IDs to Owl Center when <code className="text-[#7D8A93]">config.json</code> includes{' '}
+            <code className="text-[#7D8A93]">owlCenter.launchId</code> (added by prepare script).
+          </p>
+          <pre className="mt-2 overflow-x-auto rounded bg-[#0F1419] p-3 font-mono text-[11px] text-[#C5D0D8]">
+            npm run prepare:sugar-deploy -- --launch-id={launchId}
+            {'\n'}
+            {status?.terminal_command ?? 'npm run sugar:deploy -- collections/your-folder'}
+          </pre>
+        </details>
+      ) : (
+        <p className="mt-4 text-xs text-[#5C6773]">
+          Core collections must use in-app deploy (Sugar CLI does not create Core Candy Machines). If a deploy stalls,
+          use Continue loading items above — progress is checkpointed.
         </p>
-        <pre className="mt-2 overflow-x-auto rounded bg-[#0F1419] p-3 font-mono text-[11px] text-[#C5D0D8]">
-          npm run prepare:sugar-deploy -- --launch-id={launchId}
-          {'\n'}
-          {status?.terminal_command ?? 'npm run sugar:deploy -- collections/your-folder'}
-        </pre>
-      </details>
+      )}
 
       <div className="mt-4 space-y-3 border-t border-[#1A222B] pt-4">
-        <p className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">Sugar CLI — import cache.json</p>
-        <input
-          ref={cacheInputRef}
-          type="file"
-          accept="application/json,.json"
-          className="sr-only"
-          onChange={(e) => {
-            const file = e.target.files?.[0]
-            if (file) void importCacheFile(file)
-            e.target.value = ''
-          }}
-        />
-        <DeployButton
-          type="button"
-          variant="ghost"
-          className="min-h-[44px] w-full touch-manipulation sm:w-auto"
-          disabled={busy}
-          onClick={() => cacheInputRef.current?.click()}
-        >
-          Import cache.json → save + go live
-        </DeployButton>
+        <p className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+          {isCore ? 'Paste base58 IDs (ops recovery)' : 'Sugar CLI — import cache.json'}
+        </p>
+        {!isCore ? (
+          <>
+            <input
+              ref={cacheInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="sr-only"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) void importCacheFile(file)
+                e.target.value = ''
+              }}
+            />
+            <DeployButton
+              type="button"
+              variant="ghost"
+              className="min-h-[44px] w-full touch-manipulation sm:w-auto"
+              disabled={busy}
+              onClick={() => cacheInputRef.current?.click()}
+            >
+              Import cache.json → save + go live
+            </DeployButton>
+          </>
+        ) : null}
 
         <p className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">Or paste base58 IDs manually</p>
         <label className="grid gap-1 text-sm text-[#C5D0D8]">

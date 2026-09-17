@@ -39,10 +39,13 @@ import { resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import { validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
+import {
+  OWL_CENTER_SERVER_CM_DEPLOY_MAX_SUPPLY,
+} from '@/lib/owl-center/cm-deploy-limits'
 
 const CONFIG_LINES_PER_TX = 10
-/** Server deploy cap — large collections should use Sugar CLI locally. */
-export const OWL_CENTER_SERVER_CM_DEPLOY_MAX_SUPPLY = 250
+
+export { OWL_CENTER_SERVER_CM_DEPLOY_MAX_SUPPLY }
 
 export type OnchainSugarDeployInput = {
   launch: Pick<
