@@ -3,20 +3,25 @@
 import { useEffect, useState } from 'react'
 
 import { formatMintDate, formatPhaseStartShort } from '@/lib/owl-center/phase-schedule'
+import {
+  MINT_TIME_ZONE_CHANGE_EVENT,
+  readMintTimeZoneMode,
+  type MintTimeZoneMode,
+} from '@/lib/owl-center/mint-time-preference'
 
 type LocalMintTimeProps = {
   iso: string | null | undefined
   /** `full` → "Sep 5, 2026, 7:30 AM"; `short` → "Sep 5, 7:30 AM" */
   variant?: 'full' | 'short'
-  /** Shown before the browser timezone is applied (avoids UTC SSR flash). */
+  /** Shown before preference is applied (avoids hydration mismatch). */
   placeholder?: string
   className?: string
 }
 
 /**
- * Format mint timestamps in the viewer's local timezone.
- * Server Components calling `formatMintDate` / `formatPhaseStartShort` use the
- * deploy host TZ (UTC on Vercel), which shifts times vs the mint console.
+ * Format mint timestamps using the shared UTC/local preference (default UTC).
+ * Prefer this over calling formatMintDate in Server Components so hub cards
+ * match the mint console after hydration.
  */
 export function LocalMintTime({
   iso,
@@ -24,15 +29,27 @@ export function LocalMintTime({
   placeholder = '…',
   className,
 }: LocalMintTimeProps) {
+  const [mode, setMode] = useState<MintTimeZoneMode>('utc')
   const [label, setLabel] = useState<string | null>(null)
 
   useEffect(() => {
-    if (variant === 'short') {
-      setLabel(formatPhaseStartShort(iso))
-    } else {
-      setLabel(formatMintDate(iso))
+    const apply = () => setMode(readMintTimeZoneMode())
+    apply()
+    window.addEventListener(MINT_TIME_ZONE_CHANGE_EVENT, apply)
+    window.addEventListener('storage', apply)
+    return () => {
+      window.removeEventListener(MINT_TIME_ZONE_CHANGE_EVENT, apply)
+      window.removeEventListener('storage', apply)
     }
-  }, [iso, variant])
+  }, [])
+
+  useEffect(() => {
+    if (variant === 'short') {
+      setLabel(formatPhaseStartShort(iso, mode))
+    } else {
+      setLabel(formatMintDate(iso, mode))
+    }
+  }, [iso, variant, mode])
 
   const text = label ?? (iso ? placeholder : variant === 'short' ? null : 'TBA')
   if (text == null) return null

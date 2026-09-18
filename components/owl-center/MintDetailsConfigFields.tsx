@@ -141,8 +141,8 @@ export function MintDetailsConfigFields({
             Lock NFTs until trading
             <span className="mt-1 block normal-case tracking-normal text-[#9BA8B4]">
               Minted NFTs cannot be transferred or listed until you later tap{' '}
-              <span className="text-[#E8EEF2]">Enable trading</span> on Manage collection. Checking this locks at
-              mint — it does not unlock. Requires Metaplex Core.
+              <span className="text-[#E8EEF2]">Enable trading</span> on Manage collection (after sell-out).
+              Checking this locks at mint — it does not unlock. Requires Metaplex Core.
             </span>
           </span>
         </label>
@@ -156,6 +156,10 @@ export function MintDetailsConfigFields({
               onChange={(e) => set('unfreeze_date', e.target.value)}
               className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8] disabled:opacity-50"
             />
+            <span className="font-mono text-[10px] normal-case tracking-normal text-[#5C6773]">
+              Target / reminder only — does not auto-unlock. Unlock is still Enable trading after the
+              collection sells out.
+            </span>
           </label>
         ) : null}
       </div>
@@ -223,10 +227,10 @@ export function MintDetailsConfigFields({
           />
         </label>
         <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
-          Each wallet can mint up to this many NFTs during PUBLIC. Allowlist phases set their own
-          per-wallet caps below (Show Advanced) — those caps stack on top of this public limit (WL 2
-          + public 5 = up to 7 total). Enforced on-chain via Candy Guard mintLimit — changing this
-          after deploy updates the on-chain cap when you save.
+          Max NFTs a wallet can mint during PUBLIC only — not how many NFTs it already holds. Allowlist
+          phases set their own caps below (Show Advanced); those stack (WL 2 + public 5 = up to 7
+          total). Enforced on-chain via Candy Guard mintLimit — changing this after deploy updates the
+          on-chain cap when you save.
         </p>
       </div>
 

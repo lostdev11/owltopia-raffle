@@ -124,6 +124,7 @@ export function CollectionLaunchOpsCard({
           embedded
           launch={launch}
           apiPath={coreThawApiPath}
+          requireSellOut={Boolean(coreThawApiPath?.includes('/owl-center/launches/'))}
           onChanged={onSaved}
         />
       ) : null}

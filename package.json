@@ -66,6 +66,7 @@
     "test:public-simple-wallet-mint-count": "npx --yes tsx scripts/test-public-simple-wallet-mint-count.ts",
     "test:mint-date-timezone": "npx --yes tsx scripts/test-mint-date-timezone.ts",
     "test:collection-mint-eligibility-copy": "npx --yes tsx scripts/test-collection-mint-eligibility-copy.ts",
+    "test:creator-core-thaw-gate": "npx --yes tsx scripts/test-creator-core-thaw-gate.ts",
     "test:effective-cm-remaining": "npx --yes tsx scripts/test-effective-cm-remaining.ts",
     "test:min-threshold-second-round": "npx --yes tsx scripts/test-min-threshold-second-round.ts",
     "test:milestone-cancel-return": "npx --yes tsx scripts/test-milestone-cancel-return.ts",

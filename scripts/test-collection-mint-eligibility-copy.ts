@@ -24,12 +24,13 @@ assert.match(allowlistEligibleReason('WL', 2), /up to 2 mints$/)
 assert.match(allowlistNotOnListReason('OG'), /Not on the OG list/)
 
 function publicWalletLimitReason(limit: number): string {
-  return `Wallet limit reached (${limit} per wallet for public)`
+  return `Wallet limit reached (${limit} from public this phase — not total NFTs in wallet)`
 }
-assert.match(publicWalletLimitReason(5), /per wallet for public/)
+assert.match(publicWalletLimitReason(5), /from public this phase/)
 
-// Timezone regression still covered by test-mint-date-timezone.ts — smoke formatMintDate here.
+// Default mint dates render in UTC; local mode still available via preference.
 process.env.TZ = 'America/New_York'
-assert.match(formatMintDate('2026-09-05T11:30:00.000Z'), /7:30/)
+assert.match(formatMintDate('2026-09-05T11:30:00.000Z', 'utc'), /11:30.*UTC/)
+assert.match(formatMintDate('2026-09-05T11:30:00.000Z', 'local'), /7:30/)
 
 console.log('test-collection-mint-eligibility-copy: ok')

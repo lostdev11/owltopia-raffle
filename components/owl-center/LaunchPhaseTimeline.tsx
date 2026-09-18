@@ -1,4 +1,7 @@
+'use client'
+
 import { cn } from '@/lib/utils'
+import { useMintTimeZoneMode } from '@/hooks/use-mint-time-zone'
 import { launchConfiguredTimelinePhases, resolveLaunchTimelineIndex } from '@/lib/owl-center/launch-phases'
 import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
 import { formatPhaseStartShort, getPhaseStartsAt, isPublicSimpleMintOpen } from '@/lib/owl-center/phase-schedule'
@@ -30,6 +33,7 @@ type Props = {
 }
 
 export function LaunchPhaseTimeline({ active, launch, userMintPhase = null, userReservedPhases = [] }: Props) {
+  const timeMode = useMintTimeZoneMode()
   const phases = launch ? launchConfiguredTimelinePhases(launch) : DEFAULT_ORDER
   const idx = resolveLaunchTimelineIndex(phases, active)
   const reservedSet = new Set(userReservedPhases)
@@ -51,7 +55,7 @@ export function LaunchPhaseTimeline({ active, launch, userMintPhase = null, user
           const isUserMint = userMintPhase === p
           const isUserReserved = reservedSet.has(p) && !current && !isUserMint
           const startsAt = launch ? getPhaseStartsAt(launch, p) : null
-          const startLabel = formatPhaseStartShort(startsAt)
+          const startLabel = formatPhaseStartShort(startsAt, timeMode)
           const upcoming = !done && !current && (scheduledFuture || (publicSimple && p === 'PUBLIC' && !publicSimpleOpen))
 
           return (

@@ -304,27 +304,47 @@ export function getMintCountdownInfo(
   return null
 }
 
-export function formatMintDate(iso: string | null | undefined): string {
+import {
+  mintTimeZoneOptions,
+  parseMintTimeZoneMode,
+  type MintTimeZoneMode,
+} from '@/lib/owl-center/mint-time-preference'
+
+export function formatMintDate(
+  iso: string | null | undefined,
+  mode: MintTimeZoneMode = 'utc'
+): string {
   if (!iso) return 'TBA'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return 'TBA'
-  // Uses the runtime timezone (browser local in Client Components; UTC on Vercel SSR).
-  // Prefer `<LocalMintTime>` in Server Components so hub cards match the mint console.
-  return d.toLocaleString(undefined, {
+  const resolved = parseMintTimeZoneMode(mode)
+  const label = d.toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    ...mintTimeZoneOptions(resolved),
   })
+  return resolved === 'utc' ? `${label} UTC` : label
 }
 
-export function formatPhaseStartShort(iso: string | null | undefined): string | null {
+export function formatPhaseStartShort(
+  iso: string | null | undefined,
+  mode: MintTimeZoneMode = 'utc'
+): string | null {
   if (!iso) return null
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return null
-  // Same TZ caveat as formatMintDate — use LocalMintTime for SSR UI.
-  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  const resolved = parseMintTimeZoneMode(mode)
+  const label = d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    ...mintTimeZoneOptions(resolved),
+  })
+  return resolved === 'utc' ? `${label} UTC` : label
 }
 
 const DATETIME_LOCAL_RE =
