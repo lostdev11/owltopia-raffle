@@ -3,10 +3,13 @@ import { listGenOwlRevSharePeriods, getGenOwlRevSharePeriod } from '@/lib/db/gen
 import { areGenOwlRevShareClaimsEnabled } from '@/lib/db/rev-share-schedule'
 import { listStakingPositionsByWallet } from '@/lib/db/staking-positions'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
-import { classifyGen1OneOfOneMints } from '@/lib/nesting/gen1-one-of-one'
-import { classifyGen2OneOfOneMints } from '@/lib/nesting/gen2-one-of-one'
 import { isPositionEligibleForRevSharePeriod } from '@/lib/nesting/gen-owl-rev-share-eligibility'
 import { ensureGenOwlRevSharePeriodFinalized } from '@/lib/nesting/gen-owl-rev-share-finalize'
+import {
+  loadRevShareSnapshotBuckets,
+  resolveRevShareClaimAmounts,
+  countPaidOneOfOneClaimsForGroup,
+} from '@/lib/nesting/gen-owl-rev-share-claim-bucket'
 import {
   claimsOpenForPeriod,
   formatPeriodMonthLabel,
@@ -14,7 +17,6 @@ import {
   groupKeyForPoolSlug,
   parsePeriodMonth,
 } from '@/lib/nesting/gen-owl-rev-share-month'
-import { resolveGen1PerNestAmounts, resolveGen2PerNestAmounts } from '@/lib/nesting/gen-owl-rev-share'
 import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
 import type { GenOwlRevSharePeriodRow } from '@/lib/db/gen-owl-rev-share-periods'
 
@@ -30,18 +32,6 @@ export type GenOwlRevShareClaimableRow = {
   already_claimed: boolean
   sol_transaction_signature?: string | null
   usdc_transaction_signature?: string | null
-}
-
-function perNestForGroup(
-  period: GenOwlRevSharePeriodRow | null,
-  group: GenOwlStakingGroupKey,
-  bucket: 'standard' | 'one-of-one'
-): { sol: number; usdc: number } {
-  if (!period) return { sol: 0, usdc: 0 }
-  if (group === 'gen1-owl') {
-    return resolveGen1PerNestAmounts(period, bucket)
-  }
-  return resolveGen2PerNestAmounts(period, bucket)
 }
 
 function periodHasDepositTotals(period: GenOwlRevSharePeriodRow): boolean {
@@ -100,15 +90,8 @@ export async function listGenOwlRevShareClaimableForWallet(
 
   if (openMonths.length === 0) return []
 
-  const mints = positions
-    .map((p) => p.asset_identifier?.trim())
-    .filter((m): m is string => Boolean(m))
-  const [gen1Classification, gen2Classification] = await Promise.all([
-    classifyGen1OneOfOneMints(mints),
-    classifyGen2OneOfOneMints(mints),
-  ])
-
   const rows: GenOwlRevShareClaimableRow[] = []
+  const poolCache = new Map<string, Awaited<ReturnType<typeof getStakingPoolById>>>()
 
   for (const period of openMonths) {
     const finalized = period.finalized_at
@@ -116,19 +99,37 @@ export async function listGenOwlRevShareClaimableForWallet(
       : await ensureGenOwlRevSharePeriodFinalized(period.period_month)
     if (!finalized?.finalized_at) continue
 
+    const snapshotBuckets = await loadRevShareSnapshotBuckets(finalized.period_month)
+    const useSnapshot = snapshotBuckets.size > 0
+    const paidOooByGroup = new Map<GenOwlStakingGroupKey, number>()
+    if (!useSnapshot) {
+      const [gen1Paid, gen2Paid] = await Promise.all([
+        countPaidOneOfOneClaimsForGroup({ period: finalized, group: 'gen1-owl' }),
+        countPaidOneOfOneClaimsForGroup({ period: finalized, group: 'gen2-owl' }),
+      ])
+      paidOooByGroup.set('gen1-owl', gen1Paid)
+      paidOooByGroup.set('gen2-owl', gen2Paid)
+    }
+
     for (const position of positions) {
       if (!isPositionEligibleForRevSharePeriod(position, period.period_month)) continue
-      const pool = await getStakingPoolById(position.pool_id)
+      let pool = poolCache.get(position.pool_id)
+      if (pool === undefined) {
+        pool = await getStakingPoolById(position.pool_id)
+        poolCache.set(position.pool_id, pool)
+      }
       const group = groupKeyForPoolSlug(pool?.slug)
       if (!group) continue
 
-      const mint = position.asset_identifier?.trim() ?? null
-      const classification = group === 'gen1-owl' ? gen1Classification : gen2Classification
-      const bucket: 'standard' | 'one-of-one' =
-        mint && classification.get(mint) === 'one-of-one' ? 'one-of-one' : 'standard'
-
-      const amounts = perNestForGroup(finalized, group, bucket)
-      if (amounts.sol <= 0 && amounts.usdc <= 0) continue
+      const amounts = await resolveRevShareClaimAmounts({
+        period: finalized,
+        group,
+        positionId: position.id,
+        mint: position.asset_identifier,
+        snapshotBuckets: useSnapshot ? snapshotBuckets : undefined,
+        paidOneOfOneCount: useSnapshot ? undefined : paidOooByGroup.get(group),
+      })
+      if (!amounts || (amounts.sol <= 0 && amounts.usdc <= 0)) continue
 
       const claimed = await getGenOwlRevShareClaimForPosition(period.period_month, position.id)
 
