@@ -87,3 +87,73 @@ export function finalizeMintSessionOptimistic(args: OptimisticMintFinalizeArgs):
     }
   })()
 }
+
+export type RecoveredMintConfirmSuccess = {
+  kind: 'success'
+  count: number
+  lastSig: string | null
+  mintAddresses: string[]
+}
+
+export type RecoveredMintConfirmError = {
+  kind: 'error'
+  message: string
+  hardFailure: boolean
+}
+
+export type RecoveredMintConfirmResult = RecoveredMintConfirmSuccess | RecoveredMintConfirmError
+
+/**
+ * Bound confirm for mint recovery. Always resolves to success or error — never leave the UI on
+ * `recording_mint` when confirm throws or times out (CollectionMintPanel historically hung here).
+ */
+export async function runRecoveredMintConfirm(args: {
+  sigs: string[]
+  mintPks: string[]
+  confirmBatch: (payload: MintConfirmBatchPayload) => Promise<void>
+  onProgress?: (confirmedCount: number, totalSteps: number) => void
+}): Promise<RecoveredMintConfirmResult> {
+  const { sigs, mintPks, confirmBatch, onProgress } = args
+  if (sigs.length === 0) {
+    return {
+      kind: 'error',
+      message:
+        'Couldn’t confirm a mint — check Collectibles in your wallet, then tap Mint to try again if it isn’t there.',
+      hardFailure: false,
+    }
+  }
+
+  try {
+    const recordDeadline = createMintSessionDeadline(mintConfirmBackgroundBudgetMs(sigs.length))
+    const recorded = await raceMintSessionBudget(
+      recordDeadline,
+      recordMintSessionConfirms(sigs, mintPks, confirmBatch, onProgress),
+      'Saving mint timed out'
+    )
+    const count = recorded.confirmedCount || mintPks.length || 1
+    return {
+      kind: 'success',
+      count,
+      lastSig: recorded.lastSig ?? sigs[sigs.length - 1] ?? null,
+      mintAddresses: mintPks.length ? mintPks : [],
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (isHardMintConfirmFailure(msg) || mintPks.length === 0) {
+      return {
+        kind: 'error',
+        message: isHardMintConfirmFailure(msg)
+          ? 'That didn’t go through — no NFT was minted (you were only charged the network + platform fee, not the mint price). Your allocation is intact; tap Mint to try again.'
+          : 'Couldn’t confirm a mint — check Collectibles in your wallet, then tap Mint to try again if it isn’t there.',
+        hardFailure: isHardMintConfirmFailure(msg),
+      }
+    }
+    // Soft failure but NFTs were detected on-chain — treat as success; reconcile can finish DB.
+    return {
+      kind: 'success',
+      count: mintPks.length || 1,
+      lastSig: sigs[sigs.length - 1] ?? null,
+      mintAddresses: mintPks,
+    }
+  }
+}
