@@ -688,8 +688,8 @@ export function Gen2MintPanel({
             <p className="text-sm text-[#9BA8B4]">
               GEN1 phase: mint up to{' '}
               <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> — one free Gen2 per Gen1 in the
-              airdrop snapshot ({elig.gen1_snapshot.gen1_nft_count} reserved). Approve once in your wallet to mint your
-              selected quantity.
+              airdrop snapshot ({elig.gen1_snapshot.gen1_nft_count} reserved). One wallet approval mints your
+              selected quantity (your wallet may list each NFT).
             </p>
           ) : null}
 
@@ -733,7 +733,8 @@ export function Gen2MintPanel({
             <p className="text-sm text-[#9BA8B4]">
               Presale redemption (free — already paid): mint up to{' '}
               <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> at once from your presale credits (
-              {elig.presale_balance.purchased_available_mints} left). One wallet approval mints your selected quantity.
+              {elig.presale_balance.purchased_available_mints} left). One wallet approval mints your selected quantity
+              (your wallet may list each NFT).
             </p>
           ) : null}
 
@@ -742,7 +743,8 @@ export function Gen2MintPanel({
               WL phase: mint up to{' '}
               <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> at once from your{' '}
               {elig.wl_allocation.available_mints} assigned WL spot
-              {elig.wl_allocation.available_mints === 1 ? '' : 's'}. One wallet approval mints your selected quantity.
+              {elig.wl_allocation.available_mints === 1 ? '' : 's'}. One wallet approval mints your selected quantity
+              (your wallet may list each NFT).
             </p>
           ) : null}
 
@@ -830,8 +832,8 @@ export function Gen2MintPanel({
           ) : null}
 
           <p className="text-xs text-[#5C6773]">
-            Phantom / Solflare: approve once to mint your selected quantity. Mint price is shown in
-            USD — your wallet also needs SOL for fees (≈$1 platform fee + network + NFT rent).
+            Phantom / Solflare: one approval mints your selected quantity (wallet may list each NFT). Mint price is shown
+            in USD — your wallet also needs SOL for fees (≈$1 platform fee + network + NFT rent).
           </p>
         </div>
     </MintPanelShell>

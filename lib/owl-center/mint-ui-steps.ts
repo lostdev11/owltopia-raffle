@@ -67,7 +67,7 @@ export function mintProgressSubtext(
 
   if (progress?.phase === 'chain') {
     if (progress.total > 1) {
-      return 'Approve once in Phantom or Solflare — all your NFTs mint together.'
+      return `One wallet approval for all ${progress.total} NFTs — your wallet may list each as its own transaction.`
     }
     return 'Approve once in Phantom or Solflare.'
   }
