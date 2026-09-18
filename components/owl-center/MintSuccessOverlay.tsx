@@ -19,6 +19,8 @@ export type MintSuccessOverlayProps = {
   preferMainnet?: boolean
   transactionSignature: string
   explorerUrl: string
+  /** Shown when fewer NFTs landed than the user requested (partial batch). */
+  notice?: string | null
   onClose: () => void
 }
 
@@ -206,6 +208,7 @@ export function MintSuccessOverlay({
   preferMainnet = false,
   transactionSignature,
   explorerUrl,
+  notice,
   onClose,
 }: MintSuccessOverlayProps) {
   const mints = useMemo(() => {
@@ -390,6 +393,12 @@ export function MintSuccessOverlay({
         >
           {heading}
         </h2>
+
+        {notice?.trim() ? (
+          <p className="rounded border border-[#FFD769]/35 bg-[#FFD769]/10 px-3 py-2 text-sm leading-relaxed text-[#FFD769]">
+            {notice.trim()}
+          </p>
+        ) : null}
 
         {revealComplete ? (
           <>

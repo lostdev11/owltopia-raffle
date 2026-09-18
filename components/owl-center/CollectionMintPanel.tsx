@@ -92,6 +92,7 @@ export function CollectionMintPanel({
   const [mintedAddresses, setMintedAddresses] = useState<string[]>([])
   const [mintedCount, setMintedCount] = useState(0)
   const [mintProgress, setMintProgress] = useState<MintProgressSnapshot | null>(null)
+  const [mintSuccessNotice, setMintSuccessNotice] = useState<string | null>(null)
   const [recoveringMint, setRecoveringMint] = useState(false)
   const lastPlannedMintB58sRef = useRef<string[]>([])
 
@@ -139,6 +140,7 @@ export function CollectionMintPanel({
     setMintedAddresses([])
     setMintedCount(0)
     setMintProgress(null)
+    setMintSuccessNotice(null)
   }, [])
 
   const finalizeRecoveredMint = useCallback(
@@ -235,6 +237,7 @@ export function CollectionMintPanel({
     setMintedAddresses([])
     setMintedCount(0)
     setMintProgress(null)
+    setMintSuccessNotice(null)
     if (!connected || !walletStr || !adapter) {
       setErr('Connect your wallet (Phantom / Solflare on mobile)')
       setStep('error')
@@ -340,10 +343,11 @@ export function CollectionMintPanel({
             network: mintNetwork,
           })
         },
-        onSuccess: ({ lastSig, mintedAddresses, mintedCount }) => {
+        onSuccess: ({ lastSig, mintedAddresses, mintedCount, warning }) => {
           setLastSig(lastSig)
           setMintedAddresses(mintedAddresses)
           setMintedCount(mintedCount)
+          setMintSuccessNotice(warning)
           setMintProgress(null)
           setStep('success')
           // Debit locally so Mint disables immediately — prevents a second tap that only pays
@@ -472,6 +476,7 @@ export function CollectionMintPanel({
         preferMainnet={mintNetwork === 'mainnet'}
         transactionSignature={lastSig ?? ''}
         explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}
+        notice={mintSuccessNotice}
         onClose={dismissSuccess}
       />
       <CommandCard label={`MINT // ${phaseName.toLowerCase()} · ${mintNetwork}`}>
