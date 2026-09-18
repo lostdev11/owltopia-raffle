@@ -124,6 +124,22 @@ export function scheduleInstantsEqual(a: string | null | undefined, b: string | 
 }
 
 /**
+ * Prefer the DB-stored ISO when the requested value is the same instant.
+ * Stops datetime-local round-trips (minute precision / reformatting) from rewriting
+ * schedule columns on limit-only mint-config saves.
+ */
+export function preferStoredScheduleIso(
+  requested: string | null | undefined,
+  stored: string | null | undefined
+): string | null {
+  const storedTrim = stored?.trim() || null
+  const requestedTrim = requested?.trim() || null
+  if (storedTrim && scheduleInstantsEqual(requestedTrim, storedTrim)) return storedTrim
+  if (!requestedTrim) return null
+  return datetimeLocalToIso(requestedTrim) ?? requestedTrim
+}
+
+/**
  * PUBLIC start to persist with a mint-details save.
  *
  * Straight public mint: Mint opens is the live date.
@@ -160,17 +176,41 @@ export function resolveAllowlistPhasesForSave(opts: {
   kickoff: string | null
   previousKickoff?: string | null
   previousPublic?: string | null
+  /** Prior persisted phases — used to keep starts_at byte-stable when instants match. */
+  previousPhases?: PartnerAllowlistPhase[] | null
 }): PartnerAllowlistPhase[] {
-  const { phases, kickoff, previousKickoff, previousPublic } = opts
-  return phases.map((phase) => {
+  const { phases, kickoff, previousKickoff, previousPublic, previousPhases } = opts
+  const kickoffMoved =
+    Boolean(kickoff?.trim()) &&
+    previousKickoff != null &&
+    !scheduleInstantsEqual(kickoff, previousKickoff)
+  const previousPublicWasSyncedToKickoff =
+    previousKickoff != null &&
+    previousPublic != null &&
+    scheduleInstantsEqual(previousPublic, previousKickoff)
+
+  return phases.map((phase, idx) => {
     let starts_at = phase.starts_at
     if (starts_at && kickoff) {
-      if (previousKickoff && scheduleInstantsEqual(starts_at, previousKickoff)) {
-        starts_at = kickoff
-      } else if (previousPublic && scheduleInstantsEqual(starts_at, previousPublic)) {
-        starts_at = kickoff
+      // Only drag phase starts when Mint opens actually moved — never on limit-only saves.
+      if (kickoffMoved) {
+        if (previousKickoff && scheduleInstantsEqual(starts_at, previousKickoff)) {
+          starts_at = kickoff
+        } else if (
+          previousPublicWasSyncedToKickoff &&
+          previousPublic &&
+          scheduleInstantsEqual(starts_at, previousPublic)
+        ) {
+          starts_at = kickoff
+        }
       }
-      starts_at = resolveEffectiveAllowlistStartsAt(starts_at, { launch_deadline_at: kickoff, phase_schedule: {} })
+      const effective = resolveEffectiveAllowlistStartsAt(starts_at, {
+        launch_deadline_at: kickoff,
+        phase_schedule: {},
+      })
+      const prevStored =
+        previousPhases?.find((p) => p.key === phase.key)?.starts_at ?? previousPhases?.[idx]?.starts_at ?? null
+      starts_at = preferStoredScheduleIso(effective, prevStored) ?? effective
     }
     return starts_at === phase.starts_at ? phase : { ...phase, starts_at }
   })

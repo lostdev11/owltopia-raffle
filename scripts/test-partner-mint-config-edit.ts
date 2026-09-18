@@ -659,5 +659,64 @@ assert.equal(staleWlPatch.launch_deadline_at, sepIso, 'moving first phase start 
 assert.equal(staleWlPatch.partner_allowlist_phases?.[0]?.starts_at, sepIso, 'first phase start persists')
 assert.equal(staleWlPatch.phase_schedule?.PUBLIC, sepIso)
 
+// Limit-only save must not rewrite schedule ISO strings (datetime-local round-trip / kickoff sync).
+const limitOnlyKickoff = '2026-09-18T16:00:00.000Z'
+const limitOnlyPublic = '2026-09-18T21:00:00.000Z'
+const limitOnlyWl = '2026-09-18T16:00:00.000Z'
+const limitOnlyLaunch = baseLaunch({
+  launch_deadline_at: limitOnlyKickoff,
+  phase_schedule: {
+    PUBLIC: limitOnlyPublic,
+    WHITELIST: limitOnlyWl,
+    AIRDROP: limitOnlyKickoff,
+  },
+  creator_wl_enabled: true,
+  wl_supply: 1010,
+  wallet_mint_limit: 5,
+  partner_allowlist_phases: [
+    {
+      key: 'wl',
+      label: 'Whitelist',
+      starts_at: limitOnlyWl,
+      supply: 1010,
+      price_usdc: 0,
+      wallet_mint_limit: 2,
+    },
+  ],
+})
+const limitOnlyForm = mintDetailsFormFromLaunch(limitOnlyLaunch)
+limitOnlyForm.wallet_mint_limit = '7'
+const limitOnlyPatch = buildMintDetailsPatchFromBody(
+  mintDetailsPayloadFromForm(limitOnlyForm),
+  limitOnlyLaunch
+)
+assert.ok(!('error' in limitOnlyPatch))
+assert.equal(limitOnlyPatch.wallet_mint_limit, 7, 'public wallet limit updates')
+assert.equal(
+  limitOnlyPatch.launch_deadline_at,
+  limitOnlyKickoff,
+  'limit-only save keeps kickoff ISO byte-identical'
+)
+assert.equal(
+  limitOnlyPatch.phase_schedule?.PUBLIC,
+  limitOnlyPublic,
+  'limit-only save keeps PUBLIC start ISO byte-identical'
+)
+assert.equal(
+  limitOnlyPatch.phase_schedule?.WHITELIST,
+  limitOnlyWl,
+  'limit-only save keeps WHITELIST start ISO byte-identical'
+)
+assert.equal(
+  limitOnlyPatch.partner_allowlist_phases?.[0]?.starts_at,
+  limitOnlyWl,
+  'limit-only save keeps allowlist phase starts_at byte-identical'
+)
+assert.equal(
+  limitOnlyPatch.partner_allowlist_phases?.[0]?.wallet_mint_limit,
+  2,
+  'allowlist phase wallet limit unchanged when only public limit edited'
+)
+
 console.log('ok: partner mint-config date save round-trip')
 
