@@ -76,12 +76,13 @@ export function unsettledRaffleSettlementLiability(row: {
   creator_claimed_at?: string | null
   platform_fee_settled_at?: string | null
 }): { creator: number; platformFee: number; total: number } {
-  const creator = timestampSet(row.creator_claimed_at)
-    ? 0
-    : Number(row.creator_payout_amount) || 0
-  const platformFee = timestampSet(row.platform_fee_settled_at)
-    ? 0
-    : Number(row.platform_fee_amount) || 0
+  const creatorClaimed = timestampSet(row.creator_claimed_at)
+  const creator = creatorClaimed ? 0 : Number(row.creator_payout_amount) || 0
+  // claim-proceeds pays creator + platform fee in one tx; platform-finance treats creator_claimed_at as fee collected.
+  const platformFee =
+    timestampSet(row.platform_fee_settled_at) || creatorClaimed
+      ? 0
+      : Number(row.platform_fee_amount) || 0
   return { creator, platformFee, total: creator + platformFee }
 }
 
