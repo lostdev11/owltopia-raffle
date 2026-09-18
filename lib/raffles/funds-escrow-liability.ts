@@ -62,6 +62,64 @@ export function emptyFundsEscrowCurrencyBucket(): FundsEscrowCurrencyBucket {
   return { sol: 0, usdc: 0, owl: 0, bamboo: 0, goats: 0 }
 }
 
+function timestampSet(value: string | null | undefined): boolean {
+  return Boolean(String(value ?? '').trim())
+}
+
+/**
+ * Remaining creator + platform fee still owed from funds escrow for one settled raffle.
+ * `successful_pending_claims` often persists after the creator claims proceeds (NFT/winner claims still open).
+ */
+export function unsettledRaffleSettlementLiability(row: {
+  creator_payout_amount?: number | string | null
+  platform_fee_amount?: number | string | null
+  creator_claimed_at?: string | null
+  platform_fee_settled_at?: string | null
+}): { creator: number; platformFee: number; total: number } {
+  const creator = timestampSet(row.creator_claimed_at)
+    ? 0
+    : Number(row.creator_payout_amount) || 0
+  const platformFee = timestampSet(row.platform_fee_settled_at)
+    ? 0
+    : Number(row.platform_fee_amount) || 0
+  return { creator, platformFee, total: creator + platformFee }
+}
+
+/** Same partial settlement rules for auction proceeds in funds escrow. */
+export function unsettledAuctionSettlementLiability(row: {
+  creator_payout_amount?: number | string | null
+  platform_fee_amount?: number | string | null
+  creator_claimed_at?: string | null
+  platform_fee_settled_at?: string | null
+}): { creator: number; platformFee: number; total: number } {
+  return unsettledRaffleSettlementLiability(row)
+}
+
+/** Buyout bid deposit still held in a payout/refund wallet (not yet paid out or refunded). */
+export function buyoutOfferDepositStillHeld(params: {
+  status: string | null | undefined
+  payout_tx_signature?: string | null
+}): boolean {
+  const status = String(params.status || '')
+  const payoutDone = Boolean(String(params.payout_tx_signature ?? '').trim())
+  return (
+    status === 'active' ||
+    (status === 'accepted' && !payoutDone) ||
+    status === 'expired' ||
+    status === 'superseded'
+  )
+}
+
+/** Prefunded crypto milestone still binding funds-escrow balance. */
+export function milestoneCryptoBindsFundsEscrow(params: {
+  status: string | null | undefined
+  prize_type: string | null | undefined
+}): boolean {
+  if (String(params.prize_type || '') !== 'crypto') return false
+  const status = String(params.status || '')
+  return status !== 'claimed' && status !== 'returned' && status !== 'void'
+}
+
 export function addToFundsEscrowBucket(
   bucket: FundsEscrowCurrencyBucket,
   currency: string | null | undefined,
