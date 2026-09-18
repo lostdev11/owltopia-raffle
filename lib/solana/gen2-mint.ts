@@ -785,9 +785,12 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
           }
         }
 
+        // Send mint txs one at a time so on-chain mintLimit counters update between lands.
+        // Parallel sends often bot-tax the 2nd+ tx while still charging platform fee.
         const sendResults: Array<{ sig: string | null; confirmed: boolean }> = []
-        const all = await Promise.all(fullySigned.map((tx) => sendOneMint(tx)))
-        all.forEach((r) => sendResults.push(r))
+        for (const tx of fullySigned) {
+          sendResults.push(await sendOneMint(tx))
+        }
 
         const confirmedSigs: string[] = []
         const confirmedMints: string[] = []
@@ -971,11 +974,10 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       }
     }
 
-    const sendResults: Array<{ sig: string | null; confirmed: boolean }> = new Array(effectiveQuantity)
-    const all = await Promise.all(signedTransactions.map((tx) => sendOneMint(tx)))
-    all.forEach((r, i) => {
-      sendResults[i] = r
-    })
+    const sendResults: Array<{ sig: string | null; confirmed: boolean }> = []
+    for (const tx of signedTransactions) {
+      sendResults.push(await sendOneMint(tx))
+    }
 
     const confirmedSigs: string[] = []
     const confirmedMints: string[] = []

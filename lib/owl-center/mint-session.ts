@@ -24,15 +24,21 @@ export function resolveMintSessionOutcome(
   const lastSig = sigs.length ? sigs[sigs.length - 1]! : null
   const lastMintAddress = mints.length ? mints[mints.length - 1]! : null
   const mintedCount = mints.length || sigs.length
+  const requested =
+    _requestedQuantity != null && Number.isFinite(_requestedQuantity)
+      ? Math.max(1, Math.floor(_requestedQuantity))
+      : null
+  const warning =
+    requested != null && mintedCount > 0 && mintedCount < requested
+      ? `Minted ${mintedCount} of ${requested} — you were only charged for the NFTs that landed. Tap Mint again for the rest if you still have allocation.`
+      : null
 
-  // Consumers just want it to work — we celebrate whatever minted and let them tap Mint again
-  // for any remainder. No alarming "wallet reported an error / X left" copy on the success screen.
   return {
     mintedCount,
     lastSig,
     lastMintAddress,
     mintedAddresses: mints,
-    warning: null,
+    warning,
   }
 }
 

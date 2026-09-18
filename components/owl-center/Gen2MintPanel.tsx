@@ -144,6 +144,7 @@ export function Gen2MintPanel({
   const [mintedAddresses, setMintedAddresses] = useState<string[]>([])
   const [mintedCount, setMintedCount] = useState(0)
   const [mintProgress, setMintProgress] = useState<MintProgressSnapshot | null>(null)
+  const [mintSuccessNotice, setMintSuccessNotice] = useState<string | null>(null)
   const [recoveringMint, setRecoveringMint] = useState(false)
   // Mint pubkeys planned for the last attempt + the phase it ran in — used to recover a mint that
   // landed on-chain after a mobile wallet (Phantom/Solflare) disconnected before the site finished.
@@ -161,6 +162,7 @@ export function Gen2MintPanel({
     setMintedAddresses([])
     setMintedCount(0)
     setMintProgress(null)
+    setMintSuccessNotice(null)
   }, [])
 
   const cmConfigured = Boolean(getGen2CandyMachineId(launch)?.trim() && getGen2CollectionMint(launch)?.trim())
@@ -347,6 +349,7 @@ export function Gen2MintPanel({
     setMintedAddresses([])
     setMintedCount(0)
     setMintProgress(null)
+    setMintSuccessNotice(null)
     if (!connected || !walletStr || !adapter) {
       setErr('Wallet not connected')
       setStep('error')
@@ -445,10 +448,11 @@ export function Gen2MintPanel({
             throw new Error(cj.error || 'Confirm route failed')
           }
         },
-        onSuccess: ({ lastSig, mintedAddresses, mintedCount }) => {
+        onSuccess: ({ lastSig, mintedAddresses, mintedCount, warning }) => {
           setLastSig(lastSig)
           setMintedAddresses(mintedAddresses)
           setMintedCount(mintedCount)
+          setMintSuccessNotice(warning)
           setMintProgress(null)
           setStep('success')
           // Debit the allocation locally so the Mint button disables immediately — prevents a
@@ -584,6 +588,7 @@ export function Gen2MintPanel({
         preferMainnet={mintNetwork === 'mainnet'}
         transactionSignature={lastSig ?? ''}
         explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}
+        notice={mintSuccessNotice}
         onClose={dismissSuccess}
       />
       <MintPanelShell embedded={embedded} label="mint_console">
