@@ -29,6 +29,7 @@ import {
   redirectToSolflareBrowser,
   redirectToBackpackBrowser,
 } from '@/lib/utils'
+import { usePathname } from 'next/navigation'
 import { ConnectedWalletBalances } from '@/components/ConnectedWalletBalances'
 import { replaceClientUrl } from '@/lib/client/replace-url'
 
@@ -72,6 +73,7 @@ function guardedMobileRedirect(nextUrl: string): boolean {
 export function WalletConnectButton() {
   const { publicKey, connected, disconnect, wallet, connecting, select, connect, wallets } = useWallet()
   const { setVisible } = useWalletModal()
+  const pathname = usePathname()
   const [mounted, setMounted] = useState(false)
   const [showPhantomRedirectDialog, setShowPhantomRedirectDialog] = useState(false)
   const [showMobileInAppDialog, setShowMobileInAppDialog] = useState(false)
@@ -408,6 +410,10 @@ export function WalletConnectButton() {
     let cleanUrlTimeout: number | null = null
     let visibilityCheckTimeout: number | null = null
 
+    // Prefer App Router pathname — Header stays mounted across navigations, so a
+    // delayed cleanup must not rewrite the bar using a drifted window.location.
+    const cleanPath = () => pathname || window.location.pathname
+
     // Check URL for deep link callback parameters and clean them up
     const checkUrlParams = () => {
       const urlParams = new URLSearchParams(window.location.search)
@@ -493,7 +499,7 @@ export function WalletConnectButton() {
           if (cleanUrlTimeout != null) window.clearTimeout(cleanUrlTimeout)
           cleanUrlTimeout = window.setTimeout(() => {
             cleanUrlTimeout = null
-            replaceClientUrl(window.location.pathname)
+            replaceClientUrl(cleanPath())
           }, cleanDelay)
         }
       }
@@ -520,7 +526,7 @@ export function WalletConnectButton() {
       if (cleanUrlTimeout != null) window.clearTimeout(cleanUrlTimeout)
       if (visibilityCheckTimeout != null) window.clearTimeout(visibilityCheckTimeout)
     }
-  }, [mounted, connecting])
+  }, [mounted, connecting, pathname])
 
   // When Solflare connection completes, clean callback params from URL (we skipped cleaning earlier so the SDK could read them)
   useEffect(() => {
@@ -529,10 +535,9 @@ export function WalletConnectButton() {
     const hashParams = new URLSearchParams(window.location.hash.substring(1))
     const hasSolflareCallback = urlParams.has('data') || urlParams.has('nonce') || hashParams.has('data') || hashParams.has('nonce')
     if (hasSolflareCallback) {
-      replaceClientUrl(window.location.pathname)
+      replaceClientUrl(pathname || window.location.pathname)
     }
-  }, [mounted, connected])
-
+  }, [mounted, connected, pathname])
   // Store redirect URL + recover blank pages when returning from wallet apps (iOS + Android).
   useEffect(() => {
     if (!mounted || !isMobileDevice()) return

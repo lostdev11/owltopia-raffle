@@ -1,19 +1,23 @@
 'use client'
 
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { buildPathHashUrl } from '@/lib/client/browser-url-sync'
 import { replaceClientUrl } from '@/lib/client/replace-url'
 import { nestingClaimReadyButtonClass } from '@/lib/nesting/ui-classes'
 import { cn } from '@/lib/utils'
 
-function scrollToPerches() {
-  const el = document.getElementById('perches')
-  if (!el) return
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  replaceClientUrl('#perches')
-}
-
 export function NestingHero() {
+  const pathname = usePathname() ?? '/nesting'
+
+  const scrollToPerches = () => {
+    const el = document.getElementById('perches')
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    replaceClientUrl(buildPathHashUrl(pathname, 'perches'))
+  }
+
   return (
     <section className="relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-muted/50 via-background to-background px-4 py-10 sm:px-10 sm:py-14">
       <div
