@@ -57,7 +57,7 @@ export function useCollectionMintEligibility(slug: string, wallet: string | null
         reason:
           nextMax > 0
             ? prev.reason
-            : `Wallet limit reached (${prev.wallet_mint_limit} per wallet for this phase)`,
+            : `Wallet limit reached (${prev.wallet_mint_limit} from this phase — not total NFTs in wallet)`,
       }
     })
   }, [])

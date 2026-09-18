@@ -274,7 +274,7 @@ export async function buildSimpleMintEligibility(
       ? `${activeAllowlistPhase.label} is live — connect wallet to check if you’re on the list`
       : 'Connect wallet to mint'
   } else if (!allowlistOpen && walletRemainingPublic <= 0) {
-    reason = `Wallet limit reached (${effectiveWalletLimit} per wallet for public)`
+    reason = `Wallet limit reached (${effectiveWalletLimit} from public this phase — not total NFTs in wallet)`
   } else {
     max_mintable = Math.min(allowlistOpen ? effectiveWalletLimit : walletRemainingPublic, remaining)
 
@@ -321,7 +321,7 @@ export async function buildSimpleMintEligibility(
                 max_mintable > 0
                   ? `Eligible for ${activePhase?.label ?? 'Free Mint Token'} · up to ${max_mintable} mint${max_mintable === 1 ? '' : 's'}`
                   : phaseWalletRemaining <= 0
-                    ? `Wallet limit reached (${effectiveWalletLimit} per wallet for ${activePhase?.label ?? 'this phase'})`
+                    ? `Wallet limit reached (${effectiveWalletLimit} from ${activePhase?.label ?? 'this phase'} — not total NFTs in wallet)`
                     : `${activePhase?.label ?? 'Free Mint Token'} phase is sold out`
             }
           } catch {
@@ -346,7 +346,7 @@ export async function buildSimpleMintEligibility(
             allowlist_spots_remaining = Math.min(wlRemaining, phaseWalletRemaining, phaseRemaining)
             if (phaseWalletRemaining <= 0) {
               max_mintable = 0
-              reason = `Wallet limit reached (${effectiveWalletLimit} per wallet for ${activePhase?.label ?? 'this phase'})`
+              reason = `Wallet limit reached (${effectiveWalletLimit} from ${activePhase?.label ?? 'this phase'} — not total NFTs in wallet)`
             } else if (wlRemaining <= 0) {
               max_mintable = 0
               reason = `${activePhase?.label ?? 'Whitelist'} mint allocation exhausted`

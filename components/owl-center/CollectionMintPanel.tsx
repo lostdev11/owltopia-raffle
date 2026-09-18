@@ -435,7 +435,7 @@ export function CollectionMintPanel({
     cmConfigured,
   })
 
-  /** Prefer browser-local formatting when the API only sent a UTC-formatted reason string. */
+  /** Prefer preference-aware formatting when the API only sent a UTC-formatted reason string. */
   const scheduleWaitMessage = useMemo(() => {
     if (elig?.phase_starts_at) {
       return `Public mint opens ${formatMintDate(elig.phase_starts_at)}`
@@ -482,9 +482,9 @@ export function CollectionMintPanel({
           {' · '}
           {platformFeeLabel}
           {' · '}
-          limit {elig?.wallet_mint_limit ?? launch.wallet_mint_limit}/wallet this phase
-          {elig && connected ? ` · you: ${elig.wallet_minted}/${elig.wallet_mint_limit}` : ''} · {remaining}{' '}
-          remaining
+          limit {elig?.wallet_mint_limit ?? launch.wallet_mint_limit} from this phase
+          {elig && connected ? ` · you: ${elig.wallet_minted}/${elig.wallet_mint_limit} this phase` : ''} ·{' '}
+          {remaining} remaining
         </p>
         {launch.mint_standard === 'core' &&
         launch.freeze_enabled &&

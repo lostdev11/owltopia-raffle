@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
+import { MintTimeZoneToggle } from '@/components/owl-center/MintTimeZoneToggle'
+import { useMintTimeZoneMode } from '@/hooks/use-mint-time-zone'
 import { formatCreatorMintPriceLabel } from '@/lib/owl-center/platform-mint-fee'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
 import {
@@ -11,6 +13,7 @@ import {
   type PartnerMintPhaseScheduleRow,
 } from '@/lib/owl-center/partner-mint-phase-schedule'
 import { formatMintDate, formatPhaseStartShort } from '@/lib/owl-center/phase-schedule'
+import type { MintTimeZoneMode } from '@/lib/owl-center/mint-time-preference'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 import { cn } from '@/lib/utils'
 
@@ -36,13 +39,13 @@ function priceLine(row: PartnerMintPhaseScheduleRow, liveSolLamports: string | n
   return usdc
 }
 
-function windowLine(row: PartnerMintPhaseScheduleRow): string {
-  const start = formatMintDate(row.starts_at)
+function windowLine(row: PartnerMintPhaseScheduleRow, mode: MintTimeZoneMode): string {
+  const start = formatMintDate(row.starts_at, mode)
   if (row.ends_at) {
-    return `${start} → ${formatMintDate(row.ends_at)}`
+    return `${start} → ${formatMintDate(row.ends_at, mode)}`
   }
   if (row.starts_at) {
-    const short = formatPhaseStartShort(row.starts_at)
+    const short = formatPhaseStartShort(row.starts_at, mode)
     return short ? `Opens ${short}` : `Opens ${start}`
   }
   return 'Start TBA'
@@ -57,6 +60,7 @@ export function PartnerMintPhaseSchedule({
   liveUnitLamports?: string | null
 }) {
   const [nowMs, setNowMs] = useState<number | null>(null)
+  const timeMode = useMintTimeZoneMode()
   useEffect(() => {
     setNowMs(Date.now())
     const id = window.setInterval(() => setNowMs(Date.now()), 30_000)
@@ -72,9 +76,12 @@ export function PartnerMintPhaseSchedule({
 
   return (
     <CommandCard label="MINT // phases">
-      <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.25em] text-[#5C6773]">
-        Phase schedule · limits are per phase (they stack) · WL in USDC, public in SOL or USDC
-      </p>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-[#5C6773]">
+          Phase schedule · limits are per phase (they stack) · WL in USDC, public in SOL or USDC
+        </p>
+        <MintTimeZoneToggle />
+      </div>
       <ul className="space-y-3">
         {rows.map((row) => {
           const tag = statusLabel(row)
@@ -98,7 +105,12 @@ export function PartnerMintPhaseSchedule({
                   ) : null}
                 </span>
                 {row.wallet_mint_limit != null ? (
-                  <span className="text-[#9BA8B4]">{row.wallet_mint_limit}/wallet this phase</span>
+                  <span className="text-[#9BA8B4]">
+                    {row.wallet_mint_limit} from this phase
+                    <span className="mt-0.5 block text-[10px] font-normal normal-case tracking-normal text-[#5C6773]">
+                      not total NFTs in wallet
+                    </span>
+                  </span>
                 ) : row.kind === 'presale' ? (
                   <span className="text-[#5C6773]">prepaid</span>
                 ) : (
@@ -107,7 +119,7 @@ export function PartnerMintPhaseSchedule({
               </div>
               <p className="mt-1 text-[#5C6773]">{priceLine(row, liveUnitLamports)}</p>
               <p className="mt-1 text-[10px] leading-relaxed text-[#5C6773]">
-                {windowLine(row)}
+                {windowLine(row, timeMode)}
                 {row.supply > 0 ? ` · cap ${row.supply.toLocaleString()}` : null}
               </p>
             </li>
