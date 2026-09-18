@@ -1,20 +1,15 @@
 'use client'
 
+import { usePathname } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { Gen2WlShareButton } from '@/components/owl-center/Gen2WlShareButton'
+import { buildPathHashUrl } from '@/lib/client/browser-url-sync'
 import { replaceClientUrl } from '@/lib/client/replace-url'
 import { formatPhasePriceSolOrFree } from '@/lib/owl-center/format-phase-price-sol'
 import type { Gen2MintCheckPhasePreview, Gen2MintCheckResponse, OwlCenterPhase } from '@/lib/owl-center/types'
 import { cn } from '@/lib/utils'
-
-function scrollToSection(id: string) {
-  const el = document.getElementById(id)
-  if (!el) return
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  replaceClientUrl(`#${id}`)
-}
 
 function wlPhaseFromCheck(check: Gen2MintCheckResponse | null): Gen2MintCheckPhasePreview | null {
   return check?.phases.find((p) => p.phase === 'WHITELIST') ?? null
@@ -35,9 +30,17 @@ export function Gen2WlStatusCard({
   wlPriceLamports: string | null
   onRefresh: () => void
 }) {
+  const pathname = usePathname() ?? ''
   const { connected } = useWallet()
   const wlPhase = wlPhaseFromCheck(check)
   const wl = wlPhase?.wl
+
+  const scrollToSection = (id: string) => {
+    const el = document.getElementById(id)
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (pathname) replaceClientUrl(buildPathHashUrl(pathname, id))
+  }
   const wlLive = activePhase === 'WHITELIST'
   const canMintNow = connected && wlPhase?.is_active && wlPhase.is_eligible && wlPhase.max_mintable > 0
   const hasAllocation = connected && (wl?.admin_allocated === true || (wl?.allowed_mints ?? 0) > 0)

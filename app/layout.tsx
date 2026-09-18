@@ -17,6 +17,7 @@ import { ConditionalHeader } from '@/components/ConditionalHeader'
 import { ConditionalFooter } from '@/components/ConditionalFooter'
 import { ErrorHandler } from '@/components/ErrorHandler'
 import { PageTransition } from '@/components/PageTransition'
+import { BrowserUrlSync } from '@/components/BrowserUrlSync'
 import { SolflareTouchFix } from '@/components/SolflareTouchFix'
 import { GlobalLiveActivity } from '@/components/GlobalLiveActivity'
 import { AdminTweetMirrorHost } from '@/components/admin/AdminTweetMirrorHost'
@@ -262,6 +263,9 @@ export default function RootLayout({
         <SolflareTouchFix />
         <WalletContextProvider>
           <CartProvider>
+            <Suspense fallback={null}>
+              <BrowserUrlSync />
+            </Suspense>
             <Suspense fallback={null}>
               <ReferralCapture />
             </Suspense>
