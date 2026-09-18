@@ -30,6 +30,8 @@
     "test:funds-escrow-snapshot-mismatch": "npx --yes tsx scripts/test-funds-escrow-snapshot-mismatch.ts",
     "test:funds-escrow-liability": "npx --yes tsx scripts/test-funds-escrow-liability.ts",
     "test:funds-escrow-liability-overcount-regression": "npx --yes tsx scripts/test-funds-escrow-liability-overcount-regression.ts",
+    "test:funds-escrow-buyout-liability-binding": "npx --yes tsx scripts/test-funds-escrow-buyout-liability-binding.ts",
+    "ops:funds-escrow-liability-breakdown": "npx --yes tsx --env-file=.env.local scripts/ops-funds-escrow-liability-breakdown.ts",
     "ops:funds-escrow-host-triage": "npx --yes tsx --env-file=.env.local scripts/ops-funds-escrow-host-triage.ts",
     "generate:owl-swap-escrow-key": "node scripts/generate-owl-swap-escrow-keypair.mjs",
     "test:owl-swap-simulate": "npx --yes tsx scripts/test-owl-swap-simulate.ts",

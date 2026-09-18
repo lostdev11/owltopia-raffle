@@ -83,9 +83,13 @@ async function assertGlobalFundsEscrowCoverage(): Promise<string | null> {
     )
     const result = await assertFundsEscrowOutstandingLiabilityCovered()
     if (!result.ok) {
+      const { getAppBuildId } = await import('@/lib/app-build')
       logFundsEscrowFailure('global liability coverage short', {
         error: result.error,
+        appBuildId: getAppBuildId(),
         required: result.snapshot.liability.required,
+        liabilityBuckets: result.snapshot.liability.buckets,
+        liabilityCounts: result.snapshot.liability.counts,
         hold: {
           sol: result.snapshot.pool.sol,
           usdc: result.snapshot.pool.usdc,

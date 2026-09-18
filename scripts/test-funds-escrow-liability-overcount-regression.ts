@@ -13,7 +13,7 @@ import {
 
 /** Production-shaped fixture (Sep 2026): 16 SOL escrow raffles in successful_pending_claims. */
 const PRODUCTION_SOL_RAFFLES = [
-  // 12 hosts already claimed creator proceeds — only platform fee remains (~0.012 each).
+  // 12 hosts already claimed via claim-proceeds (creator + platform fee left escrow in one tx).
   ...Array.from({ length: 12 }, (_, i) => ({
     id: `claimed-${i}`,
     currency: 'SOL',
@@ -77,12 +77,21 @@ const correctUnsettled = sumUnsettledSettlement(PRODUCTION_SOL_RAFFLES)
 
 assert.ok(buggyAllInFull > 4.5, `fixture should reproduce ~5 SOL bogus full sum, got ${buggyAllInFull}`)
 assert.ok(
-  correctUnsettled > 0.75 && correctUnsettled < 1.15,
-  `correct unsettled SOL should be ~0.8–1.0, got ${correctUnsettled}`
+  correctUnsettled > 0.8 && correctUnsettled < 0.9,
+  `correct unsettled SOL should be ~0.84 (4 pending only), got ${correctUnsettled}`
 )
 assert.ok(
   buggyAllInFull - correctUnsettled > 3.5,
   `fixture should show ~4 SOL creator double-count removed, delta=${buggyAllInFull - correctUnsettled}`
+)
+
+assert.equal(
+  unsettledRaffleSettlementLiability({
+    creator_payout_amount: 0.34,
+    platform_fee_amount: 0.012,
+    creator_claimed_at: '2026-09-10T12:00:00.000Z',
+  }).total,
+  0
 )
 
 const unclaimed = emptyFundsEscrowCurrencyBucket()
