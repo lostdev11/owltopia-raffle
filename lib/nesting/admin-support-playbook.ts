@@ -156,7 +156,7 @@ export function buildAdminSupportPlaybook(params: {
     recommendations.push({
       action: 'User: retry Claim all (no new fee if already paid)',
       detail:
-        'If they paid the SOL platform fee but no OWL left the reward treasury, claimable OWL stays on the nests. Retry Claim — the app reuses a paid fee signature (localStorage / server recovery within 48h). Claim all now skips unlocked nests and pays the rest; finish opening skipped nests separately. Do not refund SOL until retry either succeeds or confirms a second fee was charged. Check reward treasury OWL + SOL funding if transfers keep failing.',
+        'If they paid the SOL platform fee but no OWL left the reward treasury, claimable OWL stays on the nests. Retry Claim — the app reuses a paid fee signature (localStorage / server recovery within 48h). Claim all skips only nests that are truly unlocked (Finish opening); transient RPC lock-read failures abort the whole Claim all with no OWL sent so the fee can be reused — they must not silently underpay. Do not refund SOL until retry either succeeds or confirms a second fee was charged. Check reward treasury OWL + SOL funding if transfers keep failing.',
     })
   }
 

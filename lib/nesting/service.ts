@@ -625,10 +625,15 @@ export async function executeClaimAll(params: {
       plans: claimPlans,
     })
 
+    const skippedOwl = plans
+      .filter((p) => !eligibleIds.has(p.positionId))
+      .reduce((sum, p) => sum + p.payoutAmount, 0)
+
     await commitStakingPlatformFeeLinked(feeParams)
     return {
       ...result,
       skipped_lock_count: skippedLocks.length,
+      skipped_owl: skippedOwl,
       skipped_locks: skippedLocks.map((s) => ({
         position_id: s.positionId,
         asset_id: s.assetId,

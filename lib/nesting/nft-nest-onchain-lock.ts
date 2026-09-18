@@ -228,9 +228,86 @@ export type ClaimAllLockPartition = {
   skipped: ClaimAllLockSkip[]
 }
 
+function isTransientClaimAllLockError(e: StakingUserError): boolean {
+  if (e.status === 503) return true
+  const code = typeof e.extra?.code === 'string' ? e.extra.code : ''
+  return code === 'nest_lock_read_failed'
+}
+
+type ClaimAllLockOutcome =
+  | { row: StakingPositionRow; kind: 'eligible' }
+  | { row: StakingPositionRow; kind: 'skip'; skip: ClaimAllLockSkip }
+  | { row: StakingPositionRow; kind: 'transient'; skip: ClaimAllLockSkip }
+
+async function verifyClaimAllNestLockOutcome(
+  row: StakingPositionRow,
+  poolById: Map<string, StakingPoolRow>
+): Promise<ClaimAllLockOutcome> {
+  const rowPool = poolById.get(row.pool_id)
+  if (!rowPool) {
+    return {
+      row,
+      kind: 'skip',
+      skip: {
+        positionId: row.id,
+        assetId: row.asset_identifier?.trim() || null,
+        message: 'Pool not found',
+        status: 400,
+        code: 'pool_not_found',
+      },
+    }
+  }
+  try {
+    await assertActiveNftNestOnChainLock(row, rowPool, {
+      allowOwnerThawedForClaim: true,
+      closeSoftNestIfSold: true,
+    })
+    return { row, kind: 'eligible' }
+  } catch (e) {
+    if (isStakingUserError(e)) {
+      const skip: ClaimAllLockSkip = {
+        positionId: row.id,
+        assetId: row.asset_identifier?.trim() || null,
+        message: e.message,
+        status: e.status,
+        code: typeof e.extra?.code === 'string' ? e.extra.code : undefined,
+      }
+      if (isTransientClaimAllLockError(e)) {
+        return { row, kind: 'transient', skip }
+      }
+      return { row, kind: 'skip', skip }
+    }
+    throw e
+  }
+}
+
+async function verifyClaimAllNestLocksInChunks(
+  rows: StakingPositionRow[],
+  poolById: Map<string, StakingPoolRow>,
+  options?: { concurrency?: number; chunkDelayMs?: number }
+): Promise<ClaimAllLockOutcome[]> {
+  if (rows.length === 0) return []
+  const concurrency = options?.concurrency ?? claimAllLockVerifyConcurrency(rows.length)
+  const chunkDelayMs = options?.chunkDelayMs ?? claimAllLockChunkDelayMs(rows.length)
+  const outcomes: ClaimAllLockOutcome[] = []
+
+  for (let i = 0; i < rows.length; i += concurrency) {
+    if (i > 0) await sleepMs(chunkDelayMs)
+    const chunk = rows.slice(i, i + concurrency)
+    const chunkOutcomes = await Promise.all(
+      chunk.map((row) => verifyClaimAllNestLockOutcome(row, poolById))
+    )
+    outcomes.push(...chunkOutcomes)
+  }
+  return outcomes
+}
+
 /**
  * Claim all: verify locks per nest. Unlocked / unfinished nests are skipped so one bad perch
  * does not block OWL payout for the rest (fee already paid for the full set still covers).
+ *
+ * Transient RPC / lock-read failures must NOT be treated as unlocked skips — that silently
+ * underpays Claim all (user pays fee for N nests, receives OWL for N−k). Retry once, then abort.
  */
 export async function partitionClaimAllNestsByLockEligibility(
   positions: StakingPositionRow[],
@@ -245,58 +322,47 @@ export async function partitionClaimAllNestsByLockEligibility(
   })
   const noVerifyNeeded = positions.filter((row) => !rowsToVerify.some((r) => r.id === row.id))
 
-  const concurrency = claimAllLockVerifyConcurrency(rowsToVerify.length)
-  const chunkDelayMs = claimAllLockChunkDelayMs(rowsToVerify.length)
   const eligible: StakingPositionRow[] = [...noVerifyNeeded]
   const skipped: ClaimAllLockSkip[] = []
 
-  for (let i = 0; i < rowsToVerify.length; i += concurrency) {
-    if (i > 0) await sleepMs(chunkDelayMs)
-    const chunk = rowsToVerify.slice(i, i + concurrency)
-    const outcomes = await Promise.all(
-      chunk.map(async (row) => {
-        const rowPool = poolById.get(row.pool_id)
-        if (!rowPool) {
-          return {
-            row,
-            ok: false as const,
-            skip: {
-              positionId: row.id,
-              assetId: row.asset_identifier?.trim() || null,
-              message: 'Pool not found',
-              status: 400,
-              code: 'pool_not_found',
-            },
-          }
-        }
-        try {
-          await assertActiveNftNestOnChainLock(row, rowPool, {
-            allowOwnerThawedForClaim: true,
-            closeSoftNestIfSold: true,
-          })
-          return { row, ok: true as const }
-        } catch (e) {
-          if (isStakingUserError(e)) {
-            return {
-              row,
-              ok: false as const,
-              skip: {
-                positionId: row.id,
-                assetId: row.asset_identifier?.trim() || null,
-                message: e.message,
-                status: e.status,
-                code: typeof e.extra?.code === 'string' ? e.extra.code : undefined,
-              },
-            }
-          }
-          throw e
-        }
-      })
-    )
-    for (const outcome of outcomes) {
-      if (outcome.ok) eligible.push(outcome.row)
-      else skipped.push(outcome.skip)
+  let outcomes = await verifyClaimAllNestLocksInChunks(rowsToVerify, poolById)
+  let transientRows = outcomes.filter((o) => o.kind === 'transient').map((o) => o.row)
+
+  // Second pass: serial-ish retry for RPC flakes so large wallets are not underpaid.
+  if (transientRows.length > 0) {
+    await sleepMs(600)
+    const retryOutcomes = await verifyClaimAllNestLocksInChunks(transientRows, poolById, {
+      concurrency: Math.min(3, claimAllLockVerifyConcurrency(transientRows.length)),
+      chunkDelayMs: 250,
+    })
+    const byId = new Map(outcomes.map((o) => [o.row.id, o]))
+    for (const o of retryOutcomes) {
+      byId.set(o.row.id, o)
     }
+    outcomes = [...byId.values()]
+    transientRows = outcomes.filter((o) => o.kind === 'transient').map((o) => o.row)
+  }
+
+  if (transientRows.length > 0) {
+    const sample = outcomes.find((o) => o.kind === 'transient' && o.row.id === transientRows[0]!.id)
+    const sampleMessage =
+      sample && sample.kind === 'transient' ? sample.skip.message.trim() : ''
+    throw new StakingUserError(
+      sampleMessage
+        ? `${sampleMessage} Could not verify ${transientRows.length} nest${transientRows.length === 1 ? '' : 's'} — no OWL was sent. Wait a moment and tap Claim all again (your platform fee can be reused).`
+        : `Could not verify nest lock for ${transientRows.length} nest${transientRows.length === 1 ? '' : 's'} (RPC busy). No OWL was sent — wait a moment and tap Claim all again (your platform fee can be reused).`,
+      503,
+      {
+        code: 'claim_all_lock_read_failed',
+        failed_count: transientRows.length,
+        failed_position_ids: transientRows.map((r) => r.id),
+      }
+    )
+  }
+
+  for (const outcome of outcomes) {
+    if (outcome.kind === 'eligible') eligible.push(outcome.row)
+    else if (outcome.kind === 'skip') skipped.push(outcome.skip)
   }
 
   return { eligible, skipped }
