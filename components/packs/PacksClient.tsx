@@ -88,6 +88,7 @@ type PacksConfig = {
     paused: boolean
     pauseReason: string | null
     availableNfts: number
+    owlSolPrice?: number | null
   }
   ev: { targetEvSol: number; estimatedEvSol: number; estimatedRtpBps: number }
   jackpot: {
@@ -507,6 +508,7 @@ export function PacksClient({
             ) : (
               <PackVault
                 price={price}
+                owlSolPrice={config?.vault.owlSolPrice ?? null}
                 interactionLocked={ripping || showExperience || showReveal}
                 paying={phase === 'paying'}
                 cta={buyButton}

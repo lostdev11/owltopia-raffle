@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils'
 
 type Props = {
   price: number
+  /** SOL per 1 OWL — shown on the grayed-out $OWL pay option. */
+  owlSolPrice?: number | null
   interactionLocked: boolean
   paying?: boolean
   cta: ReactNode
@@ -22,6 +24,7 @@ type Props = {
 
 export function PackVault({
   price,
+  owlSolPrice = null,
   interactionLocked,
   paying = false,
   cta,
@@ -117,6 +120,7 @@ export function PackVault({
       <PackPurchasePanel
         pack={selected}
         price={price}
+        owlSolPrice={owlSolPrice}
         idTick={wheel.idTick}
         locked={interactionLocked}
         cta={cta}

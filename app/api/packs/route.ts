@@ -118,6 +118,8 @@ export async function GET() {
         paused,
         pauseReason: paused ? pauseReason : null,
         availableNfts: nftCount,
+        owlSolPrice:
+          vaultConfig?.owl_sol_price != null ? Number(vaultConfig.owl_sol_price) : null,
       },
       ev: {
         targetEvSol: ev.targetEvSol,
