@@ -556,7 +556,41 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
   }
 
   if (existing?.status === 'running') {
-    return { ok: false, error: 'Deploy already in progress — wait and refresh.', code: 'in_progress' }
+    // Stale "running" after a timed-out HTTP request:
+    // - no CM ids yet → clear and allow a fresh create
+    // - CM ids present → normalize to loading_items so resume works
+    if (existing.candy_machine_id && existing.collection_mint) {
+      await updateAssetUploadJob(job.id, {
+        upload_progress: withDeployState(
+          job.upload_progress,
+          emptyDeployPatch({
+            status: 'loading_items',
+            candy_machine_id: existing.candy_machine_id,
+            collection_mint: existing.collection_mint,
+            candy_guard_id: existing.candy_guard_id,
+            config_lines_loaded: existing.config_lines_loaded ?? 0,
+            config_lines_total: existing.config_lines_total,
+            error: null,
+          })
+        ),
+      })
+      // re-read path via recursive-ish continue: mutate local existing
+      existing.status = 'loading_items'
+      existing.error = null
+    } else {
+      await updateAssetUploadJob(job.id, {
+        upload_progress: withDeployState(
+          job.upload_progress,
+          emptyDeployPatch({
+            status: 'failed',
+            error: 'Previous deploy request timed out before Candy Machine was created. Retry deploy.',
+            completed_at: new Date().toISOString(),
+          })
+        ),
+      })
+      existing.status = 'failed'
+      existing.error = 'Previous deploy request timed out before Candy Machine was created. Retry deploy.'
+    }
   }
 
   // Core: resumable create → load items → handoff
