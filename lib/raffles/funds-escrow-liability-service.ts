@@ -16,13 +16,18 @@ import { getTokenInfo } from '@/lib/tokens'
 import { getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import {
   addToFundsEscrowBucket,
+  buyoutOfferDepositStillHeld,
   computeFundsEscrowLiabilitySnapshot,
   emptyFundsEscrowCurrencyBucket,
   evaluateFundsEscrowCoverage,
+  milestoneCryptoBindsFundsEscrow,
+  unsettledAuctionSettlementLiability,
+  unsettledRaffleSettlementLiability,
   type FundsEscrowCoverage,
   type FundsEscrowLiabilitySnapshot,
   type FundsEscrowPoolBalances,
 } from '@/lib/raffles/funds-escrow-liability'
+import { filterBuyoutOffersInFundsEscrow } from '@/lib/raffles/funds-escrow-buyout-liability'
 
 const TOKEN_PROGRAM_IDS = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID] as const
 
@@ -129,15 +134,15 @@ export async function loadFundsEscrowLiabilitySnapshot(): Promise<FundsEscrowLia
     milestoneCryptoHeld: 0,
   }
 
-  const [rafflesRes, auctionsRes, buyoutsRes, auctionBidsRes, milestonesRes] = await Promise.all([
+  const [rafflesRes, auctionsRes, buyoutsRes, auctionBidsRes, milestonesRes, escrowRafflesRes] =
+    await Promise.all([
     db
       .from('raffles')
       .select(
-        'id, currency, creator_payout_amount, platform_fee_amount, status, creator_claimed_at, ticket_payments_to_funds_escrow, settled_at'
+        'id, currency, creator_payout_amount, platform_fee_amount, status, creator_claimed_at, platform_fee_settled_at, ticket_payments_to_funds_escrow, settled_at'
       )
       .eq('ticket_payments_to_funds_escrow', true)
       .eq('status', 'successful_pending_claims')
-      .is('creator_claimed_at', null)
       .not('settled_at', 'is', null)
       .limit(10000),
     db
@@ -146,11 +151,12 @@ export async function loadFundsEscrowLiabilitySnapshot(): Promise<FundsEscrowLia
         'id, bid_currency, creator_payout_amount, platform_fee_amount, status, creator_claimed_at'
       )
       .eq('status', 'successful_pending_claims')
-      .is('creator_claimed_at', null)
       .limit(5000),
     db
       .from('raffle_buyout_offers')
-      .select('amount, currency, status, deposit_tx_signature, payout_tx_signature, refunded_at')
+      .select(
+        'amount, currency, status, deposit_tx_signature, payout_tx_signature, refunded_at, raffle_id, bidder_wallet'
+      )
       .not('deposit_tx_signature', 'is', null)
       .is('refunded_at', null)
       .limit(20000),
@@ -170,38 +176,39 @@ export async function loadFundsEscrowLiabilitySnapshot(): Promise<FundsEscrowLia
       .is('claimed_at', null)
       .is('returned_at', null)
       .limit(20000),
+    db.from('raffles').select('id').eq('ticket_payments_to_funds_escrow', true).limit(10000),
   ])
 
+  const escrowRaffleIds = new Set(
+    (escrowRafflesRes.data ?? []).map((r) => String(r.id)).filter(Boolean)
+  )
+
   for (const row of rafflesRes.data ?? []) {
-    const currency = String(row.currency || 'SOL')
-    const creator = Number(row.creator_payout_amount) || 0
-    const fee = Number(row.platform_fee_amount) || 0
-    const total = creator + fee
+    const { total } = unsettledRaffleSettlementLiability(row)
     if (total <= 0) continue
+    const currency = String(row.currency || 'SOL')
     addToFundsEscrowBucket(unclaimedRaffleSettlements, currency, total)
     counts.unclaimedRaffleSettlements += 1
   }
 
   for (const row of auctionsRes.data ?? []) {
-    const currency = String(row.bid_currency || 'SOL')
-    const creator = Number(row.creator_payout_amount) || 0
-    const fee = Number(row.platform_fee_amount) || 0
-    const total = creator + fee
+    const { total } = unsettledAuctionSettlementLiability(row)
     if (total <= 0) continue
+    const currency = String(row.bid_currency || 'SOL')
     addToFundsEscrowBucket(unclaimedAuctionSettlements, currency, total)
     counts.unclaimedAuctionSettlements += 1
   }
 
-  for (const row of buyoutsRes.data ?? []) {
-    const status = String(row.status || '')
-    const payoutDone = Boolean(String(row.payout_tx_signature ?? '').trim())
-    // Still held: active bids; accepted not yet paid; expired/superseded awaiting refund.
-    const held =
-      status === 'active' ||
-      (status === 'accepted' && !payoutDone) ||
-      status === 'expired' ||
-      status === 'superseded'
-    if (!held) continue
+  const buyoutHeld = (buyoutsRes.data ?? []).filter(
+    (row) =>
+      escrowRaffleIds.has(String(row.raffle_id)) &&
+      buyoutOfferDepositStillHeld({
+        status: row.status,
+        payout_tx_signature: row.payout_tx_signature,
+      })
+  )
+  const buyoutsInFundsEscrow = await filterBuyoutOffersInFundsEscrow(buyoutHeld)
+  for (const row of buyoutsInFundsEscrow) {
     addToFundsEscrowBucket(openBuyoutDeposits, String(row.currency || 'SOL'), Number(row.amount) || 0)
     counts.openBuyoutDeposits += 1
   }
@@ -212,8 +219,14 @@ export async function loadFundsEscrowLiabilitySnapshot(): Promise<FundsEscrowLia
   }
 
   for (const row of milestonesRes.data ?? []) {
-    const status = String(row.status || '')
-    if (status === 'claimed' || status === 'returned') continue
+    if (
+      !milestoneCryptoBindsFundsEscrow({
+        status: row.status,
+        prize_type: row.prize_type,
+      })
+    ) {
+      continue
+    }
     addToFundsEscrowBucket(
       milestoneCryptoHeld,
       String(row.prize_currency || 'SOL'),
