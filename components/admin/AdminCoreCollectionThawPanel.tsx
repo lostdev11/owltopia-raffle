@@ -6,6 +6,8 @@ import { Loader2 } from 'lucide-react'
 import { CommandCard } from '@/components/owl-center/CommandCard'
 import { CommandCardSection } from '@/components/owl-center/CommandCardSection'
 import { DeployButton } from '@/components/owl-center/DeployButton'
+import { isCreatorCoreThawAllowed } from '@/lib/owl-center/creator-core-thaw-gate'
+import { formatMintDate } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
 /**
@@ -17,12 +19,15 @@ export function AdminCoreCollectionThawPanel({
   onChanged,
   apiPath,
   embedded = false,
+  /** When true (creator Manage collection), soft-gate until sell-out. */
+  requireSellOut = false,
 }: {
   launch: OwlCenterLaunchPublic
   onChanged?: () => void
   /** Defaults to admin thaw route; pass creator path for partner Manage collection. */
   apiPath?: string
   embedded?: boolean
+  requireSellOut?: boolean
 }) {
   const [busy, setBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -31,7 +36,8 @@ export function AdminCoreCollectionThawPanel({
   if (launch.mint_standard !== 'core' || !launch.freeze_enabled) return null
 
   const unlocked = launch.freeze_status === 'thawed'
-  const canUnlock = Boolean(launch.collection_mint?.trim()) && !unlocked
+  const sellOutGate = requireSellOut ? isCreatorCoreThawAllowed(launch) : { ok: true as const }
+  const canUnlock = Boolean(launch.collection_mint?.trim()) && !unlocked && sellOutGate.ok
   const path = apiPath ?? `/api/admin/owl-center/collections/${launch.id}/core-thaw`
 
   async function unlockTrading() {
@@ -54,18 +60,26 @@ export function AdminCoreCollectionThawPanel({
     }
   }
 
+  const plannedLabel = launch.unfreeze_date ? formatMintDate(launch.unfreeze_date) : null
+
   const body = (
     <>
       <p className="mb-3 text-sm leading-relaxed text-[#9BA8B4]">
-        <strong className="font-normal text-[#E8EEF2]">Enable trading (unlock all NFTs)</strong> — only when mint
-        is finished (or you are ready for Magic Eden / Tensor). This does not lock NFTs. You already chose
-        “Lock NFTs until trading” at mint setup.
+        <strong className="font-normal text-[#E8EEF2]">Enable trading (unlock all NFTs)</strong> — after the
+        collection sells out (or when you are ready for Magic Eden / Tensor). This does not lock NFTs. You already
+        chose “Lock NFTs until trading” at mint setup. Planned unlock date is a reminder only and does not
+        auto-unlock.
       </p>
       <p className="mb-4 font-mono text-xs text-[#C5D0D8]">
         {unlocked ? 'Trading unlocked' : 'NFTs locked until you enable trading'}
-        {launch.unfreeze_date ? ` · planned ${new Date(launch.unfreeze_date).toLocaleString()}` : ''}
+        {plannedLabel ? ` · planned ${plannedLabel}` : ''}
         {launch.minted_count > 0 ? ` · ${launch.minted_count} minted` : ''}
       </p>
+      {!unlocked && requireSellOut && !sellOutGate.ok ? (
+        <p className="mb-4 rounded border border-[#FFD769]/35 bg-[#FFD769]/10 px-3 py-2 text-sm text-[#FFD769]">
+          {sellOutGate.error}
+        </p>
+      ) : null}
 
       {!unlocked && confirming ? (
         <div className="mb-4 grid gap-3 border border-[#FFD769]/30 bg-[#FFD769]/10 p-3">
