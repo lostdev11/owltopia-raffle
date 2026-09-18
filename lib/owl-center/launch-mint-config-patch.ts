@@ -152,6 +152,7 @@ export function buildMintDetailsPatchFromBody(
     kickoff: mintOpensIso,
     requestedPublic,
     previousPublic: launch.phase_schedule?.PUBLIC ?? null,
+    previousKickoff: launch.launch_deadline_at,
     hasQueuedPhases,
   })
   const phase_schedule = { ...parsed.phase_schedule }

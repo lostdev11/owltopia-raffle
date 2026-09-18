@@ -127,21 +127,30 @@ export function scheduleInstantsEqual(a: string | null | undefined, b: string | 
  * PUBLIC start to persist with a mint-details save.
  *
  * Straight public mint: Mint opens is the live date.
- * Allowlist/presale: keep an independent public start only when the request actually
- * changed it. If Public start was left at the previous leftover time, copy Mint opens
- * so moving the date back is visible after reload.
+ * Allowlist/presale: Public start may intentionally follow Mint opens (WL window → public).
+ * Only treat an unchanged Public start as "leftover" when it was still tied to the previous
+ * Mint opens and Mint opens itself moved — otherwise keep the later public window across saves.
  */
 export function resolvePublicStartForSave(opts: {
   kickoff: string | null
   requestedPublic: string | null
   previousPublic?: string | null
+  previousKickoff?: string | null
   hasQueuedPhases: boolean
 }): string | null {
-  const { kickoff, requestedPublic, previousPublic, hasQueuedPhases } = opts
+  const { kickoff, requestedPublic, previousPublic, previousKickoff, hasQueuedPhases } = opts
   if (!hasQueuedPhases) return kickoff ?? requestedPublic
   if (!kickoff) return requestedPublic
   if (!requestedPublic || scheduleInstantsEqual(requestedPublic, kickoff)) return kickoff
-  if (previousPublic !== undefined && scheduleInstantsEqual(requestedPublic, previousPublic)) return kickoff
+  const kickoffMoved =
+    previousKickoff != null && !scheduleInstantsEqual(kickoff, previousKickoff)
+  const publicUnchanged =
+    previousPublic !== undefined && scheduleInstantsEqual(requestedPublic, previousPublic)
+  const previousPublicWasSyncedToKickoff =
+    previousKickoff != null &&
+    previousPublic != null &&
+    scheduleInstantsEqual(previousPublic, previousKickoff)
+  if (kickoffMoved && publicUnchanged && previousPublicWasSyncedToKickoff) return kickoff
   return requestedPublic
 }
 
@@ -167,16 +176,31 @@ export function resolveAllowlistPhasesForSave(opts: {
   })
 }
 
-/** Changing Mint opens also moves Public start; the public field can still be edited after. */
+/**
+ * Changing Mint opens also moves Public start when they were still tied together.
+ * With allowlist/presale, a later Public start is kept so WL → public windows survive edits.
+ */
 export function applyMintOpensDate(values: MintDetailsFormValues, launch_date: string): MintDetailsFormValues {
   const previousKickoff = values.launch_date
   const previousPublic = values.public_start
+  const hasQueuedPhases =
+    values.presale_enabled || values.wl_enabled || values.allowlist_phases.length > 0
+  const publicWasDiverged =
+    hasQueuedPhases &&
+    Boolean(previousKickoff.trim()) &&
+    Boolean(previousPublic.trim()) &&
+    !scheduleInstantsEqual(previousPublic, previousKickoff)
   const allowlist_phases = values.allowlist_phases.map((phase) => {
     if (!phase.start.trim()) return phase
     if (previousKickoff && scheduleInstantsEqual(phase.start, previousKickoff)) {
       return { ...phase, start: launch_date }
     }
-    if (previousPublic && scheduleInstantsEqual(phase.start, previousPublic)) {
+    // Do not drag allowlist starts that matched an intentional later Public start.
+    if (
+      !publicWasDiverged &&
+      previousPublic &&
+      scheduleInstantsEqual(phase.start, previousPublic)
+    ) {
       return { ...phase, start: launch_date }
     }
     return phase
@@ -184,10 +208,16 @@ export function applyMintOpensDate(values: MintDetailsFormValues, launch_date: s
   const wl_start =
     values.wl_start.trim() &&
     (scheduleInstantsEqual(values.wl_start, previousKickoff) ||
-      scheduleInstantsEqual(values.wl_start, previousPublic))
+      (!publicWasDiverged && scheduleInstantsEqual(values.wl_start, previousPublic)))
       ? launch_date
       : values.wl_start
-  return { ...values, launch_date, public_start: launch_date, allowlist_phases, wl_start }
+  return {
+    ...values,
+    launch_date,
+    public_start: publicWasDiverged ? previousPublic : launch_date,
+    allowlist_phases,
+    wl_start,
+  }
 }
 
 /**
@@ -199,7 +229,11 @@ export function resolveSimpleMintDate(kickoff: string | null, publicStart: strin
   return kickoff ?? publicStart
 }
 
-/** Canonical Mint opens ISO to write on save — prefer whichever date field the user actually changed. */
+/**
+ * Canonical Mint opens ISO to write on save.
+ * Simple public: either date field can move the live kickoff.
+ * Allowlist/presale: Mint opens stays independent — editing Public start must not pull kickoff forward.
+ */
 export function resolveMintOpensIsoForPatch(opts: {
   kickoff: string | null
   requestedPublic: string | null
@@ -212,7 +246,7 @@ export function resolveMintOpensIsoForPatch(opts: {
   const publicChanged = Boolean(requestedPublic && !scheduleInstantsEqual(requestedPublic, previousPublic))
 
   if (kickoffChanged) return kickoff
-  if (publicChanged) return requestedPublic
+  if (!hasQueuedPhases && publicChanged) return requestedPublic
   if (!hasQueuedPhases) return resolveSimpleMintDate(kickoff, requestedPublic)
   return kickoff ?? requestedPublic
 }
