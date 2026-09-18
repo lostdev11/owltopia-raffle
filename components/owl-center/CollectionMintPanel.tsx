@@ -18,8 +18,7 @@ import { publicSimpleMintGuardGroupLabel } from '@/lib/owl-center/public-simple-
 import { isLaunchWhitelistWindowOpen } from '@/lib/owl-center/launch-wl-window'
 import { isPublicSimpleMintOpen } from '@/lib/owl-center/phase-schedule'
 import { postCollectionConfirmMintWithRetry } from '@/lib/owl-center/confirm-mint-client'
-import { finalizeMintSessionOptimistic, isHardMintConfirmFailure } from '@/lib/owl-center/mint-finalize-client'
-import { recordMintSessionConfirms } from '@/lib/owl-center/mint-session'
+import { finalizeMintSessionOptimistic, isHardMintConfirmFailure, runRecoveredMintConfirm } from '@/lib/owl-center/mint-finalize-client'
 import {
   createMintSessionDeadline,
   MINT_SESSION_OUTER_MAX_MS,
@@ -148,16 +147,14 @@ export function CollectionMintPanel({
 
       const sigs = recovered.txSignatures
       const mintPks = recovered.mintedNftMints
-      let confirmedCount = 0
-      let confirmedLastSig: string | null = null
-      let confirmedMintAddresses: string[] = []
 
       setStep('recording_mint')
       setMintProgress({ current: 0, total: 1, phase: 'record' })
-      const recorded = await recordMintSessionConfirms(
+      // Bound confirm + always terminal step — never hang on "Saving your mint…" (Gen2 parity).
+      const result = await runRecoveredMintConfirm({
         sigs,
         mintPks,
-        async ({ txSignature, quantity, mintedNftMints }) => {
+        confirmBatch: async ({ txSignature, quantity, mintedNftMints }) => {
           await postCollectionConfirmMintWithRetry(slug, {
             wallet: walletStr,
             txSignature,
@@ -167,21 +164,29 @@ export function CollectionMintPanel({
             network: mintNetwork,
           })
         },
-        () => {
-          confirmedCount = Math.max(mintPks.length, 1)
-          setMintedCount(Math.max(mintPks.length, 1))
+        onProgress: () => {
           setMintProgress({ current: 1, total: 1, phase: 'record' })
-        }
-      )
-      confirmedLastSig = recorded.lastSig
+        },
+      })
 
-      setLastSig(confirmedLastSig ?? sigs[sigs.length - 1] ?? null)
-      setMintedAddresses(mintPks.length ? mintPks : [])
-      setMintedCount(confirmedCount || mintPks.length || 1)
+      if (result.kind === 'error') {
+        setMintProgress(null)
+        setMintedAddresses([])
+        setMintedCount(0)
+        setLastSig(null)
+        setErr(result.message)
+        setStep('error')
+        void loadElig()
+        return false
+      }
+
+      setLastSig(result.lastSig)
+      setMintedAddresses(result.mintAddresses)
+      setMintedCount(result.count)
       setErr(null)
       setMintProgress(null)
       setStep('success')
-      applyMinted(confirmedCount || mintPks.length || 1)
+      applyMinted(result.count)
       onRefresh()
       void loadElig({ background: true })
       return true
