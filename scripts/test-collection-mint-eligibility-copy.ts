@@ -23,6 +23,11 @@ assert.match(allowlistEligibleReason('WL', 1), /Eligible for WL · up to 1 mint$
 assert.match(allowlistEligibleReason('WL', 2), /up to 2 mints$/)
 assert.match(allowlistNotOnListReason('OG'), /Not on the OG list/)
 
+function publicWalletLimitReason(limit: number): string {
+  return `Wallet limit reached (${limit} per wallet for public)`
+}
+assert.match(publicWalletLimitReason(5), /per wallet for public/)
+
 // Timezone regression still covered by test-mint-date-timezone.ts — smoke formatMintDate here.
 process.env.TZ = 'America/New_York'
 assert.match(formatMintDate('2026-09-05T11:30:00.000Z'), /7:30/)

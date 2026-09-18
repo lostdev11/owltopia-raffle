@@ -224,8 +224,9 @@ export function MintDetailsConfigFields({
         </label>
         <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
           Each wallet can mint up to this many NFTs during PUBLIC. Allowlist phases set their own
-          per-wallet caps below (Show Advanced). Enforced on-chain via Candy Guard mintLimit —
-          changing this after deploy updates the on-chain cap when you save.
+          per-wallet caps below (Show Advanced) — those caps stack on top of this public limit (WL 2
+          + public 5 = up to 7 total). Enforced on-chain via Candy Guard mintLimit — changing this
+          after deploy updates the on-chain cap when you save.
         </p>
       </div>
 

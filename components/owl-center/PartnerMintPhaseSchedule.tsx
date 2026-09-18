@@ -73,7 +73,7 @@ export function PartnerMintPhaseSchedule({
   return (
     <CommandCard label="MINT // phases">
       <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.25em] text-[#5C6773]">
-        Phase schedule · WL in USDC, public in SOL or USDC
+        Phase schedule · limits are per phase (they stack) · WL in USDC, public in SOL or USDC
       </p>
       <ul className="space-y-3">
         {rows.map((row) => {
@@ -98,7 +98,7 @@ export function PartnerMintPhaseSchedule({
                   ) : null}
                 </span>
                 {row.wallet_mint_limit != null ? (
-                  <span className="text-[#9BA8B4]">{row.wallet_mint_limit}/wallet</span>
+                  <span className="text-[#9BA8B4]">{row.wallet_mint_limit}/wallet this phase</span>
                 ) : row.kind === 'presale' ? (
                   <span className="text-[#5C6773]">prepaid</span>
                 ) : (
