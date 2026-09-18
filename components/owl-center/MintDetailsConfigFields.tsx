@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
-import { applyMintOpensDate, type MintDetailsFormValues } from '@/lib/owl-center/launch-mint-config'
+import { applyMintOpensDate, resolveFormMintOpensFromFirstPhase, type MintDetailsFormValues } from '@/lib/owl-center/launch-mint-config'
 import { OWL_CENTER_MAX_LAUNCH_SUPPLY } from '@/lib/owl-center/launch-limits'
 import { datetimeLocalToIso, formatMintDate } from '@/lib/owl-center/phase-schedule'
 import {
@@ -37,7 +37,9 @@ export function MintDetailsConfigFields({
   showSupplyField = false,
   supplyConfigLocked = false,
 }: Props) {
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(
+    () => values.presale_enabled || values.wl_enabled || values.allowlist_phases.length > 0
+  )
 
   useEffect(() => {
     if (!defaultWallet.trim()) return
@@ -58,8 +60,11 @@ export function MintDetailsConfigFields({
   const simplePublic =
     !values.presale_enabled && !values.wl_enabled && values.allowlist_phases.length === 0
   const setMintOpens = (raw: string) => onChange(applyMintOpensDate(values, raw))
-  const mintOpensPreview = values.launch_date.trim()
-    ? formatMintDate(datetimeLocalToIso(values.launch_date))
+  const autoMintOpensLocal = simplePublic ? '' : resolveFormMintOpensFromFirstPhase(values)
+  const mintOpensPreview = (simplePublic ? values.launch_date : autoMintOpensLocal).trim()
+    ? formatMintDate(
+        datetimeLocalToIso(simplePublic ? values.launch_date : autoMintOpensLocal)
+      )
     : null
 
   const supply = Number(values.total_supply) || 0
@@ -247,6 +252,7 @@ export function MintDetailsConfigFields({
             <option value="USDC">USDC</option>
           </select>
         </label>
+        {simplePublic ? (
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
           Mint opens
           <input
@@ -262,6 +268,23 @@ export function MintDetailsConfigFields({
             </span>
           ) : null}
         </label>
+        ) : (
+        <div className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
+          <span>Mint opens</span>
+          <p className="normal-case tracking-normal text-[#9BA8B4]">
+            Auto-set when the first allowlist or presale phase starts — no separate date to enter.
+          </p>
+          {mintOpensPreview ? (
+            <span className="font-mono text-[10px] normal-case tracking-normal text-[#00C97A]">
+              Opens {mintOpensPreview} (from first phase)
+            </span>
+          ) : (
+            <span className="font-mono text-[10px] normal-case tracking-normal text-[#5C6773]">
+              Set a Phase starts time below to open the mint.
+            </span>
+          )}
+        </div>
+        )}
         {simplePublic ? null : (
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
           Public phase starts
@@ -270,13 +293,12 @@ export function MintDetailsConfigFields({
             value={values.public_start}
             onChange={(e) => {
               const public_start = e.target.value
-              onChange(simplePublic ? applyMintOpensDate(values, public_start) : { ...values, public_start })
+              onChange({ ...values, public_start })
             }}
             className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
           />
           <span className="font-mono text-[10px] normal-case tracking-normal text-[#5C6773]">
-            Follows Mint opens when you change that field. Edit this afterward only if public should start later
-            than allowlist or presale.
+            When public mint begins after allowlist or presale. Must be at or after the first phase start.
           </span>
         </label>
         )}
@@ -302,7 +324,10 @@ export function MintDetailsConfigFields({
         <input
           type="checkbox"
           checked={values.presale_enabled}
-          onChange={(e) => set('presale_enabled', e.target.checked)}
+          onChange={(e) => {
+            set('presale_enabled', e.target.checked)
+            if (e.target.checked) setShowAdvanced(true)
+          }}
           className="h-4 w-4 accent-[#00FF9C]"
         />
         Presale phase (prepaid · free mint redemption)
@@ -358,7 +383,7 @@ export function MintDetailsConfigFields({
                       {
                         key: 'wl',
                         label: 'Whitelist',
-                        start: values.wl_start,
+                        start: values.wl_start || values.launch_date,
                         supply: values.wl_supply,
                         price: values.wl_price,
                         price_currency: 'USDC',
@@ -366,6 +391,7 @@ export function MintDetailsConfigFields({
                       } satisfies PartnerAllowlistPhaseFormRow,
                     ]
               onChange({ ...values, wl_enabled: true, allowlist_phases: seed })
+              setShowAdvanced(true)
             } else {
               onChange({ ...values, wl_enabled: false, allowlist_phases: [], wl_supply: '', wl_start: '', wl_price: '' })
             }
@@ -559,7 +585,8 @@ export function MintDetailsConfigFields({
             </button>
           ) : null}
           <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
-            Set Public start above so the last allowlist window ends when public mint opens. Phase supply is a hard
+            Set Public start above so the last allowlist window ends when public mint opens. Mint opens
+            automatically at the earliest Phase starts below. Phase supply is a hard
             cap (mints stop for that phase when used). Max per wallet defaults Spots per wallet when you paste lists
             below; leave blank to inherit the public per-wallet limit. Price currency: USDC is re-quoted to SOL as the
             market moves; SOL stays fixed on-chain (same as public SOL mint). Free Mint Token: set the SPL mint to

@@ -3,6 +3,7 @@ import { isLaunchSupplyConfigLocked } from '@/lib/owl-center/launch-edit-locks'
 import {
   parseMintDetailsConfig,
   resolveAllowlistPhasesForSave,
+  resolveMintOpensFromFirstPhase,
   resolveMintOpensIsoForPatch,
   resolvePublicStartForSave,
 } from '@/lib/owl-center/launch-mint-config'
@@ -141,12 +142,19 @@ export function buildMintDetailsPatchFromBody(
     parsed.creator_wl_enabled ||
     (parsed.partner_allowlist_phases?.length ?? 0) > 0
   const requestedPublic = parsed.phase_schedule.PUBLIC ?? null
+  const firstPhaseKickoff = resolveMintOpensFromFirstPhase({
+    presaleEnabled: parsed.creator_presale_enabled,
+    presaleStart: parsed.phase_schedule.PRESALE ?? null,
+    allowlistPhases: parsed.partner_allowlist_phases,
+    legacyWlStart: parsed.phase_schedule.WHITELIST ?? null,
+  })
   const mintOpensIso = resolveMintOpensIsoForPatch({
     kickoff: parsed.launch_deadline_at,
     requestedPublic,
     previousKickoff: launch.launch_deadline_at,
     previousPublic: launch.phase_schedule?.PUBLIC ?? null,
     hasQueuedPhases,
+    firstPhaseKickoff,
   })
   const publicIso = resolvePublicStartForSave({
     kickoff: mintOpensIso,
@@ -159,6 +167,7 @@ export function buildMintDetailsPatchFromBody(
   if (publicIso) phase_schedule.PUBLIC = publicIso
   else delete phase_schedule.PUBLIC
   if (mintOpensIso) phase_schedule.AIRDROP = mintOpensIso
+  else delete phase_schedule.AIRDROP
 
   const partner_allowlist_phases = resolveAllowlistPhasesForSave({
     phases: parsed.partner_allowlist_phases ?? [],
