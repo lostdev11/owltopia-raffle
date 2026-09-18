@@ -20,7 +20,7 @@ function applyMinted(
     wallet_minted: nextMinted,
     is_eligible: prev.is_eligible && nextMax > 0,
     reason:
-      nextMax > 0 ? prev.reason : `Wallet limit reached (${prev.wallet_mint_limit} per wallet)`,
+      nextMax > 0 ? prev.reason : `Wallet limit reached (${prev.wallet_mint_limit} per wallet for this phase)`,
   }
 }
 

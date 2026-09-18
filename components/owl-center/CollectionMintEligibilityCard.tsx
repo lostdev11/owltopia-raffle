@@ -87,7 +87,11 @@ export function CollectionMintEligibilityCard({
             {connected && wallet ? (
               <p className="mt-2 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
                 Wallet {shortWallet(wallet)}
-                {elig ? ` · minted ${elig.wallet_minted}/${elig.wallet_mint_limit}` : ''}
+                {elig
+                  ? ` · minted ${elig.wallet_minted}/${elig.wallet_mint_limit}${
+                      phaseLabel ? ` ${phaseLabel}` : ' public'
+                    }`
+                  : ''}
                 {onList === true ? ' · on list' : onList === false ? ' · not on list' : ''}
               </p>
             ) : null}
