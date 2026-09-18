@@ -10,6 +10,10 @@ import {
   entryHasOnChainRefundAmount,
   noPaymentRefundSignature,
 } from '@/lib/raffles/entry-refund-amount'
+import {
+  recordTicketRefundLedger,
+  type TicketRefundLedgerSource,
+} from '@/lib/db/ticket-refund-ledger'
 
 /** Thrown when the DB rejects a duplicate transaction_signature (unique index). */
 export class TransactionSignatureAlreadyUsedError extends Error {
@@ -1111,9 +1115,19 @@ export async function clearEntryRefundLock(entryId: string): Promise<void> {
   }
 }
 
-export async function markEntryRefunded(entryId: string, transactionSignature: string): Promise<void> {
+export type MarkEntryRefundedMeta = {
+  source: TicketRefundLedgerSource
+  actorWallet?: string | null
+}
+
+export async function markEntryRefunded(
+  entryId: string,
+  transactionSignature: string,
+  meta: MarkEntryRefundedMeta = { source: 'buyer_claim' }
+): Promise<void> {
   const now = new Date().toISOString()
-  const { error } = await getSupabaseAdmin()
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
     .from('entries')
     .update({
       refunded_at: now,
@@ -1121,10 +1135,31 @@ export async function markEntryRefunded(entryId: string, transactionSignature: s
       refund_lock_started_at: null,
     })
     .eq('id', entryId)
+    .select('id, raffle_id, wallet_address, amount_paid, currency')
+    .maybeSingle()
 
   if (error) {
     console.error('markEntryRefunded error:', error)
     throw new Error(`Failed to mark entry refunded: ${error.message}`)
+  }
+
+  if (!data) return
+
+  try {
+    await recordTicketRefundLedger({
+      entryId: String(data.id),
+      raffleId: String(data.raffle_id),
+      walletAddress: String(data.wallet_address),
+      amount: Number(data.amount_paid) || 0,
+      currency: String(data.currency || 'SOL'),
+      txSignature: transactionSignature,
+      refundedAt: now,
+      source: meta.source,
+      actorWallet: meta.actorWallet ?? null,
+    })
+  } catch (e) {
+    // Entry is already refunded on-chain / in DB — log and continue; cron/admin can heal ledger.
+    console.error('[markEntryRefunded] ledger write failed:', e)
   }
 }
 
@@ -1158,7 +1193,9 @@ export async function markZeroPaymentEntriesRefundedForRaffle(raffleId: string):
     }
     if (entryHasOnChainRefundAmount(entry)) continue
     try {
-      await markEntryRefunded(entry.id, noPaymentRefundSignature(entry.id))
+      await markEntryRefunded(entry.id, noPaymentRefundSignature(entry.id), {
+        source: 'zero_payment',
+      })
       closed += 1
     } catch (e) {
       console.error('markZeroPaymentEntriesRefundedForRaffle mark:', e)
@@ -1195,14 +1232,32 @@ export async function markEntriesRefundedManual(
     .eq('raffle_id', rid)
     .eq('status', 'confirmed')
     .is('refunded_at', null)
-    .select('id')
+    .select('id, raffle_id, wallet_address, amount_paid, currency')
 
   if (error) {
     console.error('markEntriesRefundedManual:', error)
     throw new Error(`Failed to mark entries refunded: ${error.message}`)
   }
 
-  const updatedIds = (data ?? []).map((row) => String((row as { id: string }).id))
+  const updatedIds: string[] = []
+  for (const row of data ?? []) {
+    const id = String((row as { id: string }).id)
+    updatedIds.push(id)
+    try {
+      await recordTicketRefundLedger({
+        entryId: id,
+        raffleId: String((row as { raffle_id: string }).raffle_id),
+        walletAddress: String((row as { wallet_address: string }).wallet_address),
+        amount: Number((row as { amount_paid?: number | string | null }).amount_paid) || 0,
+        currency: String((row as { currency?: string | null }).currency || 'SOL'),
+        txSignature: sig,
+        refundedAt: now,
+        source: 'manual_record',
+      })
+    } catch (e) {
+      console.error('[markEntriesRefundedManual] ledger write failed:', e)
+    }
+  }
   return { updatedIds }
 }
 
@@ -1228,12 +1283,29 @@ export async function markOrphanEntryRefundedManual(
     .eq('id', id)
     .in('status', ['pending', 'rejected', 'confirmed'])
     .is('refunded_at', null)
-    .select('id')
+    .select('id, raffle_id, wallet_address, amount_paid, currency')
     .maybeSingle()
 
   if (error) {
     console.error('markOrphanEntryRefundedManual:', error)
     throw new Error(`Failed to mark entry refunded: ${error.message}`)
+  }
+
+  if (data?.id) {
+    try {
+      await recordTicketRefundLedger({
+        entryId: String(data.id),
+        raffleId: String(data.raffle_id),
+        walletAddress: String(data.wallet_address),
+        amount: Number(data.amount_paid) || 0,
+        currency: String(data.currency || 'SOL'),
+        txSignature: sig,
+        refundedAt: now,
+        source: 'manual_record',
+      })
+    } catch (e) {
+      console.error('[markOrphanEntryRefundedManual] ledger write failed:', e)
+    }
   }
 
   return { updated: !!data?.id }

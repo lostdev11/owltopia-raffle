@@ -44,10 +44,15 @@ const short = evaluateFundsEscrowCoverage({
   },
   required: snap.required,
   feeReserveSol: 0.002,
+  buckets: snap.buckets,
 })
 assert.equal(short.covered, false)
 assert.ok(short.error && /cannot cover outstanding liability/i.test(short.error))
 assert.ok(short.shortfall.sol > 0.45)
+assert.ok(
+  short.error && /unclaimed host settlements/i.test(short.error),
+  'shortfall error should name dominant SOL bucket'
+)
 
 const ok = evaluateFundsEscrowCoverage({
   hold: {

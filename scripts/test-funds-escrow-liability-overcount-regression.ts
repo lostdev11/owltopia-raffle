@@ -122,7 +122,11 @@ const snap = computeFundsEscrowLiabilitySnapshot({
 
 assert.ok(Math.abs(snap.required.sol - correctUnsettled) < 1e-9)
 
-/** Mikeey owl-944: ~1.02687 SOL on-chain vs ~0.8–1.0 real liability should pass the gate. */
+/**
+ * Mikeey owl-944: ~1.02687 SOL on-chain covers unsettled host settlements (~0.84) alone.
+ * Production still fails the gate when failed/cancelled ticket-refund liability (~5.46 SOL)
+ * is stacked on top — that is real underfunding, not settlement overcount.
+ */
 const coverage = evaluateFundsEscrowCoverage({
   hold: {
     configured: true,
@@ -135,9 +139,35 @@ const coverage = evaluateFundsEscrowCoverage({
   },
   required: snap.required,
   feeReserveSol: 0.002,
+  buckets: snap.buckets,
 })
 assert.equal(coverage.covered, true, coverage.error ?? 'expected covered')
 assert.equal(coverage.error, null)
+
+const withRefundHole = emptyFundsEscrowCurrencyBucket()
+addToFundsEscrowBucket(withRefundHole, 'SOL', snap.required.sol + 5.45655)
+const refundBlocked = evaluateFundsEscrowCoverage({
+  hold: {
+    configured: true,
+    address: 'Escrow',
+    sol: 1.02687,
+    usdc: 0,
+    owl: 0,
+    bamboo: 0,
+    goats: 0,
+  },
+  required: withRefundHole,
+  feeReserveSol: 0.002,
+  buckets: {
+    ...snap.buckets,
+    refundableTicketEntries: { ...emptyFundsEscrowCurrencyBucket(), sol: 5.45655 },
+  },
+})
+assert.equal(refundBlocked.covered, false)
+assert.ok(
+  refundBlocked.error && /ticket refunds on failed\/cancelled raffles/i.test(refundBlocked.error),
+  refundBlocked.error ?? 'expected dominant refund bucket in error'
+)
 
 /** Bogus ~8 SOL required (5.04 settlements + ~3 other) must fail against real hold. */
 const bogusRequired = emptyFundsEscrowCurrencyBucket()

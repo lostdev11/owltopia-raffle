@@ -175,11 +175,35 @@ function heldOrZero(n: number | null | undefined): number {
   return n != null && Number.isFinite(n) ? Math.max(0, n) : 0
 }
 
+/** Largest SOL liability bucket — helps ops/support see refunds vs host settlements. */
+export function describeDominantFundsEscrowSolBucket(
+  buckets: FundsEscrowLiabilityBuckets
+): string | null {
+  const ranked: Array<{ label: string; sol: number }> = [
+    { label: 'unclaimed host settlements', sol: buckets.unclaimedRaffleSettlements.sol },
+    {
+      label: 'ticket refunds on failed/cancelled raffles',
+      sol: buckets.refundableTicketEntries.sol,
+    },
+    { label: 'open buyout deposits', sol: buckets.openBuyoutDeposits.sol },
+    { label: 'unclaimed auction settlements', sol: buckets.unclaimedAuctionSettlements.sol },
+    { label: 'open auction bids', sol: buckets.openAuctionBids.sol },
+    { label: 'milestone crypto held', sol: buckets.milestoneCryptoHeld.sol },
+  ]
+    .filter((b) => Number.isFinite(b.sol) && b.sol > 1e-12)
+    .sort((a, b) => b.sol - a.sol)
+  if (ranked.length === 0) return null
+  const top = ranked[0]
+  return `Largest SOL bucket: ${top.label} (~${top.sol.toFixed(5)} SOL)`
+}
+
 export function evaluateFundsEscrowCoverage(params: {
   hold: FundsEscrowPoolBalances
   required: FundsEscrowCurrencyBucket
   /** Extra SOL reserved for network fees across pending outflows. */
   feeReserveSol?: number
+  /** Optional — when set, shortfall error names the dominant SOL bucket. */
+  buckets?: FundsEscrowLiabilityBuckets
 }): FundsEscrowCoverage {
   const feeReserve = Math.max(0, Number(params.feeReserveSol) || 0)
   const requiredSol = params.required.sol + feeReserve
@@ -237,11 +261,17 @@ export function evaluateFundsEscrowCoverage(params: {
     )
   }
 
+  const dominant =
+    shortfall.sol > 0 && params.buckets
+      ? describeDominantFundsEscrowSolBucket(params.buckets)
+      : null
+
   return {
     covered: false,
     shortfall,
     error:
-      `Funds escrow cannot cover outstanding liability: ${parts.join('; ')}. ` +
-      `Please contact support to top up the escrow, then try again.`,
+      `Funds escrow cannot cover outstanding liability: ${parts.join('; ')}` +
+      (dominant ? `. ${dominant}` : '') +
+      `. Please contact support to top up the escrow, then try again.`,
   }
 }

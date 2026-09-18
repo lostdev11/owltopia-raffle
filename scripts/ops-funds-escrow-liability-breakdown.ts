@@ -10,6 +10,9 @@ import { loadFundsEscrowLiabilityWithCoverage } from '../lib/raffles/funds-escro
 
 async function main() {
   const snap = await loadFundsEscrowLiabilityWithCoverage()
+  const holdSol = snap.pool.sol ?? 0
+  const requiredSol = snap.liability.required.sol + snap.feeReserveSol
+  const topUpSol = Math.max(0, requiredSol - holdSol)
   console.log(
     JSON.stringify(
       {
@@ -20,6 +23,9 @@ async function main() {
         hold: snap.pool,
         required: snap.liability.required,
         shortfall: snap.coverage.shortfall,
+        /** Send at least this much SOL to `hold.address` to clear the global claim/refund gate. */
+        topUpSol,
+        topUpAddress: snap.pool.address,
         buckets: snap.liability.buckets,
         counts: snap.liability.counts,
       },
@@ -27,6 +33,11 @@ async function main() {
       2
     )
   )
+  if (!snap.coverage.covered && topUpSol > 0 && snap.pool.address) {
+    console.error(
+      `\nACTION: top up funds escrow ${snap.pool.address} with at least ${topUpSol.toFixed(5)} SOL, then retry claim-proceeds.`
+    )
+  }
 }
 
 main().catch((e) => {

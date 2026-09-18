@@ -94,7 +94,10 @@ export async function POST(request: NextRequest) {
       try {
         if (!entryHasOnChainRefundAmount(entry)) {
           const signature = noPaymentRefundSignature(entry.id)
-          await markEntryRefunded(entry.id, signature)
+          await markEntryRefunded(entry.id, signature, {
+            source: 'admin_send',
+            actorWallet: session.wallet,
+          })
           results.push({ id: entryId, kind: 'ticket', ok: true, transactionSignature: signature })
           continue
         }
@@ -115,7 +118,10 @@ export async function POST(request: NextRequest) {
           results.push({ id: entryId, kind: 'ticket', ok: false, error: 'Escrow refund failed' })
           continue
         }
-        await markEntryRefunded(entry.id, result.signature)
+        await markEntryRefunded(entry.id, result.signature, {
+          source: 'admin_send',
+          actorWallet: session.wallet,
+        })
         results.push({ id: entryId, kind: 'ticket', ok: true, transactionSignature: result.signature })
       } catch (e) {
         await clearEntryRefundLock(entry.id)

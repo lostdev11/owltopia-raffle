@@ -64,6 +64,28 @@ export async function finalizeRaffleCancellation(params: {
     console.error('[finalize-cancellation] zero-payment refund close:', e)
   }
 
+  if (refundPolicy === 'full_refund') {
+    try {
+      const { autoRefundTicketEntriesForRaffle } = await import('@/lib/raffles/auto-ticket-refunds')
+      const auto = await autoRefundTicketEntriesForRaffle({
+        raffleId,
+        source: 'auto_finalize',
+        limit: 40,
+      })
+      if (auto.refunded > 0 || auto.failed > 0) {
+        console.info('[finalize-cancellation] auto-refund', {
+          raffleId,
+          refunded: auto.refunded,
+          failed: auto.failed,
+          stoppedEarly: auto.stoppedEarly,
+          stopReason: auto.stopReason,
+        })
+      }
+    } catch (e) {
+      console.error('[finalize-cancellation] auto-refund:', e)
+    }
+  }
+
   let prizeReturnAttempted = false
   let prizeReturnOk: boolean | undefined
   let prizeReturnSignature: string | undefined

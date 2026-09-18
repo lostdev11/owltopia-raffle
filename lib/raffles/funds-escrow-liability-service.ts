@@ -283,6 +283,7 @@ export async function loadFundsEscrowLiabilityWithCoverage(): Promise<FundsEscro
     hold: pool,
     required: liability.required,
     feeReserveSol: FEE_RESERVE_SOL,
+    buckets: liability.buckets,
   })
   return { liability, coverage, pool, feeReserveSol: FEE_RESERVE_SOL }
 }
