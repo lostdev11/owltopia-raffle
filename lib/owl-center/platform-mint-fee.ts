@@ -16,8 +16,13 @@ export function owlCenterPlatformMintFeeUsdc(): number {
   return owlCenterPlatformMintFeeUsd()
 }
 
-/** Extra SOL reserved for Candy Machine NFT account rent + network fees (beyond platform fee). */
-export const OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS = 20_000_000n
+/**
+ * @deprecated Use live rent from {@link getOwlCenterMintRentReservePerNftLamports} in `@/lib/solana/owl-center-mint-rent`.
+ * Kept as alias for older imports/tests.
+ */
+export {
+  OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS_FALLBACK as OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS,
+} from '@/lib/solana/owl-center-mint-rent'
 
 export function isOwlCenterPlatformMintFeeEnabled(): boolean {
   return owlCenterPlatformMintFeeUsd() > 0
