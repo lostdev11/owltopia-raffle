@@ -1,7 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { usePathname } from 'next/navigation'
 
+import { buildPathHashUrl } from '@/lib/client/browser-url-sync'
 import { replaceClientUrl } from '@/lib/client/replace-url'
 import type { OwlCenterGen2Section } from '@/lib/owl-center/nav'
 import { cn } from '@/lib/utils'
@@ -13,15 +15,19 @@ export function OwlCenterSectionNav({
   sections: OwlCenterGen2Section[]
   className?: string
 }) {
+  const pathname = usePathname() ?? ''
   const [activeId, setActiveId] = useState(sections[0]?.id ?? '')
 
-  const scrollTo = useCallback((id: string) => {
-    const el = document.getElementById(id)
-    if (!el) return
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    setActiveId(id)
-    replaceClientUrl(`#${id}`)
-  }, [])
+  const scrollTo = useCallback(
+    (id: string) => {
+      const el = document.getElementById(id)
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setActiveId(id)
+      if (pathname) replaceClientUrl(buildPathHashUrl(pathname, id))
+    },
+    [pathname]
+  )
 
   useEffect(() => {
     const hash = typeof window !== 'undefined' ? window.location.hash.replace(/^#/, '') : ''

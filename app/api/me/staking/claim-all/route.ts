@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
       batch_count: result.batch_count ?? 1,
       skipped_lock_count:
         typeof result.skipped_lock_count === 'number' ? result.skipped_lock_count : 0,
+      skipped_owl: typeof result.skipped_owl === 'number' ? result.skipped_owl : 0,
       skipped_locks: Array.isArray(result.skipped_locks) ? result.skipped_locks : [],
       execution: {
         path: result.execution_path,

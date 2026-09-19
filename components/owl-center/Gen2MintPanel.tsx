@@ -16,17 +16,16 @@ import {
   owlCenterPhaseLabel,
 } from '@/lib/owl-center/phase-display'
 import { useGen2MintEligibility } from '@/hooks/use-gen2-mint-eligibility'
-import { finalizeMintSessionOptimistic, isHardMintConfirmFailure } from '@/lib/owl-center/mint-finalize-client'
+import { finalizeMintSessionOptimistic, isHardMintConfirmFailure, runRecoveredMintConfirm } from '@/lib/owl-center/mint-finalize-client'
 import {
   attemptOwlCenterMintRecovery,
   isLikelyWalletMintDisconnectError,
 } from '@/lib/owl-center/mint-recovery-client'
-import { recordMintSessionConfirms, type MintConfirmBatchPayload } from '@/lib/owl-center/mint-session'
+import { type MintConfirmBatchPayload } from '@/lib/owl-center/mint-session'
 import type { RecoveredCandyMachineMint } from '@/lib/solana/recover-candy-machine-mint'
 import { reasonLabel } from '@/lib/owl-center/mint-check-reason-label'
 import {
   createMintSessionDeadline,
-  mintConfirmBackgroundBudgetMs,
   MINT_SESSION_OUTER_MAX_MS,
   MintSessionTimeoutError,
   raceMintSessionBudget,
@@ -145,6 +144,7 @@ export function Gen2MintPanel({
   const [mintedAddresses, setMintedAddresses] = useState<string[]>([])
   const [mintedCount, setMintedCount] = useState(0)
   const [mintProgress, setMintProgress] = useState<MintProgressSnapshot | null>(null)
+  const [mintSuccessNotice, setMintSuccessNotice] = useState<string | null>(null)
   const [recoveringMint, setRecoveringMint] = useState(false)
   // Mint pubkeys planned for the last attempt + the phase it ran in — used to recover a mint that
   // landed on-chain after a mobile wallet (Phantom/Solflare) disconnected before the site finished.
@@ -162,6 +162,7 @@ export function Gen2MintPanel({
     setMintedAddresses([])
     setMintedCount(0)
     setMintProgress(null)
+    setMintSuccessNotice(null)
   }, [])
 
   const cmConfigured = Boolean(getGen2CandyMachineId(launch)?.trim() && getGen2CollectionMint(launch)?.trim())
@@ -196,65 +197,35 @@ export function Gen2MintPanel({
 
       setStep('recording_mint')
       setMintProgress({ current: 0, total: 1, phase: 'record' })
-      try {
-        // The scan can surface a bot-tax tx (touched the Candy Machine, minted nothing) — the
-        // confirm route proves no NFT and rejects it, which used to throw here with the overlay
-        // still on `recording_mint`, hanging forever on "Saving your mint…". Bound the confirm with
-        // a budget and always resolve to a terminal step (success or error) below.
-        const recordDeadline = createMintSessionDeadline(mintConfirmBackgroundBudgetMs(sigs.length))
-        const recorded = await raceMintSessionBudget(
-          recordDeadline,
-          recordMintSessionConfirms(
-            sigs,
-            mintPks,
-            (payload) => postGen2Confirm(payload, phaseForConfirm),
-            () => setMintProgress({ current: 1, total: 1, phase: 'record' })
-          ),
-          'Saving mint timed out'
-        )
-        const count = recorded.confirmedCount || mintPks.length || 1
-        setLastSig(recorded.lastSig ?? sigs[sigs.length - 1] ?? null)
-        setMintedAddresses(mintPks.length ? mintPks : [])
-        setMintedCount(count)
-        setErr(null)
+      // Bound confirm + always terminal step — shared with CollectionMintPanel.
+      const result = await runRecoveredMintConfirm({
+        sigs,
+        mintPks,
+        confirmBatch: (payload) => postGen2Confirm(payload, phaseForConfirm),
+        onProgress: () => setMintProgress({ current: 1, total: 1, phase: 'record' }),
+      })
+
+      if (result.kind === 'error') {
         setMintProgress(null)
-        setStep('success')
-        // Debit locally so the Mint button reflects the recovered mint immediately.
-        applyMinted(count)
-        onRefresh()
-        void loadElig({ background: true })
-        return true
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
-        setMintProgress(null)
-        // Hard failure (server verify proved no NFT minted) OR nothing concrete to show: the scan
-        // matched a bot-tax / fees-only tx. Clear the overlay and tell the user only fees were
-        // charged so they can retry — never leave them stuck on "Saving your mint…".
-        if (isHardMintConfirmFailure(msg) || mintPks.length === 0) {
-          setMintedAddresses([])
-          setMintedCount(0)
-          setLastSig(null)
-          setErr(
-            isHardMintConfirmFailure(msg)
-              ? 'That didn’t go through — no NFT was minted (you were only charged the network + platform fee, not the mint price). Your allocation is intact; tap Mint to try again.'
-              : 'Couldn’t confirm a mint — check Collectibles in your wallet, then tap Mint to try again if it isn’t there.'
-          )
-          setStep('error')
-          void loadElig()
-          return false
-        }
-        // Soft failure (RPC lag / save timeout) but an NFT WAS detected on-chain — keep the win and
-        // let the unload beacon + reconcile cron persist it to the DB.
-        setLastSig(sigs[sigs.length - 1] ?? null)
-        setMintedAddresses(mintPks)
-        setMintedCount(mintPks.length || 1)
-        setErr(null)
-        setStep('success')
-        applyMinted(mintPks.length || 1)
-        onRefresh()
-        void loadElig({ background: true })
-        return true
+        setMintedAddresses([])
+        setMintedCount(0)
+        setLastSig(null)
+        setErr(result.message)
+        setStep('error')
+        void loadElig()
+        return false
       }
+
+      setLastSig(result.lastSig)
+      setMintedAddresses(result.mintAddresses)
+      setMintedCount(result.count)
+      setErr(null)
+      setMintProgress(null)
+      setStep('success')
+      applyMinted(result.count)
+      onRefresh()
+      void loadElig({ background: true })
+      return true
     },
     [walletStr, elig?.active_phase, postGen2Confirm, applyMinted, onRefresh, loadElig]
   )
@@ -378,6 +349,7 @@ export function Gen2MintPanel({
     setMintedAddresses([])
     setMintedCount(0)
     setMintProgress(null)
+    setMintSuccessNotice(null)
     if (!connected || !walletStr || !adapter) {
       setErr('Wallet not connected')
       setStep('error')
@@ -476,10 +448,11 @@ export function Gen2MintPanel({
             throw new Error(cj.error || 'Confirm route failed')
           }
         },
-        onSuccess: ({ lastSig, mintedAddresses, mintedCount }) => {
+        onSuccess: ({ lastSig, mintedAddresses, mintedCount, warning }) => {
           setLastSig(lastSig)
           setMintedAddresses(mintedAddresses)
           setMintedCount(mintedCount)
+          setMintSuccessNotice(warning)
           setMintProgress(null)
           setStep('success')
           // Debit the allocation locally so the Mint button disables immediately — prevents a
@@ -615,6 +588,7 @@ export function Gen2MintPanel({
         preferMainnet={mintNetwork === 'mainnet'}
         transactionSignature={lastSig ?? ''}
         explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}
+        notice={mintSuccessNotice}
         onClose={dismissSuccess}
       />
       <MintPanelShell embedded={embedded} label="mint_console">
@@ -714,8 +688,8 @@ export function Gen2MintPanel({
             <p className="text-sm text-[#9BA8B4]">
               GEN1 phase: mint up to{' '}
               <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> — one free Gen2 per Gen1 in the
-              airdrop snapshot ({elig.gen1_snapshot.gen1_nft_count} reserved). Approve once in your wallet to mint your
-              selected quantity.
+              airdrop snapshot ({elig.gen1_snapshot.gen1_nft_count} reserved). One wallet approval mints your
+              selected quantity (your wallet may list each NFT).
             </p>
           ) : null}
 
@@ -759,7 +733,8 @@ export function Gen2MintPanel({
             <p className="text-sm text-[#9BA8B4]">
               Presale redemption (free — already paid): mint up to{' '}
               <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> at once from your presale credits (
-              {elig.presale_balance.purchased_available_mints} left). One wallet approval mints your selected quantity.
+              {elig.presale_balance.purchased_available_mints} left). One wallet approval mints your selected quantity
+              (your wallet may list each NFT).
             </p>
           ) : null}
 
@@ -768,7 +743,8 @@ export function Gen2MintPanel({
               WL phase: mint up to{' '}
               <span className="font-mono text-[#00FF9C]">{elig.max_mintable}</span> at once from your{' '}
               {elig.wl_allocation.available_mints} assigned WL spot
-              {elig.wl_allocation.available_mints === 1 ? '' : 's'}. One wallet approval mints your selected quantity.
+              {elig.wl_allocation.available_mints === 1 ? '' : 's'}. One wallet approval mints your selected quantity
+              (your wallet may list each NFT).
             </p>
           ) : null}
 
@@ -856,8 +832,8 @@ export function Gen2MintPanel({
           ) : null}
 
           <p className="text-xs text-[#5C6773]">
-            Phantom / Solflare: approve once to mint your selected quantity. Mint price is shown in
-            USD — your wallet also needs SOL for fees (≈$1 platform fee + network + NFT rent).
+            Phantom / Solflare: one approval mints your selected quantity (wallet may list each NFT). Mint price is shown
+            in USD — your wallet also needs SOL for fees (≈$1 platform fee + network + NFT rent).
           </p>
         </div>
     </MintPanelShell>

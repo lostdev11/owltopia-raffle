@@ -6,6 +6,14 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { ArrowLeft, ChevronDown, Globe, Loader2, PauseCircle, Plus, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -27,7 +35,10 @@ import { AdminWalletNestAssetsPanel } from '@/components/nesting/AdminWalletNest
 import type { NestingWalletNestAsset } from '@/lib/nesting/admin-wallet-diagnostics'
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { PoolOnChainSettingsForm } from '@/components/nesting/PoolOnChainSettingsForm'
-import { NESTING_RECONCILE_MAX_BATCH } from '@/lib/nesting/rpc-policy'
+import {
+  NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH,
+  NESTING_RECONCILE_MAX_BATCH,
+} from '@/lib/nesting/rpc-policy'
 import {
   buildQuickNftPoolDescription,
   isProbableSolanaPubkey,
@@ -107,8 +118,21 @@ export function AdminNestingClient() {
   const [forceUnstakeMode, setForceUnstakeMode] = useState<'position' | 'wallet'>('position')
   const [forceUnstakePositionId, setForceUnstakePositionId] = useState('')
   const [forceUnstakeWallet, setForceUnstakeWallet] = useState('')
+  /** Empty = all projects; otherwise a staking_pools.id perch. */
+  const [forceUnstakePoolId, setForceUnstakePoolId] = useState('')
+  /** Empty = all eligible (up to batch max); otherwise nest count to leave. */
+  const [forceUnstakeCount, setForceUnstakeCount] = useState('')
   const [forceUnstaking, setForceUnstaking] = useState(false)
   const [forceUnstakeMsg, setForceUnstakeMsg] = useState<string | null>(null)
+  /** In-app confirm for wallet force-leave (replaces window.confirm). */
+  const [forceUnstakeConfirm, setForceUnstakeConfirm] = useState<{
+    wallet: string
+    walletBody: { wallet_address: string; pool_id?: string; limit?: number }
+    leaveCount: number
+    eligible: number
+    projectLabel: string | null
+    partial: boolean
+  } | null>(null)
 
   const [supportWallet, setSupportWallet] = useState('')
   const [walletDiagRunning, setWalletDiagRunning] = useState(false)
@@ -859,6 +883,102 @@ export function AdminNestingClient() {
     supportPlaybook?.nest_diagnostics.positions_under_wallet.ghost_active ??
     0
 
+  const forceUnstakePoolOptions = [...pools].sort((a, b) => {
+    const partnerA = (a.partner_project_slug || '').toLowerCase()
+    const partnerB = (b.partner_project_slug || '').toLowerCase()
+    if (partnerA !== partnerB) return partnerA.localeCompare(partnerB)
+    return (a.name || a.slug || '').localeCompare(b.name || b.slug || '')
+  })
+
+  const forceUnstakePoolLabel = (() => {
+    if (!forceUnstakePoolId) return null
+    const pool = pools.find((p) => p.id === forceUnstakePoolId)
+    if (!pool) return forceUnstakePoolId
+    const partner = pool.partner_project_slug?.trim()
+    return partner ? `${pool.name} (${partner})` : pool.name || pool.slug || pool.id
+  })()
+
+  /** Parsed nest count for wallet force leave; null = leave all eligible (up to batch max). */
+  const parseForceUnstakeCount = (): number | null | 'invalid' => {
+    const raw = forceUnstakeCount.trim()
+    if (!raw) return null
+    const n = Number(raw)
+    if (!Number.isInteger(n) || n <= 0) return 'invalid'
+    return Math.min(n, NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH)
+  }
+
+  const executeWalletForceUnstake = async (pending: {
+    wallet: string
+    walletBody: { wallet_address: string; pool_id?: string; limit?: number }
+  }) => {
+    const { wallet, walletBody } = pending
+    const poolScope = walletBody.pool_id ?? null
+    setForceUnstaking(true)
+    try {
+      const res = await fetch('/api/admin/staking/unstake-override', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...walletBody, unstake_all: true }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSaveError(typeof json?.error === 'string' ? json.error : 'Force unstake all failed')
+        return
+      }
+      const closed = Array.isArray(json?.closed) ? json.closed.length : 0
+      const failed = Array.isArray(json?.failed) ? json.failed.length : 0
+      const remaining =
+        typeof json?.remaining_eligible === 'number' ? json.remaining_eligible : 0
+      const needsOwnerThaw =
+        typeof json?.needs_owner_thaw_count === 'number'
+          ? json.needs_owner_thaw_count
+          : Array.isArray(json?.closed)
+            ? json.closed.filter((c: { needs_owner_thaw?: boolean }) => c?.needs_owner_thaw).length
+            : 0
+      const failSamples = Array.isArray(json?.failed)
+        ? json.failed
+            .slice(0, 3)
+            .map((f: { error?: string; asset_identifier?: string | null }) => {
+              const asset =
+                typeof f?.asset_identifier === 'string' && f.asset_identifier.trim()
+                  ? `${f.asset_identifier.trim().slice(0, 8)}…`
+                  : 'asset?'
+              return `${asset}: ${typeof f?.error === 'string' ? f.error : 'unknown error'}`
+            })
+            .filter(Boolean)
+        : []
+      const failNote =
+        failed > 0
+          ? ` ${failed} failed${failSamples.length > 0 ? ` (${failSamples.join(' | ')})` : ''}.`
+          : ''
+      const thawNote =
+        needsOwnerThaw > 0
+          ? ` ${needsOwnerThaw} NFT(s) still Owner-frozen on-chain — ask the holder to open My nest and use “Thaw leftover nest locks” (or approve updatePlugin frozen:false in their wallet).`
+          : ''
+      const remainNote =
+        remaining > 0
+          ? ` ${remaining} still eligible — run Force leave again to continue the batch.`
+          : ''
+      const scopeNote =
+        typeof json?.pool_name === 'string' && json.pool_name.trim()
+          ? ` (project ${json.pool_name.trim()})`
+          : poolScope
+            ? ' (selected project)'
+            : ''
+      setForceUnstakeMsg(
+        `Closed ${closed} nest(s) for ${typeof json?.wallet === 'string' ? json.wallet : wallet}${scopeNote}.${failNote}${thawNote}${remainNote}`
+      )
+      if (remaining === 0 && failed === 0) {
+        setForceUnstakeWallet('')
+        setForceUnstakeCount('')
+      }
+    } finally {
+      setForceUnstaking(false)
+      setForceUnstakeConfirm(null)
+    }
+  }
+
   const runForceUnstake = async () => {
     setForceUnstakeMsg(null)
     setSaveError(null)
@@ -866,12 +986,27 @@ export function AdminNestingClient() {
     if (forceUnstakeMode === 'wallet') {
       const wallet = forceUnstakeWallet.trim()
       if (!wallet) {
-        setSaveError('Paste the holder wallet address to force leave all open nests.')
+        setSaveError('Paste the holder wallet address to force leave open nests.')
         return
       }
       if (!isProbableSolanaPubkey(wallet)) {
         setSaveError('Wallet address does not look like a Solana pubkey.')
         return
+      }
+
+      const nestCount = parseForceUnstakeCount()
+      if (nestCount === 'invalid') {
+        setSaveError(
+          `Nests to leave must be a positive integer (max ${NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH} per run).`
+        )
+        return
+      }
+
+      const poolScope = forceUnstakePoolId.trim() || null
+      const walletBody = {
+        wallet_address: wallet,
+        ...(poolScope ? { pool_id: poolScope } : {}),
+        ...(nestCount != null ? { limit: nestCount } : {}),
       }
 
       setForceUnstaking(true)
@@ -880,7 +1015,7 @@ export function AdminNestingClient() {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ wallet_address: wallet, preview: true }),
+          body: JSON.stringify({ ...walletBody, preview: true }),
         })
         const previewJson = await previewRes.json().catch(() => ({}))
         if (!previewRes.ok) {
@@ -896,68 +1031,25 @@ export function AdminNestingClient() {
               ? previewJson.candidates.length
               : 0
         if (eligible <= 0) {
-          setSaveError('No open nests eligible for admin force leave on this wallet.')
+          setSaveError(
+            poolScope
+              ? 'No open nests eligible for admin force leave on this wallet for the selected project.'
+              : 'No open nests eligible for admin force leave on this wallet.'
+          )
           return
         }
-        const ok = window.confirm(
-          `Force leave ${eligible} open nest(s) for ${wallet}? This bypasses lock timers and cannot be undone from this panel.`
-        )
-        if (!ok) return
-
-        const res = await fetch('/api/admin/staking/unstake-override', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ wallet_address: wallet, unstake_all: true }),
+        const leaveCount =
+          nestCount != null
+            ? Math.min(nestCount, eligible)
+            : Math.min(eligible, NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH)
+        setForceUnstakeConfirm({
+          wallet,
+          walletBody,
+          leaveCount,
+          eligible,
+          projectLabel: forceUnstakePoolLabel,
+          partial: nestCount != null && leaveCount < eligible,
         })
-        const json = await res.json().catch(() => ({}))
-        if (!res.ok) {
-          setSaveError(typeof json?.error === 'string' ? json.error : 'Force unstake all failed')
-          return
-        }
-        const closed = Array.isArray(json?.closed) ? json.closed.length : 0
-        const failed = Array.isArray(json?.failed) ? json.failed.length : 0
-        const remaining =
-          typeof json?.remaining_eligible === 'number' ? json.remaining_eligible : 0
-        const needsOwnerThaw =
-          typeof json?.needs_owner_thaw_count === 'number'
-            ? json.needs_owner_thaw_count
-            : Array.isArray(json?.closed)
-              ? json.closed.filter((c: { needs_owner_thaw?: boolean }) => c?.needs_owner_thaw)
-                  .length
-              : 0
-        const failSamples = Array.isArray(json?.failed)
-          ? json.failed
-              .slice(0, 3)
-              .map((f: { error?: string; asset_identifier?: string | null }) => {
-                const asset =
-                  typeof f?.asset_identifier === 'string' && f.asset_identifier.trim()
-                    ? `${f.asset_identifier.trim().slice(0, 8)}…`
-                    : 'asset?'
-                return `${asset}: ${typeof f?.error === 'string' ? f.error : 'unknown error'}`
-              })
-              .filter(Boolean)
-          : []
-        const failNote =
-          failed > 0
-            ? ` ${failed} failed${
-                failSamples.length > 0 ? ` (${failSamples.join(' | ')})` : ''
-              }.`
-            : ''
-        const thawNote =
-          needsOwnerThaw > 0
-            ? ` ${needsOwnerThaw} NFT(s) still Owner-frozen on-chain — ask the holder to open My nest and use “Thaw leftover nest locks” (or approve updatePlugin frozen:false in their wallet).`
-            : ''
-        const remainNote =
-          remaining > 0
-            ? ` ${remaining} still eligible — run Force leave all again to continue the batch.`
-            : ''
-        setForceUnstakeMsg(
-          `Closed ${closed} nest(s) for ${typeof json?.wallet === 'string' ? json.wallet : wallet}.${failNote}${thawNote}${remainNote}`
-        )
-        if (remaining === 0 && failed === 0) {
-          setForceUnstakeWallet('')
-        }
       } finally {
         setForceUnstaking(false)
       }
@@ -1945,7 +2037,7 @@ export function AdminNestingClient() {
       <section className="space-y-4">
         <SectionHeader
           title="Support: force leave nest"
-          description="Runs the same on-chain / DB unstake as the holder’s Leave nest — bypasses lock timer, council vote lock, and global nesting pause. For NFTs, also skips Helius collection grouping when the pool collection_key does not match the asset (uses on-chain owner + asset collection). Owner-authority freeze locks cannot be thawed by the server keypair: admin force leave still closes the nest in the ledger and reports that the holder must thaw the NFT from their wallet. Close one nest by staking_positions.id, or force leave all eligible open nests for a holder wallet."
+          description="Runs the same on-chain / DB unstake as the holder’s Leave nest — bypasses lock timer, council vote lock, and global nesting pause. For NFTs, also skips Helius collection grouping when the pool collection_key does not match the asset (uses on-chain owner + asset collection). Owner-authority freeze locks cannot be thawed by the server keypair: admin force leave still closes the nest in the ledger and reports that the holder must thaw the NFT from their wallet. Close one nest by staking_positions.id, or force leave eligible open nests for a holder wallet (optionally scoped to one project/perch — useful for partner nests)."
         />
         <Card className="rounded-xl border-amber-500/30 bg-amber-500/5">
           <CardHeader>
@@ -1958,7 +2050,10 @@ export function AdminNestingClient() {
             <p className="text-xs text-muted-foreground leading-relaxed">
               For NFT perches with freeze locks, the server signs thaw with your configured freeze authority. For token
               vaults, tokens return to the holder wallet on record. Use position id for a single nest; use holder wallet
-              to unstake all eligible open nests (up to 25 per run — re-run if more remain).
+              to unstake eligible open nests (up to {NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH} per run — re-run if more
+              remain). Optionally set “Nests to leave” to close only that many (oldest first). Choose a project to limit
+              force leave to that perch only (e.g. a partner collection nested with us); leave All projects to match
+              prior behavior.
             </p>
             <div
               className="grid grid-cols-2 gap-1 rounded-xl border border-white/[0.08] bg-black/25 p-1"
@@ -1995,7 +2090,7 @@ export function AdminNestingClient() {
                   setForceUnstakeMsg(null)
                 }}
               >
-                Holder wallet (all)
+                Holder wallet
               </button>
             </div>
             {forceUnstakeMode === 'position' ? (
@@ -2012,17 +2107,71 @@ export function AdminNestingClient() {
                 />
               </div>
             ) : (
-              <div className="space-y-2">
-                <Label htmlFor="force-unstake-wallet">Holder wallet</Label>
-                <Input
-                  id="force-unstake-wallet"
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="Base58 wallet address"
-                  value={forceUnstakeWallet}
-                  onChange={(e) => setForceUnstakeWallet(e.target.value)}
-                  className="font-mono text-xs min-h-[44px] touch-manipulation"
-                />
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="force-unstake-wallet">Holder wallet</Label>
+                  <Input
+                    id="force-unstake-wallet"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="Base58 wallet address"
+                    value={forceUnstakeWallet}
+                    onChange={(e) => setForceUnstakeWallet(e.target.value)}
+                    className="font-mono text-xs min-h-[44px] touch-manipulation"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="force-unstake-pool">Project (perch)</Label>
+                  <select
+                    id="force-unstake-pool"
+                    value={forceUnstakePoolId}
+                    onChange={(e) => {
+                      setForceUnstakePoolId(e.target.value)
+                      setForceUnstakeMsg(null)
+                    }}
+                    className="min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-sm touch-manipulation"
+                    disabled={loadingPools && pools.length === 0}
+                  >
+                    <option value="">All projects</option>
+                    {forceUnstakePoolOptions.map((pool) => {
+                      const partner = pool.partner_project_slug?.trim()
+                      const label = partner
+                        ? `${pool.name} · ${partner}${pool.is_active ? '' : ' (inactive)'}`
+                        : `${pool.name}${pool.is_active ? '' : ' (inactive)'}`
+                      return (
+                        <option key={pool.id} value={pool.id}>
+                          {label}
+                        </option>
+                      )
+                    })}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Partner perches show their partner project slug. All projects keeps the previous force-leave-all
+                    behavior.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="force-unstake-count">Nests to leave</Label>
+                  <Input
+                    id="force-unstake-count"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH}
+                    autoComplete="off"
+                    placeholder={`All eligible (max ${NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH})`}
+                    value={forceUnstakeCount}
+                    onChange={(e) => {
+                      setForceUnstakeCount(e.target.value)
+                      setForceUnstakeMsg(null)
+                    }}
+                    className="min-h-[44px] touch-manipulation"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Leave blank to close all eligible nests in this run (oldest first, max{' '}
+                    {NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH}). Set e.g. 18 to leave only that many.
+                  </p>
+                </div>
               </div>
             )}
             <div className="flex flex-wrap items-center gap-3">
@@ -2039,7 +2188,17 @@ export function AdminNestingClient() {
                 onClick={() => void runForceUnstake()}
               >
                 {forceUnstaking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                {forceUnstakeMode === 'wallet' ? 'Force leave all nests' : 'Force leave nest'}
+                {forceUnstakeMode === 'wallet'
+                  ? (() => {
+                      const parsed = parseForceUnstakeCount()
+                      if (typeof parsed === 'number') {
+                        return `Force leave ${parsed} nest${parsed === 1 ? '' : 's'}`
+                      }
+                      return forceUnstakePoolId
+                        ? 'Force leave project nests'
+                        : 'Force leave all nests'
+                    })()
+                  : 'Force leave nest'}
               </Button>
               {forceUnstakeMsg ? (
                 <p className="text-sm text-muted-foreground max-w-xl">{forceUnstakeMsg}</p>
@@ -2047,6 +2206,88 @@ export function AdminNestingClient() {
             </div>
           </CardContent>
         </Card>
+
+        <Dialog
+          open={forceUnstakeConfirm != null}
+          onOpenChange={(open) => {
+            if (!open && !forceUnstaking) setForceUnstakeConfirm(null)
+          }}
+        >
+          <DialogContent
+            className="sm:max-w-md max-h-[min(90dvh,32rem)] overflow-y-auto touch-manipulation"
+            onPointerDownOutside={(e) => {
+              if (forceUnstaking) e.preventDefault()
+            }}
+            onEscapeKeyDown={(e) => {
+              if (forceUnstaking) e.preventDefault()
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle className="pr-8 flex items-center gap-2 text-amber-100">
+                <ShieldAlert className="h-5 w-5 shrink-0 text-amber-400" aria-hidden />
+                Confirm force leave
+              </DialogTitle>
+              <DialogDescription asChild>
+                <div className="space-y-3 text-left text-foreground pt-1">
+                  {forceUnstakeConfirm ? (
+                    <>
+                      <p className="text-sm">
+                        Force leave{' '}
+                        <strong>
+                          {forceUnstakeConfirm.partial
+                            ? `${forceUnstakeConfirm.leaveCount} of ${forceUnstakeConfirm.eligible}`
+                            : forceUnstakeConfirm.leaveCount}
+                        </strong>{' '}
+                        open nest{forceUnstakeConfirm.leaveCount === 1 ? '' : 's'} for
+                      </p>
+                      <p className="font-mono text-xs break-all rounded-md border border-white/10 bg-black/30 px-3 py-2">
+                        {forceUnstakeConfirm.wallet}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {forceUnstakeConfirm.projectLabel
+                          ? `Project: ${forceUnstakeConfirm.projectLabel}`
+                          : 'Scope: all projects'}
+                      </p>
+                      <ul className="text-sm list-disc pl-5 space-y-1.5 text-muted-foreground">
+                        <li>Oldest nests first</li>
+                        <li>Bypasses lock timers</li>
+                        <li>Cannot be undone from this panel</li>
+                      </ul>
+                    </>
+                  ) : null}
+                </div>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-[44px] touch-manipulation"
+                disabled={forceUnstaking}
+                onClick={() => setForceUnstakeConfirm(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                className="min-h-[44px] touch-manipulation"
+                disabled={forceUnstaking || !forceUnstakeConfirm}
+                onClick={() => {
+                  if (!forceUnstakeConfirm) return
+                  void executeWalletForceUnstake(forceUnstakeConfirm)
+                }}
+              >
+                {forceUnstaking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                {forceUnstakeConfirm
+                  ? `Force leave ${forceUnstakeConfirm.leaveCount} nest${
+                      forceUnstakeConfirm.leaveCount === 1 ? '' : 's'
+                    }`
+                  : 'Force leave'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </section>
 
       <section>

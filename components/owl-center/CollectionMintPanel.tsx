@@ -18,8 +18,7 @@ import { publicSimpleMintGuardGroupLabel } from '@/lib/owl-center/public-simple-
 import { isLaunchWhitelistWindowOpen } from '@/lib/owl-center/launch-wl-window'
 import { isPublicSimpleMintOpen } from '@/lib/owl-center/phase-schedule'
 import { postCollectionConfirmMintWithRetry } from '@/lib/owl-center/confirm-mint-client'
-import { finalizeMintSessionOptimistic, isHardMintConfirmFailure } from '@/lib/owl-center/mint-finalize-client'
-import { recordMintSessionConfirms } from '@/lib/owl-center/mint-session'
+import { finalizeMintSessionOptimistic, isHardMintConfirmFailure, runRecoveredMintConfirm } from '@/lib/owl-center/mint-finalize-client'
 import {
   createMintSessionDeadline,
   MINT_SESSION_OUTER_MAX_MS,
@@ -93,6 +92,7 @@ export function CollectionMintPanel({
   const [mintedAddresses, setMintedAddresses] = useState<string[]>([])
   const [mintedCount, setMintedCount] = useState(0)
   const [mintProgress, setMintProgress] = useState<MintProgressSnapshot | null>(null)
+  const [mintSuccessNotice, setMintSuccessNotice] = useState<string | null>(null)
   const [recoveringMint, setRecoveringMint] = useState(false)
   const lastPlannedMintB58sRef = useRef<string[]>([])
 
@@ -140,6 +140,7 @@ export function CollectionMintPanel({
     setMintedAddresses([])
     setMintedCount(0)
     setMintProgress(null)
+    setMintSuccessNotice(null)
   }, [])
 
   const finalizeRecoveredMint = useCallback(
@@ -148,16 +149,14 @@ export function CollectionMintPanel({
 
       const sigs = recovered.txSignatures
       const mintPks = recovered.mintedNftMints
-      let confirmedCount = 0
-      let confirmedLastSig: string | null = null
-      let confirmedMintAddresses: string[] = []
 
       setStep('recording_mint')
       setMintProgress({ current: 0, total: 1, phase: 'record' })
-      const recorded = await recordMintSessionConfirms(
+      // Bound confirm + always terminal step — never hang on "Saving your mint…" (Gen2 parity).
+      const result = await runRecoveredMintConfirm({
         sigs,
         mintPks,
-        async ({ txSignature, quantity, mintedNftMints }) => {
+        confirmBatch: async ({ txSignature, quantity, mintedNftMints }) => {
           await postCollectionConfirmMintWithRetry(slug, {
             wallet: walletStr,
             txSignature,
@@ -167,21 +166,29 @@ export function CollectionMintPanel({
             network: mintNetwork,
           })
         },
-        () => {
-          confirmedCount = Math.max(mintPks.length, 1)
-          setMintedCount(Math.max(mintPks.length, 1))
+        onProgress: () => {
           setMintProgress({ current: 1, total: 1, phase: 'record' })
-        }
-      )
-      confirmedLastSig = recorded.lastSig
+        },
+      })
 
-      setLastSig(confirmedLastSig ?? sigs[sigs.length - 1] ?? null)
-      setMintedAddresses(mintPks.length ? mintPks : [])
-      setMintedCount(confirmedCount || mintPks.length || 1)
+      if (result.kind === 'error') {
+        setMintProgress(null)
+        setMintedAddresses([])
+        setMintedCount(0)
+        setLastSig(null)
+        setErr(result.message)
+        setStep('error')
+        void loadElig()
+        return false
+      }
+
+      setLastSig(result.lastSig)
+      setMintedAddresses(result.mintAddresses)
+      setMintedCount(result.count)
       setErr(null)
       setMintProgress(null)
       setStep('success')
-      applyMinted(confirmedCount || mintPks.length || 1)
+      applyMinted(result.count)
       onRefresh()
       void loadElig({ background: true })
       return true
@@ -230,6 +237,7 @@ export function CollectionMintPanel({
     setMintedAddresses([])
     setMintedCount(0)
     setMintProgress(null)
+    setMintSuccessNotice(null)
     if (!connected || !walletStr || !adapter) {
       setErr('Connect your wallet (Phantom / Solflare on mobile)')
       setStep('error')
@@ -335,10 +343,11 @@ export function CollectionMintPanel({
             network: mintNetwork,
           })
         },
-        onSuccess: ({ lastSig, mintedAddresses, mintedCount }) => {
+        onSuccess: ({ lastSig, mintedAddresses, mintedCount, warning }) => {
           setLastSig(lastSig)
           setMintedAddresses(mintedAddresses)
           setMintedCount(mintedCount)
+          setMintSuccessNotice(warning)
           setMintProgress(null)
           setStep('success')
           // Debit locally so Mint disables immediately — prevents a second tap that only pays
@@ -430,7 +439,7 @@ export function CollectionMintPanel({
     cmConfigured,
   })
 
-  /** Prefer browser-local formatting when the API only sent a UTC-formatted reason string. */
+  /** Prefer preference-aware formatting when the API only sent a UTC-formatted reason string. */
   const scheduleWaitMessage = useMemo(() => {
     if (elig?.phase_starts_at) {
       return `Public mint opens ${formatMintDate(elig.phase_starts_at)}`
@@ -467,6 +476,7 @@ export function CollectionMintPanel({
         preferMainnet={mintNetwork === 'mainnet'}
         transactionSignature={lastSig ?? ''}
         explorerUrl={lastSig ? owlCenterSolanaExplorerTxUrl(lastSig, mintNetwork) : '#'}
+        notice={mintSuccessNotice}
         onClose={dismissSuccess}
       />
       <CommandCard label={`MINT // ${phaseName.toLowerCase()} · ${mintNetwork}`}>
@@ -477,9 +487,9 @@ export function CollectionMintPanel({
           {' · '}
           {platformFeeLabel}
           {' · '}
-          limit {elig?.wallet_mint_limit ?? launch.wallet_mint_limit}/wallet
-          {elig && connected ? ` · you: ${elig.wallet_minted}/${elig.wallet_mint_limit}` : ''} · {remaining}{' '}
-          remaining
+          limit {elig?.wallet_mint_limit ?? launch.wallet_mint_limit} from this phase
+          {elig && connected ? ` · you: ${elig.wallet_minted}/${elig.wallet_mint_limit} this phase` : ''} ·{' '}
+          {remaining} remaining
         </p>
         {launch.mint_standard === 'core' &&
         launch.freeze_enabled &&

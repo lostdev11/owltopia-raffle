@@ -21,12 +21,16 @@ import {
   isSwitchboardGatewayTransientError,
   isVrfRevealTimeoutError,
   isInvalidVrfSecpSignatureError,
+  isBlockhashNotFoundError,
   isRetryableVrfRevealError,
   resolveVrfRevealWaitMs,
   vrfRevealRetryDelayMs,
   shouldAutoForceNewVrfRequest,
   resolveAdminVrfForceNewRequest,
   resolveSwitchboardOracleRpcUrl,
+  resolveSwitchboardOracleRpcCandidates,
+  SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES,
+  SWITCHBOARD_SIMULATE_OPTS,
   DRAW_ALGO_V1,
   DRAW_ALGO_V2_COMMIT_REVEAL,
   DRAW_ALGO_V3_VRF,
@@ -253,6 +257,15 @@ assert.equal(
     ),
     true
   )
+  // Pack open prod cliff: CU sim without replaceRecentBlockhash → BlockhashNotFound.
+  assert.equal(isBlockhashNotFoundError('Switchboard tx simulation failed: "BlockhashNotFound"'), true)
+  assert.equal(isBlockhashNotFoundError('Transaction simulation failed: Blockhash not found'), true)
+  assert.equal(isRetryableVrfRevealError('Switchboard tx simulation failed: "BlockhashNotFound"'), true)
+  assert.equal(isBlockhashNotFoundError('InvalidSecpSignature'), false)
+  assert.equal(isRetryableVrfRevealError('tx confirm timed out after 45000ms (abcd1234…)'), true)
+  assert.equal(SWITCHBOARD_SIMULATE_OPTS.replaceRecentBlockhash, true)
+  assert.equal(SWITCHBOARD_SIMULATE_OPTS.sigVerify, false)
+  assert.equal(SWITCHBOARD_SIMULATE_OPTS.commitment, 'confirmed')
   assert.equal(
     resolveAdminVrfForceNewRequest({
       draw_vrf_account: 'Rand111111111111111111111111111111111111111',
@@ -352,12 +365,19 @@ assert.equal(
   )
   assert.equal(resolveAdminVrfForceNewRequest({ draw_vrf_account: null }), true)
 
-  // Oracle gateways must not receive private Helius/API-key RPCs (causes InvalidSecpSignature).
+  // Prefer the app's paid HTTPS RPC first so oracle signatures match the verify bank.
   const prevOracleRpc = process.env.SWITCHBOARD_ORACLE_RPC_URL
   delete process.env.SWITCHBOARD_ORACLE_RPC_URL
   assert.equal(
     resolveSwitchboardOracleRpcUrl('https://mainnet.helius-rpc.com/?api-key=secret'),
-    'https://api.mainnet-beta.solana.com'
+    'https://mainnet.helius-rpc.com/?api-key=secret'
+  )
+  assert.deepEqual(
+    resolveSwitchboardOracleRpcCandidates('https://mainnet.helius-rpc.com/?api-key=secret'),
+    [
+      'https://mainnet.helius-rpc.com/?api-key=secret',
+      ...SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES,
+    ]
   )
   assert.equal(
     resolveSwitchboardOracleRpcUrl('https://api.devnet.solana.com'),

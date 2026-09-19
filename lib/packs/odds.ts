@@ -44,7 +44,13 @@ export type PackOddsPercentages = {
       fairValueSol: number
       weight: number
       percentOfPremiumPool: number
+      /**
+       * True chance this exact mint is won (share of the shared chase pool).
+       * With many chase NFTs this is often ≪ 1% — UI should prefer `tierPercentOverall`.
+       */
       percentOverall: number
+      /** Chase-tier rate shown to buyers (always the shared pool %, e.g. 1%). */
+      tierPercentOverall: number
     }[]
   }
   nftInventory: {
@@ -118,6 +124,8 @@ export function computePackOddsPercentages(options?: {
       percentOfPremiumPool: ofPrem,
       // ofPrem is % of premium pool; overall = share * 1% overall
       percentOverall: Math.round((ofPrem * PACK_PREMIUM_NFT_OVERALL_BPS) / 100) / 100,
+      // Buyers see the chase *tier* rate (shared ~1%), not the diluted per-mint share.
+      tierPercentOverall: premiumOverallPct,
     }
   })
 

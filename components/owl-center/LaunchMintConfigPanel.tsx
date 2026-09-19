@@ -9,6 +9,7 @@ import { LaunchCoverImageFields } from '@/components/owl-center/LaunchCoverImage
 import {
   MintDetailsConfigFields,
 } from '@/components/owl-center/MintDetailsConfigFields'
+import { MintTimeZoneToggle } from '@/components/owl-center/MintTimeZoneToggle'
 import { OwlCenterSaveNotice } from '@/components/owl-center/OwlCenterSaveNotice'
 import { isLaunchSupplyConfigLocked } from '@/lib/owl-center/launch-edit-locks'
 import { OWL_CENTER_MAX_LAUNCH_SUPPLY } from '@/lib/owl-center/launch-limits'
@@ -106,18 +107,37 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
         )
         setDirty(true)
       } else {
+        // Detect silent schedule drift (e.g. limit-only save rewriting phase times).
+        const beforeKickoff = launch.launch_deadline_at
+        const beforePublic = launch.phase_schedule?.PUBLIC ?? null
+        const afterKickoff = saved?.launch_deadline_at ?? null
+        const afterPublic = saved?.phase_schedule?.PUBLIC ?? null
+        const scheduleDrifted =
+          Boolean(saved) &&
+          ((beforeKickoff != null &&
+            afterKickoff != null &&
+            !scheduleInstantsEqual(beforeKickoff, afterKickoff)) ||
+            (beforePublic != null &&
+              afterPublic != null &&
+              !scheduleInstantsEqual(beforePublic, afterPublic)))
+
         if (saved) setValues(mintDetailsFormFromLaunch(saved))
         setDirty(false)
         const opensLabel = formatMintDate(savedIso ?? requestedIso)
         const warningSuffix = j.warnings?.length ? ` ${j.warnings.join(' ')}` : ''
+        const driftSuffix = scheduleDrifted
+          ? ` Warning: phase schedule times changed on save (was ${formatMintDate(beforeKickoff)} → ${formatMintDate(afterKickoff)}). Re-check Public / allowlist starts.`
+          : ''
         if (j.guard_sync && j.guard_sync.ok === false) {
           setMsg(
-            `Saved. Mint opens ${opensLabel}. On-chain Candy Guard was not updated (${j.guard_sync.error ?? 'unknown'}). Dates may still be site-only until guards are synced.${warningSuffix}`
+            `Saved. Mint opens ${opensLabel}. On-chain Candy Guard was not updated (${j.guard_sync.error ?? 'unknown'}). Dates may still be site-only until guards are synced.${warningSuffix}${driftSuffix}`
           )
         } else if (j.guard_sync?.status === 'updated') {
-          setMsg(`Saved. Mint opens ${opensLabel}. On-chain start date and per-wallet cap updated.${warningSuffix}`)
+          setMsg(
+            `Saved. Mint opens ${opensLabel}. On-chain start date and per-wallet cap updated.${warningSuffix}${driftSuffix}`
+          )
         } else {
-          setMsg(`Saved. Mint opens ${opensLabel}.${warningSuffix}`)
+          setMsg(`Saved. Mint opens ${opensLabel}.${warningSuffix}${driftSuffix}`)
         }
         onSaved?.(saved)
       }
@@ -144,12 +164,15 @@ export function LaunchMintConfigPanel({ launchId, launch, onSaved, saveApiPath, 
       }}
     >
       {notices}
-      <p className="mb-4 text-sm leading-relaxed text-[#9BA8B4]">
-        Edit supply, Metaplex Core vs legacy, mint price, schedule, per-wallet limit, and fund wallets.
-        {supplyLocked
-          ? ' Supply and on-chain standard are locked after Candy Machine deploy.'
-          : ' Change supply and Core settings anytime before Candy Machine deploy.'}
-      </p>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <p className="text-sm leading-relaxed text-[#9BA8B4]">
+          Edit supply, Metaplex Core vs legacy, mint price, schedule, per-wallet limit, and fund wallets.
+          {supplyLocked
+            ? ' Supply and on-chain standard are locked after Candy Machine deploy.'
+            : ' Change supply and Core settings anytime before Candy Machine deploy.'}
+        </p>
+        <MintTimeZoneToggle />
+      </div>
       <MintDetailsConfigFields
         values={values}
         onChange={updateValues}

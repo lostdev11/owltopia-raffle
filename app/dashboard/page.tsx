@@ -64,6 +64,7 @@ import {
 } from '@/lib/xp/engagement-payload'
 import { CreatorAnalyticsSection } from '@/components/dashboard/CreatorAnalyticsSection'
 import { DashboardOverviewSection } from '@/components/dashboard/DashboardOverviewSection'
+import { DashboardTicketRefundLedger } from '@/components/dashboard/DashboardTicketRefundLedger'
 import { DashboardCollapsible } from '@/components/dashboard/DashboardCollapsible'
 import { DashboardSiwsSignInGate } from '@/components/dashboard/DashboardSiwsSignInGate'
 import { HostingClaimTracker } from '@/components/dashboard/hosting/HostingClaimTracker'
@@ -2693,6 +2694,10 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       )}
+
+      <div className="mb-8">
+        <DashboardTicketRefundLedger />
+      </div>
 
       <Tabs
         value={dashboardTab}

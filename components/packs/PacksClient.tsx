@@ -74,6 +74,7 @@ type PacksConfig = {
         weight: number
         percentOfPremiumPool: number
         percentOverall: number
+        tierPercentOverall?: number
       }[]
     }
     nftBands: { min: number; max: number; weight: number }[]
@@ -87,6 +88,7 @@ type PacksConfig = {
     paused: boolean
     pauseReason: string | null
     availableNfts: number
+    owlSolPrice?: number | null
   }
   ev: { targetEvSol: number; estimatedEvSol: number; estimatedRtpBps: number }
   jackpot: {
@@ -506,6 +508,7 @@ export function PacksClient({
             ) : (
               <PackVault
                 price={price}
+                owlSolPrice={config?.vault.owlSolPrice ?? null}
                 interactionLocked={ripping || showExperience || showReveal}
                 paying={phase === 'paying'}
                 cta={buyButton}
@@ -679,10 +682,11 @@ export function PacksClient({
             </div>
             <div className="sm:col-span-2 lg:col-span-4">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200/90">
-                1% chase NFTs (~{config?.odds.premiumNft?.overallPercent ?? 1}%)
+                1% chase NFTs
               </p>
               <p className="mt-1 text-[11px] text-white/40">
-                Admin-flagged Owltopia / partner grails share this pool (not floor alone).
+                Shared ~{config?.odds.premiumNft?.overallPercent ?? 1}% hit — when chase lands, one
+                of these is drawn by floor weight.
               </p>
               <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-sm text-[#A9CBB9]">
                 {(config?.odds.premiumNft?.items ?? []).length === 0 && (
@@ -695,7 +699,10 @@ export function PacksClient({
                       <span className="text-white/30">({n.fairValueSol} SOL)</span>
                     </span>
                     <span className="shrink-0 tabular-nums text-amber-200/80">
-                      {n.percentOverall}%
+                      {n.tierPercentOverall ??
+                        config?.odds.premiumNft?.overallPercent ??
+                        1}
+                      %
                     </span>
                   </li>
                 ))}

@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
       // Referral complimentary / zero-paid rows have nothing to return on-chain.
       if (!entryHasOnChainRefundAmount(entry)) {
         const signature = noPaymentRefundSignature(entry.id)
-        await markEntryRefunded(entry.id, signature)
+        await markEntryRefunded(entry.id, signature, { source: 'zero_payment' })
         return NextResponse.json({
           success: true,
           transactionSignature: signature,
@@ -116,7 +116,7 @@ export async function POST(request: NextRequest) {
         return refundFailedResponse(msg)
       }
 
-      await markEntryRefunded(entry.id, result.signature)
+      await markEntryRefunded(entry.id, result.signature, { source: 'buyer_claim' })
 
       return NextResponse.json({
         success: true,

@@ -201,20 +201,17 @@ assert.equal(publicEditedPatch.phase_schedule?.PUBLIC, publicEditedIso)
 
 const sepLocal = '2026-09-24T09:44'
 const sepIso = datetimeLocalToIso(sepLocal)
+// Move mint opens by moving the first allowlist phase start (Mint opens is auto-derived).
+const allowlistSepForm = dateForm({
+  total_supply: '100',
+  public_price: '1',
+  launch_date: leftoverPublic,
+  public_start: sepLocal,
+  wl_enabled: true,
+  allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: sepLocal, supply: '20', price: '10' }],
+})
 const allowlistSepPatch = buildMintDetailsPatchFromBody(
-  mintDetailsPayloadFromForm(
-    applyMintOpensDate(
-      dateForm({
-        total_supply: '100',
-        public_price: '1',
-        launch_date: leftoverPublic,
-        public_start: leftoverPublic,
-        wl_enabled: true,
-        allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: '2026-08-20T12:00', supply: '20', price: '10' }],
-      }),
-      sepLocal
-    )
-  ),
+  mintDetailsPayloadFromForm(allowlistSepForm),
   baseLaunch({
     launch_deadline_at: datetimeLocalToIso(leftoverPublic),
     phase_schedule: { PUBLIC: datetimeLocalToIso(leftoverPublic)! },
@@ -223,7 +220,7 @@ const allowlistSepPatch = buildMintDetailsPatchFromBody(
   })
 )
 assert.ok(!('error' in allowlistSepPatch))
-assert.equal(allowlistSepPatch.launch_deadline_at, sepIso, 'allowlist Aug→Sep mint opens')
+assert.equal(allowlistSepPatch.launch_deadline_at, sepIso, 'allowlist: first phase start is mint opens')
 assert.equal(allowlistSepPatch.phase_schedule?.PUBLIC, sepIso)
 
 assert.equal(
@@ -233,9 +230,128 @@ assert.equal(
     previousKickoff: datetimeLocalToIso(leftoverPublic),
     previousPublic: datetimeLocalToIso(leftoverPublic),
     hasQueuedPhases: true,
+    firstPhaseKickoff: datetimeLocalToIso(leftoverPublic),
   }),
-  sepIso,
-  'allowlist: editing only Public start moves mint opens'
+  datetimeLocalToIso(leftoverPublic),
+  'allowlist: mint opens follows first phase, not Public start'
+)
+
+assert.equal(
+  resolveMintOpensIsoForPatch({
+    kickoff: datetimeLocalToIso(leftoverPublic),
+    requestedPublic: sepIso,
+    previousKickoff: datetimeLocalToIso(leftoverPublic),
+    previousPublic: datetimeLocalToIso(leftoverPublic),
+    hasQueuedPhases: true,
+    firstPhaseKickoff: null,
+  }),
+  null,
+  'allowlist: blank mint opens until a phase start exists'
+)
+
+// Public-first then WL: Mint opens stays early, Public stays later across save + re-save.
+const publicThenWlKickoff = '2026-09-18T13:00'
+const publicThenWlPublic = '2026-09-18T18:00'
+const publicThenWlKickoffIso = datetimeLocalToIso(publicThenWlKickoff)
+const publicThenWlPublicIso = datetimeLocalToIso(publicThenWlPublic)
+const publicThenWlPayload = mintDetailsPayloadFromForm(
+  dateForm({
+    total_supply: '100',
+    public_price: '0',
+    currency: 'USDC',
+    wallet_mint_limit: '5',
+    launch_date: publicThenWlKickoff,
+    public_start: publicThenWlPublic,
+    wl_enabled: true,
+    allowlist_phases: [
+      {
+        key: 'wl',
+        label: 'Whitelist',
+        start: publicThenWlKickoff,
+        supply: '50',
+        price: '9',
+        wallet_mint_limit: '2',
+      },
+    ],
+  })
+)
+const publicThenWlFirstPatch = buildMintDetailsPatchFromBody(
+  publicThenWlPayload,
+  baseLaunch({
+    launch_deadline_at: publicThenWlKickoffIso,
+    phase_schedule: { PUBLIC: publicThenWlKickoffIso!, AIRDROP: publicThenWlKickoffIso! },
+    creator_wl_enabled: false,
+    wl_supply: 0,
+  })
+)
+assert.ok(!('error' in publicThenWlFirstPatch))
+assert.equal(publicThenWlFirstPatch.launch_deadline_at, publicThenWlKickoffIso, 'public→wl: mint opens stays')
+assert.equal(publicThenWlFirstPatch.phase_schedule?.PUBLIC, publicThenWlPublicIso, 'public→wl: public stays later')
+
+const publicThenWlSecondPatch = buildMintDetailsPatchFromBody(
+  publicThenWlPayload,
+  baseLaunch({
+    launch_deadline_at: publicThenWlKickoffIso,
+    phase_schedule: {
+      PUBLIC: publicThenWlPublicIso!,
+      WHITELIST: publicThenWlKickoffIso!,
+      AIRDROP: publicThenWlKickoffIso!,
+    },
+    creator_wl_enabled: true,
+    wl_supply: 50,
+    partner_allowlist_phases: [
+      {
+        key: 'wl',
+        label: 'Whitelist',
+        starts_at: publicThenWlKickoffIso!,
+        supply: 50,
+        price_usdc: 9,
+        wallet_mint_limit: 2,
+      },
+    ],
+  })
+)
+assert.ok(!('error' in publicThenWlSecondPatch))
+assert.equal(
+  publicThenWlSecondPatch.launch_deadline_at,
+  publicThenWlKickoffIso,
+  'public→wl re-save: mint opens must not jump to public'
+)
+assert.equal(
+  publicThenWlSecondPatch.phase_schedule?.PUBLIC,
+  publicThenWlPublicIso,
+  'public→wl re-save: later public must not reset to mint opens'
+)
+
+const divergedMintOpensForm = applyMintOpensDate(
+  dateForm({
+    total_supply: '100',
+    public_price: '0',
+    launch_date: publicThenWlKickoff,
+    public_start: publicThenWlPublic,
+    wl_enabled: true,
+    allowlist_phases: [
+      {
+        key: 'wl',
+        label: 'Whitelist',
+        start: publicThenWlKickoff,
+        supply: '50',
+        price: '9',
+      },
+    ],
+  }),
+  '2026-09-18T13:30'
+)
+assert.equal(divergedMintOpensForm.launch_date, '2026-09-18T13:30')
+assert.equal(
+  divergedMintOpensForm.public_start,
+  publicThenWlPublic,
+  'UI: changing Mint opens must keep an intentional later Public start'
+)
+assert.equal(
+  divergedMintOpensForm.allowlist_phases[0]?.start,
+  '2026-09-18T13:30',
+  'UI: WL start tied to Mint opens still follows kickoff'
 )
 
 assert.equal(datetimeLocalToIso('2026-08-24 15:44:00+00'), '2026-08-24T15:44:00.000Z')
@@ -273,7 +389,7 @@ assert.equal((wlPayload.allowlist_phases as { start: string }[])[0]?.start, wlSt
 
 const wlParsed = parseMintDetailsConfig(wlPayload)
 assert.ok(!('error' in wlParsed), 'allowlist mint dates should parse')
-assert.equal(wlParsed.launch_deadline_at, localIso)
+assert.equal(wlParsed.launch_deadline_at, wlStartIso, 'mint opens auto = first WL phase')
 assert.equal(wlParsed.phase_schedule.PUBLIC, publicStartIso)
 assert.equal(wlParsed.phase_schedule.WHITELIST, wlStartIso)
 assert.equal(wlParsed.partner_allowlist_phases[0]?.starts_at, wlStartIso)
@@ -342,11 +458,59 @@ assert.equal(solPhaseParsed.wl_price_usdc, null)
 
 const wlPatch = buildMintDetailsPatchFromBody(wlPayload, baseLaunch({ creator_wl_enabled: true, wl_supply: 20 }))
 assert.ok(!('error' in wlPatch))
-assert.equal(wlPatch.launch_deadline_at, localIso)
+assert.equal(wlPatch.launch_deadline_at, wlStartIso, 'patch mint opens = first phase')
 assert.equal(wlPatch.phase_schedule?.PUBLIC, publicStartIso)
 assert.equal(wlPatch.partner_allowlist_phases?.[0]?.starts_at, wlStartIso)
 
 const leftoverPublicIso = datetimeLocalToIso(leftoverPublic)
+// Ignore a leftover manual Mint opens — first phase start wins.
+const wlIgnoreManualKickoff = mintDetailsPayloadFromForm(
+  dateForm({
+    total_supply: '100',
+    public_price: '1',
+    launch_date: leftoverPublic,
+    public_start: publicStart,
+    wl_enabled: true,
+    allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: wlStart, supply: '20', price: '10' }],
+  })
+)
+assert.equal(wlIgnoreManualKickoff.launch_date, wlStartIso, 'payload drops leftover Mint opens for first phase')
+const wlIgnoreManualPatch = buildMintDetailsPatchFromBody(
+  wlIgnoreManualKickoff,
+  baseLaunch({
+    launch_deadline_at: leftoverPublicIso,
+    phase_schedule: { PUBLIC: leftoverPublicIso! },
+    creator_wl_enabled: true,
+    wl_supply: 20,
+  })
+)
+assert.ok(!('error' in wlIgnoreManualPatch))
+assert.equal(wlIgnoreManualPatch.launch_deadline_at, wlStartIso, 'allowlist: first phase replaces leftover Mint opens')
+assert.equal(wlIgnoreManualPatch.phase_schedule?.PUBLIC, publicStartIso)
+
+const blankPhaseOpensPayload = mintDetailsPayloadFromForm(
+  dateForm({
+    total_supply: '100',
+    public_price: '1',
+    launch_date: leftoverPublic,
+    public_start: '',
+    wl_enabled: true,
+    allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: '', supply: '20', price: '10' }],
+  })
+)
+assert.equal(blankPhaseOpensPayload.launch_date, null, 'no phase start → mint opens stays blank')
+const blankPhaseOpensPatch = buildMintDetailsPatchFromBody(
+  blankPhaseOpensPayload,
+  baseLaunch({
+    launch_deadline_at: leftoverPublicIso,
+    phase_schedule: { PUBLIC: leftoverPublicIso! },
+    creator_wl_enabled: true,
+    wl_supply: 20,
+  })
+)
+assert.ok(!('error' in blankPhaseOpensPatch))
+assert.equal(blankPhaseOpensPatch.launch_deadline_at, null, 'Genbeta: clear Mint opens until first phase is set')
+
 const wlLeftoverForm = applyMintOpensDate(
   dateForm({
     total_supply: '100',
@@ -354,12 +518,13 @@ const wlLeftoverForm = applyMintOpensDate(
     launch_date: leftoverPublic,
     public_start: leftoverPublic,
     wl_enabled: true,
-    allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: wlStart, supply: '20', price: '10' }],
+    allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: leftoverPublic, supply: '20', price: '10' }],
   }),
   localKickoff
 )
 assert.equal(wlLeftoverForm.launch_date, localKickoff)
-assert.equal(wlLeftoverForm.public_start, localKickoff, 'changing Mint opens also moves Public start')
+assert.equal(wlLeftoverForm.public_start, localKickoff, 'changing Mint opens also moves Public start when synced')
+assert.equal(wlLeftoverForm.allowlist_phases[0]?.start, localKickoff, 'WL tied to Mint opens follows kickoff')
 
 const wlSyncedPayload = mintDetailsPayloadFromForm(wlLeftoverForm)
 assert.equal(wlSyncedPayload.launch_date, localIso)
@@ -385,7 +550,7 @@ const wlUnchangedPublicPayload = mintDetailsPayloadFromForm(
     launch_date: localKickoff,
     public_start: leftoverPublic,
     wl_enabled: true,
-    allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: wlStart, supply: '20', price: '10' }],
+    allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: localKickoff, supply: '20', price: '10' }],
   })
 )
 const wlUnchangedPublicPatch = buildMintDetailsPatchFromBody(
@@ -402,7 +567,7 @@ assert.equal(wlUnchangedPublicPatch.launch_deadline_at, localIso)
 assert.equal(
   wlUnchangedPublicPatch.phase_schedule?.PUBLIC,
   localIso,
-  'allowlist: leftover Public start matching previous PUBLIC follows Mint opens'
+  'allowlist: leftover Public still tied to previous Mint opens follows first-phase kickoff'
 )
 
 assert.equal(
@@ -473,10 +638,10 @@ const staleWlPatch = buildMintDetailsPatchFromBody(
     dateForm({
       total_supply: '100',
       public_price: '1',
-      launch_date: sepLocal,
+      launch_date: leftoverPublic,
       public_start: sepLocal,
       wl_enabled: true,
-      allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: '2026-08-24T11:48', supply: '20', price: '10' }],
+      allowlist_phases: [{ key: 'wl', label: 'Whitelist', start: sepLocal, supply: '20', price: '10' }],
     })
   ),
   baseLaunch({
@@ -490,8 +655,68 @@ const staleWlPatch = buildMintDetailsPatchFromBody(
   })
 )
 assert.ok(!('error' in staleWlPatch))
-assert.equal(staleWlPatch.launch_deadline_at, sepIso, 'stale WL save moves mint opens')
-assert.equal(staleWlPatch.partner_allowlist_phases?.[0]?.starts_at, sepIso, 'stale WL before kickoff clamps to mint opens')
+assert.equal(staleWlPatch.launch_deadline_at, sepIso, 'moving first phase start moves mint opens')
+assert.equal(staleWlPatch.partner_allowlist_phases?.[0]?.starts_at, sepIso, 'first phase start persists')
+assert.equal(staleWlPatch.phase_schedule?.PUBLIC, sepIso)
+
+// Limit-only save must not rewrite schedule ISO strings (datetime-local round-trip / kickoff sync).
+const limitOnlyKickoff = '2026-09-18T16:00:00.000Z'
+const limitOnlyPublic = '2026-09-18T21:00:00.000Z'
+const limitOnlyWl = '2026-09-18T16:00:00.000Z'
+const limitOnlyLaunch = baseLaunch({
+  launch_deadline_at: limitOnlyKickoff,
+  phase_schedule: {
+    PUBLIC: limitOnlyPublic,
+    WHITELIST: limitOnlyWl,
+    AIRDROP: limitOnlyKickoff,
+  },
+  creator_wl_enabled: true,
+  wl_supply: 1010,
+  wallet_mint_limit: 5,
+  partner_allowlist_phases: [
+    {
+      key: 'wl',
+      label: 'Whitelist',
+      starts_at: limitOnlyWl,
+      supply: 1010,
+      price_usdc: 0,
+      wallet_mint_limit: 2,
+    },
+  ],
+})
+const limitOnlyForm = mintDetailsFormFromLaunch(limitOnlyLaunch)
+limitOnlyForm.wallet_mint_limit = '7'
+const limitOnlyPatch = buildMintDetailsPatchFromBody(
+  mintDetailsPayloadFromForm(limitOnlyForm),
+  limitOnlyLaunch
+)
+assert.ok(!('error' in limitOnlyPatch))
+assert.equal(limitOnlyPatch.wallet_mint_limit, 7, 'public wallet limit updates')
+assert.equal(
+  limitOnlyPatch.launch_deadline_at,
+  limitOnlyKickoff,
+  'limit-only save keeps kickoff ISO byte-identical'
+)
+assert.equal(
+  limitOnlyPatch.phase_schedule?.PUBLIC,
+  limitOnlyPublic,
+  'limit-only save keeps PUBLIC start ISO byte-identical'
+)
+assert.equal(
+  limitOnlyPatch.phase_schedule?.WHITELIST,
+  limitOnlyWl,
+  'limit-only save keeps WHITELIST start ISO byte-identical'
+)
+assert.equal(
+  limitOnlyPatch.partner_allowlist_phases?.[0]?.starts_at,
+  limitOnlyWl,
+  'limit-only save keeps allowlist phase starts_at byte-identical'
+)
+assert.equal(
+  limitOnlyPatch.partner_allowlist_phases?.[0]?.wallet_mint_limit,
+  2,
+  'allowlist phase wallet limit unchanged when only public limit edited'
+)
 
 console.log('ok: partner mint-config date save round-trip')
 

@@ -161,7 +161,10 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ ok: false, error: 'Refund failed' }, { status: 500 })
         }
 
-        await markEntryRefunded(entry.id, result.signature)
+        await markEntryRefunded(entry.id, result.signature, {
+          source: 'admin_send',
+          actorWallet: session.wallet,
+        })
         return NextResponse.json({
           ok: true,
           entryId: entry.id,

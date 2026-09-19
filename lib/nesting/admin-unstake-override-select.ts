@@ -40,15 +40,30 @@ export type AdminOverrideUnstakeFailed = {
 }
 
 /**
+ * Optional perch/project scope for wallet-level force leave.
+ * Empty / null / undefined = all projects (existing behavior).
+ */
+export function filterOpenPositionsByPoolId(
+  positions: StakingPositionRow[],
+  poolId: string | null | undefined
+): StakingPositionRow[] {
+  const id = typeof poolId === 'string' ? poolId.trim() : ''
+  if (!id) return positions
+  return positions.filter((p) => p.pool_id === id)
+}
+
+/**
  * Positions the single-id admin override would accept: active nests, plus abortable
  * opening NFT pending rows (same rules as executeUnstakeAdminOverride).
  */
 export function selectAdminOverrideUnstakeCandidates(
   positions: StakingPositionRow[],
-  poolsById: Map<string, Pick<StakingPoolRow, 'asset_type' | 'adapter_mode' | 'name' | 'slug'>>
+  poolsById: Map<string, Pick<StakingPoolRow, 'asset_type' | 'adapter_mode' | 'name' | 'slug'>>,
+  options?: { pool_id?: string | null }
 ): AdminOverrideUnstakeCandidate[] {
+  const scoped = filterOpenPositionsByPoolId(positions, options?.pool_id)
   const selected: StakingPositionRow[] = []
-  for (const position of positions) {
+  for (const position of scoped) {
     if (!isOpenStakingPosition(position)) continue
     if (position.status === 'active') {
       selected.push(position)

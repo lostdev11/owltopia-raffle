@@ -15,9 +15,18 @@ export type CollectionConfirmMintResponse = {
 
 const CONFIRM_RETRY_DELAYS_MS = [0, 300, 700, 1500] as const
 const CONFIRM_HARD_MAX_MS = 12_000
+/** Per-attempt fetch timeout so a hung RPC cannot stall past CONFIRM_HARD_MAX_MS. */
+const CONFIRM_ATTEMPT_TIMEOUT_MS = 4_000
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function attemptAbortSignal(ms: number): AbortSignal | undefined {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(ms)
+  }
+  return undefined
 }
 
 /** POST confirm-mint with retries — mints succeed on-chain before DB record is written. */
@@ -34,6 +43,10 @@ export async function postCollectionConfirmMintWithRetry(
     if (delayMs > 0) await sleep(delayMs)
     if (Date.now() - started >= CONFIRM_HARD_MAX_MS) break
 
+    const remainingMs = CONFIRM_HARD_MAX_MS - (Date.now() - started)
+    const attemptMs = Math.max(500, Math.min(CONFIRM_ATTEMPT_TIMEOUT_MS, remainingMs))
+    const signal = attemptAbortSignal(attemptMs)
+
     try {
       const res = await fetch(`/api/owl-center/collections/${encodeURIComponent(slug)}/confirm-mint`, {
         method: 'POST',
@@ -41,7 +54,8 @@ export async function postCollectionConfirmMintWithRetry(
         body: JSON.stringify(body),
         // Let the confirm finish even if the user navigates away / the mobile tab is backgrounded
         // right after the wallet returns (small JSON, well under the 64KB keepalive cap).
-        keepalive: true,
+        // Note: keepalive + AbortSignal is unsupported in some browsers; prefer abort when available.
+        ...(signal ? { signal } : { keepalive: true }),
       })
       const json = (await res.json()) as CollectionConfirmMintResponse
       lastJson = json

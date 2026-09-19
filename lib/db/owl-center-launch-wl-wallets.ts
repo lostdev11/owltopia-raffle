@@ -60,6 +60,33 @@ export async function sumLaunchWlPhaseUsedMints(
   return rows.reduce((s, r) => s + Math.max(0, r.used_mints), 0)
 }
 
+/**
+ * Total soft-allowlist mints consumed by one wallet across all phase keys.
+ * Used to separate allowlist-window mints (still stored as phase=PUBLIC in mint_events)
+ * from true public-phase usage when enforcing launch.wallet_mint_limit.
+ */
+export async function sumLaunchWlWalletUsedMints(
+  launchId: string,
+  wallet: string
+): Promise<number> {
+  const w = normalizeSolanaWalletAddress(wallet)
+  if (!w) return 0
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('owl_center_launch_wl_wallets')
+    .select('used_mints')
+    .eq('launch_id', launchId)
+    .eq('wallet', w)
+  if (error) {
+    console.error('sumLaunchWlWalletUsedMints:', error.message)
+    return 0
+  }
+  return (data ?? []).reduce(
+    (sum, row) => sum + Math.max(0, Number((row as { used_mints?: number }).used_mints ?? 0)),
+    0
+  )
+}
+
 export async function getLaunchWlWallet(
   launchId: string,
   wallet: string,

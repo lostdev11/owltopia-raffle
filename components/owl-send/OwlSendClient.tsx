@@ -106,6 +106,14 @@ import {
 import { owlSendNftSendButtonLabel } from '@/lib/owl-send/send-button-label'
 import { isOwlSendPacketSizeError } from '@/lib/owl-send/tx-size'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
+import {
+  buildOwlSendTokenScatterCostEstimate,
+  estimateOwlSendRemainingTokenScatterSol,
+  friendlyOwlSendInsufficientSolError,
+  owlSendSolShortfallMessage,
+  owlSendTokenScatterAtaCountsPerBatch,
+  sumOwlSendCountsFromIndex,
+} from '@/lib/owl-send/sol-affordability'
 import { formatOwlSendFeeSol, getOwlSendFeeSol, getOwlSendFeeSolForDiscount } from '@/lib/owl-send/fee'
 import type { OwlSendHolderRoleName } from '@/lib/owl-send/holder-discount'
 import { sendOwlSendNftBatch, owlSendLineNeedsSpecialPath } from '@/lib/owl-send/send-batch'
@@ -224,10 +232,14 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
   const [tokenScatterDefaultAmount, setTokenScatterDefaultAmount] = useState('')
   const [tokenScatterRaw, setTokenScatterRaw] = useState('')
   const [tokenBatches, setTokenBatches] = useState<OwlSendTokenScatterLine[][]>([])
+  /** Parallel to flat packed lines — true when dest ATA must be created. */
+  const [tokenNeedsCreateAta, setTokenNeedsCreateAta] = useState<boolean[]>([])
   const [tokenBatchProgress, setTokenBatchProgress] = useState<BatchProgress[]>([])
   const [tokenActiveBatch, setTokenActiveBatch] = useState(0)
   const [tokenBusy, setTokenBusy] = useState(false)
   const [tokenError, setTokenError] = useState<string | null>(null)
+  /** Soft warning when SOL may be short (does not block Review). */
+  const [tokenSolWarning, setTokenSolWarning] = useState<string | null>(null)
   const [tokenSuccessSig, setTokenSuccessSig] = useState<string | null>(null)
   const [tokenSuccessDetail, setTokenSuccessDetail] = useState<string | null>(null)
   const [successPopup, setSuccessPopup] = useState<OwlSendSuccessState>(null)
@@ -1585,11 +1597,18 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     setPendingDraft(null)
   }
 
+  const clearTokenScatterPlan = () => {
+    setTokenBatches([])
+    setTokenNeedsCreateAta([])
+    setTokenBatchProgress([])
+    setTokenActiveBatch(0)
+    setTokenSolWarning(null)
+  }
+
   const prepareTokenScatter = async () => {
     setTokenError(null)
     setTokenSuccessSig(null)
-    setTokenBatches([])
-    setTokenBatchProgress([])
+    clearTokenScatterPlan()
     if (!publicKey) {
       setTokenError('Connect your wallet first.')
       return
@@ -1639,7 +1658,14 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
       }
       const chunked = packOwlSendTokenScatterLines(built.lines, needsCreateAta)
       const newAtaApprox = needsCreateAta.filter(Boolean).length
+      const cost = buildOwlSendTokenScatterCostEstimate({
+        lineCount: built.lines.length,
+        batchCount: chunked.length,
+        newAtaCount: newAtaApprox,
+        discountBps,
+      })
       setTokenBatches(chunked)
+      setTokenNeedsCreateAta(needsCreateAta)
       setTokenBatchProgress(
         chunked.map((_, i) => ({
           index: i,
@@ -1648,14 +1674,44 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         }))
       )
       setTokenActiveBatch(0)
-      setSessionNotice(
+
+      let solWarning: string | null = null
+      if (cost?.totalSolKnown != null) {
+        try {
+          const lamports = await connection.getBalance(publicKey, 'confirmed')
+          const haveSol = lamports / 1e9
+          const needSol =
+            estimateOwlSendRemainingTokenScatterSol({
+              batchLineCounts: chunked.map((b) => b.length),
+              batchAtaCounts: owlSendTokenScatterAtaCountsPerBatch(chunked, needsCreateAta),
+              fromBatchIndex: 0,
+              discountBps,
+            }) ?? cost.totalSolKnown
+          if (haveSol < needSol) {
+            solWarning = owlSendSolShortfallMessage({
+              needSol,
+              haveSol,
+              newAtaCount: newAtaApprox,
+            })
+          }
+        } catch {
+          // Balance probe is best-effort; send still preflights later.
+        }
+      }
+      setTokenSolWarning(solWarning)
+
+      const packNote =
         chunked.length === 1
           ? `Packed ${built.lines.length} wallet${built.lines.length === 1 ? '' : 's'} into 1 approval.`
           : `Packed ${built.lines.length} wallets into ${chunked.length} approvals` +
-              (newAtaApprox > 0
-                ? ` (~${newAtaApprox} new token account${newAtaApprox === 1 ? '' : 's'} to create).`
-                : ' (all dest accounts already exist — denser packs).')
-      )
+            (newAtaApprox > 0
+              ? ` (~${newAtaApprox} new token account${newAtaApprox === 1 ? '' : 's'} to create).`
+              : ' (all dest accounts already exist — denser packs).')
+      const costNote =
+        cost?.totalSolKnown != null
+          ? ` Estimated total ~${formatOwlSendFeeSol(cost.totalSolKnown)} (Owl fee + rent + network).`
+          : ''
+      setSessionNotice(`${packNote}${costNote}`)
     } finally {
       setTokenBusy(false)
     }
@@ -1697,6 +1753,53 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     sendCancelledRef.current = false
     setTokenBusy(true)
     setTokenError(null)
+
+    const batchLineCounts = tokenBatches.map((b) => b.length)
+    let batchAtaCounts: number[]
+    try {
+      batchAtaCounts =
+        tokenNeedsCreateAta.length === batchLineCounts.reduce((a, b) => a + b, 0)
+          ? owlSendTokenScatterAtaCountsPerBatch(tokenBatches, tokenNeedsCreateAta)
+          : tokenBatches.map(() => 0)
+    } catch {
+      batchAtaCounts = tokenBatches.map(() => 0)
+    }
+
+    const remainingNeedSol = estimateOwlSendRemainingTokenScatterSol({
+      batchLineCounts,
+      batchAtaCounts,
+      fromBatchIndex: batchIndex,
+      discountBps,
+    })
+    const remainingAta = sumOwlSendCountsFromIndex(batchAtaCounts, batchIndex)
+
+    if (remainingNeedSol != null) {
+      try {
+        const lamports = await connection.getBalance(publicKey, 'confirmed')
+        const haveSol = lamports / 1e9
+        if (haveSol < remainingNeedSol) {
+          const msg = owlSendSolShortfallMessage({
+            needSol: remainingNeedSol,
+            haveSol,
+            newAtaCount: remainingAta,
+            fromApproval: batchIndex + 1,
+            totalApprovals: tokenBatches.length,
+          })
+          setTokenError(msg)
+          setTokenSolWarning(msg)
+          setTokenBatchProgress((prev) =>
+            prev.map((b) =>
+              b.index === batchIndex ? { ...b, status: 'failed', error: msg } : b
+            )
+          )
+          setTokenBusy(false)
+          return
+        }
+        setTokenSolWarning(null)
+      } catch {
+        // If balance read fails, continue — simulate will still catch shortfalls.
+      }
+    }
 
     let workingIndex = batchIndex
     let lastSignature = ''
@@ -1795,7 +1898,33 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
               )
             }
             continue
-          } catch {
+          } catch (signAllErr) {
+            const solFriendly = friendlyOwlSendInsufficientSolError(signAllErr, {
+              estimatedNeedSol:
+                estimateOwlSendRemainingTokenScatterSol({
+                  batchLineCounts,
+                  batchAtaCounts,
+                  fromBatchIndex: workingIndex,
+                  discountBps,
+                }) ?? undefined,
+              remainingNewAtaCount: sumOwlSendCountsFromIndex(batchAtaCounts, workingIndex),
+              fromApproval: workingIndex + 1,
+              totalApprovals: tokenBatches.length,
+            })
+            if (solFriendly) {
+              setTokenBatchProgress((prev) =>
+                prev.map((b) =>
+                  b.index === workingIndex
+                    ? { ...b, status: 'failed', error: solFriendly }
+                    : b.index > workingIndex && b.status === 'sending'
+                      ? { ...b, status: 'pending' }
+                      : b
+                )
+              )
+              setTokenError(solFriendly)
+              setTokenSolWarning(solFriendly)
+              return
+            }
             preferSequential = true
             setTokenBatchProgress((prev) =>
               prev.map((b) =>
@@ -1829,12 +1958,28 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
         if (sendCancelledRef.current) return
 
         if (!result.ok) {
+          const solFriendly =
+            friendlyOwlSendInsufficientSolError(result.error, {
+              estimatedNeedSol:
+                estimateOwlSendRemainingTokenScatterSol({
+                  batchLineCounts,
+                  batchAtaCounts,
+                  fromBatchIndex: workingIndex,
+                  discountBps,
+                }) ?? undefined,
+              remainingNewAtaCount: sumOwlSendCountsFromIndex(batchAtaCounts, workingIndex),
+              fromApproval: workingIndex + 1,
+              totalApprovals: tokenBatches.length,
+            }) ?? result.error
           setTokenBatchProgress((prev) =>
             prev.map((b) =>
-              b.index === workingIndex ? { ...b, status: 'failed', error: result.error } : b
+              b.index === workingIndex ? { ...b, status: 'failed', error: solFriendly } : b
             )
           )
-          setTokenError(result.error)
+          setTokenError(solFriendly)
+          if (friendlyOwlSendInsufficientSolError(result.error)) {
+            setTokenSolWarning(solFriendly)
+          }
           return
         }
 
@@ -2012,6 +2157,52 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
     tokenBusy || tokenBatchProgress.some((b) => b.status === 'sending')
   const tokenDoneCount = tokenBatchProgress.filter((b) => b.status === 'done').length
   const tokenAllDone = tokenBatches.length > 0 && tokenDoneCount === tokenBatches.length
+
+  const tokenScatterCost = useMemo(() => {
+    if (tokenBatches.length < 1) return null
+    const lineCount = tokenBatches.reduce((n, b) => n + b.length, 0)
+    const newAtaCount =
+      tokenNeedsCreateAta.length === lineCount
+        ? tokenNeedsCreateAta.filter(Boolean).length
+        : null
+    return buildOwlSendTokenScatterCostEstimate({
+      lineCount,
+      batchCount: tokenBatches.length,
+      newAtaCount: newAtaCount ?? lineCount,
+      discountBps,
+    })
+  }, [tokenBatches, tokenNeedsCreateAta, discountBps])
+
+  const tokenRemainingCost = useMemo(() => {
+    if (tokenBatches.length < 1 || tokenAllDone) return null
+    const from = tokenActiveBatch
+    const batchLineCounts = tokenBatches.map((b) => b.length)
+    const lineCount = sumOwlSendCountsFromIndex(batchLineCounts, from)
+    if (lineCount < 1) return null
+    let ataCount = 0
+    try {
+      if (tokenNeedsCreateAta.length === batchLineCounts.reduce((a, b) => a + b, 0)) {
+        const per = owlSendTokenScatterAtaCountsPerBatch(tokenBatches, tokenNeedsCreateAta)
+        ataCount = sumOwlSendCountsFromIndex(per, from)
+      } else {
+        ataCount = lineCount
+      }
+    } catch {
+      ataCount = lineCount
+    }
+    return buildOwlSendCostEstimate({
+      nftCount: lineCount,
+      batchCount: Math.max(1, tokenBatches.length - from),
+      newAtaCount: ataCount,
+      discountBps,
+    })
+  }, [
+    tokenBatches,
+    tokenNeedsCreateAta,
+    tokenActiveBatch,
+    tokenAllDone,
+    discountBps,
+  ])
 
   if (access.loading) {
     return (
@@ -3071,8 +3262,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                       type="button"
                       onClick={() => {
                         setTokenMode(id)
-                        setTokenBatches([])
-                        setTokenBatchProgress([])
+                        clearTokenScatterPlan()
                         setTokenError(null)
                       }}
                       className={cn(
@@ -3213,8 +3403,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                           value={tokenScatterMint ?? ''}
                           onChange={(e) => {
                             setTokenScatterMint(e.target.value || null)
-                            setTokenBatches([])
-                            setTokenBatchProgress([])
+                            clearTokenScatterPlan()
                           }}
                           className="min-h-[44px] w-full touch-manipulation rounded-md border border-input bg-black/40 px-3 text-sm"
                         >
@@ -3238,8 +3427,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                         value={tokenScatterDefaultAmount}
                         onChange={(e) => {
                           setTokenScatterDefaultAmount(e.target.value)
-                          setTokenBatches([])
-                          setTokenBatchProgress([])
+                          clearTokenScatterPlan()
                         }}
                         placeholder="e.g. 100"
                         className="min-h-[44px] bg-black/40"
@@ -3255,8 +3443,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                           className="mb-2"
                           onApply={(paste) => {
                             setTokenScatterRaw(paste)
-                            setTokenBatches([])
-                            setTokenBatchProgress([])
+                            clearTokenScatterPlan()
                           }}
                         />
                       ) : null}
@@ -3265,8 +3452,7 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                         value={tokenScatterRaw}
                         onChange={(e) => {
                           setTokenScatterRaw(e.target.value)
-                          setTokenBatches([])
-                          setTokenBatchProgress([])
+                          clearTokenScatterPlan()
                         }}
                         rows={5}
                         placeholder={'wallet1\nwallet2,50\nwallet3 25'}
@@ -3308,6 +3494,36 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
 
                     {tokenBatches.length > 0 ? (
                       <div className="space-y-3">
+                        {tokenScatterCost ? (
+                          <div
+                            className={cn(
+                              'space-y-1 rounded-lg border px-3 py-2 text-sm',
+                              tokenSolWarning
+                                ? 'border-amber-500/40 bg-amber-500/10'
+                                : 'border-emerald-500/20 bg-emerald-500/5'
+                            )}
+                          >
+                            <p className="font-medium text-theme-prime">{tokenScatterCost.feeLabel}</p>
+                            <p className="text-muted-foreground">{tokenScatterCost.rentLabel}</p>
+                            <p className="text-muted-foreground">{tokenScatterCost.networkLabel}</p>
+                            <p className="pt-1 font-semibold text-white">
+                              Total {tokenScatterCost.totalLabel}
+                              {tokenRemainingCost &&
+                              tokenDoneCount > 0 &&
+                              !tokenAllDone &&
+                              tokenRemainingCost.totalSolKnown != null
+                                ? ` · remaining ${tokenRemainingCost.totalLabel}`
+                                : ''}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Owl fee is only part of the cost — new recipient token accounts need
+                              ~0.002 SOL rent each (refundable if you close them later).
+                            </p>
+                            {tokenSolWarning ? (
+                              <p className="pt-1 text-xs text-amber-200">{tokenSolWarning}</p>
+                            ) : null}
+                          </div>
+                        ) : null}
                         {tokenBatches.length > 12 ? (
                           <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3 text-sm">
                             <div className="flex items-center justify-between gap-2">
@@ -3334,11 +3550,13 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                               />
                             </div>
                             <p className="mt-2 text-xs text-muted-foreground">
-                              {tokenBatches.reduce((n, b) => n + b.length, 0)} wallets total ·{' '}
-                              {formatOwlSendFeeSol(
-                                feeSol * tokenBatches.reduce((n, b) => n + b.length, 0)
-                              )}{' '}
-                              Owl fee · stay on this page while sheets open
+                              {tokenBatches.reduce((n, b) => n + b.length, 0)} wallets ·{' '}
+                              {tokenScatterCost
+                                ? `${tokenScatterCost.totalLabel} est. total`
+                                : `${formatOwlSendFeeSol(
+                                    feeSol * tokenBatches.reduce((n, b) => n + b.length, 0)
+                                  )} Owl fee`}{' '}
+                              · stay on this page while sheets open
                             </p>
                             {tokenBatchProgress[tokenActiveBatch]?.error ? (
                               <p className="mt-2 text-xs text-red-300">
@@ -3380,7 +3598,10 @@ export function OwlSendClient({ initialViewerIsAdmin, isPublic }: Props) {
                                   </div>
                                   <p className="mt-1 text-xs text-muted-foreground">
                                     {lines.length} wallet{lines.length === 1 ? '' : 's'} ·{' '}
-                                    {formatOwlSendFeeSol(feeSol * lines.length)} fee
+                                    {formatOwlSendFeeSol(feeSol * lines.length)} Owl fee
+                                    {tokenNeedsCreateAta.length > 0
+                                      ? ' + rent if new accounts'
+                                      : ''}
                                   </p>
                                   {b.signature ? (
                                     <div className="mt-2">

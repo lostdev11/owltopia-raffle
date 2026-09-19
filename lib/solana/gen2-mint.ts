@@ -37,10 +37,7 @@ import {
   findRecentCandyMachineMintSignature,
   pollTransactionSignatureStatus,
 } from '@/lib/solana/recover-candy-machine-mint'
-import {
-  sendTransactionPreferPhantomSignAndSend,
-  walletAdapterIsPhantom,
-} from '@/lib/solana/phantom-sign-and-send-transaction'
+import { walletAdapterIsPhantom } from '@/lib/solana/phantom-sign-and-send-transaction'
 import { assertTransactionSimulatesClean } from '@/lib/solana/phantom-presimulate'
 import type { MintSessionDeadline } from '@/lib/owl-center/mint-time-budget'
 import {
@@ -211,7 +208,7 @@ export type MintGen2Params = {
 export type MintGen2Result =
       | {
       ok: true
-      /** One signature per transaction (batched mints share a single signature). */
+      /** One signature per on-chain mint tx (batch = many txs, one wallet approval). */
       txSignatures: string[]
       mintedNftMints: string[]
     }
@@ -654,7 +651,8 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
      * Paid public (no server co-sign) + Phantom multi-signer mint txs:
      * Phantom docs require wallet `signTransaction` / `signAllTransactions` first, then other
      * signers (mint keypair), then broadcast — not `signAndSend` on a pre-partial-signed tx.
-     * Allowlist route stays single-signer → `signAndSend` (Blowfish/Lighthouse OK).
+     * Allowlist route (single-signer) is bundled into the same `signAllTransactions` sheet as the
+     * mints, then sent/confirmed first so mintV2 still sees the proof PDA.
      *
      * @see https://docs.phantom.com/developer-powertools/domain-and-transaction-warnings
      */
@@ -674,52 +672,15 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
           return { ok: false, error: 'Wallet not connected' }
         }
 
-        const fallbackSend = (
-          transaction: Parameters<NonNullable<typeof walletAdapter.sendTransaction>>[0],
-          conn: Connection,
-          options?: Parameters<NonNullable<typeof walletAdapter.sendTransaction>>[2]
-        ) => {
-          if (typeof walletAdapter.sendTransaction !== 'function') {
-            throw new Error('Wallet cannot send transactions')
-          }
-          return walletAdapter.sendTransaction(transaction, conn, options)
-        }
-
-        // Allowlist proof must land before mintV2 (own tx — keeps mint txs under size limit).
+        // Allowlist proof stays its own tx (size limit) but shares the same wallet sheet as mints.
+        let routeBuilt: Transaction | null = null
         if (includeAllowListRoute) {
           const routeRes = buildRouteBuilder()
           if (!routeRes.ok) {
             resumeMintSessionDeadline(sessionDeadline)
             return { ok: false, error: routeRes.error }
           }
-          const routeBuilt = routeRes.builder.setBlockhash(blockhash).build(umi)
-          const routeWeb3 = toWeb3JsTransaction(routeBuilt)
-          const routeSig = await sendTransactionPreferPhantomSignAndSend({
-            transaction: routeWeb3,
-            connection,
-            adapter: walletAdapter,
-            publicKey: feePayer,
-            fallbackSendTransaction: fallbackSend,
-            options: { skipPreflight: false, preflightCommitment: 'confirmed', maxRetries: 3 },
-          })
-          const routeConfirmMs = Math.max(
-            MINT_SEND_MIN_MS,
-            mintSessionRemainingMs(sessionDeadline) - MINT_RECOVERY_RESERVE_MS
-          )
-          const routeOk = await pollTransactionSignatureStatus(rpcUrl, routeSig, {
-            maxWaitMs: routeConfirmMs,
-            intervalMs: 400,
-            minCommitment: 'confirmed',
-          })
-          if (!routeOk) {
-            resumeMintSessionDeadline(sessionDeadline)
-            return {
-              ok: false,
-              error:
-                'Allowlist setup didn’t confirm — tap Mint again to finish (your spots are still reserved).',
-              plannedMintB58s: plannedB58s,
-            }
-          }
+          routeBuilt = routeRes.builder.setBlockhash(blockhash).build(umi)
         }
 
         const builtMints: Transaction[] = []
@@ -733,26 +694,41 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
           builtMints.push(res.builder.setBlockhash(blockhash).build(umi))
         }
 
-        // Pre-sim before the wallet sheet so doomed mints do not look "malicious".
-        for (const built of builtMints) {
-          await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(built), {
-            failMessagePrefix: 'Mint would fail on-chain before wallet approval.',
+        // Pre-sim before the wallet sheet so doomed txs do not look "malicious".
+        // When an allowlist route is required, mintV2 sims wait until that proof PDA lands
+        // (see post-route pre-sim below) — otherwise they fail with a missing PDA.
+        if (routeBuilt) {
+          await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(routeBuilt), {
+            failMessagePrefix: 'Allowlist setup would fail on-chain before wallet approval.',
             rejectCandyGuardBotTax: true,
           })
+        } else {
+          for (const built of builtMints) {
+            await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(built), {
+              failMessagePrefix: 'Mint would fail on-chain before wallet approval.',
+              rejectCandyGuardBotTax: true,
+            })
+          }
         }
 
-        // 1) Phantom signs fee payer only (one prompt for the batch).
-        const walletSigned = await signAllTransactions(
-          builtMints.map((transaction) => ({
+        // 1) Phantom signs fee payer only — one prompt for allowlist route (if any) + all mints.
+        const walletSigned = await signAllTransactions([
+          ...(routeBuilt
+            ? [{ transaction: routeBuilt, signers: [umi.identity] }]
+            : []),
+          ...builtMints.map((transaction) => ({
             transaction,
             signers: [umi.identity],
-          }))
-        )
+          })),
+        ])
+
+        const routeSigned = routeBuilt ? walletSigned[0]! : null
+        const mintWalletSigned = routeBuilt ? walletSigned.slice(1) : walletSigned
 
         // 2) Mint keypairs sign after Phantom (required account signer for each mint).
         const fullySigned: Transaction[] = []
         for (let i = 0; i < quantity; i++) {
-          fullySigned.push(await nftMints[i]!.signTransaction(walletSigned[i]!))
+          fullySigned.push(await nftMints[i]!.signTransaction(mintWalletSigned[i]!))
         }
 
         resumeMintSessionDeadline(sessionDeadline)
@@ -785,9 +761,32 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
           }
         }
 
+        // Proof PDA must land before mintV2; send route first when present.
+        if (routeSigned) {
+          const routeResult = await sendOneMint(routeSigned)
+          if (!routeResult.confirmed) {
+            return {
+              ok: false,
+              error:
+                'Allowlist setup didn’t confirm — tap Mint again to finish (your spots are still reserved).',
+              plannedMintB58s: plannedB58s,
+            }
+          }
+          // Now that the proof PDA exists, catch doomed mints before we burn fees sending them.
+          for (const tx of fullySigned) {
+            await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(tx), {
+              failMessagePrefix: 'Mint would fail on-chain after allowlist setup.',
+              rejectCandyGuardBotTax: true,
+            })
+          }
+        }
+
+        // Send mint txs one at a time so on-chain mintLimit counters update between lands.
+        // Parallel sends often bot-tax the 2nd+ tx while still charging platform fee.
         const sendResults: Array<{ sig: string | null; confirmed: boolean }> = []
-        const all = await Promise.all(fullySigned.map((tx) => sendOneMint(tx)))
-        all.forEach((r) => sendResults.push(r))
+        for (const tx of fullySigned) {
+          sendResults.push(await sendOneMint(tx))
+        }
 
         const confirmedSigs: string[] = []
         const confirmedMints: string[] = []
@@ -971,11 +970,10 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
       }
     }
 
-    const sendResults: Array<{ sig: string | null; confirmed: boolean }> = new Array(effectiveQuantity)
-    const all = await Promise.all(signedTransactions.map((tx) => sendOneMint(tx)))
-    all.forEach((r, i) => {
-      sendResults[i] = r
-    })
+    const sendResults: Array<{ sig: string | null; confirmed: boolean }> = []
+    for (const tx of signedTransactions) {
+      sendResults.push(await sendOneMint(tx))
+    }
 
     const confirmedSigs: string[] = []
     const confirmedMints: string[] = []

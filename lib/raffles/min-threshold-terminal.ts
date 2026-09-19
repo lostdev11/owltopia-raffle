@@ -33,6 +33,26 @@ export async function finalizeMinThresholdTerminalFailure(raffleId: string): Pro
   }
 
   try {
+    const { autoRefundTicketEntriesForRaffle } = await import('@/lib/raffles/auto-ticket-refunds')
+    const auto = await autoRefundTicketEntriesForRaffle({
+      raffleId,
+      source: 'auto_finalize',
+      limit: 40,
+    })
+    if (auto.refunded > 0 || auto.failed > 0) {
+      console.info('[finalizeMinThresholdTerminalFailure] auto-refund', {
+        raffleId,
+        refunded: auto.refunded,
+        failed: auto.failed,
+        stoppedEarly: auto.stoppedEarly,
+        stopReason: auto.stopReason,
+      })
+    }
+  } catch (e) {
+    console.error('[finalizeMinThresholdTerminalFailure] auto-refund:', e)
+  }
+
+  try {
     const { voidMilestonesOnFailedRaffle } = await import('@/lib/raffles/milestones/settlement')
     await voidMilestonesOnFailedRaffle(raffleId)
   } catch (e) {

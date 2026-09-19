@@ -2,9 +2,12 @@ import { parseStandardFreezeConfig } from '@/lib/owl-center/freeze-config'
 import { isLaunchSupplyConfigLocked } from '@/lib/owl-center/launch-edit-locks'
 import {
   parseMintDetailsConfig,
+  preferStoredScheduleIso,
   resolveAllowlistPhasesForSave,
+  resolveMintOpensFromFirstPhase,
   resolveMintOpensIsoForPatch,
   resolvePublicStartForSave,
+  scheduleInstantsEqual,
 } from '@/lib/owl-center/launch-mint-config'
 import { partnerAllowlistEarliestStart } from '@/lib/owl-center/partner-allowlist-phases'
 import { isLaunchRoyaltyLocked, launchSellerFeeBasisPoints } from '@/lib/owl-center/royalty'
@@ -141,35 +144,62 @@ export function buildMintDetailsPatchFromBody(
     parsed.creator_wl_enabled ||
     (parsed.partner_allowlist_phases?.length ?? 0) > 0
   const requestedPublic = parsed.phase_schedule.PUBLIC ?? null
-  const mintOpensIso = resolveMintOpensIsoForPatch({
+  const firstPhaseKickoff = resolveMintOpensFromFirstPhase({
+    presaleEnabled: parsed.creator_presale_enabled,
+    presaleStart: parsed.phase_schedule.PRESALE ?? null,
+    allowlistPhases: parsed.partner_allowlist_phases,
+    legacyWlStart: parsed.phase_schedule.WHITELIST ?? null,
+  })
+  const mintOpensResolved = resolveMintOpensIsoForPatch({
     kickoff: parsed.launch_deadline_at,
     requestedPublic,
     previousKickoff: launch.launch_deadline_at,
     previousPublic: launch.phase_schedule?.PUBLIC ?? null,
     hasQueuedPhases,
+    firstPhaseKickoff,
   })
-  const publicIso = resolvePublicStartForSave({
+  // Keep stored kickoff ISO when the instant did not change (limit-only / non-schedule edits).
+  const mintOpensIso =
+    preferStoredScheduleIso(mintOpensResolved, launch.launch_deadline_at) ?? mintOpensResolved
+  const publicResolved = resolvePublicStartForSave({
     kickoff: mintOpensIso,
     requestedPublic,
     previousPublic: launch.phase_schedule?.PUBLIC ?? null,
+    previousKickoff: launch.launch_deadline_at,
     hasQueuedPhases,
   })
+  const publicIso =
+    preferStoredScheduleIso(publicResolved, launch.phase_schedule?.PUBLIC ?? null) ?? publicResolved
   const phase_schedule = { ...parsed.phase_schedule }
   if (publicIso) phase_schedule.PUBLIC = publicIso
   else delete phase_schedule.PUBLIC
-  if (mintOpensIso) phase_schedule.AIRDROP = mintOpensIso
+  if (mintOpensIso) {
+    phase_schedule.AIRDROP =
+      preferStoredScheduleIso(mintOpensIso, launch.phase_schedule?.AIRDROP ?? null) ?? mintOpensIso
+  } else delete phase_schedule.AIRDROP
 
   const partner_allowlist_phases = resolveAllowlistPhasesForSave({
     phases: parsed.partner_allowlist_phases ?? [],
     kickoff: mintOpensIso,
     previousKickoff: launch.launch_deadline_at,
     previousPublic: launch.phase_schedule?.PUBLIC ?? null,
+    previousPhases: launch.partner_allowlist_phases ?? null,
   })
   const earliestAllowlist = partnerAllowlistEarliestStart(partner_allowlist_phases)
   if (partner_allowlist_phases.length > 0 && earliestAllowlist) {
-    phase_schedule.WHITELIST = earliestAllowlist
+    phase_schedule.WHITELIST =
+      preferStoredScheduleIso(earliestAllowlist, launch.phase_schedule?.WHITELIST ?? null) ??
+      earliestAllowlist
   } else if (!parsed.creator_wl_enabled) {
     delete phase_schedule.WHITELIST
+  }
+
+  // Preserve other phase_schedule keys byte-for-byte when instants match (PRESALE, etc.).
+  for (const key of Object.keys(phase_schedule) as Array<keyof typeof phase_schedule>) {
+    const prev = launch.phase_schedule?.[key as keyof NonNullable<OwlCenterLaunchPublic['phase_schedule']>]
+    if (prev && scheduleInstantsEqual(phase_schedule[key], prev)) {
+      phase_schedule[key] = prev
+    }
   }
 
   const patch: Parameters<typeof updateOwlCenterLaunchByIdAdmin>[1] = {

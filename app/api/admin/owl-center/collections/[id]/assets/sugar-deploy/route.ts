@@ -34,11 +34,18 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   return NextResponse.json({
     arweave_ready: status.arweave_ready,
     can_deploy: status.can_deploy,
+    can_continue_loading: status.can_continue_loading,
     can_retry_handoff: status.can_retry_handoff,
     onchain_deploy_enabled: status.onchain_deploy_enabled,
     server_deploy_max_supply: status.server_deploy_max_supply,
+    tm_server_deploy_max_supply: status.tm_server_deploy_max_supply,
+    config_line_count: status.config_line_count,
+    over_server_cap: status.over_server_cap,
+    fully_deployed: status.fully_deployed,
     candy_machine_id: status.candy_machine_id,
     collection_mint: status.collection_mint,
+    in_progress_candy_machine_id: status.in_progress_candy_machine_id,
+    in_progress_collection_mint: status.in_progress_collection_mint,
     deploy_state: status.deploy_state,
     mint_mode: status.launch.mint_mode,
     mint_standard: status.mint_standard,
@@ -110,7 +117,22 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   const result = await runOnchainSugarDeployForLaunch(id)
   if (!result.ok) {
     const status = result.code === 'not_found' ? 404 : 400
-    return NextResponse.json({ ok: false, error: result.error, code: result.code }, { status })
+    return NextResponse.json(
+      {
+        ok: false,
+        error: result.error,
+        code: result.code,
+        result: {
+          candy_machine_id: result.candy_machine_id,
+          collection_mint: result.collection_mint,
+          candy_guard_id: result.candy_guard_id,
+          continue_loading: result.continue_loading,
+          config_lines_loaded: result.config_lines_loaded,
+          config_lines_total: result.config_lines_total,
+        },
+      },
+      { status }
+    )
   }
 
   return NextResponse.json({ ok: true, result })

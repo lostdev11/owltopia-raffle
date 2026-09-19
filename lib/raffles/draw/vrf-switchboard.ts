@@ -1,6 +1,6 @@
 /**
  * Switchboard On-Demand randomness (commit → reveal) for owltopia-draw-v3-vrf.
- * Platform pays via funds/prize escrow keypair. Pure client path — no custom raffle program yet.
+ * Platform pays via VRF_FEE_PAYER_SECRET_KEY (preferred), else prize/funds escrow. Pure client path — no custom raffle program yet.
  */
 import {
   Keypair,
@@ -15,42 +15,111 @@ import {
 } from '@solana/web3.js'
 import { getSolanaConnection } from '@/lib/solana/connection'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
-import { getFundsEscrowKeypair } from '@/lib/raffles/funds-escrow'
-import { getPrizeEscrowKeypair } from '@/lib/raffles/prize-escrow'
+import { resolveVrfOrRevealFeePayer } from '@/lib/raffles/vrf-fee-payer'
 import { seedFromVrfHex, extractVrfValueHex, isSwitchboardRandomnessRevealed } from '@/lib/raffles/draw/vrf-seed'
 import {
   resolveVrfRevealWaitMs,
   vrfRevealRetryDelayMs,
   isSwitchboardGatewayTransientError,
   isInvalidVrfSecpSignatureError,
+  isBlockhashNotFoundError,
 } from '@/lib/raffles/draw/vrf-retry-policy'
 import {
   SWITCHBOARD_TX_CU_PRICE,
   resolveSwitchboardComputeUnitLimit,
 } from '@/lib/raffles/draw/vrf-switchboard-cu'
+import { confirmTxWithTimeout } from '@/lib/solana/confirm-tx-with-timeout'
 
 export const VRF_PROVIDER_SWITCHBOARD = 'switchboard' as const
 
-/** Public cluster RPCs Switchboard oracle gateways can call without our API keys. */
-const SWITCHBOARD_ORACLE_RPC_MAINNET = 'https://api.mainnet-beta.solana.com'
+/**
+ * Public RPCs Switchboard oracle gateways can call without our API keys.
+ * Prefer durable third-party publics — `api.mainnet-beta.solana.com` is heavily
+ * rate-limited and often returns tip state that disagrees with paid RPCs used
+ * for simulate/send (→ InvalidSecpSignature 6016).
+ */
+export const SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES = [
+  'https://solana-rpc.publicnode.com',
+  'https://solana.drpc.org',
+  'https://api.mainnet-beta.solana.com',
+] as const
+
 const SWITCHBOARD_ORACLE_RPC_DEVNET = 'https://api.devnet.solana.com'
+
+/** Slots after the committed seed slot before we start reveal polls. */
+export const SWITCHBOARD_SEED_SLOT_MATURITY = 15
+
+/**
+ * Wait until `seedSlot + maturity` is behind the confirmed tip (or minWait elapses).
+ * Reveal signatures signed too early against an unstable tip fail Secp on-chain.
+ */
+export async function waitForSwitchboardSeedSlot(params: {
+  connection: Connection
+  seedSlot?: number
+  minWaitMs?: number
+  maxWaitMs?: number
+  maturitySlots?: number
+}): Promise<void> {
+  const minWaitMs = params.minWaitMs ?? 8_000
+  const maxWaitMs = params.maxWaitMs ?? 20_000
+  const maturity = params.maturitySlots ?? SWITCHBOARD_SEED_SLOT_MATURITY
+  const started = Date.now()
+  while (Date.now() - started < maxWaitMs) {
+    const elapsed = Date.now() - started
+    try {
+      const slot = await params.connection.getSlot('confirmed')
+      if (
+        typeof params.seedSlot === 'number' &&
+        Number.isFinite(params.seedSlot) &&
+        slot >= params.seedSlot + maturity &&
+        elapsed >= minWaitMs
+      ) {
+        return
+      }
+    } catch {
+      // ignore tip read flakes
+    }
+    if (elapsed >= minWaitMs && params.seedSlot == null) return
+    await new Promise((r) => setTimeout(r, 1_000))
+  }
+}
 
 /**
  * RPC URL passed to Switchboard oracle gateways during RandomnessReveal.
  *
- * Gateways fetch slot state from this URL from *their* servers. Passing a private
- * Helius/QuickNode URL (API key / IP allowlist) often yields signatures that fail
- * on-chain as InvalidSecpSignature (6016 / 0x1780). Always prefer a public cluster
- * endpoint the oracles can reach.
+ * Gateways fetch slot state from this URL from *their* servers. The reveal tx
+ * must then be simulated/sent against the *same* RPC — signing on public and
+ * simulating on Helius causes InvalidSecpSignature (6016 / 0x1780) even when
+ * both are "correct". Override with SWITCHBOARD_ORACLE_RPC_URL when needed.
  */
 export function resolveSwitchboardOracleRpcUrl(clusterRpcHint?: string): string {
-  const override = (process.env.SWITCHBOARD_ORACLE_RPC_URL || '').trim()
-  if (override) {
-    const sanitized = override.replace(/\/$/, '')
-    if (sanitized) return sanitized
+  return resolveSwitchboardOracleRpcCandidates(clusterRpcHint)[0]!
+}
+
+/** Ordered oracle RPC candidates to try on InvalidSecpSignature. */
+export function resolveSwitchboardOracleRpcCandidates(clusterRpcHint?: string): string[] {
+  const override = (process.env.SWITCHBOARD_ORACLE_RPC_URL || '').trim().replace(/\/$/, '')
+  if (override) return [override]
+
+  const hint = (clusterRpcHint ?? resolveServerSolanaRpcUrl()).trim().replace(/\/$/, '')
+  if (isDevnetRpc(hint)) return [SWITCHBOARD_ORACLE_RPC_DEVNET]
+
+  const out: string[] = []
+  const add = (url: string) => {
+    const cleaned = url.trim().replace(/\/$/, '')
+    if (!cleaned || out.includes(cleaned)) return
+    out.push(cleaned)
   }
-  const hint = (clusterRpcHint ?? resolveServerSolanaRpcUrl()).trim()
-  return isDevnetRpc(hint) ? SWITCHBOARD_ORACLE_RPC_DEVNET : SWITCHBOARD_ORACLE_RPC_MAINNET
+
+  // Prefer the same HTTPS RPC used for commit/simulate (e.g. Helius with api-key).
+  // Switchboard oracle servers can call API-key URLs; matching SlotHashes to the
+  // bank that verifies the reveal is required to avoid persistent 6016 Secp failures
+  // when signing on a public tip and simulating on a paid RPC (or vice versa).
+  if (/^https:\/\//i.test(hint) && !/localhost|127\.0\.0\.1/i.test(hint)) {
+    add(hint)
+  }
+  for (const candidate of SWITCHBOARD_ORACLE_RPC_MAINNET_CANDIDATES) add(candidate)
+  return out
 }
 
 export type SwitchboardVrfRequestResult =
@@ -77,7 +146,7 @@ export type SwitchboardVrfRevealResult =
   | { ok: false; error: string; retryable: boolean }
 
 function resolveVrfPayer(): Keypair | null {
-  return getFundsEscrowKeypair() ?? getPrizeEscrowKeypair() ?? null
+  return resolveVrfOrRevealFeePayer()
 }
 
 function isDevnetRpc(url: string): boolean {
@@ -128,16 +197,35 @@ async function loadSbProgram(connection: Connection, payer: Keypair) {
   return sb.AnchorUtils.loadProgramFromConnection(connection, keypairWallet(payer))
 }
 
+/** Simulate config that never fails solely because the tip blockhash is unknown to the bank. */
+export const SWITCHBOARD_SIMULATE_OPTS = {
+  commitment: 'confirmed' as const,
+  sigVerify: false as const,
+  replaceRecentBlockhash: true as const,
+}
+
 /**
  * Build a Switchboard v0 tx with CU headroom that survives RandomnessCommit
  * sim under-count. Prefer this over raw `sb.asV0Tx` (1.3×, no floor, ignores sim err).
+ *
+ * Simulation uses `replaceRecentBlockhash: true` so load-balanced RPCs do not
+ * return BlockhashNotFound for a `processed` tip the sim bank does not know yet
+ * (prod pack opens: charged SOL, then "Switchboard tx simulation failed:
+ * \"BlockhashNotFound\"" → refund_needed). The sendable tx always gets a fresh
+ * `confirmed` blockhash after a successful sim.
  */
+type SwitchboardBuiltTx = {
+  tx: VersionedTransaction
+  blockhash: string
+  lastValidBlockHeight: number
+}
+
 async function asSwitchboardV0Tx(params: {
   connection: Connection
   ixs: TransactionInstruction[]
   signers: Keypair[]
   computeUnitPrice?: number
-}): Promise<VersionedTransaction> {
+}): Promise<SwitchboardBuiltTx> {
   const payer = params.signers[0]
   if (!payer) throw new Error('asSwitchboardV0Tx: missing signer / payer')
 
@@ -148,39 +236,92 @@ async function asSwitchboardV0Tx(params: {
   const simLimitIx = ComputeBudgetProgram.setComputeUnitLimit({
     units: 1_400_000,
   })
-  const { blockhash } = await params.connection.getLatestBlockhash('processed')
-  const simMessage = new TransactionMessage({
-    payerKey: payer.publicKey,
-    recentBlockhash: blockhash,
-    instructions: [priorityFeeIx, simLimitIx, ...params.ixs],
-  }).compileToV0Message()
-  const simTx = new VersionedTransaction(simMessage)
-  const simulation = await params.connection.simulateTransaction(simTx, {
-    commitment: 'processed',
-    sigVerify: false,
-  })
-  if (simulation.value.err) {
-    const logs = (simulation.value.logs || []).join('\n')
-    throw new Error(
-      `Switchboard tx simulation failed: ${JSON.stringify(simulation.value.err)}${
-        logs ? `\n${logs}` : ''
-      }`
-    )
-  }
 
-  const computeLimitIx = ComputeBudgetProgram.setComputeUnitLimit({
-    units: resolveSwitchboardComputeUnitLimit({
-      unitsConsumed: simulation.value.unitsConsumed,
-    }),
+  const maxAttempts = 3
+  let lastErr: Error | null = null
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      // Placeholder hash for the sim message only — bank replaces it when
+      // replaceRecentBlockhash is set. Still fetch something valid for encode.
+      const { blockhash: simBlockhash } = await params.connection.getLatestBlockhash(
+        'confirmed'
+      )
+      const simMessage = new TransactionMessage({
+        payerKey: payer.publicKey,
+        recentBlockhash: simBlockhash,
+        instructions: [priorityFeeIx, simLimitIx, ...params.ixs],
+      }).compileToV0Message()
+      const simTx = new VersionedTransaction(simMessage)
+      const simulation = await params.connection.simulateTransaction(
+        simTx,
+        SWITCHBOARD_SIMULATE_OPTS
+      )
+      if (simulation.value.err) {
+        const logs = (simulation.value.logs || []).join('\n')
+        const err = new Error(
+          `Switchboard tx simulation failed: ${JSON.stringify(simulation.value.err)}${
+            logs ? `\n${logs}` : ''
+          }`
+        )
+        if (isBlockhashNotFoundError(err.message) && attempt < maxAttempts - 1) {
+          lastErr = err
+          await new Promise((r) => setTimeout(r, 250 * (attempt + 1)))
+          continue
+        }
+        throw err
+      }
+
+      // Fresh confirmed blockhash for the sendable tx (sim replacement is not reusable).
+      const latest = await params.connection.getLatestBlockhash('confirmed')
+      const computeLimitIx = ComputeBudgetProgram.setComputeUnitLimit({
+        units: resolveSwitchboardComputeUnitLimit({
+          unitsConsumed: simulation.value.unitsConsumed,
+        }),
+      })
+      const message = new TransactionMessage({
+        payerKey: payer.publicKey,
+        recentBlockhash: latest.blockhash,
+        instructions: [priorityFeeIx, computeLimitIx, ...params.ixs],
+      }).compileToV0Message()
+      const tx = new VersionedTransaction(message)
+      tx.sign(params.signers)
+      return {
+        tx,
+        blockhash: latest.blockhash,
+        lastValidBlockHeight: latest.lastValidBlockHeight,
+      }
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e))
+      lastErr = err
+      if (isBlockhashNotFoundError(err.message) && attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 250 * (attempt + 1)))
+        continue
+      }
+      throw err
+    }
+  }
+  throw lastErr ?? new Error('asSwitchboardV0Tx: exhausted retries')
+}
+
+/** Send + confirm with a hard timeout so pack opens cannot hang on "Resolving prize…". */
+async function sendAndConfirmSwitchboardTx(params: {
+  connection: Connection
+  built: SwitchboardBuiltTx
+  confirmTimeoutMs?: number
+}): Promise<string> {
+  const signature = await params.connection.sendTransaction(params.built.tx, {
+    skipPreflight: false,
+    preflightCommitment: 'processed',
+    maxRetries: 3,
   })
-  const message = new TransactionMessage({
-    payerKey: payer.publicKey,
-    recentBlockhash: blockhash,
-    instructions: [priorityFeeIx, computeLimitIx, ...params.ixs],
-  }).compileToV0Message()
-  const tx = new VersionedTransaction(message)
-  tx.sign(params.signers)
-  return tx
+  await confirmTxWithTimeout(params.connection, {
+    signature,
+    blockhash: params.built.blockhash,
+    lastValidBlockHeight: params.built.lastValidBlockHeight,
+    commitment: 'confirmed',
+    timeoutMs: params.confirmTimeoutMs,
+  })
+  return signature
 }
 
 function normalizeGatewayUrl(raw: string | null | undefined): string | null {
@@ -324,7 +465,7 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
     return {
       ok: false,
       error:
-        'No escrow key configured for VRF fees (set FUNDS_ESCROW_SECRET_KEY or PRIZE_ESCROW_SECRET_KEY)',
+        'No fee-payer key configured for VRF (set VRF_FEE_PAYER_SECRET_KEY, or PRIZE_ESCROW_SECRET_KEY / FUNDS_ESCROW_SECRET_KEY as fallback)',
     }
   }
 
@@ -368,32 +509,22 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
     }
 
     // Create must land before commit (commitIx accounts assume the account exists).
-    const createTx = await asSwitchboardV0Tx({
+    const createBuilt = await asSwitchboardV0Tx({
       connection,
       ixs: [createIx],
       signers: [payer, rngKp],
     })
-    const createSig = await connection.sendTransaction(createTx, {
-      skipPreflight: false,
-      preflightCommitment: 'processed',
-      maxRetries: 3,
-    })
-    await connection.confirmTransaction(createSig, 'confirmed')
+    await sendAndConfirmSwitchboardTx({ connection, built: createBuilt })
 
-    const commitTx = await asSwitchboardV0Tx({
+    const commitBuilt = await asSwitchboardV0Tx({
       connection,
       ixs: [commitIx],
       signers: [payer],
     })
-    const commitSig = await connection.sendTransaction(commitTx, {
-      skipPreflight: false,
-      preflightCommitment: 'processed',
-      maxRetries: 3,
+    const commitSig = await sendAndConfirmSwitchboardTx({
+      connection,
+      built: commitBuilt,
     })
-    await connection.confirmTransaction(commitSig, 'confirmed')
-
-    // Oracle needs a moment after commit before reveal signatures validate on-chain.
-    await new Promise((r) => setTimeout(r, 4000))
 
     let seedSlot: number | undefined
     try {
@@ -403,6 +534,10 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
     } catch {
       // optional
     }
+
+    // Wait until the seed slot is comfortably behind the tip so SlotHashes is stable
+    // for oracle signing. Fixed sleeps alone still produced Secp 6016 under load.
+    await waitForSwitchboardSeedSlot({ connection, seedSlot, minWaitMs: 8_000, maxWaitMs: 20_000 })
 
     const bs58 = (await import('bs58')).default
     return {
@@ -447,14 +582,16 @@ export async function switchboardRevealRandomness(params: {
 
   try {
     const sb = await loadSb()
-    // Paid / primary RPC for simulate + send. Oracle gateways get a public URL separately.
+    // Paid / primary RPC for account reads after reveal lands.
     const connection = getSolanaConnection()
     const program = await loadSbProgram(connection, payer)
-    const oracleRpcUrl = resolveSwitchboardOracleRpcUrl(connection.rpcEndpoint)
-    // Separate program bound to a public RPC so SDK revealIx passes a reachable `rpc`
-    // to fetchRandomnessReveal (private Helius URLs → InvalidSecpSignature).
-    const oracleConnection = new Connection(oracleRpcUrl, 'confirmed')
-    const oracleProgram = await loadSbProgram(oracleConnection, payer)
+    const oracleRpcCandidates = resolveSwitchboardOracleRpcCandidates(connection.rpcEndpoint)
+    let oracleRpcIndex = 0
+    let oracleRpcUrl = oracleRpcCandidates[oracleRpcIndex]!
+    // Reveal sign + simulate + send MUST share one RPC. Signing against public
+    // mainnet-beta while simulating on Helius → persistent InvalidSecpSignature.
+    let oracleConnection = new Connection(oracleRpcUrl, 'confirmed')
+    let oracleProgram = await loadSbProgram(oracleConnection, payer)
     const bs58 = (await import('bs58')).default
     const rngKp = Keypair.fromSecretKey(bs58.decode(params.randomnessSecretKeyBase58.trim()))
     const accountPk = new PublicKey(params.randomnessAccount.trim())
@@ -467,7 +604,21 @@ export async function switchboardRevealRandomness(params: {
     }
 
     const randomness = new sb.Randomness(program, accountPk)
-    const oracleRandomness = new sb.Randomness(oracleProgram, accountPk)
+    let oracleRandomness = new sb.Randomness(oracleProgram, accountPk)
+
+    const bindOracleRpc = async (rpcUrl: string) => {
+      oracleRpcUrl = rpcUrl
+      oracleConnection = new Connection(rpcUrl, 'confirmed')
+      oracleProgram = await loadSbProgram(oracleConnection, payer)
+      oracleRandomness = new sb.Randomness(oracleProgram, accountPk)
+    }
+
+    const rotateOracleRpcOnSecp = async (): Promise<boolean> => {
+      if (oracleRpcIndex >= oracleRpcCandidates.length - 1) return false
+      oracleRpcIndex += 1
+      await bindOracleRpc(oracleRpcCandidates[oracleRpcIndex]!)
+      return true
+    }
 
     const readRevealedValue = async (
       revealTx: string
@@ -511,17 +662,18 @@ export async function switchboardRevealRandomness(params: {
         const attemptReveal = async (
           revealIx: TransactionInstruction
         ): Promise<SwitchboardVrfRevealResult | null> => {
-          const revealTx = await asSwitchboardV0Tx({
-            connection,
+          const remainingMs = Math.max(5_000, maxWaitMs - (Date.now() - started))
+          // Same connection the gateway used for `rpc` when building the signature.
+          const revealBuilt = await asSwitchboardV0Tx({
+            connection: oracleConnection,
             ixs: [revealIx],
             signers: [payer],
           })
-          const revealSig = await connection.sendTransaction(revealTx, {
-            skipPreflight: false,
-            preflightCommitment: 'processed',
-            maxRetries: 3,
+          const revealSig = await sendAndConfirmSwitchboardTx({
+            connection: oracleConnection,
+            built: revealBuilt,
+            confirmTimeoutMs: Math.min(45_000, remainingMs),
           })
-          await connection.confirmTransaction(revealSig, 'confirmed')
           lastRevealSig = revealSig
 
           const fromChain = await readRevealedValue(revealSig)
@@ -557,8 +709,7 @@ export async function switchboardRevealRandomness(params: {
           return null
         }
 
-        // Primary: SDK revealIx against a public-RPC program (assigned oracle gateway +
-        // oracle-reachable rpc param). Private RPC here caused persistent 6016 Secp failures.
+        // Primary: SDK revealIx against current oracle RPC (assigned gateway + matching rpc).
         let sdkSecpFailure = false
         try {
           const sdkResult = await attemptReveal(
@@ -568,12 +719,16 @@ export async function switchboardRevealRandomness(params: {
         } catch (sdkErr) {
           lastErr = sdkErr instanceof Error ? sdkErr.message : 'SDK revealIx failed'
           sdkSecpFailure = isInvalidVrfSecpSignatureError(lastErr)
+          if (sdkSecpFailure && (await rotateOracleRpcOnSecp())) {
+            // Fresh signature against a different public tip — retry immediately.
+            continue
+          }
         }
 
         // Fallback: try gateways in oracle-first order when SDK path fails (503 / timeout).
-        // Skip on Secp — oracle not ready yet; wrong gateways only produce more Secp failures.
-        // Always pass oracleRpcUrl so gateway signatures verify on-chain.
-        if (!sdkSecpFailure) {
+        // On Secp after RPC rotation is exhausted, still try alternate gateways with the
+        // current oracleRpcUrl (wrong gateway can also produce Secp).
+        if (!sdkSecpFailure || oracleRpcIndex >= oracleRpcCandidates.length - 1) {
           if (!gatewayUrls) {
             const data = await randomness.loadData()
             gatewayUrls = await collectRevealGatewayUrls(program, data)
@@ -583,8 +738,8 @@ export async function switchboardRevealRandomness(params: {
             try {
               const gatewayResult = await attemptReveal(
                 await buildRevealIxForGateway({
-                  program,
-                  randomness,
+                  program: oracleProgram,
+                  randomness: oracleRandomness,
                   payer: payer.publicKey,
                   gatewayUrl,
                   rpcUrl: oracleRpcUrl,
@@ -594,8 +749,10 @@ export async function switchboardRevealRandomness(params: {
             } catch (gatewayErr) {
               const msg = gatewayErr instanceof Error ? gatewayErr.message : 'Gateway reveal failed'
               lastErr = msg
-              // Wrong gateway signature — try the next URL instead of failing the whole draw.
-              if (isInvalidVrfSecpSignatureError(msg)) continue
+              if (isInvalidVrfSecpSignatureError(msg)) {
+                if (await rotateOracleRpcOnSecp()) break
+                continue
+              }
               if (!isSwitchboardGatewayTransientError(msg)) break
             }
           }
@@ -609,6 +766,9 @@ export async function switchboardRevealRandomness(params: {
         } catch {
           // ignore
         }
+        if (isInvalidVrfSecpSignatureError(lastErr) && (await rotateOracleRpcOnSecp())) {
+          continue
+        }
       }
 
       const delayMs = vrfRevealRetryDelayMs({ attemptIndex, lastError: lastErr })
@@ -620,7 +780,9 @@ export async function switchboardRevealRandomness(params: {
 
     const gatewayHint = isSwitchboardGatewayTransientError(lastErr)
       ? ` (Switchboard oracle gateway flaky — tried ${gatewayUrls?.length ?? 0} gateways; auto-retry will re-commit if this stays down)`
-      : ''
+      : isInvalidVrfSecpSignatureError(lastErr)
+        ? ` (InvalidSecpSignature after trying ${oracleRpcCandidates.length} oracle RPCs ending with ${oracleRpcUrl})`
+        : ''
     return {
       ok: false,
       error: `VRF reveal timed out after ${maxWaitMs}ms: ${lastErr}${gatewayHint}`,

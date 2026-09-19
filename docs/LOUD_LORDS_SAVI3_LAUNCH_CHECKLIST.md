@@ -11,7 +11,7 @@ Ops notes for onboarding **Loud Lords Revival** on Owltopia `public_simple` (Par
 | Free Mint Token | SPL mint address from Savi3 (`redeem_token_mint`); burn **1** raw unit per NFT (`redeem_token_amount=1`, `redeem_mode=burn`) |
 | Phase price | **0** for Free Mint Token (Candy Guard `tokenBurn` only — no `solPayment`) |
 | Remaining supply | Paid / public phases as agreed |
-| Large CM deploy | Use Arweave + Sugar ops pipeline ([OWL_CENTER_ARWEAVE_COLLECTION_PIPELINE.md](./OWL_CENTER_ARWEAVE_COLLECTION_PIPELINE.md)) — in-app deploy cap is ~250 |
+| Large CM deploy | **Core:** in-app deploy (resumable item loading). **Token Metadata:** Sugar ops pipeline ([OWL_CENTER_ARWEAVE_COLLECTION_PIPELINE.md](./OWL_CENTER_ARWEAVE_COLLECTION_PIPELINE.md)) — TM in-app cap is 250 |
 
 ## Creator mint config (Mint details)
 

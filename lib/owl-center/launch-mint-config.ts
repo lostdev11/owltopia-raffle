@@ -124,24 +124,49 @@ export function scheduleInstantsEqual(a: string | null | undefined, b: string | 
 }
 
 /**
+ * Prefer the DB-stored ISO when the requested value is the same instant.
+ * Stops datetime-local round-trips (minute precision / reformatting) from rewriting
+ * schedule columns on limit-only mint-config saves.
+ */
+export function preferStoredScheduleIso(
+  requested: string | null | undefined,
+  stored: string | null | undefined
+): string | null {
+  const storedTrim = stored?.trim() || null
+  const requestedTrim = requested?.trim() || null
+  if (storedTrim && scheduleInstantsEqual(requestedTrim, storedTrim)) return storedTrim
+  if (!requestedTrim) return null
+  return datetimeLocalToIso(requestedTrim) ?? requestedTrim
+}
+
+/**
  * PUBLIC start to persist with a mint-details save.
  *
  * Straight public mint: Mint opens is the live date.
- * Allowlist/presale: keep an independent public start only when the request actually
- * changed it. If Public start was left at the previous leftover time, copy Mint opens
- * so moving the date back is visible after reload.
+ * Allowlist/presale: Public start may intentionally follow Mint opens (WL window → public).
+ * Only treat an unchanged Public start as "leftover" when it was still tied to the previous
+ * Mint opens and Mint opens itself moved — otherwise keep the later public window across saves.
  */
 export function resolvePublicStartForSave(opts: {
   kickoff: string | null
   requestedPublic: string | null
   previousPublic?: string | null
+  previousKickoff?: string | null
   hasQueuedPhases: boolean
 }): string | null {
-  const { kickoff, requestedPublic, previousPublic, hasQueuedPhases } = opts
+  const { kickoff, requestedPublic, previousPublic, previousKickoff, hasQueuedPhases } = opts
   if (!hasQueuedPhases) return kickoff ?? requestedPublic
   if (!kickoff) return requestedPublic
   if (!requestedPublic || scheduleInstantsEqual(requestedPublic, kickoff)) return kickoff
-  if (previousPublic !== undefined && scheduleInstantsEqual(requestedPublic, previousPublic)) return kickoff
+  const kickoffMoved =
+    previousKickoff != null && !scheduleInstantsEqual(kickoff, previousKickoff)
+  const publicUnchanged =
+    previousPublic !== undefined && scheduleInstantsEqual(requestedPublic, previousPublic)
+  const previousPublicWasSyncedToKickoff =
+    previousKickoff != null &&
+    previousPublic != null &&
+    scheduleInstantsEqual(previousPublic, previousKickoff)
+  if (kickoffMoved && publicUnchanged && previousPublicWasSyncedToKickoff) return kickoff
   return requestedPublic
 }
 
@@ -151,32 +176,71 @@ export function resolveAllowlistPhasesForSave(opts: {
   kickoff: string | null
   previousKickoff?: string | null
   previousPublic?: string | null
+  /** Prior persisted phases — used to keep starts_at byte-stable when instants match. */
+  previousPhases?: PartnerAllowlistPhase[] | null
 }): PartnerAllowlistPhase[] {
-  const { phases, kickoff, previousKickoff, previousPublic } = opts
-  return phases.map((phase) => {
+  const { phases, kickoff, previousKickoff, previousPublic, previousPhases } = opts
+  const kickoffMoved =
+    Boolean(kickoff?.trim()) &&
+    previousKickoff != null &&
+    !scheduleInstantsEqual(kickoff, previousKickoff)
+  const previousPublicWasSyncedToKickoff =
+    previousKickoff != null &&
+    previousPublic != null &&
+    scheduleInstantsEqual(previousPublic, previousKickoff)
+
+  return phases.map((phase, idx) => {
     let starts_at = phase.starts_at
     if (starts_at && kickoff) {
-      if (previousKickoff && scheduleInstantsEqual(starts_at, previousKickoff)) {
-        starts_at = kickoff
-      } else if (previousPublic && scheduleInstantsEqual(starts_at, previousPublic)) {
-        starts_at = kickoff
+      // Only drag phase starts when Mint opens actually moved — never on limit-only saves.
+      if (kickoffMoved) {
+        if (previousKickoff && scheduleInstantsEqual(starts_at, previousKickoff)) {
+          starts_at = kickoff
+        } else if (
+          previousPublicWasSyncedToKickoff &&
+          previousPublic &&
+          scheduleInstantsEqual(starts_at, previousPublic)
+        ) {
+          starts_at = kickoff
+        }
       }
-      starts_at = resolveEffectiveAllowlistStartsAt(starts_at, { launch_deadline_at: kickoff, phase_schedule: {} })
+      const effective = resolveEffectiveAllowlistStartsAt(starts_at, {
+        launch_deadline_at: kickoff,
+        phase_schedule: {},
+      })
+      const prevStored =
+        previousPhases?.find((p) => p.key === phase.key)?.starts_at ?? previousPhases?.[idx]?.starts_at ?? null
+      starts_at = preferStoredScheduleIso(effective, prevStored) ?? effective
     }
     return starts_at === phase.starts_at ? phase : { ...phase, starts_at }
   })
 }
 
-/** Changing Mint opens also moves Public start; the public field can still be edited after. */
+/**
+ * Changing Mint opens also moves Public start when they were still tied together.
+ * With allowlist/presale, a later Public start is kept so WL → public windows survive edits.
+ */
 export function applyMintOpensDate(values: MintDetailsFormValues, launch_date: string): MintDetailsFormValues {
   const previousKickoff = values.launch_date
   const previousPublic = values.public_start
+  const hasQueuedPhases =
+    values.presale_enabled || values.wl_enabled || values.allowlist_phases.length > 0
+  const publicWasDiverged =
+    hasQueuedPhases &&
+    Boolean(previousKickoff.trim()) &&
+    Boolean(previousPublic.trim()) &&
+    !scheduleInstantsEqual(previousPublic, previousKickoff)
   const allowlist_phases = values.allowlist_phases.map((phase) => {
     if (!phase.start.trim()) return phase
     if (previousKickoff && scheduleInstantsEqual(phase.start, previousKickoff)) {
       return { ...phase, start: launch_date }
     }
-    if (previousPublic && scheduleInstantsEqual(phase.start, previousPublic)) {
+    // Do not drag allowlist starts that matched an intentional later Public start.
+    if (
+      !publicWasDiverged &&
+      previousPublic &&
+      scheduleInstantsEqual(phase.start, previousPublic)
+    ) {
       return { ...phase, start: launch_date }
     }
     return phase
@@ -184,10 +248,16 @@ export function applyMintOpensDate(values: MintDetailsFormValues, launch_date: s
   const wl_start =
     values.wl_start.trim() &&
     (scheduleInstantsEqual(values.wl_start, previousKickoff) ||
-      scheduleInstantsEqual(values.wl_start, previousPublic))
+      (!publicWasDiverged && scheduleInstantsEqual(values.wl_start, previousPublic)))
       ? launch_date
       : values.wl_start
-  return { ...values, launch_date, public_start: launch_date, allowlist_phases, wl_start }
+  return {
+    ...values,
+    launch_date,
+    public_start: publicWasDiverged ? previousPublic : launch_date,
+    allowlist_phases,
+    wl_start,
+  }
 }
 
 /**
@@ -199,22 +269,91 @@ export function resolveSimpleMintDate(kickoff: string | null, publicStart: strin
   return kickoff ?? publicStart
 }
 
-/** Canonical Mint opens ISO to write on save — prefer whichever date field the user actually changed. */
+/**
+ * Canonical Mint opens ISO to write on save.
+ * Simple public: either date field can move the live kickoff.
+ * Allowlist/presale: Mint opens is derived from the first phase start (not a separate field).
+ */
 export function resolveMintOpensIsoForPatch(opts: {
   kickoff: string | null
   requestedPublic: string | null
   previousKickoff?: string | null
   previousPublic?: string | null
   hasQueuedPhases: boolean
+  /** Earliest presale / allowlist start — wins over a leftover manual Mint opens. */
+  firstPhaseKickoff?: string | null
 }): string | null {
-  const { kickoff, requestedPublic, previousKickoff, previousPublic, hasQueuedPhases } = opts
+  const {
+    kickoff,
+    requestedPublic,
+    previousKickoff,
+    previousPublic,
+    hasQueuedPhases,
+    firstPhaseKickoff,
+  } = opts
+
+  if (hasQueuedPhases) {
+    // Auto Mint opens = first phase start. Blank until a phase start exists.
+    if (firstPhaseKickoff) return firstPhaseKickoff
+    return null
+  }
+
   const kickoffChanged = Boolean(kickoff && !scheduleInstantsEqual(kickoff, previousKickoff))
   const publicChanged = Boolean(requestedPublic && !scheduleInstantsEqual(requestedPublic, previousPublic))
 
   if (kickoffChanged) return kickoff
   if (publicChanged) return requestedPublic
-  if (!hasQueuedPhases) return resolveSimpleMintDate(kickoff, requestedPublic)
-  return kickoff ?? requestedPublic
+  return resolveSimpleMintDate(kickoff, requestedPublic)
+}
+
+/** Earliest non-empty schedule instant among candidates (ISO or datetime-local). */
+export function earliestScheduleInstant(
+  candidates: Array<string | null | undefined>
+): string | null {
+  let best: string | null = null
+  let bestMs: number | null = null
+  for (const raw of candidates) {
+    const ms = scheduleMs(raw)
+    if (ms == null || !raw?.trim()) continue
+    const iso = datetimeLocalToIso(raw.trim()) ?? raw.trim()
+    if (bestMs == null || ms < bestMs) {
+      bestMs = ms
+      best = iso
+    }
+  }
+  return best
+}
+
+/**
+ * Mint opens when the first queued phase starts (presale or earliest allowlist).
+ * Used so partners do not maintain a separate Mint opens field (Genbeta / WL flows).
+ */
+export function resolveMintOpensFromFirstPhase(opts: {
+  presaleEnabled: boolean
+  presaleStart?: string | null
+  allowlistPhases?: Array<{ starts_at?: string | null; start?: string | null }>
+  legacyWlStart?: string | null
+}): string | null {
+  const candidates: Array<string | null | undefined> = []
+  if (opts.presaleEnabled) candidates.push(opts.presaleStart)
+  const phases = opts.allowlistPhases ?? []
+  for (const phase of phases) {
+    candidates.push(phase.starts_at ?? phase.start)
+  }
+  if (phases.length === 0) candidates.push(opts.legacyWlStart)
+  return earliestScheduleInstant(candidates)
+}
+
+/** Form helper: earliest phase start as datetime-local (or empty). */
+export function resolveFormMintOpensFromFirstPhase(values: MintDetailsFormValues): string {
+  const iso = resolveMintOpensFromFirstPhase({
+    presaleEnabled: values.presale_enabled,
+    presaleStart: values.presale_start,
+    allowlistPhases: values.allowlist_phases.map((p) => ({ start: p.start })),
+    legacyWlStart: values.wl_start,
+  })
+  if (!iso) return ''
+  return isoToDatetimeLocal(iso) || iso
 }
 
 function requireScheduleEntry(
@@ -321,7 +460,7 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
 
   const launchDateParsed = requireScheduleEntry(body.launch_date ?? body.launch_deadline_at, 'mint open date')
   if (!launchDateParsed.ok) return launchDateParsed
-  const launch_deadline_at = launchDateParsed.iso
+  let launch_deadline_at = launchDateParsed.iso
 
   const phase_schedule: Record<string, string> = {}
   const rawSchedule = body.phase_schedule
@@ -355,6 +494,15 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
   }
 
   const hasQueuedPhases = presale_enabled || wl_enabled || partner_allowlist_phases.length > 0
+  // With queued phases, Mint opens is the first phase start — not a separate manual field.
+  if (hasQueuedPhases) {
+    launch_deadline_at = resolveMintOpensFromFirstPhase({
+      presaleEnabled: presale_enabled,
+      presaleStart: presale_start,
+      allowlistPhases: partner_allowlist_phases,
+      legacyWlStart: wl_start,
+    })
+  }
   const requestedPublic = public_start ?? phase_schedule.PUBLIC ?? null
   if (hasQueuedPhases) {
     const publicIso = resolvePublicStartForSave({
@@ -380,6 +528,7 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
   }
 
   if (launch_deadline_at && !phase_schedule.AIRDROP) phase_schedule.AIRDROP = launch_deadline_at
+  else if (!launch_deadline_at) delete phase_schedule.AIRDROP
 
   const public_price_usdc = currency === 'USDC' ? public_price : null
   const multiPrice = partnerAllowlistPrimaryPriceUsdc(partner_allowlist_phases)
@@ -514,7 +663,6 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
   // Convert datetime-local values to ISO here (in the browser) so the
   // local→UTC offset uses the admin's timezone, not the server's (UTC).
   // Fall back to the raw field if conversion fails so the date is not dropped.
-  const launchIso = formDateToPayload(values.launch_date)
   const presaleIso = formDateToPayload(values.presale_start)
   const publicIso = formDateToPayload(values.public_start)
 
@@ -523,10 +671,20 @@ export function mintDetailsPayloadFromForm(values: MintDetailsFormValues): Recor
     start: formDateToPayload(row.start) ?? '',
   }))
   const wlEnabled = allowlist_phases.length > 0 || values.wl_enabled
+  const hasQueuedPhases = wlEnabled || values.presale_enabled
+  const firstPhaseKickoff = resolveMintOpensFromFirstPhase({
+    presaleEnabled: values.presale_enabled,
+    presaleStart: presaleIso,
+    allowlistPhases: allowlist_phases,
+    legacyWlStart: formDateToPayload(values.wl_start),
+  })
+  // Queued phases: Mint opens = first phase start (blank until a phase start exists).
+  // Simple public: keep the Mint opens field.
+  const launchIso = hasQueuedPhases ? firstPhaseKickoff : formDateToPayload(values.launch_date)
   const resolvedPublicIso = resolvePublicStartForSave({
     kickoff: launchIso,
     requestedPublic: publicIso,
-    hasQueuedPhases: wlEnabled || values.presale_enabled,
+    hasQueuedPhases,
   })
   const first = allowlist_phases[0]
   const wlIso = first?.start.trim()

@@ -2,11 +2,16 @@
 
 import type { ReactNode } from 'react'
 import { ChevronLeft, ChevronRight, ShieldCheck } from 'lucide-react'
+import { CurrencyIcon } from '@/components/CurrencyIcon'
+import { PACK_DEFAULT_OWL_SOL_PRICE, resolveOwlSolPrice } from '@/lib/packs/config'
 import type { VaultPack } from '@/lib/packs/vault-wheel'
+import { cn } from '@/lib/utils'
 
 type Props = {
   pack: VaultPack
   price: number
+  /** SOL per 1 OWL — used to show the upcoming $OWL pack price. */
+  owlSolPrice?: number | null
   idTick: number
   locked: boolean
   cta: ReactNode
@@ -20,9 +25,19 @@ type Props = {
   onNext: () => void
 }
 
+function formatOwlPackPrice(priceSol: number, owlSolPrice: number | null | undefined): string {
+  const rate = resolveOwlSolPrice(owlSolPrice ?? PACK_DEFAULT_OWL_SOL_PRICE)
+  if (!(rate > 0) || !(priceSol > 0)) return '—'
+  const owl = priceSol / rate
+  if (owl >= 100) return owl.toFixed(0)
+  if (owl >= 10) return owl.toFixed(owl % 1 === 0 ? 0 : 1)
+  return owl.toFixed(owl % 1 === 0 ? 0 : 2).replace(/\.?0+$/, '')
+}
+
 export function PackPurchasePanel({
   pack,
   price,
+  owlSolPrice = null,
   idTick,
   locked,
   cta,
@@ -34,6 +49,8 @@ export function PackPurchasePanel({
   onPrev,
   onNext,
 }: Props) {
+  const priceOwlLabel = formatOwlPackPrice(price, owlSolPrice)
+
   return (
     <div className="relative z-10 mx-auto mt-3 w-full max-w-sm px-1 sm:mt-4">
       <div className="flex items-center justify-center gap-3 sm:gap-4">
@@ -68,9 +85,46 @@ export function PackPurchasePanel({
         </button>
       </div>
 
-      <p className="mt-3 text-center font-display text-2xl tracking-wide text-white">
-        {price} SOL
-      </p>
+      <div
+        className="mt-3 grid grid-cols-2 gap-2"
+        role="group"
+        aria-label="Pack payment currency"
+      >
+        <div
+          className={cn(
+            'flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl border px-2 py-2',
+            'border-[#00FF9C]/55 bg-[#00FF9C]/12 text-white'
+          )}
+          aria-current="true"
+        >
+          <span className="inline-flex items-center gap-1.5 text-sm font-bold uppercase tracking-[0.12em]">
+            <CurrencyIcon currency="SOL" size={16} />
+            SOL
+          </span>
+          <span className="font-display text-lg tracking-wide">{price} SOL</span>
+        </div>
+        <button
+          type="button"
+          disabled
+          aria-disabled="true"
+          title="$OWL checkout coming soon"
+          className={cn(
+            'relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl border px-2 py-2',
+            'cursor-not-allowed border-white/10 bg-white/[0.03] text-white/35 touch-manipulation',
+            'opacity-55 grayscale'
+          )}
+          style={{ touchAction: 'manipulation' }}
+        >
+          <span className="absolute right-1.5 top-1 rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-white/50">
+            Soon
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-sm font-bold uppercase tracking-[0.12em]">
+            <CurrencyIcon currency="OWL" size={16} className="opacity-60" />
+            $OWL
+          </span>
+          <span className="font-display text-lg tracking-wide">{priceOwlLabel} $OWL</span>
+        </button>
+      </div>
 
       <div className="mt-3">{cta}</div>
 

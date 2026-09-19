@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { consumeLaunchWlMints, recordLaunchPhaseMintUsage } from '@/lib/db/owl-center-launch-wl-wallets'
+import { canConfirmVerifiedMintQuantity } from '@/lib/owl-center/confirm-mint-eligibility'
 import { partnerPhaseHasRedeemTokenBurn, resolvePartnerPhaseWalletMintLimit } from '@/lib/owl-center/partner-allowlist-phases'
 import { buildSimpleMintEligibility } from '@/lib/owl-center/simple-mint-eligibility'
 import { getLaunchActiveAllowlistPhase, isLaunchWhitelistWindowOpen } from '@/lib/owl-center/launch-wl-window'
@@ -118,11 +119,18 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   if (eligibilityPre.active_phase !== phase) {
     return NextResponse.json({ error: 'Phase mismatch — refresh and try again' }, { status: 400 })
   }
-  if (!eligibilityPre.is_eligible || qty > eligibilityPre.max_mintable) {
-    return NextResponse.json(
-      { error: 'Not eligible for this mint quantity — refresh your allocation' },
-      { status: 400 }
-    )
+  // Verify already proved an NFT minted. Do not use forward-looking max_mintable alone — the
+  // on-chain mintLimit counter often already includes this mint, which would reject the last
+  // spot(s) and leave MINTED stuck at 0/N.
+  const confirmElig = canConfirmVerifiedMintQuantity({
+    quantity: qty,
+    maxMintable: eligibilityPre.max_mintable,
+    isPaused: eligibilityPre.is_paused,
+    walletMinted: eligibilityPre.wallet_minted,
+    walletMintLimit: eligibilityPre.wallet_mint_limit,
+  })
+  if (!confirmElig.ok) {
+    return NextResponse.json({ error: confirmElig.error }, { status: 400 })
   }
 
   const db = getSupabaseAdmin()

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { getOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { requireLaunchMintEditorSession } from '@/lib/owl-center/creator-access'
+import { isCreatorCoreThawAllowed } from '@/lib/owl-center/creator-core-thaw-gate'
 import { runCoreCollectionThawForLaunch } from '@/lib/owl-center/core-collection-thaw'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -30,6 +31,14 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
   const editor = await requireLaunchMintEditorSession(request, launch)
   if (editor instanceof NextResponse) return editor
+
+  // Soft-gate creators until sell-out; admins stay ungated for emergencies.
+  if (!editor.isAdmin) {
+    const gate = isCreatorCoreThawAllowed(launch)
+    if (!gate.ok) {
+      return NextResponse.json({ error: gate.error }, { status: 400 })
+    }
+  }
 
   const result = await runCoreCollectionThawForLaunch(id)
   if (!result.ok) {

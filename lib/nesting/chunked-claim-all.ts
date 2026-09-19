@@ -1,8 +1,9 @@
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { executeBatchOwlClaims, type BatchOwlClaimResult } from '@/lib/nesting/batch-claim'
+import { isBatchClaimLedgerSyncError } from '@/lib/nesting/batch-claim-errors'
 import type { PositionClaimPlan } from '@/lib/nesting/claim-plan'
 import { getClaimAllBatchSize } from '@/lib/nesting/policy'
-import { StakingUserError } from '@/lib/nesting/errors'
+import { isStakingUserError, StakingUserError } from '@/lib/nesting/errors'
 
 export type ChunkedBatchOwlClaimResult = BatchOwlClaimResult & {
   batch_count: number
@@ -16,6 +17,22 @@ function chunkPlans(plans: PositionClaimPlan[], size: number): PositionClaimPlan
     chunks.push(plans.slice(i, i + size))
   }
   return chunks
+}
+
+function shouldRetryFailedClaimBatch(e: unknown): boolean {
+  // OWL may already have left the treasury — never re-send.
+  if (isBatchClaimLedgerSyncError(e)) return false
+  if (isStakingUserError(e)) {
+    const code = typeof e.extra?.code === 'string' ? e.extra.code : ''
+    if (code === 'owl_reward_transfer_unreconciled' || code === 'owl_reward_transfer_in_flight') {
+      return false
+    }
+    // Validation / policy errors will not recover on retry.
+    if (e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429) {
+      return false
+    }
+  }
+  return true
 }
 
 /**
@@ -51,20 +68,28 @@ export async function executeChunkedBatchOwlClaims(params: {
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i]!
-    try {
-      const result = await executeBatchOwlClaims({
-        wallet: params.wallet,
-        pool: params.pool,
-        plans: chunk,
-      })
-      totalClaimed += result.total_claimed
-      claims.push(...result.claims)
-      if (result.execution_path === 'onchain_transfer') {
-        executionPath = 'onchain_transfer'
+    let result: BatchOwlClaimResult | null = null
+    let lastError: unknown
+    // One retry per batch absorbs transient RPC / blockhash failures without stranding remaining nests.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        result = await executeBatchOwlClaims({
+          wallet: params.wallet,
+          pool: params.pool,
+          plans: chunk,
+        })
+        lastError = undefined
+        break
+      } catch (e) {
+        lastError = e
+        if (attempt === 0 && shouldRetryFailedClaimBatch(e)) {
+          await new Promise((r) => setTimeout(r, 400))
+          continue
+        }
+        break
       }
-      const sig = result.transaction_signature?.trim()
-      if (sig) transactionSignatures.push(sig)
-    } catch (e) {
+    }
+    if (!result) {
       if (totalClaimed > 0) {
         throw new StakingUserError(
           `OWL was sent for ${i} of ${chunks.length} batches (${totalClaimed.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL total). Refresh your wallet and dashboard — Claim all again only for remaining nests; your prior platform fee can be reused if the app still has it. Contact support if any nests still show claimable OWL after a successful payout.`,
@@ -80,8 +105,15 @@ export async function executeChunkedBatchOwlClaims(params: {
           }
         )
       }
-      throw e
+      throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'Claim batch failed'))
     }
+    totalClaimed += result.total_claimed
+    claims.push(...result.claims)
+    if (result.execution_path === 'onchain_transfer') {
+      executionPath = 'onchain_transfer'
+    }
+    const sig = result.transaction_signature?.trim()
+    if (sig) transactionSignatures.push(sig)
   }
 
   return {

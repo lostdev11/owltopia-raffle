@@ -5,7 +5,12 @@ import { isSome, publicKey } from '@metaplex-foundation/umi'
 import type { DefaultGuardSet } from '@metaplex-foundation/mpl-core-candy-machine'
 
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
-import { getLaunchWlWallet, sumLaunchWlPhaseUsedMints } from '@/lib/db/owl-center-launch-wl-wallets'
+import {
+  getLaunchWlWallet,
+  sumLaunchWlPhaseUsedMints,
+  sumLaunchWlWalletUsedMints,
+} from '@/lib/db/owl-center-launch-wl-wallets'
+import { publicSimplePublicPhaseWalletMinted } from '@/lib/owl-center/public-simple-wallet-mint-count'
 import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { launchScheduledPublicReason } from '@/lib/owl-center/launch-mint-open'
@@ -98,7 +103,7 @@ async function walletOnChainCoreMintLimitCount(
   }
 }
 
-async function walletPublicMintCount(
+async function walletLabeledPublicMintCount(
   launchId: string,
   wallet: string,
   network: 'mainnet' | 'devnet'
@@ -112,6 +117,22 @@ async function walletPublicMintCount(
     .eq('phase', 'PUBLIC')
     .eq('network', network)
   return (data ?? []).reduce((sum, row) => sum + Number((row as { quantity: number }).quantity ?? 0), 0)
+}
+
+/**
+ * True public-phase mints toward launch.wallet_mint_limit.
+ * Allowlist-window confirms are also stored as phase=PUBLIC; subtract soft WL used_mints.
+ */
+async function walletPublicPhaseMintCount(
+  launchId: string,
+  wallet: string,
+  network: 'mainnet' | 'devnet'
+): Promise<number> {
+  const [labeledPublicMinted, allowlistUsedMints] = await Promise.all([
+    walletLabeledPublicMintCount(launchId, wallet, network),
+    sumLaunchWlWalletUsedMints(launchId, wallet),
+  ])
+  return publicSimplePublicPhaseWalletMinted({ labeledPublicMinted, allowlistUsedMints })
 }
 
 export async function buildSimpleMintEligibility(
@@ -145,9 +166,12 @@ export async function buildSimpleMintEligibility(
   const wallet = walletRaw?.trim() ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
   const allowlistOpen = isLaunchWhitelistWindowOpen(launch)
   const activeAllowlistPhase = allowlistOpen ? getLaunchActiveAllowlistPhase(launch) : null
-  const dbWalletMinted = wallet ? await walletPublicMintCount(launch.id, wallet, mint_network) : 0
+  const dbWalletMinted = wallet
+    ? await walletPublicPhaseMintCount(launch.id, wallet, mint_network)
+    : 0
   // Prefer the higher of DB ledger vs on-chain mintLimit counter so a lagging confirm cannot
   // re-enable Mint after the wallet already hit AllowedMintLimitReached (Breppe double-charge).
+  // On-chain mintLimit ids are per guard group, so public reads only the public counter.
   const onChainWalletMinted = wallet
     ? await walletOnChainCoreMintLimitCount(
         launch,
@@ -160,7 +184,7 @@ export async function buildSimpleMintEligibility(
   const effectiveWalletLimit = allowlistOpen
     ? resolvePartnerPhaseWalletMintLimit(activeAllowlistPhase, launch.wallet_mint_limit)
     : Math.max(1, Math.floor(Number(launch.wallet_mint_limit) || 1))
-  // During allowlist, per-wallet progress is WL used_mints (below); public uses mint_events count.
+  // During allowlist, per-wallet progress is WL used_mints (below); public uses public-phase count.
   const walletRemainingPublic = Math.max(0, effectiveWalletLimit - wallet_minted)
   const scheduleClosed = publicSimpleMintClosedInfo(launch)
   const mint_window_open = allowlistOpen || scheduleClosed == null
@@ -250,7 +274,7 @@ export async function buildSimpleMintEligibility(
       ? `${activeAllowlistPhase.label} is live — connect wallet to check if you’re on the list`
       : 'Connect wallet to mint'
   } else if (!allowlistOpen && walletRemainingPublic <= 0) {
-    reason = `Wallet limit reached (${effectiveWalletLimit} per wallet)`
+    reason = `Wallet limit reached (${effectiveWalletLimit} from public this phase — not total NFTs in wallet)`
   } else {
     max_mintable = Math.min(allowlistOpen ? effectiveWalletLimit : walletRemainingPublic, remaining)
 
@@ -297,7 +321,7 @@ export async function buildSimpleMintEligibility(
                 max_mintable > 0
                   ? `Eligible for ${activePhase?.label ?? 'Free Mint Token'} · up to ${max_mintable} mint${max_mintable === 1 ? '' : 's'}`
                   : phaseWalletRemaining <= 0
-                    ? `Wallet limit reached (${effectiveWalletLimit} per wallet for ${activePhase?.label ?? 'this phase'})`
+                    ? `Wallet limit reached (${effectiveWalletLimit} from ${activePhase?.label ?? 'this phase'} — not total NFTs in wallet)`
                     : `${activePhase?.label ?? 'Free Mint Token'} phase is sold out`
             }
           } catch {
@@ -322,7 +346,7 @@ export async function buildSimpleMintEligibility(
             allowlist_spots_remaining = Math.min(wlRemaining, phaseWalletRemaining, phaseRemaining)
             if (phaseWalletRemaining <= 0) {
               max_mintable = 0
-              reason = `Wallet limit reached (${effectiveWalletLimit} per wallet for ${activePhase?.label ?? 'this phase'})`
+              reason = `Wallet limit reached (${effectiveWalletLimit} from ${activePhase?.label ?? 'this phase'} — not total NFTs in wallet)`
             } else if (wlRemaining <= 0) {
               max_mintable = 0
               reason = `${activePhase?.label ?? 'Whitelist'} mint allocation exhausted`
@@ -337,7 +361,7 @@ export async function buildSimpleMintEligibility(
 
     is_eligible = max_mintable > 0
     if (is_eligible && !allowlistOpen && !reason) {
-      reason = `Eligible for public · up to ${max_mintable} mint${max_mintable === 1 ? '' : 's'}`
+      reason = `Eligible for public · up to ${max_mintable} mint${max_mintable === 1 ? '' : 's'} (${wallet_minted}/${effectiveWalletLimit} this phase)`
     }
     if (is_eligible && platformFeeEnabled && wallet && platformFeeQuote?.ok) {
       const feeBal = await assertOwlCenterPlatformMintFeeSolBalance(

@@ -6,6 +6,8 @@ import { runGen2WalletSafeMetadataFix } from '@/lib/owl-center/wallet-safe-oncha
 
 import { buildGen2Eligibility } from '@/lib/owl-center/gen2-eligibility'
 
+import { canConfirmVerifiedMintQuantity } from '@/lib/owl-center/confirm-mint-eligibility'
+
 import { evaluateGen2MintMilestones } from '@/lib/owl-center/gen2-milestones/evaluate'
 
 import { notifyGen2MintDiscordFeedForTx } from '@/lib/owl-center/gen2-mint-discord-feed'
@@ -251,16 +253,15 @@ export async function POST(request: NextRequest) {
 
   }
 
-  if (!eligibilityPre.is_eligible || qty > eligibilityPre.max_mintable) {
-
-    return NextResponse.json(
-
-      { error: 'Not eligible for this mint quantity — refresh your allocation checker' },
-
-      { status: 400 }
-
-    )
-
+  // Verify already proved an NFT minted. Credit qty against max_mintable so filling the last
+  // allocation is still recordable (forward-looking is_eligible/max_mintable is often 0 by now).
+  const confirmElig = canConfirmVerifiedMintQuantity({
+    quantity: qty,
+    maxMintable: eligibilityPre.max_mintable,
+    isPaused: eligibilityPre.is_paused,
+  })
+  if (!confirmElig.ok) {
+    return NextResponse.json({ error: confirmElig.error }, { status: 400 })
   }
 
 

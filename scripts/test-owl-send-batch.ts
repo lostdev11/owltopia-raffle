@@ -73,6 +73,7 @@ import {
   OWL_SEND_MAX_PER_TX_TOKEN,
   OWL_SEND_MAX_PER_TX_TOKEN_NEW_ATA,
   OWL_SEND_TOKEN_SIGN_ALL_WINDOW,
+  OWL_SEND_ATA_RENT_SOL,
   owlSendClassicApprovalSize,
 } from '@/lib/owl-send/constants'
 import {
@@ -93,6 +94,14 @@ import {
   prependOwlSendComputeBudget,
 } from '@/lib/owl-send/compute-budget'
 import { buildOwlSendCostEstimate } from '@/lib/owl-send/cost-estimate'
+import {
+  OWL_SEND_SOL_DUST_BUFFER_SOL,
+  buildOwlSendTokenScatterCostEstimate,
+  estimateOwlSendRemainingTokenScatterSol,
+  friendlyOwlSendInsufficientSolError,
+  owlSendTokenScatterAtaCountsPerBatch,
+  sumOwlSendCountsFromIndex,
+} from '@/lib/owl-send/sol-affordability'
 import { getOwlSendFeeLamportsForCount, getOwlSendFeeSol } from '@/lib/owl-send/fee'
 import { canAccessOwlSend, canAccessOwlSendCsv, isOwlSendCsvPublicClient } from '@/lib/owl-send/access'
 
@@ -254,6 +263,61 @@ const cost = buildOwlSendCostEstimate({ nftCount: 20, batchCount: 4, newAtaCount
 assert.ok(cost)
 assert.equal(cost!.platformFeeSol, 0.02)
 assert.ok(cost!.rentSolKnown != null && cost!.rentSolKnown > 0)
+
+// Token airdrop cost must include ATA rent (screenshot: 629 wallets / ~609 new ATAs).
+{
+  const lineCount = 629
+  const newAtaCount = 609
+  const batchCount = 90
+  const scatterCost = buildOwlSendTokenScatterCostEstimate({
+    lineCount,
+    batchCount,
+    newAtaCount,
+    discountBps: 5000,
+  })
+  assert.ok(scatterCost)
+  assert.ok(scatterCost!.rentSolKnown != null)
+  assert.ok(
+    Math.abs((scatterCost!.rentSolKnown ?? 0) - OWL_SEND_ATA_RENT_SOL * newAtaCount) < 1e-9
+  )
+  assert.ok((scatterCost!.totalSolKnown ?? 0) > (scatterCost!.platformFeeSol ?? 0))
+  assert.ok((scatterCost!.totalSolKnown ?? 0) > 1.2) // rent alone ≈ 1.24 SOL
+  assert.match(scatterCost!.totalLabel, /SOL/)
+  assert.ok(!scatterCost!.totalLabel.includes('+ rent if needed'))
+
+  const needs = Array.from({ length: lineCount }, (_, i) => i < newAtaCount)
+  const packs = packOwlSendTokenScatterLines(
+    Array.from({ length: lineCount }, (_, i) => i),
+    needs
+  )
+  const ataPer = owlSendTokenScatterAtaCountsPerBatch(packs, needs)
+  assert.equal(ataPer.reduce((a, b) => a + b, 0), newAtaCount)
+  assert.equal(sumOwlSendCountsFromIndex(ataPer, 0), newAtaCount)
+
+  const remainingFrom32 = estimateOwlSendRemainingTokenScatterSol({
+    batchLineCounts: packs.map((p) => p.length),
+    batchAtaCounts: ataPer,
+    fromBatchIndex: 32,
+    discountBps: 5000,
+  })
+  assert.ok(remainingFrom32 != null && remainingFrom32 > OWL_SEND_SOL_DUST_BUFFER_SOL)
+
+  const friendly = friendlyOwlSendInsufficientSolError(
+    'Transaction would fail on-chain before wallet approval.\n' +
+      'Program 11111111111111111111111111111111 failed: custom program error: 0x1\n' +
+      'Transfer: insufficient lamports 1210862, need 3500000',
+    {
+      estimatedNeedSol: remainingFrom32 ?? undefined,
+      remainingNewAtaCount: sumOwlSendCountsFromIndex(ataPer, 32),
+      fromApproval: 33,
+      totalApprovals: packs.length,
+    }
+  )
+  assert.ok(friendly)
+  assert.match(friendly!, /Not enough SOL/)
+  assert.match(friendly!, /Retry from 33/)
+  assert.ok(!/Program 11111111/.test(friendly!))
+}
 
 assert.equal(canAccessOwlSend({ isAdmin: true, publicOverride: false }), true)
 assert.equal(canAccessOwlSend({ isAdmin: false, publicOverride: false }), false)

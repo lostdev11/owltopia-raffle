@@ -51,7 +51,7 @@ Buying stays off until a full admin turns packs on (`pack_vault_config.paused`):
 | OWL scale | **10 → 50** (10 OWL = 0.1 SOL at default rate) |
 | SOL scale | 0.05 → 0.5 SOL (Gembird ladder; 0.1 / 0.2 / 0.5 chase tiers) |
 | NFT fair value | 0.05+ SOL (admin-tagged, up to 50 SOL); **higher FP = rarer** |
-| NFT 1% tier | Admin `odds_tier=premium_1pct` (Owltopia Gen1/Gen2/Coins + optional chase); **~1% overall** shared pool; FP still weights within pool |
+| NFT 1% tier | Admin `odds_tier=premium_1pct` (Owltopia Gen1/Gen2/Coins + optional chase); **~1% overall** shared pool; UI shows **1%** per chase mint (tier rate); FP still weights which chase mint wins *inside* the pool |
 | RTP target | **80%** (EV ≈ 0.08 SOL / open) |
 | OWL win UX | “You won N $OWL — sent to your wallet” |
 | UX | Instant rip (`/packs`) |
@@ -61,6 +61,8 @@ Buying stays off until a full admin turns packs on (`pack_vault_config.paused`):
 ## Jackpot
 
 Each **0.1 SOL** pack contributes **0.02 SOL** to a visible accumulating jackpot pool (~**0.2%** win chance per open by default). On a jackpot hit, the buyer receives the **full pool** in SOL and the pool resets to zero. Regular OWL/SOL/NFT prizes apply when the jackpot roll misses.
+
+Paid opens that never finished (e.g. historical VRF `refund_needed`) still count toward the pool when recalculated. Admins can sync with `PATCH /api/admin/packs` `{ "recalculate_jackpot": true }`.
 
 Apply migration **229** (`packs_jackpot`) and **232** (`packs_launch_mode_and_test_wallets`) alongside prior pack migrations.
 
@@ -78,7 +80,7 @@ Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payo
 3. Fund the vault with SOL, OWL, and NFTs. **All pack purchase SOL goes to this wallet**; prize payouts leave from it (house edge stays as residual balance).
 4. Admin → Packs: load wallet NFTs, set floors (0.05+ SOL; grails above 0.5 are allowed), **Deposit & add**. Classic SPL NFTs pack up to **3 per on-chain tx**; Phantom (and other multi-sign wallets) approve **all classic txs in one sheet**. Metaplex Core, compressed, and pNFTs need one approval each; frozen/nested assets are not supported. Aim for ~30 NFTs at launch.
 5. Apply migration **227** (`packs_vrf_and_nft_snapshot`).
-6. Pack VRF is on by default (`owltopia-pack-open-v2-vrf`). Needs `FUNDS_ESCROW_SECRET_KEY` or `PRIZE_ESCROW_SECRET_KEY` for Switchboard fees — same as raffle VRF. Set `PACK_VRF_ENABLED=false` only to fall back to local commit–reveal.
+6. Pack VRF is on by default (`owltopia-pack-open-v2-vrf`). Prefers `VRF_FEE_PAYER_SECRET_KEY` for Switchboard fees (falls back to prize/funds escrow) — same as raffle VRF. Set `PACK_VRF_ENABLED=false` only to fall back to local commit–reveal.
 7. Run `npm run packs:ev-simulator` before going live; set `owl_sol_price` until EV ≈ 0.08 SOL. Use Admin → **Launch checklist**.
 8. Admin → Packs → set **Restricted live** (testers) or **Public live**, then **Turn packs on** when the vault is funded.
 9. Opens auto-pause when NFT inventory cannot cover the NFT category (solvency guard). Only a full admin can turn them back on.
