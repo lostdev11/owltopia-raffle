@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { upsertPartnerCommunityCreatorFromApplication } from '@/lib/db/partner-community-creators-admin'
+import { grantOwlCenterAccessFromPartnerPro } from '@/lib/partners/sync-owl-center-access'
 import { clearPartnerCommunityWalletCache } from '@/lib/raffles/partner-communities'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 
@@ -93,11 +94,14 @@ export async function updatePartnerProgramApplicationStatus(
 export type ApprovePartnerProgramApplicationResult = {
   application: PartnerProgramApplicationRow
   creator_wallet: string
+  /** Whether Owl Center launchpad access was granted (or re-approved) for the wallet. */
+  owl_center_granted: boolean
 }
 
 /**
- * Approve an application: upsert partner_community_creators from answers + logo, mark active.
- * Idempotent — re-approve refreshes the creator row.
+ * Approve an application: upsert partner_community_creators from answers + logo, mark active,
+ * and sync Owl Center launchpad access for the same wallet.
+ * Idempotent — re-approve refreshes the creator row and re-approves Owl Center.
  */
 export async function approvePartnerProgramApplication(
   id: number
@@ -115,13 +119,21 @@ export async function approvePartnerProgramApplication(
       : '$0_partner'
   ) as '$0_partner' | 'partner_pro' | 'white_label'
 
+  const display_label = app.project_name.trim() || null
+
   await upsertPartnerCommunityCreatorFromApplication({
     creator_wallet,
-    display_label: app.project_name.trim() || null,
+    display_label,
     partner_tier,
     logo_url: app.logo_url,
   })
   clearPartnerCommunityWalletCache()
+
+  const owlSync = await grantOwlCenterAccessFromPartnerPro({
+    wallet: creator_wallet,
+    label: display_label,
+    detail: `application #${id}`,
+  })
 
   const now = new Date().toISOString()
   const sb = getSupabaseAdmin()
@@ -141,5 +153,6 @@ export async function approvePartnerProgramApplication(
   return {
     application: data as PartnerProgramApplicationRow,
     creator_wallet,
+    owl_center_granted: owlSync.granted,
   }
 }

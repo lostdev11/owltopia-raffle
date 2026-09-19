@@ -1,4 +1,9 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import {
+  grantOwlCenterAccessFromPartnerPro,
+  revokeOwlCenterAccessForPartnerWallet,
+  transferOwlCenterAccessForPartnerWalletRename,
+} from '@/lib/partners/sync-owl-center-access'
 
 export type PartnerCommunityCreatorRow = {
   creator_wallet: string
@@ -96,7 +101,15 @@ export async function insertPartnerCommunityCreator(input: {
   const { data, error } = await sb.from('partner_community_creators').insert(row).select().single()
 
   if (error) throw new Error(error.message)
-  return data as PartnerCommunityCreatorRow
+  const created = data as PartnerCommunityCreatorRow
+  if (created.is_active) {
+    await grantOwlCenterAccessFromPartnerPro({
+      wallet: created.creator_wallet,
+      label: created.display_label,
+      detail: 'admin allowlist insert',
+    })
+  }
+  return created
 }
 
 /**
@@ -204,7 +217,26 @@ export async function updatePartnerCommunityCreator(
     .single()
 
   if (error) throw new Error(error.message)
-  return data as PartnerCommunityCreatorRow
+  const updated = data as PartnerCommunityCreatorRow
+
+  if (patch.is_active === true) {
+    await grantOwlCenterAccessFromPartnerPro({
+      wallet: updated.creator_wallet,
+      label: updated.display_label,
+      detail: 'admin allowlist activate',
+    })
+  } else if (patch.is_active === false) {
+    await revokeOwlCenterAccessForPartnerWallet(updated.creator_wallet)
+  } else if (updated.is_active && patch.display_label !== undefined) {
+    // Keep Owl Center label in sync when an active partner is renamed in admin.
+    await grantOwlCenterAccessFromPartnerPro({
+      wallet: updated.creator_wallet,
+      label: updated.display_label,
+      detail: 'admin allowlist label sync',
+    })
+  }
+
+  return updated
 }
 
 /**
@@ -259,6 +291,13 @@ export async function renamePartnerCommunityCreatorWallet(
     await sb.from('partner_community_creators').delete().eq('creator_wallet', to)
     throw new Error(deleteError.message)
   }
+
+  await transferOwlCenterAccessForPartnerWalletRename({
+    fromWallet: from,
+    toWallet: to,
+    label: existing.display_label,
+    isActive: existing.is_active,
+  })
 
   return inserted as PartnerCommunityCreatorRow
 }
@@ -377,4 +416,5 @@ export async function deletePartnerCommunityCreator(creator_wallet: string): Pro
   const sb = getSupabaseAdmin()
   const { error } = await sb.from('partner_community_creators').delete().eq('creator_wallet', creator_wallet)
   if (error) throw new Error(error.message)
+  await revokeOwlCenterAccessForPartnerWallet(creator_wallet)
 }
