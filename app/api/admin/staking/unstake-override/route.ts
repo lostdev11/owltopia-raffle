@@ -11,11 +11,35 @@ import { safeErrorMessage } from '@/lib/safe-error'
 export const dynamic = 'force-dynamic'
 
 /**
+ * Optional nest count for wallet-mode force leave.
+ * Accepts `limit` or `count` (positive integer). Omitted / null / empty → undefined (close up to batch max).
+ */
+function parseOptionalNestLimit(
+  body: Record<string, unknown> | null
+): { ok: true; limit: number | undefined } | { ok: false; error: string } {
+  if (!body) return { ok: true, limit: undefined }
+  const raw =
+    body.limit != null && body.limit !== ''
+      ? body.limit
+      : body.count != null && body.count !== ''
+        ? body.count
+        : undefined
+  if (raw === undefined) return { ok: true, limit: undefined }
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw.trim()) : NaN
+  if (!Number.isInteger(n) || n <= 0) {
+    return { ok: false, error: 'limit/count must be a positive integer' }
+  }
+  return { ok: true, limit: n }
+}
+
+/**
  * POST /api/admin/staking/unstake-override
  *
  * Single nest: `{ position_id: string }` — UUID of `staking_positions.id`.
  * All nests for a holder: `{ wallet_address: string, unstake_all: true }` — closes up to 25
  * eligible open nests per call (re-run if `remaining_eligible` > 0).
+ * Optional nest count: `{ limit: number }` or `{ count: number }` — close only that many
+ * (oldest first; still capped at 25). Omit to close all eligible in the batch.
  * Optional project scope: `{ pool_id: string }` with preview / unstake_all — only nests on that perch.
  * Preview only: `{ wallet_address: string, preview: true }` — lists candidates, no mutations.
  *
@@ -31,7 +55,7 @@ export async function POST(request: NextRequest) {
   if (session instanceof NextResponse) return session
 
   try {
-    const body = await request.json().catch(() => null)
+    const body = (await request.json().catch(() => null)) as Record<string, unknown> | null
     const position_id = typeof body?.position_id === 'string' ? body.position_id.trim() : ''
     const wallet_address =
       typeof body?.wallet_address === 'string' ? body.wallet_address.trim() : ''
@@ -41,6 +65,11 @@ export async function POST(request: NextRequest) {
 
     if (wallet_address && (preview || unstake_all)) {
       const poolScope = pool_id || null
+      const parsedLimit = parseOptionalNestLimit(body)
+      if (!parsedLimit.ok) {
+        return NextResponse.json({ error: parsedLimit.error }, { status: 400 })
+      }
+      const nestLimit = parsedLimit.limit
 
       if (preview && !unstake_all) {
         const listed = await listAdminOverrideUnstakeCandidates(wallet_address, {
@@ -55,6 +84,7 @@ export async function POST(request: NextRequest) {
           pool_id: listed.pool_id,
           pool_name: listed.pool_name,
           pool_slug: listed.pool_slug,
+          ...(nestLimit != null ? { limit: nestLimit } : {}),
           admin_override: true,
         })
       }
@@ -62,6 +92,7 @@ export async function POST(request: NextRequest) {
       const result = await executeUnstakeAdminOverrideForWallet({
         wallet_address,
         pool_id: poolScope,
+        limit: nestLimit,
       })
 
       console.warn('[admin/staking/unstake-override]', {
@@ -70,6 +101,7 @@ export async function POST(request: NextRequest) {
         holder_wallet: result.wallet,
         pool_id: result.pool_id,
         pool_slug: result.pool_slug,
+        limit: nestLimit ?? null,
         closed: result.closed.length,
         failed: result.failed.length,
         remaining_eligible: result.remaining_eligible,
@@ -86,6 +118,7 @@ export async function POST(request: NextRequest) {
         ...result,
         admin_override: true,
         unstake_all: true,
+        ...(nestLimit != null ? { limit: nestLimit } : {}),
       })
     }
 

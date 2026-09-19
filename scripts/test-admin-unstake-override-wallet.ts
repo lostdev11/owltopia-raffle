@@ -1,5 +1,6 @@
 /**
  * Admin force-leave-by-wallet candidate selection + batch runner (no DB).
+ * Covers pool_id scoping and batch `limit` (API/UI now pass limit/count through to this path).
  * Run: npx tsx scripts/test-admin-unstake-override-wallet.ts
  */
 import assert from 'node:assert/strict'

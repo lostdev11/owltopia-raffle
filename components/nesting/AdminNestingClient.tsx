@@ -27,7 +27,10 @@ import { AdminWalletNestAssetsPanel } from '@/components/nesting/AdminWalletNest
 import type { NestingWalletNestAsset } from '@/lib/nesting/admin-wallet-diagnostics'
 import { SectionHeader } from '@/components/council/SectionHeader'
 import { PoolOnChainSettingsForm } from '@/components/nesting/PoolOnChainSettingsForm'
-import { NESTING_RECONCILE_MAX_BATCH } from '@/lib/nesting/rpc-policy'
+import {
+  NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH,
+  NESTING_RECONCILE_MAX_BATCH,
+} from '@/lib/nesting/rpc-policy'
 import {
   buildQuickNftPoolDescription,
   isProbableSolanaPubkey,
@@ -109,6 +112,8 @@ export function AdminNestingClient() {
   const [forceUnstakeWallet, setForceUnstakeWallet] = useState('')
   /** Empty = all projects; otherwise a staking_pools.id perch. */
   const [forceUnstakePoolId, setForceUnstakePoolId] = useState('')
+  /** Empty = all eligible (up to batch max); otherwise nest count to leave. */
+  const [forceUnstakeCount, setForceUnstakeCount] = useState('')
   const [forceUnstaking, setForceUnstaking] = useState(false)
   const [forceUnstakeMsg, setForceUnstakeMsg] = useState<string | null>(null)
 
@@ -876,6 +881,15 @@ export function AdminNestingClient() {
     return partner ? `${pool.name} (${partner})` : pool.name || pool.slug || pool.id
   })()
 
+  /** Parsed nest count for wallet force leave; null = leave all eligible (up to batch max). */
+  const parseForceUnstakeCount = (): number | null | 'invalid' => {
+    const raw = forceUnstakeCount.trim()
+    if (!raw) return null
+    const n = Number(raw)
+    if (!Number.isInteger(n) || n <= 0) return 'invalid'
+    return Math.min(n, NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH)
+  }
+
   const runForceUnstake = async () => {
     setForceUnstakeMsg(null)
     setSaveError(null)
@@ -891,10 +905,19 @@ export function AdminNestingClient() {
         return
       }
 
+      const nestCount = parseForceUnstakeCount()
+      if (nestCount === 'invalid') {
+        setSaveError(
+          `Nests to leave must be a positive integer (max ${NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH} per run).`
+        )
+        return
+      }
+
       const poolScope = forceUnstakePoolId.trim() || null
       const walletBody = {
         wallet_address: wallet,
         ...(poolScope ? { pool_id: poolScope } : {}),
+        ...(nestCount != null ? { limit: nestCount } : {}),
       }
 
       setForceUnstaking(true)
@@ -926,11 +949,17 @@ export function AdminNestingClient() {
           )
           return
         }
+        const leaveCount =
+          nestCount != null ? Math.min(nestCount, eligible) : Math.min(eligible, NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH)
         const projectNote = forceUnstakePoolLabel
           ? ` on project “${forceUnstakePoolLabel}”`
           : ' across all projects'
+        const countNote =
+          nestCount != null && leaveCount < eligible
+            ? `${leaveCount} of ${eligible}`
+            : `${leaveCount}`
         const ok = window.confirm(
-          `Force leave ${eligible} open nest(s) for ${wallet}${projectNote}? This bypasses lock timers and cannot be undone from this panel.`
+          `Force leave ${countNote} open nest(s) for ${wallet}${projectNote}? Oldest nests first. This bypasses lock timers and cannot be undone from this panel.`
         )
         if (!ok) return
 
@@ -993,6 +1022,7 @@ export function AdminNestingClient() {
         )
         if (remaining === 0 && failed === 0) {
           setForceUnstakeWallet('')
+          setForceUnstakeCount('')
         }
       } finally {
         setForceUnstaking(false)
@@ -1994,7 +2024,8 @@ export function AdminNestingClient() {
             <p className="text-xs text-muted-foreground leading-relaxed">
               For NFT perches with freeze locks, the server signs thaw with your configured freeze authority. For token
               vaults, tokens return to the holder wallet on record. Use position id for a single nest; use holder wallet
-              to unstake eligible open nests (up to 25 per run — re-run if more remain). Choose a project to limit
+              to unstake eligible open nests (up to {NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH} per run — re-run if more
+              remain). Optionally set “Nests to leave” to close only that many (oldest first). Choose a project to limit
               force leave to that perch only (e.g. a partner collection nested with us); leave All projects to match
               prior behavior.
             </p>
@@ -2093,6 +2124,28 @@ export function AdminNestingClient() {
                     behavior.
                   </p>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="force-unstake-count">Nests to leave</Label>
+                  <Input
+                    id="force-unstake-count"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH}
+                    autoComplete="off"
+                    placeholder={`All eligible (max ${NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH})`}
+                    value={forceUnstakeCount}
+                    onChange={(e) => {
+                      setForceUnstakeCount(e.target.value)
+                      setForceUnstakeMsg(null)
+                    }}
+                    className="min-h-[44px] touch-manipulation"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Leave blank to close all eligible nests in this run (oldest first, max{' '}
+                    {NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH}). Set e.g. 18 to leave only that many.
+                  </p>
+                </div>
               </div>
             )}
             <div className="flex flex-wrap items-center gap-3">
@@ -2110,9 +2163,15 @@ export function AdminNestingClient() {
               >
                 {forceUnstaking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 {forceUnstakeMode === 'wallet'
-                  ? forceUnstakePoolId
-                    ? 'Force leave project nests'
-                    : 'Force leave all nests'
+                  ? (() => {
+                      const parsed = parseForceUnstakeCount()
+                      if (typeof parsed === 'number') {
+                        return `Force leave ${parsed} nest${parsed === 1 ? '' : 's'}`
+                      }
+                      return forceUnstakePoolId
+                        ? 'Force leave project nests'
+                        : 'Force leave all nests'
+                    })()
                   : 'Force leave nest'}
               </Button>
               {forceUnstakeMsg ? (
