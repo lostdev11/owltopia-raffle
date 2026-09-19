@@ -27,7 +27,7 @@ import {
 import { getLaunchCandyMachineId, getLaunchCollectionMint, getLaunchSolanaRpcUrl, resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getGen2CandyMachineId, getGen2CollectionMint, getSolanaCluster, isDevnetMintEnabled, type OwlMintNetwork } from '@/lib/solana/network'
 import { appendOwlCenterPlatformMintFeeSol, assertOwlCenterPlatformMintFeeSolBalance, resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
-import { OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS } from '@/lib/owl-center/platform-mint-fee'
+import { getOwlCenterMintRentReserveLamports } from '@/lib/solana/owl-center-mint-rent'
 import { friendlySolanaRpcErrorMessage, MINT_PREP_SOLANA_RPC_RETRY, MINT_SOLANA_RPC_RETRY, MINT_SOLANA_SEND_RETRY, withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
 import { createOwlCenterUmi } from '@/lib/solana/umi'
 import { invalidLaunchMintIdReason, validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
@@ -516,17 +516,22 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     // wallets sign a mint that bot-taxes — charging the platform fee + bot tax while never taking the
     // mint price or minting an NFT. Include the price so we fail fast with a clear message instead.
     const mintPriceLamports = plan.mintPriceLamports > 0n ? plan.mintPriceLamports : 0n
+    const rentReserveTotal = await getOwlCenterMintRentReserveLamports(
+      network,
+      'gen2_full',
+      quantity,
+      getLaunchSolanaRpcUrl(network)
+    )
     if ((collectPlatformMintFee && platformFeeLamports > 0n) || mintPriceLamports > 0n) {
       const totalFee = collectPlatformMintFee ? platformFeeLamports * BigInt(quantity) : 0n
       const totalPrice = mintPriceLamports * BigInt(quantity)
-      const needed =
-        totalFee + totalPrice + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS * BigInt(quantity)
+      const needed = totalFee + totalPrice + rentReserveTotal
       if (prefetchedWalletBalanceLamports != null) {
         if (prefetchedWalletBalanceLamports < needed) {
           const priceSol = Number(totalPrice) / 1_000_000_000
           const feeSol = Number(totalFee) / 1_000_000_000
           const haveSol = Number(prefetchedWalletBalanceLamports) / 1_000_000_000
-          const needSol = priceSol + feeSol + 0.02 * quantity
+          const needSol = priceSol + feeSol + Number(rentReserveTotal) / 1_000_000_000
           const priceCopy = priceSol > 0 ? `the ${priceSol.toFixed(3)} SOL mint price plus ` : ''
           return {
             ok: false,
@@ -544,7 +549,8 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
                 getLaunchSolanaRpcUrl(network),
                 quantity,
                 prefetchedWalletBalanceLamports,
-                mintPriceLamports
+                mintPriceLamports,
+                'gen2_full'
               ),
             MINT_SOLANA_RPC_RETRY
           ).then((feeBal) => {

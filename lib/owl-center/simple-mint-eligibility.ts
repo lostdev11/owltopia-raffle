@@ -24,7 +24,7 @@ import {
 } from '@/lib/owl-center/launch-wl-window'
 import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/lib/owl-center/mint-policy'
 import { publicSimpleMintClosedInfo, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
-import { OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS, isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
+import { isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 import { publicSimpleMintGuardGroupLabel } from '@/lib/owl-center/public-simple-guard-plan'
 import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
@@ -46,6 +46,7 @@ import {
   getLaunchSolanaRpcUrl,
 } from '@/lib/solana/launch-cm'
 import { assertOwlCenterPlatformMintFeeSolBalance, resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
+import { getOwlCenterMintRentReservePerNftLamports } from '@/lib/solana/owl-center-mint-rent'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 import { invalidLaunchMintIdReason } from '@/lib/solana/validate-pubkey'
@@ -232,13 +233,13 @@ export async function buildSimpleMintEligibility(
 
   if (platformFeeEnabled && platformFeeQuote?.ok === true) {
     const priceLamports = unit_lamports_estimate != null ? BigInt(unit_lamports_estimate) : 0n
+    const rentReservePerNft = await getOwlCenterMintRentReservePerNftLamports(mint_network, 'public_simple')
     mint_sol_needed_lamports = String(
-      platformFeeQuote.lamports + OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS + priceLamports
+      platformFeeQuote.lamports + rentReservePerNft + priceLamports
     )
   } else if (unit_lamports_estimate != null) {
-    mint_sol_needed_lamports = String(
-      OWL_CENTER_MINT_SOL_RENT_RESERVE_LAMPORTS + BigInt(unit_lamports_estimate)
-    )
+    const rentReservePerNft = await getOwlCenterMintRentReservePerNftLamports(mint_network, 'public_simple')
+    mint_sol_needed_lamports = String(rentReservePerNft + BigInt(unit_lamports_estimate))
   }
 
   const prefetchedBalance =
@@ -371,7 +372,8 @@ export async function buildSimpleMintEligibility(
         getLaunchSolanaRpcUrl(mint_network),
         1,
         prefetchedBalance,
-        unit_lamports_estimate != null ? BigInt(unit_lamports_estimate) : 0n
+        unit_lamports_estimate != null ? BigInt(unit_lamports_estimate) : 0n,
+        'public_simple'
       )
       if (!feeBal.ok) {
         is_eligible = false
