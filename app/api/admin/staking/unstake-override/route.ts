@@ -6,6 +6,7 @@ import {
 } from '@/lib/nesting/service'
 import { listAdminOverrideUnstakeCandidates } from '@/lib/nesting/admin-unstake-override'
 import { isStakingUserError } from '@/lib/nesting/errors'
+import { NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH } from '@/lib/nesting/rpc-policy'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
@@ -17,6 +18,7 @@ export const dynamic = 'force-dynamic'
  * All nests for a holder: `{ wallet_address: string, unstake_all: true }` — closes up to 25
  * eligible open nests per call (re-run if `remaining_eligible` > 0).
  * Optional project scope: `{ pool_id: string }` with preview / unstake_all — only nests on that perch.
+ * Optional count: `{ limit: number }` (1–25) — close at most that many oldest eligible nests this run.
  * Preview only: `{ wallet_address: string, preview: true }` — lists candidates, no mutations.
  *
  * Runs the same adapter path as the holder "Leave nest" (thaw NFT or return tokens from vault),
@@ -38,6 +40,7 @@ export async function POST(request: NextRequest) {
     const pool_id = typeof body?.pool_id === 'string' ? body.pool_id.trim() : ''
     const preview = body?.preview === true
     const unstake_all = body?.unstake_all === true
+    const limit = parseAdminUnstakeLimit(body?.limit)
 
     if (wallet_address && (preview || unstake_all)) {
       const poolScope = pool_id || null
@@ -46,11 +49,15 @@ export async function POST(request: NextRequest) {
         const listed = await listAdminOverrideUnstakeCandidates(wallet_address, {
           pool_id: poolScope,
         })
+        const eligible_count = listed.candidates.length
+        const effective_limit = limit ?? NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH
         return NextResponse.json({
           preview: true,
           wallet: listed.wallet,
           candidates: listed.candidates,
-          eligible_count: listed.candidates.length,
+          eligible_count,
+          will_attempt: Math.min(eligible_count, effective_limit),
+          limit: effective_limit,
           open_position_count: listed.open_position_count,
           pool_id: listed.pool_id,
           pool_name: listed.pool_name,
@@ -62,6 +69,7 @@ export async function POST(request: NextRequest) {
       const result = await executeUnstakeAdminOverrideForWallet({
         wallet_address,
         pool_id: poolScope,
+        limit,
       })
 
       console.warn('[admin/staking/unstake-override]', {
@@ -70,6 +78,7 @@ export async function POST(request: NextRequest) {
         holder_wallet: result.wallet,
         pool_id: result.pool_id,
         pool_slug: result.pool_slug,
+        limit: result.attempted > 0 ? limit ?? NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH : limit,
         closed: result.closed.length,
         failed: result.failed.length,
         remaining_eligible: result.remaining_eligible,
@@ -84,6 +93,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         ...result,
+        limit: limit ?? NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH,
         admin_override: true,
         unstake_all: true,
       })
@@ -128,4 +138,17 @@ export async function POST(request: NextRequest) {
     console.error('[admin/staking/unstake-override]', e)
     return NextResponse.json({ error: safeErrorMessage(e) }, { status: 500 })
   }
+}
+
+/** Parse optional body.limit; undefined means use server default max batch. */
+function parseAdminUnstakeLimit(raw: unknown): number | undefined {
+  if (raw == null || raw === '') return undefined
+  const n =
+    typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string'
+        ? Number.parseInt(raw.trim(), 10)
+        : NaN
+  if (!Number.isFinite(n)) return undefined
+  return Math.min(Math.max(1, Math.floor(n)), NESTING_ADMIN_UNSTAKE_ALL_MAX_BATCH)
 }
