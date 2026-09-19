@@ -1,6 +1,7 @@
 /**
  * Discord / Owl Vision → site Partner Spotlight retire path.
- * Soft-deactivates linked creators + spotlight brands; suspends Discord partner tenants.
+ * Soft-deactivates linked creators + spotlight brands; suspends Discord partner tenants;
+ * revokes Owl Center launchpad access for those wallets.
  */
 import {
   getDiscordGiveawayPartnerByGuildId,
@@ -17,28 +18,38 @@ import {
   deactivatePartnerSpotlightBrandsMatchingName,
   partnerNameMatchesQuery,
 } from '@/lib/db/partner-spotlight-brands'
+import { revokeOwlCenterAccessForPartnerWallet } from '@/lib/partners/sync-owl-center-access'
 import { clearPartnerCommunityWalletCache } from '@/lib/raffles/partner-communities'
 
 export type RetirePartnerResult = {
   suspendedTenantIds: string[]
   deactivatedCreatorWallets: string[]
   deactivatedBrandSlugs: string[]
+  revokedOwlCenterWallets: string[]
   messages: string[]
 }
 
-async function deactivateCreatorsByWallets(wallets: string[]): Promise<string[]> {
-  const out: string[] = []
+async function deactivateCreatorsByWallets(wallets: string[]): Promise<{
+  deactivated: string[]
+  revokedOwlCenter: string[]
+}> {
+  const deactivated: string[] = []
+  const revokedOwlCenter: string[] = []
   for (const w of [...new Set(wallets.map((x) => x.trim()).filter(Boolean))]) {
     const row = await getPartnerCommunityCreatorByWallet(w)
     if (!row) continue
     if (!row.is_active) {
-      out.push(w)
-      continue
+      deactivated.push(w)
+    } else {
+      await updatePartnerCommunityCreator(w, { is_active: false })
+      deactivated.push(w)
     }
-    await updatePartnerCommunityCreator(w, { is_active: false })
-    out.push(w)
+    // updatePartnerCommunityCreator already revokes Owl Center when is_active→false;
+    // still revoke explicitly for already-inactive creators that may retain launchpad access.
+    const owl = await revokeOwlCenterAccessForPartnerWallet(w)
+    if (owl.revoked) revokedOwlCenter.push(w)
   }
-  return out
+  return { deactivated, revokedOwlCenter }
 }
 
 async function findCreatorWalletsMatchingName(name: string): Promise<string[]> {
@@ -76,6 +87,7 @@ export async function retirePartnerCommunity(input: {
     suspendedTenantIds: [],
     deactivatedCreatorWallets: [],
     deactivatedBrandSlugs: [],
+    revokedOwlCenterWallets: [],
     messages: [],
   }
 
@@ -97,8 +109,9 @@ export async function retirePartnerCommunity(input: {
     if (creator?.discord_partner_tenant_id) {
       tenantIdsToTouch.add(creator.discord_partner_tenant_id)
     }
-    const deactivated = await deactivateCreatorsByWallets([creatorWallet])
+    const { deactivated, revokedOwlCenter } = await deactivateCreatorsByWallets([creatorWallet])
     result.deactivatedCreatorWallets.push(...deactivated)
+    result.revokedOwlCenterWallets.push(...revokedOwlCenter)
     if (creator?.display_label) {
       const brands = await deactivatePartnerSpotlightBrandsMatchingName(creator.display_label)
       result.deactivatedBrandSlugs.push(...brands)
@@ -110,8 +123,9 @@ export async function retirePartnerCommunity(input: {
     result.deactivatedBrandSlugs.push(...brands)
 
     const wallets = await findCreatorWalletsMatchingName(brandName)
-    const deactivated = await deactivateCreatorsByWallets(wallets)
+    const { deactivated, revokedOwlCenter } = await deactivateCreatorsByWallets(wallets)
     result.deactivatedCreatorWallets.push(...deactivated)
+    result.revokedOwlCenterWallets.push(...revokedOwlCenter)
 
     for (const w of deactivated) {
       const row = await getPartnerCommunityCreatorByWallet(w)
@@ -147,8 +161,9 @@ export async function retirePartnerCommunity(input: {
     }
 
     const wallets = await findCreatorWalletsForTenant(id)
-    const deactivated = await deactivateCreatorsByWallets(wallets)
+    const { deactivated, revokedOwlCenter } = await deactivateCreatorsByWallets(wallets)
     result.deactivatedCreatorWallets.push(...deactivated)
+    result.revokedOwlCenterWallets.push(...revokedOwlCenter)
 
     const byTenant = await deactivatePartnerSpotlightBrandsForTenant(id)
     result.deactivatedBrandSlugs.push(...byTenant)
@@ -161,11 +176,13 @@ export async function retirePartnerCommunity(input: {
   result.suspendedTenantIds = [...new Set(result.suspendedTenantIds)]
   result.deactivatedCreatorWallets = [...new Set(result.deactivatedCreatorWallets)]
   result.deactivatedBrandSlugs = [...new Set(result.deactivatedBrandSlugs)]
+  result.revokedOwlCenterWallets = [...new Set(result.revokedOwlCenterWallets)]
 
   if (
     result.suspendedTenantIds.length === 0 &&
     result.deactivatedCreatorWallets.length === 0 &&
-    result.deactivatedBrandSlugs.length === 0
+    result.deactivatedBrandSlugs.length === 0 &&
+    result.revokedOwlCenterWallets.length === 0
   ) {
     result.messages.push(
       brandName || creatorWallet || guildId || tenantId
@@ -181,6 +198,11 @@ export async function retirePartnerCommunity(input: {
     if (result.deactivatedCreatorWallets.length) {
       result.messages.push(
         `Deactivated partner creator wallet(s): ${result.deactivatedCreatorWallets.length}.`
+      )
+    }
+    if (result.revokedOwlCenterWallets.length) {
+      result.messages.push(
+        `Revoked Owl Center launchpad access for ${result.revokedOwlCenterWallets.length} wallet(s).`
       )
     }
   }

@@ -63,6 +63,10 @@ const adminDiscord = readFileSync(
 assert.ok(adminDiscord.includes("patch.status === 'suspended'"))
 assert.ok(adminDiscord.includes('retirePartnerCommunity'))
 
+const retireLib = readFileSync(new URL('../lib/partners/retire-partner.ts', import.meta.url), 'utf8')
+assert.ok(retireLib.includes('revokeOwlCenterAccessForPartnerWallet'))
+assert.ok(retireLib.includes('revokedOwlCenterWallets'))
+
 const carousel = readFileSync(new URL('../components/PartnerRafflesCarousel.tsx', import.meta.url), 'utf8')
 assert.ok(carousel.includes('mergePartnerSpotlightBrands(fromLiveRaffles, spotlightBrands)'))
 assert.ok(!carousel.includes('!PARTNER_SPOTLIGHT_BRANDS.some'))

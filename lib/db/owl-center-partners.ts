@@ -46,6 +46,26 @@ export async function listOwlCenterPartners(): Promise<OwlCenterPartner[]> {
   return (data ?? []) as OwlCenterPartner[]
 }
 
+/** Single launchpad partner row by wallet (any status). */
+export async function getOwlCenterPartnerByWallet(
+  wallet: string
+): Promise<OwlCenterPartner | null> {
+  const normalized = normalizeSolanaWalletAddress(wallet)
+  if (!normalized) return null
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('owl_center_partners')
+    .select('*')
+    .eq('wallet', normalized)
+    .maybeSingle()
+
+  if (error) {
+    console.error('owl_center_partners get by wallet:', error.message || 'Unknown error')
+    return null
+  }
+  return (data as OwlCenterPartner | null) ?? null
+}
+
 /** Approve a partner wallet (insert or re-approve). Returns null on invalid wallet or DB error. */
 export async function upsertOwlCenterPartner(input: {
   wallet: string
@@ -95,4 +115,25 @@ export async function setOwlCenterPartnerStatus(
     return null
   }
   return data as OwlCenterPartner
+}
+
+/** Soft-revoke launchpad access by wallet. Returns null when row missing or DB error. */
+export async function revokeOwlCenterPartnerByWallet(
+  wallet: string
+): Promise<OwlCenterPartner | null> {
+  const normalized = normalizeSolanaWalletAddress(wallet)
+  if (!normalized) return null
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('owl_center_partners')
+    .update({ status: 'revoked', updated_at: new Date().toISOString() })
+    .eq('wallet', normalized)
+    .select('*')
+    .maybeSingle()
+
+  if (error) {
+    console.error('owl_center_partners revoke by wallet:', error.message || 'Unknown error')
+    return null
+  }
+  return (data as OwlCenterPartner | null) ?? null
 }

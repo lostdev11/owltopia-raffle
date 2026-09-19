@@ -84,7 +84,7 @@ export function AdminPartnerNestingClient() {
     setLoadingList(true)
     setListError(null)
     try {
-      const res = await fetch('/api/admin/partners/nesting', { credentials: 'include', cache: 'no-store' })
+      const res = await fetch('/api/admin/partner-nesting', { credentials: 'include', cache: 'no-store' })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
         setListError(typeof json?.error === 'string' ? json.error : 'Failed to load partner nesting data')
@@ -122,7 +122,7 @@ export function AdminPartnerNestingClient() {
     setSaveOk(null)
     setNextSteps([])
     try {
-      const res = await fetch('/api/admin/partners/nesting', {
+      const res = await fetch('/api/admin/partner-nesting', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

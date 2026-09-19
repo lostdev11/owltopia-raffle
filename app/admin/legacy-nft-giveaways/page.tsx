@@ -99,7 +99,7 @@ export default function AdminGiveawaysPage() {
 
   const fetchDiscordPartners = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/partners/discord', { credentials: 'include' })
+      const res = await fetch('/api/admin/discord-giveaway-partners', { credentials: 'include' })
       const data = await res.json().catch(() => ({}))
       if (res.ok && Array.isArray(data.partners)) {
         setDiscordPartners(
