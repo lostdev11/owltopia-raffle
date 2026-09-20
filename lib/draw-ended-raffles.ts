@@ -5,12 +5,14 @@
  * Works for any raffle duration (1 day, 2 days, 3 days, etc.): each raffle has its own start_time/end_time.
  * When end_time has passed and the ticket threshold (min_tickets) is met, a winner is selected; otherwise
  * the raffle may be extended once, then set to failed_refund_available (NFT returned when possible).
+ *
+ * Cron fairness: fast (non-VRF) work always runs first; at most one full VRF commit+reveal per tick,
+ * with rotation so two stuck VRF raffles cannot starve each other across 15-minute cron slots.
  */
 import {
   getEndedRafflesWithoutWinner,
   getEntriesByRaffleId,
   getRaffleById,
-  canSelectWinner,
   selectWinner,
   updateRaffle,
   getRaffleMinimum,
@@ -21,6 +23,16 @@ import { finalizeMinThresholdTerminalFailure } from '@/lib/raffles/min-threshold
 import { raffleIsDueForWinnerDraw } from '@/lib/raffles/purchase-window'
 import { isRaffleEligibleForWinnerSelection } from '@/lib/raffles/sell-out-eligibility'
 import { raffleRequiresPrizeEscrowForDraw } from '@/lib/raffles/visibility'
+import {
+  DRAW_ENDED_CRON_SOFT_BUDGET_MS,
+  DRAW_ENDED_MIN_MS_FOR_ANY_WORK,
+  classifyEndedRaffleWork,
+  orderEndedRafflesForCron,
+  remainingDrawCronBudgetMs,
+  resolveRevealWaitMsForCronBudget,
+  shouldStartFullVrfAttempt,
+  shouldStartVrfResumeAttempt,
+} from '@/lib/raffles/draw-ended-scheduler'
 import type { Raffle } from '@/lib/types'
 
 export type DrawResult = {
@@ -30,6 +42,13 @@ export type DrawResult = {
   winnerWallet: string | null
   error: string | null
   extended?: boolean
+  deferred?: boolean
+  drawVrfStatus?: string | null
+}
+
+export type ProcessEndedRafflesOptions = {
+  softBudgetMs?: number
+  nowMs?: number
 }
 
 /**
@@ -55,7 +74,10 @@ export async function processEndedRaffleByIdIfApplicable(raffleId: string): Prom
   return processOneEndedRaffle(raffle)
 }
 
-export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult> {
+export async function processOneEndedRaffle(
+  raffle: Raffle,
+  opts?: { revealWaitMs?: number }
+): Promise<DrawResult> {
   try {
     const entries = await getEntriesByRaffleId(raffle.id)
     const canDraw = isRaffleEligibleForWinnerSelection(raffle, entries)
@@ -99,7 +121,9 @@ export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult>
       }
     }
 
-    const winnerWallet = await selectWinner(raffle.id)
+    const winnerWallet = await selectWinner(raffle.id, false, {
+      revealWaitMs: opts?.revealWaitMs,
+    })
     if (winnerWallet) {
       return {
         raffleId: raffle.id,
@@ -117,6 +141,7 @@ export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult>
       raffleTitle: raffle.title,
       success: false,
       winnerWallet: null,
+      drawVrfStatus: vrfStatus || null,
       error:
         vrfStatus === 'failed' || vrfStatus === 'pending'
           ? vrfErr || `VRF draw ${vrfStatus} — will auto-retry on cron; admin can also retry`
@@ -133,16 +158,111 @@ export async function processOneEndedRaffle(raffle: Raffle): Promise<DrawResult>
   }
 }
 
-export async function processEndedRafflesWithoutWinners(): Promise<DrawResult[]> {
+function deferredDrawResult(raffle: Raffle, reason: string): DrawResult {
+  return {
+    raffleId: raffle.id,
+    raffleTitle: raffle.title,
+    success: false,
+    winnerWallet: null,
+    deferred: true,
+    error: reason,
+    drawVrfStatus: (raffle.draw_vrf_status ?? '').trim() || null,
+  }
+}
+
+export async function processEndedRafflesWithoutWinners(
+  opts?: ProcessEndedRafflesOptions
+): Promise<DrawResult[]> {
+  const startedAtMs = opts?.nowMs ?? Date.now()
+  const softBudgetMs = opts?.softBudgetMs ?? DRAW_ENDED_CRON_SOFT_BUDGET_MS
   const endedRaffles = await getEndedRafflesWithoutWinner()
 
   if (endedRaffles.length === 0) {
     return []
   }
 
+  const ordered = orderEndedRafflesForCron(endedRaffles, startedAtMs)
   const results: DrawResult[] = []
-  for (const raffle of endedRaffles) {
-    results.push(await processOneEndedRaffle(raffle))
+  let fullVrfAttempts = 0
+
+  for (const raffle of ordered) {
+    const remainingMs = remainingDrawCronBudgetMs({
+      startedAtMs,
+      softBudgetMs,
+    })
+
+    if (remainingMs < DRAW_ENDED_MIN_MS_FOR_ANY_WORK) {
+      results.push(
+        deferredDrawResult(
+          raffle,
+          `Deferred: cron soft budget exhausted (${remainingMs}ms left)`
+        )
+      )
+      continue
+    }
+
+    const kind = classifyEndedRaffleWork(raffle)
+
+    if (kind === 'fast') {
+      results.push(await processOneEndedRaffle(raffle))
+      continue
+    }
+
+    if (kind === 'vrf_full') {
+      if (
+        !shouldStartFullVrfAttempt({
+          fullVrfAttemptsSoFar: fullVrfAttempts,
+          remainingMs,
+        })
+      ) {
+        results.push(
+          deferredDrawResult(
+            raffle,
+            fullVrfAttempts >= 1
+              ? 'Deferred: VRF slot used this cron tick — will retry next tick'
+              : `Deferred: not enough cron budget for full VRF (${remainingMs}ms left)`
+          )
+        )
+        continue
+      }
+      const revealWaitMs = resolveRevealWaitMsForCronBudget(remainingMs)
+      results.push(await processOneEndedRaffle(raffle, { revealWaitMs }))
+      fullVrfAttempts += 1
+      continue
+    }
+
+    // vrf_resume: short budget OK; still counts as the full-VRF slot once we burn a long poll
+    if (!shouldStartVrfResumeAttempt({ remainingMs }) && fullVrfAttempts >= 1) {
+      results.push(
+        deferredDrawResult(
+          raffle,
+          'Deferred: VRF slot used this cron tick — pending reveal will retry next tick'
+        )
+      )
+      continue
+    }
+
+    if (
+      fullVrfAttempts >= 1 &&
+      !shouldStartVrfResumeAttempt({ remainingMs })
+    ) {
+      results.push(
+        deferredDrawResult(
+          raffle,
+          `Deferred: not enough cron budget for VRF resume (${remainingMs}ms left)`
+        )
+      )
+      continue
+    }
+
+    const revealWaitMs =
+      fullVrfAttempts >= 1
+        ? Math.min(15_000, resolveRevealWaitMsForCronBudget(remainingMs))
+        : resolveRevealWaitMsForCronBudget(remainingMs)
+
+    results.push(await processOneEndedRaffle(raffle, { revealWaitMs }))
+    // First resume in a tick that may burn the long poll counts as the VRF slot.
+    if (fullVrfAttempts === 0) fullVrfAttempts += 1
   }
 
   return results

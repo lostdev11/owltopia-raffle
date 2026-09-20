@@ -12,6 +12,7 @@ export const maxDuration = 120
  * Called by Vercel Cron: ended ticket raffles (threshold / extensions) and ended community giveaways (past ends_at).
  * Secured by CRON_SECRET (Bearer token in Authorization header).
  * Auto-recovers failed Switchboard VRF reveals (gateway 503) on subsequent ticks.
+ * Caps to one full VRF attempt per tick and rotates candidates so dual stuck draws cannot starve.
  */
 export async function GET(request: NextRequest) {
   const cronAuth = authorizeCronBearer(request)
@@ -32,6 +33,9 @@ export async function GET(request: NextRequest) {
         success: r.success,
         winnerWallet: r.winnerWallet ?? undefined,
         extended: r.extended,
+        deferred: r.deferred,
+        error: r.error ?? undefined,
+        drawVrfStatus: r.drawVrfStatus ?? undefined,
       })),
       communityGiveaways: {
         processedCount: communityResults.length,
