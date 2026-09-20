@@ -1,11 +1,16 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { listGenOwlRevSharePeriods } from '@/lib/db/gen-owl-rev-share-periods'
+import { sumGenOwlRevSharePoolPayouts } from '@/lib/db/gen-owl-rev-share-pool-payouts'
 import {
   computeGenOwlRevShareLiabilitySnapshot,
   evaluateGenOwlRevSharePoolCoverage,
   type GenOwlRevShareLiabilitySnapshot,
   type GenOwlRevSharePoolCoverage,
 } from '@/lib/nesting/gen-owl-rev-share-liability'
+import {
+  applyOrphanRevSharePoolPayoutsToRequired,
+  orphanRevSharePoolPayouts,
+} from '@/lib/nesting/gen-owl-rev-share-orphan-payouts'
 import { getGenOwlRevSharePoolBalances } from '@/lib/nesting/gen-owl-rev-share-pool'
 import { StakingUserError } from '@/lib/nesting/errors'
 
@@ -18,6 +23,59 @@ export type GenOwlRevShareLiabilityWithCoverage = {
     sol: number | null
     usdc: number | null
   }
+  orphan_payouts: { sol: number; usdc: number }
+}
+
+async function listAllGenOwlRevShareClaimPayments(): Promise<
+  Array<{
+    period_month: string
+    amount_sol: number
+    amount_usdc: number
+    sol_transaction_signature: string | null
+    usdc_transaction_signature: string | null
+    group_key: string | null
+  }>
+> {
+  const db = getSupabaseAdmin()
+  const pageSize = 1000
+  const out: Array<{
+    period_month: string
+    amount_sol: number
+    amount_usdc: number
+    sol_transaction_signature: string | null
+    usdc_transaction_signature: string | null
+    group_key: string | null
+  }> = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await db
+      .from('gen_owl_rev_share_claims')
+      .select(
+        'period_month, amount_sol, amount_usdc, sol_transaction_signature, usdc_transaction_signature, group_key'
+      )
+      .order('claimed_at', { ascending: true })
+      .range(from, from + pageSize - 1)
+    if (error) {
+      console.error('[gen-owl-rev-share-liability] list claims:', error.message)
+      break
+    }
+    const rows = data ?? []
+    for (const row of rows) {
+      out.push({
+        period_month: String(row.period_month),
+        amount_sol: Number(row.amount_sol) || 0,
+        amount_usdc: Number(row.amount_usdc) || 0,
+        sol_transaction_signature:
+          row.sol_transaction_signature != null ? String(row.sol_transaction_signature) : null,
+        usdc_transaction_signature:
+          row.usdc_transaction_signature != null ? String(row.usdc_transaction_signature) : null,
+        group_key: row.group_key != null ? String(row.group_key) : null,
+      })
+    }
+    if (rows.length < pageSize) break
+    from += pageSize
+  }
+  return out
 }
 
 /**
@@ -26,35 +84,34 @@ export type GenOwlRevShareLiabilityWithCoverage = {
 export async function loadGenOwlRevShareLiabilityWithCoverage(params?: {
   periodLimit?: number
 }): Promise<GenOwlRevShareLiabilityWithCoverage> {
-  const db = getSupabaseAdmin()
-  const [periods, claimsRes, balances] = await Promise.all([
+  const [periods, claims, balances, ledger] = await Promise.all([
     listGenOwlRevSharePeriods(params?.periodLimit ?? 36),
-    db
-      .from('gen_owl_rev_share_claims')
-      .select(
-        'period_month, amount_sol, amount_usdc, sol_transaction_signature, usdc_transaction_signature, group_key'
-      )
-      .limit(50000),
+    listAllGenOwlRevShareClaimPayments(),
     getGenOwlRevSharePoolBalances(),
+    sumGenOwlRevSharePoolPayouts(),
   ])
 
-  const claims = (claimsRes.data ?? []).map((row) => ({
-    period_month: String(row.period_month),
-    amount_sol: Number(row.amount_sol) || 0,
-    amount_usdc: Number(row.amount_usdc) || 0,
-    sol_transaction_signature:
-      row.sol_transaction_signature != null ? String(row.sol_transaction_signature) : null,
-    usdc_transaction_signature:
-      row.usdc_transaction_signature != null ? String(row.usdc_transaction_signature) : null,
-    group_key: row.group_key != null ? String(row.group_key) : null,
-  }))
-
   const liability = computeGenOwlRevShareLiabilitySnapshot({ periods, claims })
+  const claimsCommittedSol = Math.max(0, liability.all.deposited_sol - liability.all.unclaimed_sol)
+  const claimsCommittedUsdc = Math.max(0, liability.all.deposited_usdc - liability.all.unclaimed_usdc)
+  const orphan = orphanRevSharePoolPayouts({
+    ledger_sol: ledger.sol,
+    ledger_usdc: ledger.usdc,
+    claims_committed_sol: claimsCommittedSol,
+    claims_committed_usdc: claimsCommittedUsdc,
+  })
+  const required = applyOrphanRevSharePoolPayoutsToRequired({
+    required_sol: liability.open.required_sol,
+    required_usdc: liability.open.required_usdc,
+    orphan_sol: orphan.orphan_sol,
+    orphan_usdc: orphan.orphan_usdc,
+  })
+
   const coverage = evaluateGenOwlRevSharePoolCoverage({
     hold_sol: balances.sol,
     hold_usdc: balances.usdc,
-    required_sol: liability.open.required_sol,
-    required_usdc: liability.open.required_usdc,
+    required_sol: required.required_sol,
+    required_usdc: required.required_usdc,
     unclaimed_nests: liability.open.unclaimed_nests,
     open_period_count: liability.open.open_period_count,
     configured: balances.configured,
@@ -70,6 +127,7 @@ export async function loadGenOwlRevShareLiabilityWithCoverage(params?: {
       sol: balances.sol,
       usdc: balances.usdc,
     },
+    orphan_payouts: { sol: orphan.orphan_sol, usdc: orphan.orphan_usdc },
   }
 }
 
