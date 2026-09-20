@@ -4,6 +4,8 @@ export type GenOwlRevSharePayoutResult = {
   sol_signature: string | null
   usdc_signature: string | null
   payout_errors: string[]
+  /** True once any pool tx may have been submitted (do not delete claim reservations). */
+  send_attempted: boolean
 }
 
 /** Send SOL/USDC rev share from the dedicated rev-share pool (not funds escrow). */
