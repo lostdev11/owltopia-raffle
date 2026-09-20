@@ -42,8 +42,11 @@ import {
   sendDrawRevealMemoTransaction,
   defaultDrawAlgoForCreate,
   raffleUsesDrawVrf,
-  isSwitchboardOracleFleetUnavailableError,
 } from '@/lib/raffles/draw'
+import {
+  shouldFallbackVrfToLocalSeed,
+  shouldPreferLocalSeedOverVrfAttempt,
+} from '@/lib/raffles/draw/vrf-local-fallback'
 import { runRaffleVrfFlow } from '@/lib/raffles/draw/vrf-draw-flow'
 import {
   deleteRaffleDrawSecret,
@@ -2110,7 +2113,14 @@ export async function deleteRaffle(id: string) {
 export async function selectWinner(
   raffleId: string,
   forceOverride: boolean = false,
-  opts?: { forceVrfRetry?: boolean; revealWaitMs?: number }
+  opts?: {
+    forceVrfRetry?: boolean
+    revealWaitMs?: number
+    /** After a failed VRF attempt, settle with local seed (admin Force draw / recovery). */
+    allowLocalSeedFallback?: boolean
+    /** Skip another long Switchboard wait when gateways are already known dead. */
+    preferLocalSeedFallback?: boolean
+  }
 ): Promise<string | null> {
   const raffle = await getRaffleById(raffleId)
   if (!raffle) {
@@ -2158,55 +2168,82 @@ export async function selectWinner(
       !(raffle.draw_commit_hash ?? '').trim()
 
     if (useVrf) {
-      const vrf = await runRaffleVrfFlow({
-        raffle,
-        entries: confirmedEntries,
-        forceNewRequest: opts?.forceVrfRetry === true,
-        revealWaitMs: opts?.revealWaitMs,
-      })
-      const afterVrf = await getRaffleById(raffleId)
-      if ((afterVrf?.winner_wallet ?? '').trim()) {
-        return afterVrf!.winner_wallet!.trim()
-      }
-      if (vrf.status !== 'fulfilled') {
-        const vrfErr = (vrf.error || '').trim()
-        // Commit never creates an account when the default queue has zero healthy
-        // oracles — leave tickets stuck forever if we only retry Switchboard.
-        // Fall back to the same v1 local-seed math packs use when VRF is down.
-        if (
-          isSwitchboardOracleFleetUnavailableError(vrfErr) &&
-          !(vrf.randomnessAccount ?? '').trim()
-        ) {
-          console.warn(
-            `[selectWinner] Switchboard oracle fleet unavailable for ${raffleId}; completing with local seed fallback: ${vrfErr}`
-          )
-          vrfLocalFallbackError = vrfErr || 'No eligible randomness oracle candidates were found'
-          draw = performDraw(confirmedEntries, { algo: DRAW_ALGO_V1 })
-          if (vrf.ledgerHash && vrf.soldCount > 0) {
-            if (draw.ledgerHash !== vrf.ledgerHash || draw.soldCount !== vrf.soldCount) {
-              console.error(
-                `[selectWinner] VRF local-fallback ledger mismatch for ${raffleId}: draw=${draw.ledgerHash}/${draw.soldCount} vrf=${vrf.ledgerHash}/${vrf.soldCount}`
-              )
-              return null
-            }
+      const preferLocal =
+        opts?.preferLocalSeedFallback === true ||
+        (opts?.allowLocalSeedFallback === true && shouldPreferLocalSeedOverVrfAttempt(raffle))
+
+      if (preferLocal) {
+        const priorErr =
+          (raffle.draw_vrf_error ?? '').trim() ||
+          'Switchboard VRF reveal path unavailable'
+        console.warn(
+          `[selectWinner] preferring local seed for ${raffleId} (skip Switchboard): ${priorErr}`
+        )
+        vrfLocalFallbackError = priorErr
+        draw = performDraw(confirmedEntries, { algo: DRAW_ALGO_V1 })
+        const frozenHash = (raffle.draw_ledger_hash ?? '').trim()
+        const frozenSold = raffle.draw_sold_count
+        if (frozenHash && typeof frozenSold === 'number' && frozenSold > 0) {
+          if (draw.ledgerHash !== frozenHash || draw.soldCount !== frozenSold) {
+            console.error(
+              `[selectWinner] VRF prefer-local ledger mismatch for ${raffleId}: draw=${draw.ledgerHash}/${draw.soldCount} frozen=${frozenHash}/${frozenSold}`
+            )
+            return null
           }
-        } else {
-          console.warn(
-            `[selectWinner] VRF not fulfilled for ${raffleId}: ${vrf.status} ${vrf.error || ''}`
-          )
-          return null
         }
       } else {
-        draw = performDraw(confirmedEntries, {
-          algo: DRAW_ALGO_V3_VRF,
-          drawSeed: vrf.drawSeed,
+        const vrf = await runRaffleVrfFlow({
+          raffle,
+          entries: confirmedEntries,
+          forceNewRequest: opts?.forceVrfRetry === true,
+          revealWaitMs: opts?.revealWaitMs,
         })
-        // Ensure ledger fields match the frozen VRF snapshot.
-        if (draw.ledgerHash !== vrf.ledgerHash || draw.soldCount !== vrf.soldCount) {
-          console.error(
-            `[selectWinner] VRF ledger mismatch for ${raffleId}: draw=${draw.ledgerHash}/${draw.soldCount} vrf=${vrf.ledgerHash}/${vrf.soldCount}`
-          )
-          return null
+        const afterVrf = await getRaffleById(raffleId)
+        if ((afterVrf?.winner_wallet ?? '').trim()) {
+          return afterVrf!.winner_wallet!.trim()
+        }
+        if (vrf.status !== 'fulfilled') {
+          const vrfErr = (vrf.error || '').trim()
+          if (
+            shouldFallbackVrfToLocalSeed({
+              error: vrfErr,
+              randomnessAccount: vrf.randomnessAccount,
+              allowLocalSeedFallback: opts?.allowLocalSeedFallback === true,
+              preferLocalSeedFallback: opts?.preferLocalSeedFallback === true,
+            })
+          ) {
+            console.warn(
+              `[selectWinner] Switchboard VRF unavailable for ${raffleId}; completing with local seed fallback: ${vrfErr}`
+            )
+            vrfLocalFallbackError =
+              vrfErr || 'Switchboard VRF failed — completed with local seed'
+            draw = performDraw(confirmedEntries, { algo: DRAW_ALGO_V1 })
+            if (vrf.ledgerHash && vrf.soldCount > 0) {
+              if (draw.ledgerHash !== vrf.ledgerHash || draw.soldCount !== vrf.soldCount) {
+                console.error(
+                  `[selectWinner] VRF local-fallback ledger mismatch for ${raffleId}: draw=${draw.ledgerHash}/${draw.soldCount} vrf=${vrf.ledgerHash}/${vrf.soldCount}`
+                )
+                return null
+              }
+            }
+          } else {
+            console.warn(
+              `[selectWinner] VRF not fulfilled for ${raffleId}: ${vrf.status} ${vrf.error || ''}`
+            )
+            return null
+          }
+        } else {
+          draw = performDraw(confirmedEntries, {
+            algo: DRAW_ALGO_V3_VRF,
+            drawSeed: vrf.drawSeed,
+          })
+          // Ensure ledger fields match the frozen VRF snapshot.
+          if (draw.ledgerHash !== vrf.ledgerHash || draw.soldCount !== vrf.soldCount) {
+            console.error(
+              `[selectWinner] VRF ledger mismatch for ${raffleId}: draw=${draw.ledgerHash}/${draw.soldCount} vrf=${vrf.ledgerHash}/${vrf.soldCount}`
+            )
+            return null
+          }
         }
       }
     } else {

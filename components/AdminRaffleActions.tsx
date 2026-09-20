@@ -667,11 +667,15 @@ export function AdminRaffleActions({
   const handleForceDraw = async () => {
     setForceDrawing(true)
     setMessage(null)
+    const controller = new AbortController()
+    // Server maxDuration is 120s; fail the UI slightly sooner with a clear message.
+    const timeoutId = window.setTimeout(() => controller.abort(), 110_000)
     try {
       const res = await fetch(`/api/admin/raffles/${raffle.id}/force-draw`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        signal: controller.signal,
         body: JSON.stringify({ forceOverride: forceDrawBypassMin }),
       })
       const data = await res.json().catch(() => ({}))
@@ -686,20 +690,31 @@ export function AdminRaffleActions({
         })
         router.refresh()
       } else {
+        const vrfHint =
+          typeof data?.drawVrfError === 'string' && data.drawVrfError.trim()
+            ? ` ${data.drawVrfError.trim()}`
+            : ''
         setMessage({
           type: 'error',
           text:
-            typeof data?.error === 'string'
-              ? data.error
-              : 'Force draw did not complete',
+            (typeof data?.error === 'string' ? data.error : 'Force draw did not complete') +
+            vrfHint,
         })
       }
     } catch (e) {
+      const aborted =
+        (typeof DOMException !== 'undefined' && e instanceof DOMException && e.name === 'AbortError') ||
+        (e instanceof Error && /aborted|AbortError/i.test(e.message))
       setMessage({
         type: 'error',
-        text: e instanceof Error ? e.message : 'Force draw failed',
+        text: aborted
+          ? 'Force draw timed out after ~2 minutes (Switchboard VRF likely still failing). Retry — local seed fallback should finish quickly if gateways are down.'
+          : e instanceof Error
+            ? e.message
+            : 'Force draw failed',
       })
     } finally {
+      window.clearTimeout(timeoutId)
       setForceDrawing(false)
     }
   }
@@ -2324,7 +2339,13 @@ export function AdminRaffleActions({
                         This selects a winner immediately for{' '}
                         <span className="font-medium text-foreground">{raffle.title}</span> (
                         {ticketsSoldForDraw} confirmed ticket{ticketsSoldForDraw === 1 ? '' : 's'}
-                        ). {isVrfRaffle ? 'VRF will be retried if needed. ' : ''}
+                        ).{' '}
+                        {isVrfRaffle
+                          ? (raffle.draw_vrf_status === 'failed' || raffle.draw_vrf_status === 'pending') &&
+                            (raffle.draw_vrf_error ?? '').trim()
+                            ? 'Switchboard VRF already failed — this will settle with a local verifiable seed against the frozen ticket ledger. '
+                            : 'VRF will be tried briefly; if Switchboard gateways are down, a local verifiable seed is used. '
+                          : ''}
                         Cannot be undone without voiding the winner.
                       </DialogDescription>
                     </DialogHeader>
@@ -2378,6 +2399,12 @@ export function AdminRaffleActions({
                         {forceDrawing ? 'Drawing…' : 'Confirm force draw'}
                       </Button>
                     </DialogFooter>
+                    {forceDrawing && (
+                      <p className="text-xs text-muted-foreground">
+                        Usually finishes in a few seconds when VRF gateways are down. Can take up to
+                        ~2 minutes if Switchboard is still being polled.
+                      </p>
+                    )}
                   </DialogContent>
                 </Dialog>
               </div>

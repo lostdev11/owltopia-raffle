@@ -33,6 +33,7 @@ import {
   shouldStartFullVrfAttempt,
   shouldStartVrfResumeAttempt,
 } from '@/lib/raffles/draw-ended-scheduler'
+import { shouldPreferLocalSeedOverVrfAttempt } from '@/lib/raffles/draw/vrf-local-fallback'
 import type { Raffle } from '@/lib/types'
 
 export type DrawResult = {
@@ -123,6 +124,10 @@ export async function processOneEndedRaffle(
 
     const winnerWallet = await selectWinner(raffle.id, false, {
       revealWaitMs: opts?.revealWaitMs,
+      // Cron: if Switchboard gateways already failed this raffle, settle with local seed
+      // instead of burning another 75s reveal poll every 15 minutes.
+      allowLocalSeedFallback: shouldPreferLocalSeedOverVrfAttempt(raffle),
+      preferLocalSeedFallback: shouldPreferLocalSeedOverVrfAttempt(raffle),
     })
     if (winnerWallet) {
       return {
@@ -202,9 +207,16 @@ export async function processEndedRafflesWithoutWinners(
     }
 
     const kind = classifyEndedRaffleWork(raffle)
+    // Prior Switchboard gateway failures settle via local seed — treat as fast.
+    const settlesLocal =
+      kind !== 'fast' && shouldPreferLocalSeedOverVrfAttempt(raffle)
 
-    if (kind === 'fast') {
-      results.push(await processOneEndedRaffle(raffle))
+    if (kind === 'fast' || settlesLocal) {
+      results.push(
+        await processOneEndedRaffle(raffle, {
+          revealWaitMs: settlesLocal ? 10_000 : undefined,
+        })
+      )
       continue
     }
 

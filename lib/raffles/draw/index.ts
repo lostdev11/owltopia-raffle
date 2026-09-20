@@ -93,6 +93,11 @@ export {
   resolveSwitchboardCommitOracle,
 } from '@/lib/raffles/draw/vrf-oracle-select'
 export {
+  isSwitchboardRevealPathDead,
+  shouldFallbackVrfToLocalSeed,
+  shouldPreferLocalSeedOverVrfAttempt,
+} from '@/lib/raffles/draw/vrf-local-fallback'
+export {
   fulfilledVrfResultFromStoredDraw,
   isVrfAuditMetadataSuspicious,
   raffleDrawWinnerAlreadySelected,

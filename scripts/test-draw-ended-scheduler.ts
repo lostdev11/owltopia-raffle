@@ -142,3 +142,50 @@ assert.equal(
 )
 
 console.log('test-draw-ended-scheduler: ok')
+
+// --- Local-seed preference when Switchboard reveal path is dead ---
+import {
+  isSwitchboardRevealPathDead,
+  shouldFallbackVrfToLocalSeed,
+  shouldPreferLocalSeedOverVrfAttempt,
+} from '../lib/raffles/draw/vrf-local-fallback'
+
+const gateway503 =
+  'VRF reveal timed out after 75000ms: Gateway.fetchRandomnessReveal failed (status 503, code ERR_BAD_RESPONSE) (Switchboard oracle gateway flaky — tried 1 gateways; auto-retry will re-commit if this stays down)'
+assert.equal(isSwitchboardRevealPathDead(gateway503), true)
+assert.equal(
+  shouldPreferLocalSeedOverVrfAttempt({
+    draw_vrf_status: 'failed',
+    draw_vrf_error: gateway503,
+    draw_vrf_account: '39zm3oacbjoguMq6DkXekosU95Sp81p2qY5gNKtaNmEu',
+    draw_vrf_requested_at: '2026-09-20T14:32:51.334Z',
+  }),
+  true
+)
+assert.equal(
+  shouldFallbackVrfToLocalSeed({
+    error: gateway503,
+    randomnessAccount: '39zm3oacbjoguMq6DkXekosU95Sp81p2qY5gNKtaNmEu',
+    allowLocalSeedFallback: true,
+  }),
+  true
+)
+assert.equal(
+  shouldFallbackVrfToLocalSeed({
+    error: gateway503,
+    randomnessAccount: '39zm3oacbjoguMq6DkXekosU95Sp81p2qY5gNKtaNmEu',
+    allowLocalSeedFallback: false,
+  }),
+  false,
+  'without allowLocalSeedFallback, gateway 503 alone must not silent-fallback on cron first attempt'
+)
+assert.equal(
+  shouldFallbackVrfToLocalSeed({
+    error: 'No eligible randomness oracle candidates were found',
+    randomnessAccount: null,
+    allowLocalSeedFallback: false,
+  }),
+  true
+)
+
+console.log('test-draw-ended-scheduler + local-seed fallback: ok')
