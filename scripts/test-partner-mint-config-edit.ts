@@ -718,5 +718,33 @@ assert.equal(
   'allowlist phase wallet limit unchanged when only public limit edited'
 )
 
+// High / unlimited public per-wallet (replaces former hard max of 50).
+const unlimitedParsed = parseMintDetailsConfig({
+  total_supply: 1000,
+  mint_price: 0,
+  currency: 'USDC',
+  wallet_mint_limit: 1000,
+})
+assert.ok(!('error' in unlimitedParsed))
+assert.equal(unlimitedParsed.wallet_mint_limit, 1000, 'public per-wallet may equal supply (unlimited)')
+
+const highParsed = parseMintDetailsConfig({
+  total_supply: 1010,
+  mint_price: 0,
+  currency: 'USDC',
+  wallet_mint_limit: 1010,
+})
+assert.ok(!('error' in highParsed))
+assert.equal(highParsed.wallet_mint_limit, 1010, 'public per-wallet accepts values above legacy max 50')
+
+const clampedParsed = parseMintDetailsConfig({
+  total_supply: 10_000,
+  mint_price: 0,
+  currency: 'USDC',
+  wallet_mint_limit: 99_999,
+})
+assert.ok(!('error' in clampedParsed))
+assert.equal(clampedParsed.wallet_mint_limit, 10_000, 'public per-wallet clamps to max launch supply')
+
 console.log('ok: partner mint-config date save round-trip')
 

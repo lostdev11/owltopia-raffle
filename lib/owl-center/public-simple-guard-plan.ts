@@ -4,6 +4,7 @@
  */
 
 import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
+import { OWL_CENTER_MAX_WALLET_MINT_LIMIT } from '@/lib/owl-center/launch-limits'
 import {
   resolvePartnerAllowlistPhases,
   resolvePartnerPhaseWalletMintLimit,
@@ -23,7 +24,7 @@ import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
 function clampWalletMintLimit(raw: number | null | undefined): number {
   const n = Math.floor(Number(raw))
   if (!Number.isFinite(n)) return 5
-  return Math.min(50, Math.max(1, n))
+  return Math.min(OWL_CENTER_MAX_WALLET_MINT_LIMIT, Math.max(1, n))
 }
 
 export const PUBLIC_SIMPLE_PUBLIC_GROUP_LABEL = 'pub'

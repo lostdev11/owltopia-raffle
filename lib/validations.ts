@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { THEME_ACCENT_VALUES } from '@/lib/types'
 import { MAX_TICKET_QUANTITY_PER_ENTRY } from '@/lib/entries/max-ticket-quantity'
 import { CART_BATCH_MAX_RAFFLES_PER_TX } from '@/lib/cart/constants'
+import { OWL_CENTER_MAX_WALLET_MINT_LIMIT } from '@/lib/owl-center/launch-limits'
 
 const solanaAddress = z.string().min(32).max(44).regex(/^[1-9A-HJ-NP-Za-km-z]+$/)
 
@@ -150,7 +151,7 @@ export const owlCenterSubmitBody = z.object({
   total_supply: z.coerce.number().int().min(1).max(1_000_000),
   mint_price: z.coerce.number().finite().min(0),
   currency: z.enum(['SOL', 'USDC']).default('SOL'),
-  wallet_mint_limit: z.coerce.number().int().min(1).max(50),
+  wallet_mint_limit: z.coerce.number().int().min(1).max(OWL_CENTER_MAX_WALLET_MINT_LIMIT),
   launch_date: z.string().max(64).optional().nullable(),
   creator_wallet: solanaAddress,
   treasury_wallet: solanaAddress.optional().nullable(),

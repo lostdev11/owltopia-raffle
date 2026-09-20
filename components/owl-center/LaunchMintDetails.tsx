@@ -5,6 +5,7 @@ import { MintCountdown } from '@/components/owl-center/MintCountdown'
 import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
 import { launchHasPresaleProgram, launchShowsPresaleOverage } from '@/lib/owl-center/launch-presale'
 import { resolveMintOpensAt } from '@/lib/owl-center/launch-mint-config'
+import { isOwlCenterWalletMintUnlimited } from '@/lib/owl-center/launch-limits'
 import { getLaunchMintPriceDisplay } from '@/lib/owl-center/launch-price-quotes'
 import {
   buildPartnerMintPhaseSchedule,
@@ -148,10 +149,13 @@ export async function LaunchMintDetails({ launch }: { launch: OwlCenterLaunchPub
             <LocalMintTime iso={mintOpensAt} variant="full" />
           </dd>
         </div>
-        {launch.slug === 'gen2' ? (
+        {launch.slug === 'gen2' ||
+        isOwlCenterWalletMintUnlimited(launch.wallet_mint_limit, launch.total_supply) ? (
           <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">
             <dt className="text-[#5C6773]">Public per wallet</dt>
-            <dd className="text-[#E8EEF2]">Unlimited (pool + total supply)</dd>
+            <dd className="text-[#E8EEF2]">
+              {launch.slug === 'gen2' ? 'Unlimited (pool + total supply)' : 'Unlimited'}
+            </dd>
           </div>
         ) : launch.wallet_mint_limit > 0 ? (
           <div className="flex flex-wrap justify-between gap-x-2 gap-y-0.5">

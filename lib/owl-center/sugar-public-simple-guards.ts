@@ -1,6 +1,7 @@
 import { dateTime, lamports, none, publicKey, some, sol } from '@metaplex-foundation/umi'
 import type { DefaultGuardSetArgs } from '@metaplex-foundation/mpl-core-candy-machine'
 
+import { OWL_CENTER_MAX_WALLET_MINT_LIMIT } from '@/lib/owl-center/launch-limits'
 import type { PublicSimpleGuardPlan } from '@/lib/owl-center/public-simple-guard-plan'
 import { PUBLIC_SIMPLE_PUBLIC_MINT_LIMIT_ID } from '@/lib/owl-center/public-simple-guard-plan'
 import {
@@ -19,7 +20,7 @@ export type PublicSimpleGuardOpts = {
 export function clampPublicSimpleWalletMintLimit(raw: number | null | undefined): number {
   const n = Math.floor(Number(raw))
   if (!Number.isFinite(n)) return 5
-  return Math.min(50, Math.max(1, n))
+  return Math.min(OWL_CENTER_MAX_WALLET_MINT_LIMIT, Math.max(1, n))
 }
 
 export function publicSimpleGuardOptsFromLaunch(
