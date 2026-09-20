@@ -392,7 +392,8 @@ export async function warmGen2MintPrep(
 }
 
 /**
- * Prepare + sign + confirm Candy Machine `mintV2` txs via Phantom / Solflare (wallet-standard adapter).
+ * Prepare + sign + confirm Candy Machine `mintV2` txs via wallet-standard adapters
+ * (Phantom / Solflare / Jupiter / Backpack / etc.).
  *
  * Guard-aware: fetches the candy guard, selects the guard group for the active phase
  * (`gen1` / `pre` / `wl` / `pub` — see `lib/solana/gen2-guards.ts`), builds `mintArgs`
@@ -654,14 +655,14 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     pauseMintSessionDeadline(sessionDeadline)
 
     /**
-     * Paid public (no server co-sign) + Phantom/Solflare multi-signer mint txs:
-     * Wallet docs require `signTransaction` / `signAllTransactions` first, then other
+     * Paid public (no server co-sign) + popular-wallet multi-signer mint txs:
+     * Prefer `signTransaction` / `signAllTransactions` first, then other
      * signers (mint keypair), then broadcast — not `signAndSend` on a pre-partial-signed tx.
      * Allowlist route (single-signer) is bundled into the same `signAllTransactions` sheet as the
      * mints, then sent/confirmed first so mintV2 still sees the proof PDA.
      *
-     * Solflare mobile previously fell through to a path that did not reliably return every
-     * signed mint in a qty > 1 batch — use the same fee-payer-first sheet as Phantom.
+     * Mobile wallets that fell through to sequential or partial-sign paths often only landed the
+     * first mint for qty > 1 — fee-payer-first covers Phantom, Solflare, Jupiter, Backpack, etc.
      *
      * @see https://docs.phantom.com/developer-powertools/domain-and-transaction-warnings
      */
@@ -883,7 +884,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     // The optional allowList proof tx (if any) is signed in the SAME wallet prompt as the mints —
     // UMI's signAllTransactions invokes the wallet once — then split out so it can be sent first and
     // kept OUT of the co-sign round-trip (the cosign endpoint requires exactly one mintV2 per tx).
-    // Phantom/Solflare: fee payer only in the wallet sheet, then mint keypairs (Lighthouse-safe).
+    // Popular wallets + any signAll-capable adapter: fee payer only in the wallet sheet, then mint keypairs.
     let routeSignedTx: Transaction | null = null
     let signedTransactions: Transaction[]
     try {

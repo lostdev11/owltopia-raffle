@@ -845,7 +845,7 @@ export function Gen2MintPanel({
           ) : null}
 
           <p className="text-xs text-[#5C6773]">
-            Phantom / Solflare: one approval mints your selected quantity (wallet may list each NFT).
+            One wallet approval mints your selected quantity (wallet may list each NFT).
             {batchSolHint ? ` ${batchSolHint}.` : ' Mint price is shown in USD — wallet also needs SOL for fees + rent.'}
           </p>
         </div>

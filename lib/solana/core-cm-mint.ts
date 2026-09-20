@@ -1,6 +1,6 @@
 /**
  * Partner/admin public_simple mint via Metaplex Core Candy Machine `mintV1`.
- * Same wallet UX patterns as Gen2 TM mint (Phantom/Solflare fee-payer-first batch, platform fee) without phased guards.
+ * Same wallet UX patterns as Gen2 TM mint (fee-payer-first batch for popular wallets, platform fee) without phased guards.
  */
 import type { WalletAdapter } from '@solana/wallet-adapter-base'
 import { Connection } from '@solana/web3.js'
@@ -299,8 +299,9 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
     onMintProgress?.(quantity, quantity)
     pauseMintSessionDeadline(sessionDeadline)
 
-    // Phantom + Solflare: one signAll sheet (fee payer), then asset keypairs, then broadcast.
-    // Other wallets: sequential sendAndConfirm (one approval per NFT).
+    // Popular wallets (Phantom, Solflare, Jupiter, Backpack, …) + any signAll-capable adapter:
+    // one signAll sheet (fee payer), then asset keypairs, then broadcast.
+    // Fallback: sequential sendAndConfirm (one approval per NFT).
     const useFeePayerFirstMintBatch = walletSupportsFeePayerFirstMintBatch(walletAdapter)
     const connection = new Connection(rpcUrl, { commitment: 'confirmed' })
 
@@ -406,7 +407,7 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
       }
     }
 
-    // Non-Phantom/Solflare: Umi identity is the wallet — mintV1 includes the asset signer on the builder.
+    // Other wallets: Umi identity is the wallet — mintV1 includes the asset signer on the builder.
     resumeMintSessionDeadline(sessionDeadline)
     const confirmedSigs: string[] = []
     const confirmedMints: string[] = []

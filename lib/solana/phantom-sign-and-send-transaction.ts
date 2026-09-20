@@ -61,6 +61,37 @@ function adapterIsSolflare(adapter: WalletAdapter): boolean {
   return n === 'solflare' || n.includes('solflare')
 }
 
+function adapterIsJupiter(adapter: WalletAdapter): boolean {
+  const n = String(adapter.name).toLowerCase()
+  return n === 'jupiter' || n.includes('jupiter')
+}
+
+/**
+ * Popular wallets we ship (see docs/WALLETS.md). Candy Machine qty > 1 needs fee-payer-first
+ * `signAllTransactions` so mobile does not only land the first mint.
+ */
+const POPULAR_FEE_PAYER_FIRST_MINT_BATCH_NAMES = [
+  'phantom',
+  'solflare',
+  'jupiter',
+  'backpack',
+  'coinbase',
+  'trust',
+  'metamask',
+  'solana mobile',
+] as const
+
+/** Exported for unit tests — name-only popular-wallet check. */
+export function walletNameSupportsFeePayerFirstMintBatch(walletName: string): boolean {
+  const n = walletName.trim().toLowerCase()
+  if (!n) return false
+  return POPULAR_FEE_PAYER_FIRST_MINT_BATCH_NAMES.some((w) => n === w || n.includes(w))
+}
+
+type SignAllCapableAdapter = WalletAdapter & {
+  signAllTransactions?: (transactions: unknown[]) => Promise<unknown[]>
+}
+
 async function prepareLegacyTransactionLikeAdapter(
   transaction: Transaction,
   connection: Connection,
@@ -271,13 +302,20 @@ export function walletAdapterIsSolflare(adapter: WalletAdapter | null | undefine
   return Boolean(adapter && adapterIsSolflare(adapter))
 }
 
+/** True when the connected adapter is Jupiter (name check). */
+export function walletAdapterIsJupiter(adapter: WalletAdapter | null | undefined): boolean {
+  return Boolean(adapter && adapterIsJupiter(adapter))
+}
+
 /**
- * Wallets that inject Lighthouse (or equivalent) and need candy-machine multi-mint as:
- * `signAllTransactions` with fee payer only → mint keypairs sign → app broadcasts.
- * Phantom and Solflare share this path so qty > 1 works on mobile (one approval sheet).
+ * Candy Machine multi-mint: `signAllTransactions` with fee payer only → mint keypairs → broadcast.
+ * Used for popular wallets (Phantom, Solflare, Jupiter, Backpack, Coinbase, Trust, MetaMask,
+ * Solana Mobile) and any adapter that exposes `signAllTransactions`, so qty > 1 works on mobile.
  */
 export function walletSupportsFeePayerFirstMintBatch(
   adapter: WalletAdapter | null | undefined
 ): boolean {
-  return walletAdapterIsPhantom(adapter) || walletAdapterIsSolflare(adapter)
+  if (!adapter) return false
+  if (walletNameSupportsFeePayerFirstMintBatch(String(adapter.name))) return true
+  return typeof (adapter as SignAllCapableAdapter).signAllTransactions === 'function'
 }
