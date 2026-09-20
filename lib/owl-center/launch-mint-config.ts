@@ -1,4 +1,5 @@
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
+import { OWL_CENTER_MAX_WALLET_MINT_LIMIT } from '@/lib/owl-center/launch-limits'
 import { DEFAULT_PRESALE_OVERAGE_SUPPLY } from '@/lib/owl-center/launch-presale'
 import {
   formRowsFromPartnerAllowlistPhases,
@@ -381,7 +382,7 @@ export function parseMintDetailsConfig(body: Record<string, unknown>): ParsedMin
       ? Math.max(0, Number(wl_price_raw))
       : null
 
-  const wallet_mint_limit = pickInt(body.wallet_mint_limit, 5, 1, 50)
+  const wallet_mint_limit = pickInt(body.wallet_mint_limit, 5, 1, OWL_CENTER_MAX_WALLET_MINT_LIMIT)
 
   const presale_enabled = Boolean(body.presale_enabled ?? body.creator_presale_enabled)
 

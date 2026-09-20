@@ -3,7 +3,11 @@
 import { useEffect, useState } from 'react'
 
 import { applyMintOpensDate, resolveFormMintOpensFromFirstPhase, type MintDetailsFormValues } from '@/lib/owl-center/launch-mint-config'
-import { OWL_CENTER_MAX_LAUNCH_SUPPLY } from '@/lib/owl-center/launch-limits'
+import {
+  isOwlCenterWalletMintUnlimited,
+  OWL_CENTER_MAX_LAUNCH_SUPPLY,
+  OWL_CENTER_MAX_WALLET_MINT_LIMIT,
+} from '@/lib/owl-center/launch-limits'
 import { datetimeLocalToIso, formatMintDate } from '@/lib/owl-center/phase-schedule'
 import {
   nextPresetForPhases,
@@ -69,6 +73,42 @@ export function MintDetailsConfigFields({
 
   const supply = Number(values.total_supply) || 0
   const standardLocked = royaltiesLocked || supplyConfigLocked
+  const publicUnlimited = isOwlCenterWalletMintUnlimited(Number(values.wallet_mint_limit), supply)
+  const unlimitedSupplyCap = Math.min(
+    OWL_CENTER_MAX_WALLET_MINT_LIMIT,
+    Math.max(1, Math.floor(supply) || OWL_CENTER_MAX_WALLET_MINT_LIMIT)
+  )
+
+  const setPublicUnlimited = (enabled: boolean) => {
+    if (enabled) {
+      onChange({ ...values, wallet_mint_limit: String(unlimitedSupplyCap) })
+      return
+    }
+    const current = Math.floor(Number(values.wallet_mint_limit))
+    const next =
+      Number.isFinite(current) && current >= 1 && current < unlimitedSupplyCap
+        ? String(current)
+        : '5'
+    onChange({ ...values, wallet_mint_limit: next })
+  }
+
+  const setTotalSupply = (raw: string) => {
+    const nextSupply = Math.floor(Number(raw))
+    if (
+      publicUnlimited &&
+      Number.isFinite(nextSupply) &&
+      nextSupply >= 1 &&
+      nextSupply <= OWL_CENTER_MAX_LAUNCH_SUPPLY
+    ) {
+      onChange({
+        ...values,
+        total_supply: raw,
+        wallet_mint_limit: String(Math.min(OWL_CENTER_MAX_WALLET_MINT_LIMIT, nextSupply)),
+      })
+      return
+    }
+    set('total_supply', raw)
+  }
 
   return (
     <div className="grid gap-4">
@@ -85,7 +125,7 @@ export function MintDetailsConfigFields({
               max={OWL_CENTER_MAX_LAUNCH_SUPPLY}
               disabled={supplyConfigLocked}
               value={values.total_supply}
-              onChange={(e) => set('total_supply', e.target.value)}
+              onChange={(e) => setTotalSupply(e.target.value)}
               className="min-h-[44px] w-36 touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8] disabled:opacity-50"
             />
           </label>
@@ -215,22 +255,31 @@ export function MintDetailsConfigFields({
         <p className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">
           Public per-wallet mint limit
         </p>
+        <label className="flex min-h-[44px] cursor-pointer items-center gap-3 touch-manipulation font-mono text-[11px] uppercase tracking-widest text-[#9BA8B4]">
+          <input
+            type="checkbox"
+            checked={publicUnlimited}
+            onChange={(e) => setPublicUnlimited(e.target.checked)}
+            className="h-4 w-4 accent-[#00C97A]"
+          />
+          Unlimited (one wallet can mint the whole collection)
+        </label>
         <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
           Max mints per wallet (public phase)
           <input
             type="number"
             min={1}
-            max={50}
+            max={OWL_CENTER_MAX_WALLET_MINT_LIMIT}
+            disabled={publicUnlimited}
             value={values.wallet_mint_limit}
             onChange={(e) => set('wallet_mint_limit', e.target.value)}
-            className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
+            className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8] disabled:opacity-50"
           />
         </label>
         <p className="font-mono text-[10px] leading-relaxed text-[#5C6773]">
-          Max NFTs a wallet can mint during PUBLIC only — not how many NFTs it already holds. Allowlist
-          phases set their own caps below (Show Advanced); those stack (WL 2 + public 5 = up to 7
-          total). Enforced on-chain via Candy Guard mintLimit — changing this after deploy updates the
-          on-chain cap when you save.
+          {publicUnlimited
+            ? 'Unlimited sets the on-chain Candy Guard mintLimit to your collection supply — a wallet can mint until the drop sells out (still capped by remaining supply).'
+            : 'Max NFTs a wallet can mint during PUBLIC only — not how many NFTs it already holds. Allowlist phases set their own caps below (Show Advanced); those stack (WL 2 + public 5 = up to 7 total). Enforced on-chain via Candy Guard mintLimit — changing this after deploy updates the on-chain cap when you save.'}
         </p>
       </div>
 
@@ -480,7 +529,7 @@ export function MintDetailsConfigFields({
                 <input
                   type="number"
                   min={1}
-                  max={50}
+                  max={OWL_CENTER_MAX_WALLET_MINT_LIMIT}
                   value={phase.wallet_mint_limit ?? ''}
                   onChange={(e) => {
                     const next = [...values.allowlist_phases]

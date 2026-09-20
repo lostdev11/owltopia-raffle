@@ -3,6 +3,8 @@
  * Soft-gated before PUBLIC; on-chain mint remains PUBLIC phase.
  */
 
+import { OWL_CENTER_MAX_WALLET_MINT_LIMIT } from '@/lib/owl-center/launch-limits'
+
 export const PARTNER_ALLOWLIST_PRESETS = [
   { key: 'team', label: 'Team' },
   { key: 'og', label: 'OG' },
@@ -108,7 +110,7 @@ export function partnerPhasePriceSol(
 export function clampPartnerWalletMintLimit(raw: number | null | undefined): number {
   const n = Math.floor(Number(raw))
   if (!Number.isFinite(n)) return 5
-  return Math.min(50, Math.max(1, n))
+  return Math.min(OWL_CENTER_MAX_WALLET_MINT_LIMIT, Math.max(1, n))
 }
 
 /**
