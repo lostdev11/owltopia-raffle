@@ -58,7 +58,9 @@ const paid = paidAmountsFromClaim({
   usdc_transaction_signature: null,
 })
 assert.equal(paid.paid_sol, 0.01)
+assert.equal(paid.committed_sol, 0.01)
 assert.equal(paid.fully_paid, true)
+assert.equal(paid.reserved, true)
 
 const unpaid = paidAmountsFromClaim({
   amount_sol: 0.01,
@@ -67,7 +69,28 @@ const unpaid = paidAmountsFromClaim({
   usdc_transaction_signature: null,
 })
 assert.equal(unpaid.paid_sol, 0)
+assert.equal(unpaid.committed_sol, 0.01)
 assert.equal(unpaid.fully_paid, false)
+assert.equal(unpaid.reserved, true)
+
+// Reserved claim without payout signature still reduces outstanding liability (orphan-safe).
+const reservedSnap = computeGenOwlRevShareLiabilitySnapshot({
+  now: new Date(Date.UTC(2026, 8, 5, 12, 0, 0)),
+  periods: [period('2026-08', { gen1Sol: 1, gen1Eligible: 10 })],
+  claims: [
+    {
+      period_month: '2026-08',
+      amount_sol: 0.1,
+      amount_usdc: 0,
+      sol_transaction_signature: null,
+      usdc_transaction_signature: null,
+    },
+  ],
+})
+assert.equal(reservedSnap.open.claimed_nests, 1)
+assert.equal(reservedSnap.open.unclaimed_nests, 9)
+assert.ok(Math.abs(reservedSnap.open.paid_sol - 0) < 1e-9)
+assert.ok(Math.abs(reservedSnap.open.unclaimed_sol - 0.9) < 1e-9)
 
 // Two stacked open months: July mostly claimed, August barely claimed.
 // now = Sep 5 2026 → July + August claim windows are open.
@@ -119,6 +142,7 @@ const covered = evaluateGenOwlRevSharePoolCoverage({
   required_usdc: snap.open.required_usdc,
   unclaimed_nests: snap.open.unclaimed_nests,
   open_period_count: snap.open.open_period_count,
+  pool_address: 'owLE1P83nLnwhgPyUA2VYbxLLpQYkyU7UQHXBeMom9K',
 })
 assert.equal(covered.ok, true)
 
@@ -129,9 +153,12 @@ const short = evaluateGenOwlRevSharePoolCoverage({
   required_usdc: 0,
   unclaimed_nests: snap.open.unclaimed_nests,
   open_period_count: snap.open.open_period_count,
+  pool_address: 'owLE1P83nLnwhgPyUA2VYbxLLpQYkyU7UQHXBeMom9K',
 })
 assert.equal(short.ok, false)
 assert.ok(short.shortfall_sol > 13)
 assert.match(short.error ?? '', /unclaimed nest/i)
+assert.match(short.error ?? '', /Cover shortfall/i)
+assert.match(short.error ?? '', /owLE1P83nLnwhgPyUA2VYbxLLpQYkyU7UQHXBeMom9K/)
 
 console.log('test-gen-owl-rev-share-liability: ok')

@@ -84,7 +84,21 @@ export function paidAmountsFromClaim(row: {
   amount_usdc: number
   sol_transaction_signature: string | null
   usdc_transaction_signature: string | null
-}): { paid_sol: number; paid_usdc: number; fully_paid: boolean } {
+}): {
+  /** Confirmed on-chain payout signatures. */
+  paid_sol: number
+  paid_usdc: number
+  /**
+   * Liability reduction for pool coverage. Any claim row locks the nest, so count the
+   * reserved amounts even when signature update lagged after a successful payout —
+   * otherwise the books stay high while SOL already left the pool (permanent shortfall).
+   */
+  committed_sol: number
+  committed_usdc: number
+  fully_paid: boolean
+  /** Nest is reserved / locked (claim row exists). */
+  reserved: boolean
+} {
   const needSol = row.amount_sol > 0
   const needUsdc = row.amount_usdc > 0
   const hasSol = Boolean(row.sol_transaction_signature?.trim())
@@ -94,7 +108,10 @@ export function paidAmountsFromClaim(row: {
   return {
     paid_sol: needSol && hasSol ? row.amount_sol : 0,
     paid_usdc: needUsdc && hasUsdc ? row.amount_usdc : 0,
+    committed_sol: needSol ? row.amount_sol : 0,
+    committed_usdc: needUsdc ? row.amount_usdc : 0,
     fully_paid: (needSol || needUsdc) && solOk && usdcOk,
+    reserved: needSol || needUsdc,
   }
 }
 
@@ -170,18 +187,24 @@ export function computeGenOwlRevShareLiabilitySnapshot(params: {
     const periodClaims = claimsByPeriod.get(periodMonth) ?? []
     let paidSol = 0
     let paidUsdc = 0
+    let committedSol = 0
+    let committedUsdc = 0
     let claimedNests = 0
     for (const claim of periodClaims) {
       const paid = paidAmountsFromClaim(claim)
       paidSol += paid.paid_sol
       paidUsdc += paid.paid_usdc
-      if (paid.fully_paid) claimedNests += 1
+      committedSol += paid.committed_sol
+      committedUsdc += paid.committed_usdc
+      // Reserved rows lock the nest even when the payout signature write lagged.
+      if (paid.reserved) claimedNests += 1
     }
     const eligible =
       (Number(period.gen1_eligible_count) || 0) + (Number(period.gen2_eligible_count) || 0)
     const unclaimedNests = Math.max(0, eligible - claimedNests)
-    const unclaimedSol = Math.max(0, deposited.sol - paidSol)
-    const unclaimedUsdc = Math.max(0, deposited.usdc - paidUsdc)
+    // Coverage uses committed (reserved) amounts so orphaned payouts cannot strand the pool gate.
+    const unclaimedSol = Math.max(0, deposited.sol - committedSol)
+    const unclaimedUsdc = Math.max(0, deposited.usdc - committedUsdc)
     return {
       period_month: periodMonth,
       claims_open: claimsOpenForPeriod(periodMonth, now),
@@ -242,12 +265,18 @@ export function evaluateGenOwlRevSharePoolCoverage(params: {
   unclaimed_nests: number
   open_period_count: number
   configured?: boolean
+  /** Dedicated pool pubkey — included in shortfall copy so admins do not top up the wrong wallet. */
+  pool_address?: string | null
 }): GenOwlRevSharePoolCoverage {
   const configured = params.configured !== false
   const requiredSol = Math.max(0, Number(params.required_sol) || 0)
   const requiredUsdc = Math.max(0, Number(params.required_usdc) || 0)
   const holdSol = params.hold_sol
   const holdUsdc = params.hold_usdc
+  const poolAddr = params.pool_address?.trim() || null
+  const poolHint = poolAddr
+    ? ` Send SOL to the dedicated rev-share pool ${poolAddr} via Admin → Cover shortfall (do not fund an admin wallet, and do not use Deposit Gen 1/2 — that raises claimable books).`
+    : ` Use Admin → Cover shortfall to top up the dedicated rev-share pool without raising claimable books.`
 
   if (!configured) {
     return {
@@ -292,8 +321,8 @@ export function evaluateGenOwlRevSharePoolCoverage(params: {
       errors.push(
         `Rev share pool must hold about ${requiredSol.toFixed(5)} SOL for ` +
           `${params.unclaimed_nests} unclaimed nest(s) across ${params.open_period_count} open month(s), ` +
-          `but only has ${holdSol.toFixed(5)} SOL (short ${shortfallSol.toFixed(5)}). ` +
-          `Deposit the shortfall so holders who claim later are not left unpaid.`
+          `but only has ${holdSol.toFixed(5)} SOL (short ${shortfallSol.toFixed(5)}).` +
+          poolHint
       )
     }
   }
@@ -305,7 +334,8 @@ export function evaluateGenOwlRevSharePoolCoverage(params: {
       shortfallUsdc = requiredUsdc - holdUsdc
       errors.push(
         `Rev share pool must hold ${requiredUsdc} USDC for remaining unclaimed nests, ` +
-          `but only has ${holdUsdc} USDC (short ${shortfallUsdc}).`
+          `but only has ${holdUsdc} USDC (short ${shortfallUsdc}).` +
+          poolHint
       )
     }
   }

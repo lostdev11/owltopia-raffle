@@ -198,8 +198,8 @@ function formatRawTokenAmount(raw: bigint, decimals: number): string {
 }
 
 export type GenOwlRevSharePoolPayoutResult =
-  | { ok: true; signature: string }
-  | { ok: false; error: string }
+  | { ok: true; signature: string; send_attempted: true }
+  | { ok: false; error: string; send_attempted: boolean }
 
 async function buildUsdcTransferIxs(params: {
   poolPubkey: PublicKey
@@ -280,6 +280,7 @@ export async function payoutCryptoFromGenOwlRevSharePool(params: {
   if (!kp) {
     return {
       ok: false,
+      send_attempted: false,
       error:
         'Rev share pool is not configured. Set GEN_OWL_REV_SHARE_POOL_SECRET_KEY (and matching GEN_OWL_REV_SHARE_POOL_WALLET if used).',
     }
@@ -287,7 +288,7 @@ export async function payoutCryptoFromGenOwlRevSharePool(params: {
 
   const amount = Number(params.amount)
   if (!Number.isFinite(amount) || amount <= 0) {
-    return { ok: false, error: 'Invalid payout amount.' }
+    return { ok: false, error: 'Invalid payout amount.', send_attempted: false }
   }
 
   const connection = getSolanaConnection()
@@ -297,7 +298,7 @@ export async function payoutCryptoFromGenOwlRevSharePool(params: {
   try {
     if (params.currency === 'SOL') {
       const lamports = Math.round(amount * LAMPORTS_PER_SOL)
-      if (lamports <= 0) return { ok: false, error: 'Nothing to pay.' }
+      if (lamports <= 0) return { ok: false, error: 'Nothing to pay.', send_attempted: false }
 
       let balance: number
       try {
@@ -309,6 +310,7 @@ export async function payoutCryptoFromGenOwlRevSharePool(params: {
       if (Number.isFinite(balance) && balance < needed) {
         return {
           ok: false,
+          send_attempted: false,
           error:
             `Rev share pool is short of SOL for this payout: it needs about ` +
             `${(needed / LAMPORTS_PER_SOL).toFixed(5)} SOL (incl. network fee) but holds ` +
@@ -327,11 +329,11 @@ export async function payoutCryptoFromGenOwlRevSharePool(params: {
         commitment: 'confirmed',
         maxRetries: 3,
       })
-      return { ok: true, signature: sig }
+      return { ok: true, signature: sig, send_attempted: true }
     }
 
     const built = await buildUsdcTransferIxs({ poolPubkey, recipientPk, amount })
-    if (!built.ok) return built
+    if (!built.ok) return { ...built, send_attempted: false }
 
     const tx = new Transaction()
     for (const ix of built.ixs) tx.add(ix)
@@ -340,7 +342,7 @@ export async function payoutCryptoFromGenOwlRevSharePool(params: {
       commitment: 'confirmed',
       maxRetries: 3,
     })
-    return { ok: true, signature: sig }
+    return { ok: true, signature: sig, send_attempted: true }
   } catch (e) {
     console.error(
       '[gen-owl-rev-share-pool] payout failed',
@@ -348,7 +350,7 @@ export async function payoutCryptoFromGenOwlRevSharePool(params: {
       e
     )
     const msg = e instanceof Error ? e.message : String(e)
-    return { ok: false, error: msg }
+    return { ok: false, error: msg, send_attempted: true }
   }
 }
 
@@ -364,6 +366,8 @@ export async function payoutCombinedCryptoFromGenOwlRevSharePool(params: {
   sol_signature: string | null
   usdc_signature: string | null
   payout_errors: string[]
+  /** True once any pool tx may have been submitted (do not delete claim reservations). */
+  send_attempted: boolean
 }> {
   const amountSol = Number(params.amount_sol) || 0
   const amountUsdc = Number(params.amount_usdc) || 0
@@ -371,7 +375,12 @@ export async function payoutCombinedCryptoFromGenOwlRevSharePool(params: {
   const needUsdc = amountUsdc > 0
 
   if (!needSol && !needUsdc) {
-    return { sol_signature: null, usdc_signature: null, payout_errors: ['Nothing to pay.'] }
+    return {
+      sol_signature: null,
+      usdc_signature: null,
+      payout_errors: ['Nothing to pay.'],
+      send_attempted: false,
+    }
   }
 
   // Single-currency: reuse existing path.
@@ -386,12 +395,14 @@ export async function payoutCombinedCryptoFromGenOwlRevSharePool(params: {
         sol_signature: null,
         usdc_signature: null,
         payout_errors: [res.error],
+        send_attempted: res.send_attempted,
       }
     }
     return {
       sol_signature: needSol ? res.signature : null,
       usdc_signature: needUsdc ? res.signature : null,
       payout_errors: [],
+      send_attempted: true,
     }
   }
 
@@ -403,6 +414,7 @@ export async function payoutCombinedCryptoFromGenOwlRevSharePool(params: {
       payout_errors: [
         'Rev share pool is not configured. Set GEN_OWL_REV_SHARE_POOL_SECRET_KEY (and matching GEN_OWL_REV_SHARE_POOL_WALLET if used).',
       ],
+      send_attempted: false,
     }
   }
 
@@ -410,7 +422,12 @@ export async function payoutCombinedCryptoFromGenOwlRevSharePool(params: {
   const recipientPk = new PublicKey(params.recipientWallet.trim())
   const lamports = Math.round(amountSol * LAMPORTS_PER_SOL)
   if (lamports <= 0) {
-    return { sol_signature: null, usdc_signature: null, payout_errors: ['Invalid SOL payout amount.'] }
+    return {
+      sol_signature: null,
+      usdc_signature: null,
+      payout_errors: ['Invalid SOL payout amount.'],
+      send_attempted: false,
+    }
   }
 
   try {
@@ -430,6 +447,7 @@ export async function payoutCombinedCryptoFromGenOwlRevSharePool(params: {
             `${(needed / LAMPORTS_PER_SOL).toFixed(5)} SOL (incl. network fee) but holds ` +
             `${(balance / LAMPORTS_PER_SOL).toFixed(5)}. Ask an admin to deposit into the rev-share pool.`,
         ],
+        send_attempted: false,
       }
     }
 
@@ -439,7 +457,12 @@ export async function payoutCombinedCryptoFromGenOwlRevSharePool(params: {
       amount: amountUsdc,
     })
     if (!usdcBuilt.ok) {
-      return { sol_signature: null, usdc_signature: null, payout_errors: [usdcBuilt.error] }
+      return {
+        sol_signature: null,
+        usdc_signature: null,
+        payout_errors: [usdcBuilt.error],
+        send_attempted: false,
+      }
     }
 
     const tx = new Transaction().add(
@@ -455,7 +478,7 @@ export async function payoutCombinedCryptoFromGenOwlRevSharePool(params: {
       commitment: 'confirmed',
       maxRetries: 3,
     })
-    return { sol_signature: sig, usdc_signature: sig, payout_errors: [] }
+    return { sol_signature: sig, usdc_signature: sig, payout_errors: [], send_attempted: true }
   } catch (e) {
     console.error(
       '[gen-owl-rev-share-pool] combined payout failed',
@@ -463,6 +486,7 @@ export async function payoutCombinedCryptoFromGenOwlRevSharePool(params: {
       e
     )
     // Fallback: try separate currency txs so a combined-tx size/ix issue does not block claims.
+    // Combined send was already attempted — never treat this path as reservation-releasable.
     const errors: string[] = []
     let solSig: string | null = null
     let usdcSig: string | null = null
@@ -484,6 +508,11 @@ export async function payoutCombinedCryptoFromGenOwlRevSharePool(params: {
       const msg = e instanceof Error ? e.message : String(e)
       errors.unshift(msg)
     }
-    return { sol_signature: solSig, usdc_signature: usdcSig, payout_errors: errors }
+    return {
+      sol_signature: solSig,
+      usdc_signature: usdcSig,
+      payout_errors: errors,
+      send_attempted: true,
+    }
   }
 }

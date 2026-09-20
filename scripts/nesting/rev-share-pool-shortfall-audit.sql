@@ -83,3 +83,7 @@ ORDER BY p.period_month;
 --    homepage Save path, or a manual period edit). That is the shortfall source.
 -- 5) On Solscan: open the rev-share pool wallet and confirm
 --    inflows ≈ verified deposits, outflows ≈ sum(paid claim SOL sigs).
+-- 6) Closing a coverage hole: send SOL to the pool WITHOUT crediting period
+--    totals (Admin → Cover shortfall). Deposit Gen 1/2 raises books by the same
+--    amount and leaves the shortfall unchanged. Filling an admin wallet alone
+--    does not fund claims.

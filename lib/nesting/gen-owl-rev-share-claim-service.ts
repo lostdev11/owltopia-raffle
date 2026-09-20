@@ -16,6 +16,7 @@ import { listGenOwlRevShareClaimableForWallet } from '@/lib/nesting/gen-owl-rev-
 import { resolveRevShareClaimAmounts } from '@/lib/nesting/gen-owl-rev-share-claim-bucket'
 import { claimsOpenForPeriod, groupKeyForPoolSlug } from '@/lib/nesting/gen-owl-rev-share-month'
 import { payoutGenOwlRevShareClaim } from '@/lib/nesting/gen-owl-rev-share-payout'
+import { shouldReleaseRevShareClaimReservation } from '@/lib/nesting/gen-owl-rev-share-claim-reservation'
 import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups'
 import { areGenOwlRevShareClaimsEnabled } from '@/lib/db/rev-share-schedule'
 import {
@@ -179,9 +180,15 @@ export async function executeGenOwlRevShareClaim(params: {
   const anyPaid = Boolean(payout.sol_signature || payout.usdc_signature)
 
   if (!anyPaid) {
-    await deleteGenOwlRevShareClaim(reserved.claim.id)
+    if (shouldReleaseRevShareClaimReservation(payout)) {
+      await deleteGenOwlRevShareClaim(reserved.claim.id)
+      throw new StakingUserError(
+        `Rev share payout could not be sent: ${payout.payout_errors.join(' · ') || 'unknown error'}. Try again.`,
+        503
+      )
+    }
     throw new StakingUserError(
-      `Rev share payout could not be sent: ${payout.payout_errors.join(' · ') || 'unknown error'}. Try again.`,
+      `Rev share payout may have been sent but was not confirmed cleanly (${payout.payout_errors.join(' · ') || 'unknown error'}). This nest stays locked with a claim row — contact support; do not retry.`,
       503
     )
   }
@@ -334,9 +341,15 @@ export async function executeGenOwlRevShareClaimAll(params: {
   const anyPaid = Boolean(payout.sol_signature || payout.usdc_signature)
 
   if (!anyPaid) {
-    await deleteGenOwlRevShareClaims(reservedIds)
+    if (shouldReleaseRevShareClaimReservation(payout)) {
+      await deleteGenOwlRevShareClaims(reservedIds)
+      throw new StakingUserError(
+        `Rev share payout could not be sent: ${payout.payout_errors.join(' · ') || 'unknown error'}. Try again.`,
+        503
+      )
+    }
     throw new StakingUserError(
-      `Rev share payout could not be sent: ${payout.payout_errors.join(' · ') || 'unknown error'}. Try again.`,
+      `Rev share payout may have been sent but was not confirmed cleanly (${payout.payout_errors.join(' · ') || 'unknown error'}). These nests stay locked with claim rows — contact support; do not retry.`,
       503
     )
   }

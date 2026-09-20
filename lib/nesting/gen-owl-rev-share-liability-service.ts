@@ -58,6 +58,7 @@ export async function loadGenOwlRevShareLiabilityWithCoverage(params?: {
     unclaimed_nests: liability.open.unclaimed_nests,
     open_period_count: liability.open.open_period_count,
     configured: balances.configured,
+    pool_address: balances.address,
   })
 
   return {

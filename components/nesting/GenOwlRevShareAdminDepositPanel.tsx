@@ -61,6 +61,7 @@ export function GenOwlRevShareAdminDepositPanel({
   const { connection } = useConnection()
   const { publicKey, connected, sendTransaction } = useWallet()
   const [busyTarget, setBusyTarget] = useState<DepositTarget | null>(null)
+  const [coveringShortfall, setCoveringShortfall] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [periodMonth, setPeriodMonth] = useState<string | null>(null)
@@ -70,6 +71,7 @@ export function GenOwlRevShareAdminDepositPanel({
   const [period, setPeriod] = useState<PeriodTotals | null>(null)
   const [gen1Period, setGen1Period] = useState<PeriodTotals | null>(null)
   const [gen2Period, setGen2Period] = useState<PeriodTotals | null>(null)
+  const [poolAddress, setPoolAddress] = useState<string | null>(null)
   const [poolOnchain, setPoolOnchain] = useState<{ sol: number | null; usdc: number | null } | null>(
     null
   )
@@ -108,6 +110,7 @@ export function GenOwlRevShareAdminDepositPanel({
       setPeriod(data.period ?? null)
       setGen1Period(data.gen1_period ?? data.period ?? null)
       setGen2Period(data.gen2_period ?? data.period ?? null)
+      setPoolAddress(typeof data.address === 'string' ? data.address : null)
       const onchain = data.pool_onchain
       if (onchain && typeof onchain === 'object') {
         setPoolOnchain({
@@ -274,7 +277,82 @@ export function GenOwlRevShareAdminDepositPanel({
     ]
   )
 
-  const busy = busyTarget != null
+  const coverShortfall = useCallback(async () => {
+    setMessage(null)
+    setError(null)
+    if (!publicKey || !connected || !sendTransaction) {
+      setError('Connect the admin wallet that will fund the rev-share pool.')
+      return
+    }
+
+    setCoveringShortfall(true)
+    try {
+      const statusRes = await fetch('/api/admin/gen-owl-rev-share/cover-shortfall', {
+        credentials: 'include',
+        cache: 'no-store',
+      })
+      const statusData = await statusRes.json().catch(() => ({}))
+      if (!statusRes.ok || typeof statusData.address !== 'string') {
+        setError(
+          typeof statusData.error === 'string'
+            ? statusData.error
+            : 'Could not load coverage shortfall status.'
+        )
+        return
+      }
+
+      const suggested = Number(statusData.suggested_sol) || 0
+      if (statusData.pool_covered || suggested <= 0) {
+        setMessage('Pool already covers outstanding liability — no coverage top-up needed.')
+        await refreshPeriod()
+        return
+      }
+
+      const poolWallet = statusData.address as string
+      setPoolAddress(poolWallet)
+
+      const solSignature = await sendGenOwlRevShareSolDeposit({
+        connection,
+        sendTransaction,
+        publicKey,
+        poolWallet,
+        amountSol: suggested,
+      })
+
+      const confirmRes = await fetch('/api/admin/gen-owl-rev-share/cover-shortfall', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount_sol: suggested,
+          sol_signature: solSignature,
+        }),
+      })
+      const confirmData = await confirmRes.json().catch(() => ({}))
+      if (!confirmRes.ok) {
+        setError(
+          typeof confirmData.error === 'string'
+            ? confirmData.error
+            : 'Coverage top-up sent but verification failed. Check Solscan and retry confirm if needed.'
+        )
+        await refreshPeriod()
+        return
+      }
+
+      setMessage(
+        confirmData.pool_covered_after
+          ? `Covered shortfall with ${suggested} SOL to the rev-share pool (period books unchanged). Claims can resume.`
+          : `Sent ${suggested} SOL to the pool (books unchanged). Still short ~${Number(confirmData.shortfall_sol_after || 0).toFixed(5)} SOL — run Cover shortfall again.`
+      )
+      await refreshPeriod()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Coverage top-up failed.')
+    } finally {
+      setCoveringShortfall(false)
+    }
+  }, [connected, connection, publicKey, refreshPeriod, sendTransaction])
+
+  const busy = busyTarget != null || coveringShortfall
   const gen1MonthLabel = gen1PeriodMonth ?? periodMonth
   const gen2MonthLabel = gen2PeriodMonth ?? periodMonth
   const gen1Totals = gen1Period ?? period
@@ -284,12 +362,20 @@ export function GenOwlRevShareAdminDepositPanel({
     <div className="mt-4 max-w-2xl space-y-2 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.05] p-3">
       <p className="text-xs text-muted-foreground leading-relaxed">
         Deposit from your <span className="font-medium text-foreground/90">connected wallet</span> into the
-        dedicated rev-share pool. Funds escrow is not used. Only verified on-chain deposits credit claimable
-        totals (homepage Save is display-only). Use the Gen 1 or Gen 2 button to fund that pool alone —
-        amounts are <span className="font-medium text-foreground/90">added</span> to the month on that
-        gen&apos;s next-date field (so Gen 2 set to August credits August, not July). Platform claim fees go
-        to the mint-fee treasury — they do <span className="font-medium text-foreground/90">not</span> fund
-        this pool.
+        dedicated rev-share pool
+        {poolAddress ? (
+          <>
+            {' '}
+            (<span className="font-mono text-[11px] text-foreground/80 break-all">{poolAddress}</span>)
+          </>
+        ) : null}
+        . Funds escrow is not used. Only verified on-chain deposits credit claimable totals (homepage Save
+        is display-only). Use the Gen 1 or Gen 2 button to fund that month&apos;s pool — amounts are{' '}
+        <span className="font-medium text-foreground/90">added</span> to claimable books. If claims show
+        &quot;Waiting for pool top-up&quot;, use <span className="font-medium text-foreground/90">Cover
+        shortfall</span> instead (moves SOL into the pool without raising books). Filling an admin wallet
+        alone does nothing. Platform claim fees go to the mint-fee treasury — they do{' '}
+        <span className="font-medium text-foreground/90">not</span> fund this pool.
       </p>
       {poolOnchain ? (
         <p
@@ -367,6 +453,23 @@ export function GenOwlRevShareAdminDepositPanel({
         </div>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
+        {liability && !liability.pool_covered && liability.shortfall_sol > 0 ? (
+          <Button
+            type="button"
+            onClick={() => void coverShortfall()}
+            disabled={disabled || busy || !connected}
+            className="min-h-[44px] touch-manipulation bg-amber-600 hover:bg-amber-500 text-white"
+          >
+            {coveringShortfall ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                Covering shortfall…
+              </>
+            ) : (
+              `Cover shortfall (~${(liability.shortfall_sol + 0.001).toFixed(4)} SOL)`
+            )}
+          </Button>
+        ) : null}
         <Button
           type="button"
           onClick={() => void deposit('gen1')}
