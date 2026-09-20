@@ -56,6 +56,11 @@ function adapterIsPhantom(adapter: WalletAdapter): boolean {
   return n === 'phantom' || n.includes('phantom')
 }
 
+function adapterIsSolflare(adapter: WalletAdapter): boolean {
+  const n = String(adapter.name).toLowerCase()
+  return n === 'solflare' || n.includes('solflare')
+}
+
 async function prepareLegacyTransactionLikeAdapter(
   transaction: Transaction,
   connection: Connection,
@@ -259,4 +264,20 @@ export async function sendAllTransactionsPreferPhantomSignAndSend(
 /** True when the connected adapter is Phantom (name check). */
 export function walletAdapterIsPhantom(adapter: WalletAdapter | null | undefined): boolean {
   return Boolean(adapter && adapterIsPhantom(adapter))
+}
+
+/** True when the connected adapter is Solflare (name check). */
+export function walletAdapterIsSolflare(adapter: WalletAdapter | null | undefined): boolean {
+  return Boolean(adapter && adapterIsSolflare(adapter))
+}
+
+/**
+ * Wallets that inject Lighthouse (or equivalent) and need candy-machine multi-mint as:
+ * `signAllTransactions` with fee payer only → mint keypairs sign → app broadcasts.
+ * Phantom and Solflare share this path so qty > 1 works on mobile (one approval sheet).
+ */
+export function walletSupportsFeePayerFirstMintBatch(
+  adapter: WalletAdapter | null | undefined
+): boolean {
+  return walletAdapterIsPhantom(adapter) || walletAdapterIsSolflare(adapter)
 }

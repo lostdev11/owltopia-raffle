@@ -1,6 +1,6 @@
 /**
  * Partner/admin public_simple mint via Metaplex Core Candy Machine `mintV1`.
- * Same wallet UX patterns as Gen2 TM mint (Phantom multi-signer, platform fee) without phased guards.
+ * Same wallet UX patterns as Gen2 TM mint (Phantom/Solflare fee-payer-first batch, platform fee) without phased guards.
  */
 import type { WalletAdapter } from '@solana/wallet-adapter-base'
 import { Connection } from '@solana/web3.js'
@@ -53,7 +53,7 @@ import {
 import { friendlySolanaRpcErrorMessage, MINT_SOLANA_RPC_RETRY, MINT_SOLANA_SEND_RETRY, withSolanaRpcRetry } from '@/lib/solana/rpc-retry'
 import { createOwlCenterCoreUmi } from '@/lib/solana/umi-core'
 import { invalidLaunchMintIdReason, validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
-import { walletAdapterIsPhantom } from '@/lib/solana/phantom-sign-and-send-transaction'
+import { walletSupportsFeePayerFirstMintBatch } from '@/lib/solana/phantom-sign-and-send-transaction'
 import { assertTransactionSimulatesClean } from '@/lib/solana/phantom-presimulate'
 
 /** mintV1 with Candy Guard comfortably fits in 800k CU (same ceiling as Gen2 mintV2). */
@@ -299,10 +299,12 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
     onMintProgress?.(quantity, quantity)
     pauseMintSessionDeadline(sessionDeadline)
 
-    const usePhantomMultiSigner = walletAdapterIsPhantom(walletAdapter)
+    // Phantom + Solflare: one signAll sheet (fee payer), then asset keypairs, then broadcast.
+    // Other wallets: sequential sendAndConfirm (one approval per NFT).
+    const useFeePayerFirstMintBatch = walletSupportsFeePayerFirstMintBatch(walletAdapter)
     const connection = new Connection(rpcUrl, { commitment: 'confirmed' })
 
-    if (usePhantomMultiSigner) {
+    if (useFeePayerFirstMintBatch) {
       const blockhash = await withSolanaRpcRetry(
         () => umi.rpc.getLatestBlockhash({ commitment: 'confirmed' }),
         MINT_SOLANA_SEND_RETRY
@@ -404,7 +406,7 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
       }
     }
 
-    // Non-Phantom: Umi identity is the wallet — mintV1 includes the asset signer on the builder.
+    // Non-Phantom/Solflare: Umi identity is the wallet — mintV1 includes the asset signer on the builder.
     resumeMintSessionDeadline(sessionDeadline)
     const confirmedSigs: string[] = []
     const confirmedMints: string[] = []

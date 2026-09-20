@@ -37,7 +37,7 @@ import {
   findRecentCandyMachineMintSignature,
   pollTransactionSignatureStatus,
 } from '@/lib/solana/recover-candy-machine-mint'
-import { walletAdapterIsPhantom } from '@/lib/solana/phantom-sign-and-send-transaction'
+import { walletSupportsFeePayerFirstMintBatch } from '@/lib/solana/phantom-sign-and-send-transaction'
 import { assertTransactionSimulatesClean } from '@/lib/solana/phantom-presimulate'
 import type { MintSessionDeadline } from '@/lib/owl-center/mint-time-budget'
 import {
@@ -654,18 +654,21 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     pauseMintSessionDeadline(sessionDeadline)
 
     /**
-     * Paid public (no server co-sign) + Phantom multi-signer mint txs:
-     * Phantom docs require wallet `signTransaction` / `signAllTransactions` first, then other
+     * Paid public (no server co-sign) + Phantom/Solflare multi-signer mint txs:
+     * Wallet docs require `signTransaction` / `signAllTransactions` first, then other
      * signers (mint keypair), then broadcast — not `signAndSend` on a pre-partial-signed tx.
      * Allowlist route (single-signer) is bundled into the same `signAllTransactions` sheet as the
      * mints, then sent/confirmed first so mintV2 still sees the proof PDA.
      *
+     * Solflare mobile previously fell through to a path that did not reliably return every
+     * signed mint in a qty > 1 batch — use the same fee-payer-first sheet as Phantom.
+     *
      * @see https://docs.phantom.com/developer-powertools/domain-and-transaction-warnings
      */
-    const usePhantomMultiSignerMint =
-      !plan.thirdPartySignerKey && walletAdapterIsPhantom(walletAdapter)
+    const useFeePayerFirstMintBatch =
+      !plan.thirdPartySignerKey && walletSupportsFeePayerFirstMintBatch(walletAdapter)
 
-    if (usePhantomMultiSignerMint) {
+    if (useFeePayerFirstMintBatch) {
       try {
         const connection = new Connection(rpcUrl, { commitment: 'confirmed' })
         const blockhash = await withSolanaRpcRetry(
@@ -717,7 +720,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
           }
         }
 
-        // 1) Phantom signs fee payer only — one prompt for allowlist route (if any) + all mints.
+        // 1) Wallet signs fee payer only — one prompt for allowlist route (if any) + all mints.
         const walletSigned = await signAllTransactions([
           ...(routeBuilt
             ? [{ transaction: routeBuilt, signers: [umi.identity] }]
@@ -731,7 +734,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
         const routeSigned = routeBuilt ? walletSigned[0]! : null
         const mintWalletSigned = routeBuilt ? walletSigned.slice(1) : walletSigned
 
-        // 2) Mint keypairs sign after Phantom (required account signer for each mint).
+        // 2) Mint keypairs sign after the wallet (required account signer for each mint).
         const fullySigned: Transaction[] = []
         for (let i = 0; i < quantity; i++) {
           fullySigned.push(await nftMints[i]!.signTransaction(mintWalletSigned[i]!))
@@ -880,6 +883,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     // The optional allowList proof tx (if any) is signed in the SAME wallet prompt as the mints —
     // UMI's signAllTransactions invokes the wallet once — then split out so it can be sent first and
     // kept OUT of the co-sign round-trip (the cosign endpoint requires exactly one mintV2 per tx).
+    // Phantom/Solflare: fee payer only in the wallet sheet, then mint keypairs (Lighthouse-safe).
     let routeSignedTx: Transaction | null = null
     let signedTransactions: Transaction[]
     try {
@@ -888,11 +892,32 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
         MINT_SOLANA_SEND_RETRY
       )
       const orderedBuilders = routeBuilder ? [routeBuilder, ...builders] : builders
-      const toSign = orderedBuilders.map((b) => {
-        const withBlockhash = b.setBlockhash(blockhash)
-        return { transaction: withBlockhash.build(umi), signers: withBlockhash.getSigners(umi) }
-      })
-      const signed = await signAllTransactions(toSign)
+      let signed: Transaction[]
+      if (walletSupportsFeePayerFirstMintBatch(walletAdapter)) {
+        const walletSigned = await signAllTransactions(
+          orderedBuilders.map((b) => {
+            const withBlockhash = b.setBlockhash(blockhash)
+            return { transaction: withBlockhash.build(umi), signers: [umi.identity] }
+          })
+        )
+        if (routeBuilder) {
+          signed = [walletSigned[0]!]
+          for (let i = 0; i < quantity; i++) {
+            signed.push(await nftMints[i]!.signTransaction(walletSigned[i + 1]!))
+          }
+        } else {
+          signed = []
+          for (let i = 0; i < quantity; i++) {
+            signed.push(await nftMints[i]!.signTransaction(walletSigned[i]!))
+          }
+        }
+      } else {
+        const toSign = orderedBuilders.map((b) => {
+          const withBlockhash = b.setBlockhash(blockhash)
+          return { transaction: withBlockhash.build(umi), signers: withBlockhash.getSigners(umi) }
+        })
+        signed = await signAllTransactions(toSign)
+      }
       resumeMintSessionDeadline(sessionDeadline)
       if (routeBuilder) {
         routeSignedTx = signed[0]!
