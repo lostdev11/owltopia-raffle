@@ -9,6 +9,7 @@ import {
   getRaffleMinimum,
 } from '@/lib/db/raffles'
 import { raffleUsesDrawVrf, DRAW_ALGO_V3_VRF, resolveAdminVrfForceNewRequest } from '@/lib/raffles/draw'
+import { shouldPreferLocalSeedOverVrfAttempt } from '@/lib/raffles/draw/vrf-local-fallback'
 import { isPartnerSplPrizeRaffle } from '@/lib/partner-prize-tokens'
 
 export const dynamic = 'force-dynamic'
@@ -100,13 +101,20 @@ export async function POST(
       (raffle.draw_algo ?? '').trim() === DRAW_ALGO_V3_VRF || raffleUsesDrawVrf(raffle)
 
     const hasVrfAccount = Boolean((raffle.draw_vrf_account ?? '').trim())
+    const preferLocalSeed = isVrf && shouldPreferLocalSeedOverVrfAttempt(raffle)
     const forceNewVrf =
-      body.forceNewVrf === true ||
-      (isVrf && !hasVrfAccount) ||
-      (isVrf && resolveAdminVrfForceNewRequest(raffle))
+      !preferLocalSeed &&
+      (body.forceNewVrf === true ||
+        (isVrf && !hasVrfAccount) ||
+        (isVrf && resolveAdminVrfForceNewRequest(raffle)))
 
+    // When Switchboard gateways are already returning 503, skip another 75s reveal
+    // poll and settle with a local verifiable seed against the frozen ledger.
     const winnerWallet = await selectWinner(raffle.id, forceOverride, {
       forceVrfRetry: forceNewVrf,
+      allowLocalSeedFallback: true,
+      preferLocalSeedFallback: preferLocalSeed || body.preferLocalSeed === true,
+      revealWaitMs: preferLocalSeed ? 10_000 : 25_000,
     })
 
     if (!winnerWallet) {
@@ -126,6 +134,7 @@ export async function POST(
           drawVrfRequestTx: latest?.draw_vrf_request_tx ?? null,
           drawVrfAccount: latest?.draw_vrf_account ?? null,
           forcedNewVrf: forceNewVrf,
+          preferredLocalSeed: preferLocalSeed,
           ticketsSold,
         },
         { status: 409 }
@@ -133,20 +142,26 @@ export async function POST(
     }
 
     const latest = await getRaffleById(raffle.id)
+    const usedLocalFallback =
+      (latest?.draw_algo ?? '').trim() !== DRAW_ALGO_V3_VRF &&
+      Boolean((latest?.draw_vrf_error ?? '').includes('local seed'))
     return NextResponse.json({
       ok: true,
       success: true,
       raffleId: raffle.id,
       winnerWallet,
       forceOverride,
-      vrfRetried: isVrf,
+      vrfRetried: isVrf && !preferLocalSeed,
+      localSeedFallback: usedLocalFallback || preferLocalSeed,
       drawAlgo: latest?.draw_algo ?? null,
       drawSeed: latest?.draw_seed ?? null,
       drawVrfStatus: latest?.draw_vrf_status ?? null,
       drawVrfRequestTx: latest?.draw_vrf_request_tx ?? null,
       drawVrfFulfillTx: latest?.draw_vrf_fulfill_tx ?? null,
       forcedNewVrf: forceNewVrf,
-      message: `Winner selected: ${winnerWallet}`,
+      message: usedLocalFallback || preferLocalSeed
+        ? `Winner selected (local seed — Switchboard VRF gateways unavailable): ${winnerWallet}`
+        : `Winner selected: ${winnerWallet}`,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Force draw failed'
