@@ -23,6 +23,7 @@ import {
   isInvalidVrfSecpSignatureError,
   isBlockhashNotFoundError,
   isRetryableVrfRevealError,
+  isSwitchboardOracleFleetUnavailableError,
   resolveVrfRevealWaitMs,
   vrfRevealRetryDelayMs,
   shouldAutoForceNewVrfRequest,
@@ -263,6 +264,14 @@ assert.equal(
   assert.equal(isRetryableVrfRevealError('Switchboard tx simulation failed: "BlockhashNotFound"'), true)
   assert.equal(isBlockhashNotFoundError('InvalidSecpSignature'), false)
   assert.equal(isRetryableVrfRevealError('tx confirm timed out after 45000ms (abcd1234…)'), true)
+  assert.equal(
+    isRetryableVrfRevealError('No eligible randomness oracle candidates were found'),
+    true
+  )
+  assert.equal(
+    isSwitchboardOracleFleetUnavailableError('No eligible randomness oracle candidates were found'),
+    true
+  )
   assert.equal(SWITCHBOARD_SIMULATE_OPTS.replaceRecentBlockhash, true)
   assert.equal(SWITCHBOARD_SIMULATE_OPTS.sigVerify, false)
   assert.equal(SWITCHBOARD_SIMULATE_OPTS.commitment, 'confirmed')
@@ -548,6 +557,7 @@ async function assertVrfCommitIxNeedsAuthority() {
     return
   }
   const sb = await import('@switchboard-xyz/on-demand')
+  const { resolveSwitchboardCommitOracle } = await import('../lib/raffles/draw/vrf-oracle-select')
   const connection = new (await import('@solana/web3.js')).Connection(
     'https://api.mainnet-beta.solana.com',
     'confirmed'
@@ -565,9 +575,14 @@ async function assertVrfCommitIxNeedsAuthority() {
   )
   await assert.rejects(
     () => randomness.commitIx(queue.pubkey),
-    /Account does not exist or has no data/
+    /Account does not exist or has no data|No eligible randomness oracle candidates were found/
   )
-  const commitIx = await randomness.commitIx(queue.pubkey, payer.publicKey)
+  // Explicit oracle bypasses SDK selectRandomnessOracle health filters (fleet may be stale).
+  const oracle = await resolveSwitchboardCommitOracle({
+    queue,
+    Oracle: sb.Oracle,
+  })
+  const commitIx = await randomness.commitIx(queue.pubkey, payer.publicKey, oracle)
   assert.ok(commitIx.keys?.length >= 1)
 }
 
