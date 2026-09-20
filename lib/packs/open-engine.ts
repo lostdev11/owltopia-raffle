@@ -1,7 +1,9 @@
 import {
+  PACK_PRICE_OWL,
   PACK_PRICE_SOL,
   PACK_OPEN_ALGO_V1,
   solToLamports,
+  type PackPaymentCurrency,
 } from '@/lib/packs/config'
 import {
   packJackpotContributionForPrice,
@@ -37,7 +39,7 @@ import type {
   PackOpenResult,
   PackOpenRow,
 } from '@/lib/packs/types'
-import { verifyPackPayment } from '@/lib/packs/verify-payment'
+import { verifyPackOwlPayment, verifyPackPayment } from '@/lib/packs/verify-payment'
 import {
   getPacksVaultPublicKey,
   payoutNftFromPacksVault,
@@ -47,6 +49,9 @@ import {
 import { isPackVrfEnabled, resolvePackOpenAlgo } from '@/lib/packs/vrf-config'
 import { runPackOpenVrf } from '@/lib/packs/vrf-open-flow'
 import { resolvePackSeedFromVrfResult } from '@/lib/packs/seed-after-payment'
+import { isPackOwlCheckoutEnabled } from '@/lib/db/pack-public-settings'
+import { quotePackOwlCheckoutFee } from '@/lib/packs/owl-checkout-fee'
+import { isOwlEnabled } from '@/lib/tokens'
 
 function rowToResult(
   row: PackOpenRow,
@@ -105,10 +110,18 @@ export async function ensurePacksSolvencyOrPause(): Promise<{
   return { ok: true }
 }
 
-export async function startPackOpen(buyerWallet: string): Promise<{
+export async function startPackOpen(
+  buyerWallet: string,
+  options?: { currency?: PackPaymentCurrency }
+): Promise<{
   openId: string
   priceSol: number
   vault: string
+  currency: PackPaymentCurrency
+  priceOwl?: number
+  feeLamports?: string
+  feeSol?: number
+  solUsdPrice?: number
 }> {
   const solvency = await ensurePacksSolvencyOrPause()
   if (!solvency.ok) {
@@ -121,14 +134,49 @@ export async function startPackOpen(buyerWallet: string): Promise<{
   const vault = getPacksVaultPublicKey()
   if (!vault) throw new Error('Packs vault is not configured')
 
+  const currency: PackPaymentCurrency = options?.currency === 'OWL' ? 'OWL' : 'SOL'
+  const priceSol = Number(product.price_sol) || PACK_PRICE_SOL
+
+  if (currency === 'OWL') {
+    if (!isOwlEnabled()) {
+      throw new Error('$OWL checkout is not configured')
+    }
+    if (!(await isPackOwlCheckoutEnabled())) {
+      throw new Error('$OWL checkout is not enabled yet')
+    }
+    const feeQuote = await quotePackOwlCheckoutFee()
+    if (!feeQuote || feeQuote.feeLamports <= 0n) {
+      throw new Error('Could not quote $OWL SOL fee — try again in a moment')
+    }
+    const open = await createPendingPackOpen({
+      productId: product.id,
+      buyerWallet,
+      paymentCurrency: 'OWL',
+      paymentOwlAmount: PACK_PRICE_OWL,
+      paymentFeeSol: feeQuote.feeSol,
+    })
+    return {
+      openId: open.id,
+      priceSol,
+      vault,
+      currency: 'OWL',
+      priceOwl: PACK_PRICE_OWL,
+      feeLamports: feeQuote.feeLamports.toString(),
+      feeSol: feeQuote.feeSol,
+      solUsdPrice: feeQuote.solUsdPrice,
+    }
+  }
+
   const open = await createPendingPackOpen({
     productId: product.id,
     buyerWallet,
+    paymentCurrency: 'SOL',
   })
   return {
     openId: open.id,
-    priceSol: Number(product.price_sol) || PACK_PRICE_SOL,
+    priceSol,
     vault,
+    currency: 'SOL',
   }
 }
 
@@ -158,12 +206,22 @@ export async function confirmAndOpenPack(input: {
 
   const product = await getActivePackProduct()
   const priceSol = product ? Number(product.price_sol) : PACK_PRICE_SOL
+  const paymentCurrency: PackPaymentCurrency =
+    open.payment_currency === 'OWL' ? 'OWL' : 'SOL'
 
-  const verified = await verifyPackPayment({
-    signature: input.paymentSignature,
-    buyerWallet: input.buyerWallet,
-    expectedSol: priceSol,
-  })
+  const verified =
+    paymentCurrency === 'OWL'
+      ? await verifyPackOwlPayment({
+          signature: input.paymentSignature,
+          buyerWallet: input.buyerWallet,
+          expectedOwl: Number(open.payment_owl_amount) || PACK_PRICE_OWL,
+          expectedFeeSol: Number(open.payment_fee_sol) || 0,
+        })
+      : await verifyPackPayment({
+          signature: input.paymentSignature,
+          buyerWallet: input.buyerWallet,
+          expectedSol: priceSol,
+        })
   if (!verified.ok) {
     await updatePackOpen(open.id, {
       status: 'failed',

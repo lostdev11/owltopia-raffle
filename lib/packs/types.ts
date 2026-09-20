@@ -100,6 +100,10 @@ export type PackOpenRow = {
   product_id: string
   buyer_wallet: string
   payment_signature: string | null
+  /** Buyer payment path: SOL pack price or OWL + SOL fee. */
+  payment_currency: 'SOL' | 'OWL'
+  payment_owl_amount: number | null
+  payment_fee_sol: number | null
   status: PackOpenStatus
   open_algo: string
   open_seed: string | null

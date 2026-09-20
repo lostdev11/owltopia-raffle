@@ -3,6 +3,8 @@ import {
   PACK_CATEGORY_WEIGHTS_BPS,
   PACK_NFT_VALUE_BANDS,
   PACK_OWL_TIERS,
+  PACK_OWL_USD_FEE,
+  PACK_PRICE_OWL,
   PACK_PRICE_SOL,
   PACK_RTP_BPS,
   PACK_SOL_TIERS,
@@ -16,6 +18,8 @@ import {
   listPackInventory,
   listRecentCompletedOpens,
 } from '@/lib/packs/db'
+import { isPackOwlCheckoutEnabled } from '@/lib/db/pack-public-settings'
+import { quotePackOwlCheckoutFee } from '@/lib/packs/owl-checkout-fee'
 import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
 import { computePackOddsPercentages } from '@/lib/packs/odds'
 import {
@@ -71,17 +75,43 @@ export async function GET() {
       })),
     })
 
+    let owlCheckoutEnabled = false
+    let owlFeeSol: number | null = null
+    let owlFeeLamports: string | null = null
+    let solUsdPrice: number | null = null
+    try {
+      owlCheckoutEnabled = await isPackOwlCheckoutEnabled()
+      const feeQuote = await quotePackOwlCheckoutFee()
+      if (feeQuote) {
+        owlFeeSol = feeQuote.feeSol
+        owlFeeLamports = feeQuote.feeLamports.toString()
+        solUsdPrice = feeQuote.solUsdPrice
+      }
+    } catch {
+      // Non-fatal — UI still shows fixed 20 $OWL + $1 fee label
+    }
+
     return NextResponse.json({
       product: {
         slug: product?.slug ?? PACKS_PRODUCT_SLUG,
         name: product?.name ?? fallback.name,
         priceSol,
+        priceOwl: PACK_PRICE_OWL,
+        owlUsdFee: PACK_OWL_USD_FEE,
         rtpBps,
         categoryWeightsBps: {
           owl: product?.category_owl_bps ?? PACK_CATEGORY_WEIGHTS_BPS.owl,
           sol: product?.category_sol_bps ?? PACK_CATEGORY_WEIGHTS_BPS.sol,
           nft: product?.category_nft_bps ?? PACK_CATEGORY_WEIGHTS_BPS.nft,
         },
+      },
+      owlCheckout: {
+        enabled: owlCheckoutEnabled,
+        priceOwl: PACK_PRICE_OWL,
+        usdFee: PACK_OWL_USD_FEE,
+        feeSol: owlFeeSol,
+        feeLamports: owlFeeLamports,
+        solUsdPrice,
       },
       odds: {
         owlTiers: oddsPct.owlTiers,

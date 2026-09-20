@@ -76,12 +76,19 @@ function main() {
   assert.equal(formatPackSolAmount(0), '0')
   assert.match(formatPackSolAmount(0.053486077), /0\.053/)
 
+  const owlFriendly = friendlyPackPaymentError(
+    new Error('Transfer: insufficient lamports 1000, need 5000000'),
+    { priceSol: 0.005, balanceLamports: 1000, priceOwl: 20 }
+  )
+  assert.match(owlFriendly, /\$OWL checkout/i)
+
   console.log(
     JSON.stringify(
       {
         ok: true,
         packPurchaseErrors: true,
         sampleFriendly: friendly,
+        owlFriendly,
       },
       null,
       2

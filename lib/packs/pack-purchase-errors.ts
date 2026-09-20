@@ -98,13 +98,34 @@ export function softPackFundHint(input: {
   return insufficientPackSolMessage(input)
 }
 
+export function insufficientPackOwlMessage(input: {
+  priceOwl: number
+  haveOwl: number | null
+  feeSol: number
+  balanceLamports?: number | null
+}): string {
+  const owlNeed = formatPackSolAmount(input.priceOwl, 2)
+  const feeNeed = formatPackSolAmount(input.feeSol)
+  const owlHave =
+    input.haveOwl != null ? ` (wallet has ~${formatPackSolAmount(input.haveOwl, 2)} $OWL)` : ''
+  const solHave =
+    input.balanceLamports != null
+      ? ` and ~${formatPackSolAmount(input.balanceLamports / LAMPORTS_PER_SOL)} SOL`
+      : ''
+  return (
+    `Not enough funds for $OWL checkout. ` +
+    `You need ${owlNeed} $OWL${owlHave} plus ~${feeNeed} SOL for the $1 fee${solHave}. ` +
+    `Add $OWL and SOL, then try again.`
+  )
+}
+
 /**
  * Map raw wallet / simulation / RPC payment failures into short claim-panel copy.
  * Pass `priceSol` + optional `balanceLamports` when known so insufficient-funds stays specific.
  */
 export function friendlyPackPaymentError(
   err: unknown,
-  context?: { priceSol?: number; balanceLamports?: number }
+  context?: { priceSol?: number; balanceLamports?: number; priceOwl?: number }
 ): string {
   const raw = err instanceof Error ? err.message : String(err ?? '')
   let message = raw.trim() || 'Payment cancelled'
@@ -122,6 +143,14 @@ export function friendlyPackPaymentError(
     /insufficient sol/i.test(message)
 
   if (mentionsInsufficient) {
+    if (context?.priceOwl != null && context.priceOwl > 0) {
+      return insufficientPackOwlMessage({
+        priceOwl: context.priceOwl,
+        haveOwl: null,
+        feeSol: context.priceSol && context.priceSol > 0 ? context.priceSol : 0,
+        balanceLamports: context.balanceLamports,
+      })
+    }
     const priceSol =
       context?.priceSol && context.priceSol > 0
         ? context.priceSol

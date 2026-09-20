@@ -14,6 +14,7 @@ import {
   packPaymentLamportsNeeded,
   softPackFundHint,
 } from '@/lib/packs/pack-purchase-errors'
+import { PACK_PRICE_OWL, type PackPaymentCurrency } from '@/lib/packs/config'
 import { preloadConfetti } from '@/lib/confetti'
 import {
   isPacksLaunchPause,
@@ -39,8 +40,18 @@ type PacksConfig = {
   product: {
     name: string
     priceSol: number
+    priceOwl?: number
+    owlUsdFee?: number
     rtpBps: number
     categoryWeightsBps: { owl: number; sol: number; nft: number }
+  }
+  owlCheckout?: {
+    enabled: boolean
+    priceOwl: number
+    usdFee: number
+    feeSol: number | null
+    feeLamports: string | null
+    solUsdPrice: number | null
   }
   odds: {
     owlTiers: {
@@ -153,9 +164,20 @@ export function PacksClient({
   const [phase, setPhase] = useState<RipPhase>('idle')
   const [paymentConfirmed, setPaymentConfirmed] = useState(false)
   const [balanceLamports, setBalanceLamports] = useState<number | null>(null)
+  const [paymentCurrency, setPaymentCurrency] = useState<PackPaymentCurrency>('SOL')
 
   const allowed = access.allowed
   const showAdminPreview = access.isAdmin && !isPublic
+
+  const owlCheckoutEnabled = config?.owlCheckout?.enabled === true
+  const priceOwl = config?.owlCheckout?.priceOwl ?? config?.product.priceOwl ?? PACK_PRICE_OWL
+  const owlFeeSol = config?.owlCheckout?.feeSol ?? null
+
+  useEffect(() => {
+    if (!owlCheckoutEnabled && paymentCurrency === 'OWL') {
+      setPaymentCurrency('SOL')
+    }
+  }, [owlCheckoutEnabled, paymentCurrency])
 
   const load = useCallback(async () => {
     try {
@@ -212,7 +234,9 @@ export function PacksClient({
         publicKey,
         connection,
         sendTransaction,
+        currency: paymentCurrency,
         expectedPriceSol: config?.product.priceSol ?? 0.1,
+        expectedPriceOwl: priceOwl,
         onPaymentConfirmed: () => {
           setPaymentConfirmed(true)
         },
@@ -246,6 +270,7 @@ export function PacksClient({
     connected &&
     publicKey &&
     balanceLamports != null &&
+    paymentCurrency === 'SOL' &&
     balanceLamports < packPaymentLamportsNeeded(price)
       ? softPackFundHint({ priceSol: price, balanceLamports })
       : null
@@ -396,7 +421,7 @@ export function PacksClient({
             : 'Buying…'}
         </>
       ) : (
-        <>Buy pack</>
+        <>Buy with {paymentCurrency === 'OWL' ? '$OWL' : 'SOL'}</>
       )}
     </button>
   )
@@ -508,7 +533,11 @@ export function PacksClient({
             ) : (
               <PackVault
                 price={price}
-                owlSolPrice={config?.vault.owlSolPrice ?? null}
+                priceOwl={priceOwl}
+                owlCheckoutEnabled={owlCheckoutEnabled}
+                owlFeeSol={owlFeeSol}
+                paymentCurrency={paymentCurrency}
+                onPaymentCurrencyChange={setPaymentCurrency}
                 interactionLocked={ripping || showExperience || showReveal}
                 paying={phase === 'paying'}
                 cta={buyButton}

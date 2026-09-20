@@ -347,13 +347,20 @@ export async function releaseNftReservation(inventoryId: string): Promise<void> 
 export async function createPendingPackOpen(input: {
   productId: string
   buyerWallet: string
+  paymentCurrency?: 'SOL' | 'OWL'
+  paymentOwlAmount?: number | null
+  paymentFeeSol?: number | null
 }): Promise<PackOpenRow> {
+  const currency = input.paymentCurrency === 'OWL' ? 'OWL' : 'SOL'
   const { data, error } = await getSupabaseAdmin()
     .from('pack_opens')
     .insert({
       product_id: input.productId,
       buyer_wallet: input.buyerWallet.trim(),
       status: 'pending_payment',
+      payment_currency: currency,
+      payment_owl_amount: currency === 'OWL' ? (input.paymentOwlAmount ?? null) : null,
+      payment_fee_sol: currency === 'OWL' ? (input.paymentFeeSol ?? null) : null,
     })
     .select('*')
     .single()

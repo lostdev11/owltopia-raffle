@@ -8,15 +8,32 @@ import {
   LAMPORTS_PER_SOL,
   type Connection,
 } from '@solana/web3.js'
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  createAssociatedTokenAccountInstruction,
+  createTransferInstruction,
+  getAccount,
+  getAssociatedTokenAddress,
+} from '@solana/spl-token'
 import type { SendTransactionOptions } from '@solana/wallet-adapter-base'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
+import { owlUiToRawBigint } from '@/lib/council/owl-amount-format'
+import {
+  PACK_PRICE_OWL,
+  type PackPaymentCurrency,
+} from '@/lib/packs/config'
 import {
   friendlyPackPaymentError,
+  insufficientPackOwlMessage,
   insufficientPackSolMessage,
   isPackPriceMismatch,
+  PACK_PAYMENT_FEE_BUFFER_LAMPORTS,
   packPaymentLamportsNeeded,
   packPriceMismatchMessage,
 } from '@/lib/packs/pack-purchase-errors'
+import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 
 export type PackOpenClientResult = {
   openId: string
@@ -45,11 +62,13 @@ export type ExecutePackPurchaseOptions = {
     c: Connection,
     opts?: SendTransactionOptions
   ) => Promise<string>
+  currency?: PackPaymentCurrency
   /**
    * Price shown on the packs page. Used to pre-check balance before creating a
    * pending open, and to catch UI vs checkout price drift.
    */
   expectedPriceSol?: number
+  expectedPriceOwl?: number
   /** Fires after on-chain payment confirms — UI may show “resolving prize…” here. */
   onPaymentConfirmed?: (info: {
     openId: string
@@ -106,21 +125,134 @@ async function readBalanceLamports(
   try {
     return await connection.getBalance(publicKey, 'confirmed')
   } catch {
-    // Never block purchase solely because balance RPC failed — wallet/preflight still runs.
     return null
   }
+}
+
+async function tokenProgramHoldingMint(
+  connection: Connection,
+  owner: PublicKey,
+  mint: PublicKey
+): Promise<typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID> {
+  for (const programId of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID] as const) {
+    try {
+      const ata = await getAssociatedTokenAddress(
+        mint,
+        owner,
+        false,
+        programId,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+      const account = await getAccount(connection, ata, 'confirmed', programId)
+      if (account.amount > 0n) return programId
+    } catch {
+      // try next
+    }
+  }
+  return TOKEN_PROGRAM_ID
+}
+
+async function buildOwlCheckoutTx(input: {
+  connection: Connection
+  publicKey: PublicKey
+  vault: string
+  priceOwl: number
+  feeLamports: number
+}): Promise<{ ok: true; tx: Transaction } | { ok: false; error: string }> {
+  if (!isOwlEnabled()) {
+    return { ok: false, error: '$OWL is not configured on this site.' }
+  }
+  const owl = getTokenInfo('OWL')
+  if (!owl.mintAddress) {
+    return { ok: false, error: 'OWL mint address missing.' }
+  }
+  if (!(input.priceOwl > 0) || !(input.feeLamports > 0)) {
+    return { ok: false, error: 'Invalid $OWL checkout amounts.' }
+  }
+
+  let vaultPk: PublicKey
+  try {
+    vaultPk = new PublicKey(input.vault)
+  } catch {
+    return { ok: false, error: 'Invalid packs vault address.' }
+  }
+
+  const mint = new PublicKey(owl.mintAddress)
+  const amountRaw = owlUiToRawBigint(input.priceOwl, owl.decimals)
+  const programId = await tokenProgramHoldingMint(input.connection, input.publicKey, mint)
+
+  const senderAta = await getAssociatedTokenAddress(
+    mint,
+    input.publicKey,
+    false,
+    programId,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )
+  const recipientAta = await getAssociatedTokenAddress(
+    mint,
+    vaultPk,
+    false,
+    programId,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )
+
+  try {
+    const senderAcc = await getAccount(input.connection, senderAta, 'confirmed', programId)
+    if (senderAcc.amount < amountRaw) {
+      const have = Number(senderAcc.amount) / 10 ** owl.decimals
+      return {
+        ok: false,
+        error: insufficientPackOwlMessage({
+          priceOwl: input.priceOwl,
+          haveOwl: have,
+          feeSol: input.feeLamports / LAMPORTS_PER_SOL,
+        }),
+      }
+    }
+  } catch {
+    return { ok: false, error: 'No $OWL token account in this wallet for the configured mint.' }
+  }
+
+  const { blockhash } = await input.connection.getLatestBlockhash('confirmed')
+  const tx = new Transaction({ recentBlockhash: blockhash, feePayer: input.publicKey })
+
+  try {
+    await getAccount(input.connection, recipientAta, 'confirmed', programId)
+  } catch {
+    tx.add(
+      createAssociatedTokenAccountInstruction(
+        input.publicKey,
+        recipientAta,
+        vaultPk,
+        mint,
+        programId,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+    )
+  }
+
+  tx.add(createTransferInstruction(senderAta, recipientAta, input.publicKey, amountRaw, [], programId))
+  tx.add(
+    SystemProgram.transfer({
+      fromPubkey: input.publicKey,
+      toPubkey: vaultPk,
+      lamports: input.feeLamports,
+    })
+  )
+
+  return { ok: true, tx }
 }
 
 export async function executePackPurchase(
   opts: ExecutePackPurchaseOptions
 ): Promise<{ ok: true; result: PackOpenClientResult } | { ok: false; error: string }> {
   const wallet = opts.publicKey.toBase58()
+  const currency: PackPaymentCurrency = opts.currency === 'OWL' ? 'OWL' : 'SOL'
   let balanceLamports = await readBalanceLamports(opts.connection, opts.publicKey)
   const expectedPriceSol =
     opts.expectedPriceSol && opts.expectedPriceSol > 0 ? opts.expectedPriceSol : null
 
-  // Fail fast before create so we do not leave stranded pending_payment rows.
-  if (expectedPriceSol != null && balanceLamports != null) {
+  if (currency === 'SOL' && expectedPriceSol != null && balanceLamports != null) {
     const needed = packPaymentLamportsNeeded(expectedPriceSol)
     if (balanceLamports < needed) {
       return {
@@ -136,7 +268,7 @@ export async function executePackPurchase(
   const createRes = await fetch('/api/packs/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ wallet }),
+    body: JSON.stringify({ wallet, currency }),
   })
   const createData = await createRes.json().catch(() => ({}))
   if (!createRes.ok) {
@@ -150,39 +282,115 @@ export async function executePackPurchase(
     return { ok: false, error: 'Invalid pack create response' }
   }
 
-  if (expectedPriceSol != null && isPackPriceMismatch(expectedPriceSol, priceSol)) {
-    return { ok: false, error: packPriceMismatchMessage(expectedPriceSol, priceSol) }
-  }
+  if (currency === 'SOL') {
+    if (expectedPriceSol != null && isPackPriceMismatch(expectedPriceSol, priceSol)) {
+      return { ok: false, error: packPriceMismatchMessage(expectedPriceSol, priceSol) }
+    }
 
-  // Re-check against the charged price (create is source of truth).
-  if (balanceLamports == null) {
-    balanceLamports = await readBalanceLamports(opts.connection, opts.publicKey)
-  }
-  if (balanceLamports != null) {
-    const needed = packPaymentLamportsNeeded(priceSol)
-    if (balanceLamports < needed) {
+    if (balanceLamports == null) {
+      balanceLamports = await readBalanceLamports(opts.connection, opts.publicKey)
+    }
+    if (balanceLamports != null) {
+      const needed = packPaymentLamportsNeeded(priceSol)
+      if (balanceLamports < needed) {
+        return {
+          ok: false,
+          error: insufficientPackSolMessage({
+            priceSol,
+            balanceLamports,
+          }),
+        }
+      }
+    }
+
+    const lamports = Math.round(priceSol * LAMPORTS_PER_SOL)
+    const tx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: opts.publicKey,
+        toPubkey: new PublicKey(vault),
+        lamports,
+      })
+    )
+
+    let signature: string
+    try {
+      signature = await opts.sendTransaction(tx, opts.connection, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      })
+    } catch (e) {
       return {
         ok: false,
-        error: insufficientPackSolMessage({
+        error: friendlyPackPaymentError(e, {
           priceSol,
-          balanceLamports,
+          balanceLamports: balanceLamports ?? undefined,
         }),
       }
     }
+
+    try {
+      await confirmSignatureSuccessOnChain(opts.connection, signature)
+    } catch (e) {
+      return {
+        ok: false,
+        error:
+          e instanceof Error
+            ? e.message
+            : 'Payment sent but confirmation timed out — contact support with your signature',
+      }
+    }
+
+    opts.onPaymentConfirmed?.({ openId, paymentSignature: signature })
+    return confirmPackOpen({ openId, wallet, paymentSignature: signature })
   }
 
-  const lamports = Math.round(priceSol * LAMPORTS_PER_SOL)
-  const tx = new Transaction().add(
-    SystemProgram.transfer({
-      fromPubkey: opts.publicKey,
-      toPubkey: new PublicKey(vault),
-      lamports,
-    })
-  )
+  // OWL path
+  const priceOwl = Number(createData.priceOwl) || PACK_PRICE_OWL
+  const feeLamports = Number(createData.feeLamports)
+  const feeSol = Number(createData.feeSol)
+  if (!(priceOwl > 0) || !(feeLamports > 0)) {
+    return { ok: false, error: 'Invalid $OWL checkout quote from server' }
+  }
+
+  if (
+    opts.expectedPriceOwl != null &&
+    opts.expectedPriceOwl > 0 &&
+    Math.abs(opts.expectedPriceOwl - priceOwl) >= 0.001
+  ) {
+    return {
+      ok: false,
+      error: `Pack $OWL price changed (page showed ${opts.expectedPriceOwl}, checkout needs ${priceOwl}). Refresh and try again.`,
+    }
+  }
+
+  if (balanceLamports == null) {
+    balanceLamports = await readBalanceLamports(opts.connection, opts.publicKey)
+  }
+  const feeNeeded = feeLamports + PACK_PAYMENT_FEE_BUFFER_LAMPORTS
+  if (balanceLamports != null && balanceLamports < feeNeeded) {
+    return {
+      ok: false,
+      error: insufficientPackOwlMessage({
+        priceOwl,
+        haveOwl: null,
+        feeSol: feeSol > 0 ? feeSol : feeLamports / LAMPORTS_PER_SOL,
+        balanceLamports,
+      }),
+    }
+  }
+
+  const built = await buildOwlCheckoutTx({
+    connection: opts.connection,
+    publicKey: opts.publicKey,
+    vault,
+    priceOwl,
+    feeLamports: Math.floor(feeLamports),
+  })
+  if (!built.ok) return built
 
   let signature: string
   try {
-    signature = await opts.sendTransaction(tx, opts.connection, {
+    signature = await opts.sendTransaction(built.tx, opts.connection, {
       skipPreflight: false,
       preflightCommitment: 'confirmed',
     })
@@ -190,8 +398,9 @@ export async function executePackPurchase(
     return {
       ok: false,
       error: friendlyPackPaymentError(e, {
-        priceSol,
+        priceSol: feeSol > 0 ? feeSol : feeLamports / LAMPORTS_PER_SOL,
         balanceLamports: balanceLamports ?? undefined,
+        priceOwl,
       }),
     }
   }
@@ -209,10 +418,5 @@ export async function executePackPurchase(
   }
 
   opts.onPaymentConfirmed?.({ openId, paymentSignature: signature })
-
-  return confirmPackOpen({
-    openId,
-    wallet,
-    paymentSignature: signature,
-  })
+  return confirmPackOpen({ openId, wallet, paymentSignature: signature })
 }

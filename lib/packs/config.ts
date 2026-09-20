@@ -16,6 +16,24 @@ export const PACKS_PRODUCT_SLUG = 'owl-pack-v1' as const
 /** MVP pack price in SOL */
 export const PACK_PRICE_SOL = 0.1
 
+/** Pack price when paying with $OWL (Gembird final). */
+export const PACK_PRICE_OWL = 20
+
+/** USD notional fee on $OWL checkout, settled as SOL via Jupiter SOL/USD. */
+export const PACK_OWL_USD_FEE = 1
+
+export type PackPaymentCurrency = 'SOL' | 'OWL'
+
+export function isPackPaymentCurrency(value: unknown): value is PackPaymentCurrency {
+  return value === 'SOL' || value === 'OWL'
+}
+
+export function formatPackOwlFeeSolLabel(feeSol: number | null | undefined): string {
+  if (feeSol == null || !(feeSol > 0)) return `~$${PACK_OWL_USD_FEE} fee (paid in SOL)`
+  const solStr = feeSol >= 0.01 ? feeSol.toFixed(3) : feeSol.toFixed(4)
+  return `+$${PACK_OWL_USD_FEE} fee (~${solStr} SOL)`
+}
+
 /** Target return-to-player in basis points (8000 = 80%) */
 export const PACK_RTP_BPS = 8000
 

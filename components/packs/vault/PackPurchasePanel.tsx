@@ -3,15 +3,24 @@
 import type { ReactNode } from 'react'
 import { ChevronLeft, ChevronRight, ShieldCheck } from 'lucide-react'
 import { CurrencyIcon } from '@/components/CurrencyIcon'
-import { PACK_DEFAULT_OWL_SOL_PRICE, resolveOwlSolPrice } from '@/lib/packs/config'
+import {
+  PACK_OWL_USD_FEE,
+  PACK_PRICE_OWL,
+  formatPackOwlFeeSolLabel,
+  type PackPaymentCurrency,
+} from '@/lib/packs/config'
 import type { VaultPack } from '@/lib/packs/vault-wheel'
 import { cn } from '@/lib/utils'
 
 type Props = {
   pack: VaultPack
   price: number
-  /** SOL per 1 OWL — used to show the upcoming $OWL pack price. */
-  owlSolPrice?: number | null
+  priceOwl?: number
+  owlCheckoutEnabled?: boolean
+  /** Live SOL fee for $1 USD notional (null while loading / quote failed). */
+  owlFeeSol?: number | null
+  paymentCurrency: PackPaymentCurrency
+  onPaymentCurrencyChange: (currency: PackPaymentCurrency) => void
   idTick: number
   locked: boolean
   cta: ReactNode
@@ -25,19 +34,14 @@ type Props = {
   onNext: () => void
 }
 
-function formatOwlPackPrice(priceSol: number, owlSolPrice: number | null | undefined): string {
-  const rate = resolveOwlSolPrice(owlSolPrice ?? PACK_DEFAULT_OWL_SOL_PRICE)
-  if (!(rate > 0) || !(priceSol > 0)) return '—'
-  const owl = priceSol / rate
-  if (owl >= 100) return owl.toFixed(0)
-  if (owl >= 10) return owl.toFixed(owl % 1 === 0 ? 0 : 1)
-  return owl.toFixed(owl % 1 === 0 ? 0 : 2).replace(/\.?0+$/, '')
-}
-
 export function PackPurchasePanel({
   pack,
   price,
-  owlSolPrice = null,
+  priceOwl = PACK_PRICE_OWL,
+  owlCheckoutEnabled = false,
+  owlFeeSol = null,
+  paymentCurrency,
+  onPaymentCurrencyChange,
   idTick,
   locked,
   cta,
@@ -49,7 +53,8 @@ export function PackPurchasePanel({
   onPrev,
   onNext,
 }: Props) {
-  const priceOwlLabel = formatOwlPackPrice(price, owlSolPrice)
+  const feeLabel = formatPackOwlFeeSolLabel(owlFeeSol)
+  const owlSelected = paymentCurrency === 'OWL'
 
   return (
     <div className="relative z-10 mx-auto mt-3 w-full max-w-sm px-1 sm:mt-4">
@@ -90,41 +95,75 @@ export function PackPurchasePanel({
         role="group"
         aria-label="Pack payment currency"
       >
-        <div
+        <button
+          type="button"
+          disabled={locked}
+          aria-pressed={paymentCurrency === 'SOL'}
+          onClick={() => onPaymentCurrencyChange('SOL')}
           className={cn(
-            'flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl border px-2 py-2',
-            'border-[#00FF9C]/55 bg-[#00FF9C]/12 text-white'
+            'flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl border px-2 py-2 touch-manipulation',
+            paymentCurrency === 'SOL'
+              ? 'border-[#00FF9C]/55 bg-[#00FF9C]/12 text-white'
+              : 'border-white/15 bg-black/30 text-white/70',
+            locked && 'opacity-40'
           )}
-          aria-current="true"
+          style={{ touchAction: 'manipulation' }}
         >
           <span className="inline-flex items-center gap-1.5 text-sm font-bold uppercase tracking-[0.12em]">
             <CurrencyIcon currency="SOL" size={16} />
             SOL
           </span>
           <span className="font-display text-lg tracking-wide">{price} SOL</span>
-        </div>
+        </button>
         <button
           type="button"
-          disabled
-          aria-disabled="true"
-          title="$OWL checkout coming soon"
+          disabled={locked || !owlCheckoutEnabled}
+          aria-pressed={owlSelected && owlCheckoutEnabled}
+          aria-disabled={!owlCheckoutEnabled}
+          title={
+            owlCheckoutEnabled
+              ? `${priceOwl} $OWL + $${PACK_OWL_USD_FEE} fee paid in SOL`
+              : '$OWL checkout coming soon'
+          }
+          onClick={() => {
+            if (owlCheckoutEnabled) onPaymentCurrencyChange('OWL')
+          }}
           className={cn(
-            'relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl border px-2 py-2',
-            'cursor-not-allowed border-white/10 bg-white/[0.03] text-white/35 touch-manipulation',
-            'opacity-55 grayscale'
+            'relative flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl border px-2 py-2 touch-manipulation',
+            owlCheckoutEnabled && owlSelected
+              ? 'border-[#00FF9C]/55 bg-[#00FF9C]/12 text-white'
+              : owlCheckoutEnabled
+                ? 'border-white/15 bg-black/30 text-white/70'
+                : 'cursor-not-allowed border-white/10 bg-white/[0.03] text-white/35 opacity-55 grayscale',
+            locked && owlCheckoutEnabled && 'opacity-40'
           )}
           style={{ touchAction: 'manipulation' }}
         >
-          <span className="absolute right-1.5 top-1 rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-white/50">
-            Soon
-          </span>
+          {!owlCheckoutEnabled ? (
+            <span className="absolute right-1.5 top-1 rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-white/50">
+              Soon
+            </span>
+          ) : null}
           <span className="inline-flex items-center gap-1.5 text-sm font-bold uppercase tracking-[0.12em]">
-            <CurrencyIcon currency="OWL" size={16} className="opacity-60" />
+            <CurrencyIcon
+              currency="OWL"
+              size={16}
+              className={owlCheckoutEnabled ? undefined : 'opacity-60'}
+            />
             $OWL
           </span>
-          <span className="font-display text-lg tracking-wide">{priceOwlLabel} $OWL</span>
+          <span className="font-display text-lg tracking-wide">{priceOwl} $OWL</span>
+          <span className="text-[10px] font-sans font-medium uppercase tracking-[0.12em] text-white/45">
+            {feeLabel}
+          </span>
         </button>
       </div>
+
+      {owlSelected && owlCheckoutEnabled ? (
+        <p className="mt-2 text-center text-[11px] leading-relaxed text-white/45">
+          ${PACK_OWL_USD_FEE} fee paid in SOL feeds vault NFT inventory
+        </p>
+      ) : null}
 
       <div className="mt-3">{cta}</div>
 

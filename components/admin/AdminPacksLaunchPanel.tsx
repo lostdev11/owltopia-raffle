@@ -10,6 +10,7 @@ type PackAccessMode = 'public' | 'restricted'
 
 type LaunchState = {
   accessMode: PackAccessMode
+  owlCheckoutEnabled: boolean
   killSwitch: boolean
   effectivePublic: boolean
 }
@@ -47,6 +48,7 @@ export function AdminPacksLaunchPanel({ busy, onBusy, onError }: Props) {
       if (!walletsRes.ok) throw new Error(walletsJson.error || 'Failed to load test wallets')
       setLaunch({
         accessMode: launchJson.accessMode === 'public' ? 'public' : 'restricted',
+        owlCheckoutEnabled: Boolean(launchJson.owlCheckoutEnabled),
         killSwitch: Boolean(launchJson.killSwitch),
         effectivePublic: Boolean(launchJson.effectivePublic),
       })
@@ -76,11 +78,37 @@ export function AdminPacksLaunchPanel({ busy, onBusy, onError }: Props) {
       if (!res.ok) throw new Error(json.error || 'Failed to update launch mode')
       setLaunch({
         accessMode: json.accessMode === 'public' ? 'public' : 'restricted',
+        owlCheckoutEnabled: Boolean(json.owlCheckoutEnabled ?? launch?.owlCheckoutEnabled),
         killSwitch: Boolean(json.killSwitch),
         effectivePublic: Boolean(json.effectivePublic),
       })
     } catch (e) {
       onError(e instanceof Error ? e.message : 'Failed to update launch mode')
+    } finally {
+      onBusy(false)
+    }
+  }
+
+  async function setOwlCheckout(enabled: boolean) {
+    onBusy(true)
+    onError(null)
+    try {
+      const res = await fetch('/api/admin/packs/launch', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owl_checkout_enabled: enabled }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Failed to update $OWL checkout')
+      setLaunch({
+        accessMode: json.accessMode === 'public' ? 'public' : 'restricted',
+        owlCheckoutEnabled: Boolean(json.owlCheckoutEnabled),
+        killSwitch: Boolean(json.killSwitch),
+        effectivePublic: Boolean(json.effectivePublic),
+      })
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Failed to update $OWL checkout')
     } finally {
       onBusy(false)
     }
@@ -188,6 +216,32 @@ export function AdminPacksLaunchPanel({ busy, onBusy, onError }: Props) {
           ? ' — admins + test wallets below'
           : ' — everyone can use /packs'}
       </p>
+
+      <div className="border-t pt-4 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold">$OWL checkout</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Buyers pay <strong>20 $OWL</strong> plus a <strong>~$1 SOL fee</strong> to the packs
+            vault. When off, the $OWL option stays visible but grayed out on /packs.
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          className="min-h-[44px] touch-manipulation"
+          disabled={busy}
+          variant={launch?.owlCheckoutEnabled ? 'default' : 'outline'}
+          onClick={() => void setOwlCheckout(!(launch?.owlCheckoutEnabled ?? false))}
+        >
+          {launch?.owlCheckoutEnabled ? 'Disable $OWL checkout' : 'Enable $OWL checkout'}
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          Status:{' '}
+          <strong>{launch?.owlCheckoutEnabled ? 'On' : 'Off'}</strong>
+          {' · '}
+          20 $OWL + ~$1 SOL fee → vault
+        </p>
+      </div>
 
       <div className="border-t pt-4">
         <h3 className="text-sm font-semibold">Test wallets</h3>

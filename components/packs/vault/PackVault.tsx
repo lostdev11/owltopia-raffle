@@ -6,12 +6,16 @@ import { PackWheel } from '@/components/packs/vault/PackWheel'
 import { SelectedPack } from '@/components/packs/vault/SelectedPack'
 import { VaultChrome } from '@/components/packs/vault/VaultChrome'
 import { usePackWheel } from '@/components/packs/vault/use-pack-wheel'
+import { PACK_PRICE_OWL, type PackPaymentCurrency } from '@/lib/packs/config'
 import { cn } from '@/lib/utils'
 
 type Props = {
   price: number
-  /** SOL per 1 OWL — shown on the grayed-out $OWL pay option. */
-  owlSolPrice?: number | null
+  priceOwl?: number
+  owlCheckoutEnabled?: boolean
+  owlFeeSol?: number | null
+  paymentCurrency: PackPaymentCurrency
+  onPaymentCurrencyChange: (currency: PackPaymentCurrency) => void
   interactionLocked: boolean
   paying?: boolean
   cta: ReactNode
@@ -24,7 +28,11 @@ type Props = {
 
 export function PackVault({
   price,
-  owlSolPrice = null,
+  priceOwl = PACK_PRICE_OWL,
+  owlCheckoutEnabled = false,
+  owlFeeSol = null,
+  paymentCurrency,
+  onPaymentCurrencyChange,
   interactionLocked,
   paying = false,
   cta,
@@ -120,7 +128,11 @@ export function PackVault({
       <PackPurchasePanel
         pack={selected}
         price={price}
-        owlSolPrice={owlSolPrice}
+        priceOwl={priceOwl}
+        owlCheckoutEnabled={owlCheckoutEnabled}
+        owlFeeSol={owlFeeSol}
+        paymentCurrency={paymentCurrency}
+        onPaymentCurrencyChange={onPaymentCurrencyChange}
         idTick={wheel.idTick}
         locked={interactionLocked}
         cta={cta}
