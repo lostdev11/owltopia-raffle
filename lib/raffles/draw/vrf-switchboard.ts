@@ -28,6 +28,7 @@ import {
   SWITCHBOARD_TX_CU_PRICE,
   resolveSwitchboardComputeUnitLimit,
 } from '@/lib/raffles/draw/vrf-switchboard-cu'
+import { resolveSwitchboardCommitOracle } from '@/lib/raffles/draw/vrf-oracle-select'
 import { confirmTxWithTimeout } from '@/lib/solana/confirm-tx-with-timeout'
 
 export const VRF_PROVIDER_SWITCHBOARD = 'switchboard' as const
@@ -477,36 +478,32 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
     const queue = await sb.getDefaultQueue(rpcUrl)
     const queuePubkey = queue.pubkey
 
+    // Prefer an explicit oracle for commitIx. SDK selectRandomnessOracle() can
+    // reject the entire default queue when heartbeats/quotes are stale
+    // ("No eligible randomness oracle candidates were found") — we fall back
+    // to the freshest gateway-bearing member so commit can still land.
+    const commitOracle = await resolveSwitchboardCommitOracle({
+      queue,
+      Oracle: sb.Oracle,
+    })
+
     // Must pass payer as commit authority. Bare `commitIx(queue)` calls loadData()
     // on the randomness account before create is on-chain →
     // "Account does not exist or has no data <pubkey>".
-    // createAndCommitIxs does this correctly; keep an explicit fallback.
-    let randomness: InstanceType<typeof sb.Randomness>
-    let rngKp: Keypair
-    let createIx: Awaited<ReturnType<typeof sb.Randomness.create>>[1]
-    let commitIx: Awaited<ReturnType<InstanceType<typeof sb.Randomness>['commitIx']>>
-    if (typeof sb.Randomness.createAndCommitIxs === 'function') {
-      const [account, accountKp, ixs] = await sb.Randomness.createAndCommitIxs(
-        program,
-        queuePubkey,
-        payer.publicKey
-      )
-      randomness = account
-      rngKp = accountKp
-      createIx = ixs[0]!
-      commitIx = ixs[1]!
-    } else {
-      rngKp = Keypair.generate()
-      const created = await sb.Randomness.create(
-        program,
-        rngKp,
-        queuePubkey,
-        payer.publicKey
-      )
-      randomness = created[0]
-      createIx = created[1]
-      commitIx = await randomness.commitIx(queuePubkey, payer.publicKey)
-    }
+    const rngKp = Keypair.generate()
+    const created = await sb.Randomness.create(
+      program,
+      rngKp,
+      queuePubkey,
+      payer.publicKey
+    )
+    const randomness = created[0]
+    const createIx = created[1]
+    const commitIx = await randomness.commitIx(
+      queuePubkey,
+      payer.publicKey,
+      commitOracle
+    )
 
     // Create must land before commit (commitIx accounts assume the account exists).
     const createBuilt = await asSwitchboardV0Tx({
@@ -552,7 +549,9 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
     const raw = e instanceof Error ? e.message : 'Switchboard commit failed'
     const hint = /Account does not exist or has no data/i.test(raw)
       ? ' (Switchboard randomness commit failed before/while creating the on-chain account — retry Force draw; if this persists, check RPC cluster matches mainnet and escrow can pay rent)'
-      : ''
+      : /No eligible randomness oracle candidates were found|No oracles found on queue/i.test(raw)
+        ? ' (Switchboard default queue has no healthy randomness oracles — cron will fall back to a local verifiable seed if commit keeps failing)'
+        : ''
     return {
       ok: false,
       error: `${raw}${hint}`,

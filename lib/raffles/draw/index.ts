@@ -80,6 +80,7 @@ export {
   isVrfRevealTimeoutError,
   isInvalidVrfSecpSignatureError,
   isBlockhashNotFoundError,
+  isSwitchboardOracleFleetUnavailableError,
   isRetryableVrfRevealError,
   vrfRevealRetryDelayMs,
   vrfRequestAgeMs,
@@ -87,6 +88,10 @@ export {
   resolveAdminVrfForceNewRequest,
   ADMIN_VRF_RECOVERY_WAIT_MS,
 } from '@/lib/raffles/draw/vrf-retry-policy'
+export {
+  isSwitchboardOracleFleetUnavailable,
+  resolveSwitchboardCommitOracle,
+} from '@/lib/raffles/draw/vrf-oracle-select'
 export {
   fulfilledVrfResultFromStoredDraw,
   isVrfAuditMetadataSuspicious,

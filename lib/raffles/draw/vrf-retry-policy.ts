@@ -79,6 +79,22 @@ export function isBlockhashNotFoundError(error: string | null | undefined): bool
   return /BlockhashNotFound/i.test(msg) || /blockhash not found/i.test(msg)
 }
 
+/**
+ * Switchboard queue has members but SDK health filters reject all of them
+ * (stale heartbeat / expired TEE quote). Commit never creates draw_vrf_account.
+ */
+export function isSwitchboardOracleFleetUnavailableError(
+  error: string | null | undefined
+): boolean {
+  const msg = (error ?? '').trim()
+  if (!msg) return false
+  return (
+    /No eligible randomness oracle candidates were found/i.test(msg) ||
+    /No oracles found on queue/i.test(msg) ||
+    /No randomness oracle candidates were provided/i.test(msg)
+  )
+}
+
 /** Transient reveal failures that are safe to auto-retry (poll / re-commit when stale). */
 export function isRetryableVrfRevealError(error: string | null | undefined): boolean {
   const msg = (error ?? '').trim()
@@ -88,6 +104,7 @@ export function isRetryableVrfRevealError(error: string | null | undefined): boo
     isVrfRevealTimeoutError(msg) ||
     isSwitchboardGatewayTransientError(msg) ||
     isBlockhashNotFoundError(msg) ||
+    isSwitchboardOracleFleetUnavailableError(msg) ||
     /tx confirm timed out/i.test(msg) ||
     /confirm timed out after/i.test(msg) ||
     /Randomness not ready/i.test(msg) ||
@@ -154,6 +171,9 @@ export function shouldAutoForceNewVrfRequest(params: {
 
   // Missing secret / hard failures: always re-request.
   if (/Missing VRF account secret/i.test(err)) return true
+
+  // Commit never landed (no account) because the oracle fleet looked empty — retry promptly.
+  if (isSwitchboardOracleFleetUnavailableError(err)) return true
 
   // Abandon only after the account has been failing for a while (slot/signature truly stale).
   if (isInvalidVrfSecpSignatureError(err) && age != null && age >= staleAfter) return true
