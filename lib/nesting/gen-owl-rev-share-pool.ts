@@ -30,6 +30,7 @@ import {
   GEN_OWL_REV_SHARE_SOL_FEE_BUFFER_LAMPORTS,
   type GenOwlRevSharePoolAffordability,
 } from '@/lib/nesting/gen-owl-rev-share-pool-affordability'
+import { insertGenOwlRevSharePoolPayout } from '@/lib/db/gen-owl-rev-share-pool-payouts'
 
 export {
   evaluateGenOwlRevSharePoolAffordabilityFromBalances,
@@ -329,6 +330,12 @@ export async function payoutCryptoFromGenOwlRevSharePool(params: {
         commitment: 'confirmed',
         maxRetries: 3,
       })
+      await insertGenOwlRevSharePoolPayout({
+        transaction_signature: sig,
+        recipient_wallet: params.recipientWallet,
+        amount_sol: amount,
+        amount_usdc: 0,
+      })
       return { ok: true, signature: sig, send_attempted: true }
     }
 
@@ -341,6 +348,12 @@ export async function payoutCryptoFromGenOwlRevSharePool(params: {
     const sig = await sendAndConfirmTransaction(connection, tx, [kp], {
       commitment: 'confirmed',
       maxRetries: 3,
+    })
+    await insertGenOwlRevSharePoolPayout({
+      transaction_signature: sig,
+      recipient_wallet: params.recipientWallet,
+      amount_sol: 0,
+      amount_usdc: amount,
     })
     return { ok: true, signature: sig, send_attempted: true }
   } catch (e) {
@@ -477,6 +490,12 @@ export async function payoutCombinedCryptoFromGenOwlRevSharePool(params: {
     const sig = await sendAndConfirmTransaction(getSolanaConnection(), tx, [kp], {
       commitment: 'confirmed',
       maxRetries: 3,
+    })
+    await insertGenOwlRevSharePoolPayout({
+      transaction_signature: sig,
+      recipient_wallet: params.recipientWallet,
+      amount_sol: amountSol,
+      amount_usdc: amountUsdc,
     })
     return { sol_signature: sig, usdc_signature: sig, payout_errors: [], send_attempted: true }
   } catch (e) {
