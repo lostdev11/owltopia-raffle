@@ -1000,6 +1000,10 @@ export function WalletConnectButton() {
               Jupiter Mobile, go to owltopia.xyz, then Connect and choose Jupiter. There is no “Open in Jupiter”
               deep link like Phantom/Solflare.
             </p>
+            <p className="text-xs text-muted-foreground leading-relaxed px-0.5">
+              MetaMask Solana works best on the desktop extension or inside MetaMask&apos;s in-app browser. On mobile
+              web, prefer Phantom or Solflare — Chrome Android + MetaMask is unreliable.
+            </p>
           </div>
         </DialogContent>
       </Dialog>
@@ -1043,6 +1047,10 @@ export function WalletConnectButton() {
             <p className="text-xs text-muted-foreground leading-relaxed px-0.5">
               Using Jupiter? Open the globe browser inside Jupiter Mobile → owltopia.xyz, then Connect and choose
               Jupiter.
+            </p>
+            <p className="text-xs text-muted-foreground leading-relaxed px-0.5">
+              MetaMask Solana: use the desktop extension or MetaMask&apos;s in-app browser. Prefer Phantom or Solflare
+              on mobile web.
             </p>
           </div>
         </DialogContent>

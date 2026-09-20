@@ -20,15 +20,16 @@ import {
 
 import { isMobileDevice, shouldMobileAutoConnect } from '@/lib/utils'
 import { getSiteBaseUrl, PLATFORM_NAME } from '@/lib/site-config'
+import { ensureMetaMaskSolanaRegistered } from '@/lib/metamask-connect-solana'
 import { warnIfWalletRpcIsHeliusDevOnce } from '@/lib/rpc-cost-hint'
 import { resolvePublicSolanaRpcUrl, resolveWalletAdapterRpcUrl } from '@/lib/solana-rpc-url'
 import { getSolanaRpcUrl, isDevnetMintEnabled, walletAdapterShouldUseDevnet } from '@/lib/solana/network'
 import '@solana/wallet-adapter-react-ui/styles.css'
 
 /**
- * Phantom and Jupiter register as Standard Wallets and are discovered automatically.
- * Do NOT add PhantomWalletAdapter—Phantom logs: "Phantom was registered as a Standard Wallet.
- * The Wallet Adapter for Phantom can be removed from your app."
+ * Phantom, Jupiter, and MetaMask (via @metamask/connect-solana) register as Standard Wallets
+ * and are discovered automatically. Do NOT add PhantomWalletAdapter or a MetaMask adapter —
+ * Standard discovery handles them. Keep Solflare/Coinbase/Trust/MWA as explicit adapters.
  */
 
 interface WalletContextProviderProps {
@@ -237,6 +238,7 @@ const WALLET_READY_DELAY_MS = 1100
  * Renders the wallet provider only after client mount and a short delay (or load event) so that:
  * - SSR/hydration mismatch is avoided (wallets differ when window is undefined)
  * - Wallet extensions (Phantom, etc.) and Standard Wallet have time to inject before autoConnect runs
+ * - MetaMask Connect Solana has registered with Wallet Standard (createSolanaClient)
  * - Inner provider mounts once with autoConnect=true so the adapter restores session without needing a refresh
  */
 export function WalletContextProvider({ children }: WalletContextProviderProps) {
@@ -245,29 +247,44 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
   useEffect(() => {
     let cancelled = false
     let loadTimeoutId: ReturnType<typeof setTimeout> | null = null
-    const go = () => {
+    let delayTimeoutId: ReturnType<typeof setTimeout> | null = null
+
+    const go = async () => {
+      // MetaMask must register before WalletProvider mounts or it won't appear in the modal.
+      await ensureMetaMaskSolanaRegistered()
       if (!cancelled) setReady(true)
+    }
+
+    const scheduleGo = (ms: number) => {
+      delayTimeoutId = setTimeout(() => {
+        void go()
+      }, ms)
     }
 
     // If document already loaded (e.g. client nav), wait a short delay so extensions are ready.
     if (typeof document !== 'undefined' && document.readyState === 'complete') {
-      const t = setTimeout(go, WALLET_READY_DELAY_MS)
+      scheduleGo(WALLET_READY_DELAY_MS)
       return () => {
         cancelled = true
-        clearTimeout(t)
+        if (delayTimeoutId !== null) clearTimeout(delayTimeoutId)
       }
     }
 
     // Otherwise wait for load event (ensures extensions have injected), then small delay.
     const onLoad = () => {
-      loadTimeoutId = setTimeout(go, 50)
+      loadTimeoutId = setTimeout(() => {
+        void go()
+      }, 50)
     }
     window.addEventListener('load', onLoad, { once: true })
-    const fallback = setTimeout(go, Math.max(WALLET_READY_DELAY_MS, 800))
+    const fallback = setTimeout(() => {
+      void go()
+    }, Math.max(WALLET_READY_DELAY_MS, 800))
     return () => {
       cancelled = true
       window.removeEventListener('load', onLoad)
       if (loadTimeoutId !== null) clearTimeout(loadTimeoutId)
+      if (delayTimeoutId !== null) clearTimeout(delayTimeoutId)
       clearTimeout(fallback)
     }
   }, [])

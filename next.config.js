@@ -9,7 +9,8 @@ function contentSecurityPolicy() {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "img-src 'self' data: https: blob:",
     "font-src 'self' data: https://fonts.gstatic.com",
-    "connect-src 'self' https: wss: https://*.supabase.co https://*.helius-rpc.com https://*.quiknode.pro https://*.alchemy.com https://*.alchemyapi.io https://*.rpcpool.com https://solana.drpc.org wss://solana.drpc.org https://*.drpc.org wss://*.drpc.org https://api.mainnet-beta.solana.com https://*.mainnet-beta.solana.com",
+    // MetaMask Connect Solana relay (also covered by broad `wss:` — named so a future CSP tighten keeps remote connect working)
+    "connect-src 'self' https: wss: wss://mm-sdk-relay.api.cx.metamask.io https://*.supabase.co https://*.helius-rpc.com https://*.quiknode.pro https://*.alchemy.com https://*.alchemyapi.io https://*.rpcpool.com https://solana.drpc.org wss://solana.drpc.org https://*.drpc.org wss://*.drpc.org https://api.mainnet-beta.solana.com https://*.mainnet-beta.solana.com",
     "frame-src 'self' https://connect.solflare.com https://solflare.com https://*.solflare.com https://pay.coinbase.com https://keys.coinbase.com https://www.coinbase.com https://wallet.coinbase.com",
     "frame-ancestors 'self'",
     "object-src 'none'",

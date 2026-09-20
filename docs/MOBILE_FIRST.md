@@ -5,7 +5,7 @@
 ## What we already do
 
 - **Mobile detection**: Use `isMobileDevice()` from `@/lib/utils` for all mobile checks so behavior is consistent (wallet delay, 401 retry, touch fix, logging). Do not duplicate UA regexes.
-- **Wallet stack**: Solana Mobile Wallet Adapter (MWA), Solflare mobile adapter with `redirect_link`, Phantom/Coinbase/Trust; Android blank-page and deep-link handling; iOS Solflare in-app browser.
+- **Wallet stack**: Solana Mobile Wallet Adapter (MWA), Solflare mobile adapter with `redirect_link`, Phantom/Coinbase/Trust; MetaMask Solana via `@metamask/connect-solana` (Wallet Standard — best on desktop extension or MetaMask in-app browser); Android blank-page and deep-link handling; iOS Solflare in-app browser.
 - **Touch**: 44px+ tap targets, `touch-action: manipulation`, Solflare touch fix (uses `isMobileDevice()`), wallet modal tuned for mobile.
 - **Layout**: Responsive breakpoints, mobile hamburger nav with **wallet as primary CTA** in the header (no crowding).
 - **PWA**: `app/manifest.ts` for Add to Home Screen and standalone mode.
@@ -27,13 +27,16 @@
 
 - **Solana Mobile / Seeker**: `WalletProvider` registers `SolanaMobileWalletAdapter` on all mobile UAs. On Seeker, users should pick **Solana Mobile** in the wallet list when the built-in wallet does not appear; Phantom/Solflare are valid fallbacks (same wallet address).
 - **Nesting dashboard**: After returning from the wallet app, wait ~450ms before API calls; refresh positions after tab visibility with a short delay. Do not rely on relative `/api/...` URLs in wallet WebViews — use `nestingClientApiUrl()` from `lib/nesting/fetch-json.ts`.
-- **QA matrix**: Desktop Chrome; iOS Safari + Phantom in-app; Android Chrome + Phantom/Solflare; Jupiter Mobile globe browser (no browse UL — open owltopia.xyz inside Jupiter); Seeker Chrome/Brave with Solana Mobile and with Phantom-only.
+- **QA matrix**: Desktop Chrome; iOS Safari + Phantom in-app; Android Chrome + Phantom/Solflare; Jupiter Mobile globe browser (no browse UL — open owltopia.xyz inside Jupiter); Seeker Chrome/Brave with Solana Mobile and with Phantom-only; **Desktop Chrome + MetaMask extension** (mainnet: connect + SIWS + one ticket buy); **MetaMask mobile in-app browser** (mainnet only — MetaMask mobile does not support Solana devnet/testnet). **Do not** treat Android Chrome + MetaMask Connect as a launch blocker: MetaMask documents a known Wallet Adapter issue on Chrome Android — steer those users to Phantom/Solflare or MetaMask’s in-app browser.
+- **Key files (wallets)**: `lib/metamask-connect-solana.ts` registers MetaMask before `WalletProvider` mounts; see also `components/WalletProvider.tsx`.
 
 ## Key files
 
 - `lib/utils.ts` – `isMobileDevice()`, `isAndroidDevice()`; use these for all mobile detection.
+- `lib/metamask-connect-solana.ts` – MetaMask Connect Solana (`createSolanaClient`) before wallet-adapter mounts.
 - `components/WalletProvider.tsx` – Mobile wallet adapters and autoConnect.
 - `components/WalletConnectButton.tsx` – Mobile redirect, deep-link cleanup, cancel timeout.
+- `docs/WALLETS.md` – Supported wallets, MetaMask caveats, WalletConnect/Reown follow-up.
 - `components/SolflareTouchFix.tsx` – Touch→click fallback for all mobile (uses `isMobileDevice()`).
 - `components/Header.tsx` – Mobile hamburger; wallet always visible on small screens.
 - `app/dashboard/page.tsx` – Mobile wallet stabilize delay, 401 retry, “Preparing…” state.
