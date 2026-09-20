@@ -33,7 +33,8 @@ export type PackOpeningStage =
   | 'complete'
 
 export type PackOpeningExperienceProps = {
-  reward: PackOpenClientResult
+  /** Null while payment is confirmed but `/api/packs/open` is still resolving. */
+  reward: PackOpenClientResult | null
   onComplete?: () => void
   /** Dev / preview: start at a specific stage. Production defaults to hovering + Open pack. */
   initialStage?: PackOpeningStage
@@ -131,14 +132,15 @@ export function PackOpeningExperience({
   const [reducedMotion] = useState(() => prefersReducedMotion())
 
   const [stage, setStage] = useState<PackOpeningStage>(() => {
-    if (reducedMotion && !hoverOnly) return 'whiteTransition'
+    // Never skip ahead to white/reveal until we have a prize (payment may still be resolving).
     if (initialStage) return initialStage
+    if (reducedMotion && !hoverOnly && reward) return 'whiteTransition'
     return includeHoverGate ? 'hovering' : 'opening'
   })
   const [openFailed, setOpenFailed] = useState(false)
   const [hoverFailed, setHoverFailed] = useState(false)
   const [openClicked, setOpenClicked] = useState(false)
-  const [whiteOpaque, setWhiteOpaque] = useState(() => reducedMotion && !hoverOnly)
+  const [whiteOpaque, setWhiteOpaque] = useState(false)
   const [showReward, setShowReward] = useState(false)
   const [showName, setShowName] = useState(false)
   const [showMeta, setShowMeta] = useState(false)
@@ -148,9 +150,11 @@ export function PackOpeningExperience({
   const openPackBottom = fixedBottomWithWalletInset(walletBottomInset)
   const footerPaddingBottom = paddingBottomWithWalletInset(walletBottomInset)
 
-  const revealCfg = getPackCategoryReveal(reward.category)
+  const revealCfg = getPackCategoryReveal(reward?.category ?? 'owl')
+  const prizeReady = reward != null
 
   const beginRevealSequence = useCallback(() => {
+    if (!reward) return
     if (revealStartedRef.current) return
     if (!whiteReadyRef.current || !rewardReadyRef.current) return
     revealStartedRef.current = true
@@ -176,23 +180,28 @@ export function PackOpeningExperience({
       setShowControls(true)
       setStage('complete')
     }, controlsDelay)
-  }, [reducedMotion])
+  }, [reducedMotion, reward])
 
   const tryStartReveal = useCallback(() => {
     beginRevealSequence()
   }, [beginRevealSequence])
 
   const enterWhiteTransition = useCallback(() => {
+    if (!reward) return
     if (whiteEnteredRef.current || revealStartedRef.current) return
     whiteEnteredRef.current = true
     setStage('whiteTransition')
     setWhiteOpaque(true)
     whiteReadyRef.current = true
     tryStartReveal()
-  }, [tryStartReveal])
+  }, [tryStartReveal, reward])
 
   // Preload reward image as soon as we have the reward
   useEffect(() => {
+    if (!reward) {
+      rewardReadyRef.current = false
+      return
+    }
     let cancelled = false
     const artUrl = packPrizeArtUrl(reward.category, reward.nftImageUrl)
     void preloadRewardImage(artUrl).then(() => {
@@ -209,7 +218,15 @@ export function PackOpeningExperience({
       cancelled = true
       window.clearTimeout(grace)
     }
-  }, [reward.category, reward.nftImageUrl, tryStartReveal])
+  }, [reward, reward?.category, reward?.nftImageUrl, tryStartReveal])
+
+  // Reduced motion: once prize arrives, jump to white → reveal (skip opening clip).
+  useEffect(() => {
+    if (!reducedMotion || hoverOnly || !prizeReady) return
+    if (stage === 'hovering' || stage === 'ready') {
+      enterWhiteTransition()
+    }
+  }, [reducedMotion, hoverOnly, prizeReady, stage, enterWhiteTransition])
 
   // Reduced motion / failed open / whiteTransition entry
   useEffect(() => {
@@ -291,7 +308,7 @@ export function PackOpeningExperience({
   }, [])
 
   function onOpenPack() {
-    if (openClicked || hoverOnly) return
+    if (openClicked || hoverOnly || !prizeReady) return
     setOpenClicked(true)
     setStage('opening')
   }
@@ -387,38 +404,42 @@ export function PackOpeningExperience({
                 'shadow-[0_0_60px_-12px_rgba(0,255,156,0.65)]'
               )}
             >
-              <PrizeArt reward={reward} />
+              {reward ? <PrizeArt reward={reward} /> : null}
             </div>
           </div>
 
           <p
             className={cn(
               'mt-4 text-[11px] font-semibold uppercase tracking-[0.32em] text-[#00FF9C]/85 transition-opacity duration-500',
-              showName ? 'opacity-100' : 'opacity-0'
+              showName && reward ? 'opacity-100' : 'opacity-0'
             )}
           >
-            You revealed {categoryLabel(reward.category)}
+            {reward ? `You revealed ${categoryLabel(reward.category)}` : ''}
           </p>
           <h2
             className={cn(
               'mt-1 font-display text-2xl tracking-[0.04em] text-white transition-opacity duration-500 sm:text-3xl',
-              showName ? 'opacity-100' : 'opacity-0'
+              showName && reward ? 'opacity-100' : 'opacity-0'
             )}
           >
-            {reward.prizeLabel}
+            {reward?.prizeLabel ?? ''}
           </h2>
 
           <div
             className={cn(
               'mt-2 max-w-md space-y-1.5 text-center transition-opacity duration-500',
-              showMeta ? 'opacity-100' : 'opacity-0'
+              showMeta && reward ? 'opacity-100' : 'opacity-0'
             )}
           >
-            <p className="text-sm leading-relaxed text-white/60">{reward.revealMessage}</p>
-            {reward.category === 'nft' && reward.nftMint ? (
-              <p className="font-mono text-[11px] text-white/40">
-                {reward.nftMint.slice(0, 4)}…{reward.nftMint.slice(-4)}
-              </p>
+            {reward ? (
+              <>
+                <p className="text-sm leading-relaxed text-white/60">{reward.revealMessage}</p>
+                {reward.category === 'nft' && reward.nftMint ? (
+                  <p className="font-mono text-[11px] text-white/40">
+                    {reward.nftMint.slice(0, 4)}…{reward.nftMint.slice(-4)}
+                  </p>
+                ) : null}
+              </>
             ) : null}
           </div>
         </div>
@@ -428,7 +449,7 @@ export function PackOpeningExperience({
             'relative z-[4] flex w-full shrink-0 flex-col gap-3 px-4',
             'pt-3 sm:flex-row sm:justify-center',
             'transition-opacity duration-500',
-            showControls ? 'opacity-100' : 'pointer-events-none opacity-0'
+            showControls && reward ? 'opacity-100' : 'pointer-events-none opacity-0'
           )}
           style={{ paddingBottom: footerPaddingBottom }}
         >
@@ -439,13 +460,15 @@ export function PackOpeningExperience({
           >
             Continue
           </button>
-          <Link
-            href={`/packs/verify/${reward.openId}`}
-            className="inline-flex min-h-[48px] min-w-[180px] items-center justify-center gap-2 rounded-xl bg-[#00FF9C] px-6 text-sm font-bold uppercase tracking-wider text-[#062016] transition hover:bg-[#7DFFB8]"
-          >
-            <CheckCircle2 className="h-4 w-4" aria-hidden />
-            View item
-          </Link>
+          {reward ? (
+            <Link
+              href={`/packs/verify/${reward.openId}`}
+              className="inline-flex min-h-[48px] min-w-[180px] items-center justify-center gap-2 rounded-xl bg-[#00FF9C] px-6 text-sm font-bold uppercase tracking-wider text-[#062016] transition hover:bg-[#7DFFB8]"
+            >
+              <CheckCircle2 className="h-4 w-4" aria-hidden />
+              View item
+            </Link>
+          ) : null}
         </div>
       </div>
 
@@ -528,21 +551,36 @@ export function PackOpeningExperience({
           inHoverStages &&
           !openClicked ? (
             <div
-              className="absolute inset-x-0 flex justify-center px-4"
+              className="absolute inset-x-0 flex flex-col items-center gap-2 px-4"
               style={{ bottom: openPackBottom }}
             >
+              {!prizeReady ? (
+                <p className="text-center text-sm text-[#00FF9C]/90">
+                  Payment confirmed — resolving prize…
+                </p>
+              ) : null}
               <button
                 type="button"
-                disabled={!hoverReady || openClicked}
+                disabled={!hoverReady || openClicked || !prizeReady}
                 onClick={onOpenPack}
                 className={cn(
-                  'inline-flex min-h-[52px] min-w-[200px] items-center justify-center rounded-xl px-8',
+                  'inline-flex min-h-[52px] min-w-[200px] items-center justify-center gap-2 rounded-xl px-8',
                   'bg-[#00FF9C] text-sm font-bold uppercase tracking-[0.14em] text-[#062016]',
                   'shadow-[0_0_40px_-8px_rgba(0,255,156,0.65)] transition',
                   'hover:bg-[#7DFFB8] disabled:cursor-not-allowed disabled:opacity-45'
                 )}
               >
-                Open pack
+                {!prizeReady ? (
+                  <>
+                    <span
+                      className="h-4 w-4 animate-spin rounded-full border-2 border-[#062016]/30 border-t-[#062016]"
+                      aria-hidden
+                    />
+                    Resolving…
+                  </>
+                ) : (
+                  'Open pack'
+                )}
               </button>
             </div>
           ) : null}

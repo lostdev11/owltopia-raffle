@@ -4,11 +4,11 @@ Product utility: buy a pack with SOL, instantly rip it, always win a prize from 
 
 ## Pack opening video
 
-After payment confirms **and** `/api/packs/open` returns the real prize:
+After payment confirms, the fullscreen **pack hovering** clip starts immediately (Open pack stays disabled until the prize is ready):
 
-1. User pays pack price → tx confirms (on-page **pack hovering** clip keeps looping)
+1. User pays pack price → tx confirms → fullscreen hovering clip + “Resolving…”
 2. Server assigns the prize (NFT / SOL / $OWL) — VRF reveal may take a few seconds when enabled
-3. Fullscreen hovering clip + **Open pack**
+3. **Open pack** unlocks
 4. User taps Open pack → **pack opening** plays once (`/Animations/Pack opening.mp4`)
 5. Clip ends on white → CSS white overlay → video removed → white fades → real prize reveal + subtle confetti
 

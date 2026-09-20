@@ -239,6 +239,8 @@ export function PacksClient({
         expectedPriceOwl: priceOwl,
         onPaymentConfirmed: () => {
           setPaymentConfirmed(true)
+          // Start fullscreen hover cinematic immediately — don't wait for VRF/open.
+          setPhase('experience')
         },
       })
       if (!out.ok) {
@@ -248,7 +250,6 @@ export function PacksClient({
         setPaymentConfirmed(false)
         return
       }
-      // Cinematic only after purchase succeeded and reward is resolved
       setResult(out.result)
       setPhase('experience')
       setRipping(false)
@@ -275,7 +276,7 @@ export function PacksClient({
       ? softPackFundHint({ priceSol: price, balanceLamports })
       : null
   const showReveal = phase === 'reveal' && !!result
-  const showExperience = phase === 'experience' && !!result
+  const showExperience = phase === 'experience'
   const weights = config?.product.categoryWeightsBps ?? { owl: 3000, sol: 3000, nft: 4000 }
   const packsOpened = config?.recentOpens?.length ?? 0
   const phaseCaption =
@@ -283,9 +284,11 @@ export function PacksClient({
       ? paymentConfirmed
         ? 'Payment confirmed — resolving prize…'
         : 'Confirm in your wallet…'
-      : phase === 'experience'
-        ? 'Tap Open pack when you are ready'
-        : null
+      : phase === 'experience' && !result
+        ? 'Payment confirmed — resolving prize…'
+        : phase === 'experience'
+          ? 'Tap Open pack when you are ready'
+          : null
 
   if (access.loading) {
     return (
@@ -429,7 +432,7 @@ export function PacksClient({
   return (
     <div className="relative min-h-[100dvh] overflow-x-clip text-[#EAFBF4]">
       <PackAnimationPreload opening={phase === 'paying' || phase === 'experience'} />
-      {showExperience && result ? (
+      {showExperience ? (
         <PackOpeningExperience
           reward={result}
           includeHoverGate
