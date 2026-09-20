@@ -298,6 +298,19 @@ export function Gen2MintPanel({
     return Math.max(1, Math.min(elig.max_mintable, remaining))
   }, [elig, remaining])
 
+  const selectedQty = useMemo(
+    () => Math.min(parseMintQuantityText(qtyText, maxQ), maxQ),
+    [qtyText, maxQ]
+  )
+
+  const batchSolHint = useMemo(() => {
+    if (!elig?.mint_sol_needed_lamports || selectedQty < 1) return null
+    const per = Number(BigInt(elig.mint_sol_needed_lamports)) / 1e9
+    if (!Number.isFinite(per) || per <= 0) return null
+    if (selectedQty === 1) return `~${per.toFixed(3)} SOL per mint (price + fee + rent)`
+    return `~${(per * selectedQty).toFixed(3)} SOL for ${selectedQty} mints (~${per.toFixed(3)} SOL each)`
+  }, [elig?.mint_sol_needed_lamports, selectedQty])
+
   useEffect(() => {
     setQtyText((t) => {
       const n = parseInt(t.trim(), 10)
@@ -832,8 +845,8 @@ export function Gen2MintPanel({
           ) : null}
 
           <p className="text-xs text-[#5C6773]">
-            Phantom / Solflare: one approval mints your selected quantity (wallet may list each NFT). Mint price is shown
-            in USD — your wallet also needs SOL for fees (≈$1 platform fee + network + NFT rent).
+            Phantom / Solflare: one approval mints your selected quantity (wallet may list each NFT).
+            {batchSolHint ? ` ${batchSolHint}.` : ' Mint price is shown in USD — wallet also needs SOL for fees + rent.'}
           </p>
         </div>
     </MintPanelShell>

@@ -46,7 +46,6 @@ import {
   assertOwlCenterPlatformMintFeeSolBalance,
   resolveOwlCenterPlatformMintFeeLamports,
 } from '@/lib/solana/owl-center-platform-mint-fee'
-import { getOwlCenterMintRentReserveLamports } from '@/lib/solana/owl-center-mint-rent'
 import {
   extractTxSignatureFromUnknownError,
   pollTransactionSignatureStatus,
@@ -254,31 +253,23 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
       platformFeeLamports = feeQuote.lamports
     }
 
-    if (collectPlatformMintFee && platformFeeLamports > 0n) {
-      const feeBal = await withSolanaRpcRetry(
-        () =>
-          assertOwlCenterPlatformMintFeeSolBalance(
-            walletB58,
-            network,
-            platformFeeLamports,
-            rpcUrl,
-            quantity,
-            prefetchedWalletBalanceLamports,
-            mintPriceLamports,
-            'public_simple'
-          ),
-        MINT_SOLANA_RPC_RETRY
-      )
-      if (!feeBal.ok) return { ok: false, error: feeBal.error }
-    } else if (prefetchedWalletBalanceLamports != null) {
-      const needed = await getOwlCenterMintRentReserveLamports(network, 'public_simple', quantity, rpcUrl)
-      if (prefetchedWalletBalanceLamports < needed) {
-        return {
-          ok: false,
-          error: `Not enough SOL for mint rent and network fees (need ~${(Number(needed) / 1e9).toFixed(3)} SOL).`,
-        }
-      }
-    }
+    // Always run the scaled SOL budget check (fee × qty + price × qty + rent × qty), including when
+    // the platform fee is off so paid Core mints still fail fast on underfunded batches.
+    const feeBal = await withSolanaRpcRetry(
+      () =>
+        assertOwlCenterPlatformMintFeeSolBalance(
+          walletB58,
+          network,
+          collectPlatformMintFee ? platformFeeLamports : 0n,
+          rpcUrl,
+          quantity,
+          prefetchedWalletBalanceLamports,
+          mintPriceLamports,
+          'public_simple'
+        ),
+      MINT_SOLANA_RPC_RETRY
+    )
+    if (!feeBal.ok) return { ok: false, error: feeBal.error }
 
     const assets = Array.from({ length: quantity }, () => generateSigner(umi))
     const plannedB58s = assets.map((a) => String(a.publicKey))

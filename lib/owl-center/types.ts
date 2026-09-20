@@ -193,7 +193,10 @@ export type SimpleMintEligibilityResponse = {
   platform_mint_fee_lamports_estimate: string | null
   /** Connected wallet SOL balance (lamports) when wallet is provided. */
   wallet_sol_balance_lamports: string | null
-  /** Platform fee + live rent reserve for one mint (lamports), when fee is enabled. */
+  /**
+   * SOL needed for one mint (platform fee + live rent + unit mint price), when priced.
+   * Batch cost is this value times selected quantity — UI should scale for qty > 1.
+   */
   mint_sol_needed_lamports: string | null
   /** Human-readable platform fee label for mint UI. */
   platform_mint_fee_label: string
@@ -288,7 +291,10 @@ export type Gen2EligibilityResponse = {
   platform_mint_fee_label?: string
   /** Connected wallet SOL balance (lamports) when a wallet is provided. */
   wallet_sol_balance_lamports?: string | null
-  /** Platform fee + live rent reserve for one mint (lamports), when the fee is enabled. */
+  /**
+   * SOL needed for one mint (platform fee + live rent + unit mint price when paid).
+   * Batch cost is this × selected quantity.
+   */
   mint_sol_needed_lamports?: string | null
   /** Treasury that receives the platform fee; null when not configured. */
   platform_treasury_wallet?: string | null

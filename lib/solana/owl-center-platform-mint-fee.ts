@@ -69,10 +69,6 @@ export async function assertOwlCenterPlatformMintFeeSolBalance(
   mintMode: OwlCenterMintMode = 'gen2_full'
 ): Promise<{ ok: true; balance: bigint } | { ok: false; error: string; balance: bigint }> {
   const pricePerNft = mintPriceLamportsPerNft > 0n ? mintPriceLamportsPerNft : 0n
-  if ((!isOwlCenterPlatformMintFeeEnabled() || feeLamports <= 0n) && pricePerNft <= 0n) {
-    return { ok: true, balance: prefetchedBalanceLamports ?? 0n }
-  }
-
   const qty = Math.max(1, Math.floor(mintQuantity))
   const feeEnabled = isOwlCenterPlatformMintFeeEnabled() && feeLamports > 0n
   const totalFee = feeEnabled ? feeLamports * BigInt(qty) : 0n
@@ -91,12 +87,15 @@ export async function assertOwlCenterPlatformMintFeeSolBalance(
       const reserveSol = Number(rentReserve) / LAMPORTS_PER_SOL
       const haveSol = Number(balance) / LAMPORTS_PER_SOL
       const usd = owlCenterPlatformMintFeeUsd()
-      const perNft = qty > 1 ? ` (${qty} NFTs)` : ''
-      const priceCopy = priceSol > 0 ? `the ${priceSol.toFixed(3)} SOL mint price${perNft}, ` : ''
+      const qtyNote = qty > 1 ? ` for ${qty} mints` : ''
+      const priceCopy = priceSol > 0 ? `${priceSol.toFixed(3)} SOL mint price, ` : ''
+      const feeCopy = feeEnabled
+        ? `~$${usd.toFixed(usd % 1 === 0 ? 0 : 2)} platform fee${qty > 1 ? ` × ${qty}` : ''}, `
+        : ''
       return {
         ok: false,
         balance,
-        error: `Need ~${(priceSol + feeSol + reserveSol).toFixed(3)} SOL for ${priceCopy}the ~$${usd.toFixed(usd % 1 === 0 ? 0 : 2)} platform fee${priceSol > 0 ? '' : perNft} and rent (your wallet has ~${haveSol.toFixed(3)} SOL).`,
+        error: `Need ~${(priceSol + feeSol + reserveSol).toFixed(3)} SOL${qtyNote} (${priceCopy}${feeCopy}plus rent; your wallet has ~${haveSol.toFixed(3)} SOL).`,
       }
     }
     return { ok: true, balance }

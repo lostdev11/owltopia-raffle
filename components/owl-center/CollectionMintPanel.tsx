@@ -104,6 +104,11 @@ export function CollectionMintPanel({
     return Math.max(1, Math.min(elig.max_mintable, remaining))
   }, [elig, remaining])
 
+  const selectedQty = useMemo(
+    () => Math.min(parseMintQuantityText(qtyText, maxQ), maxQ),
+    [qtyText, maxQ]
+  )
+
   useEffect(() => {
     setQtyText((t) => {
       const n = parseInt(t.trim(), 10)
@@ -437,6 +442,7 @@ export function CollectionMintPanel({
     elig,
     eligError,
     cmConfigured,
+    quantity: selectedQty,
   })
 
   /** Prefer preference-aware formatting when the API only sent a UTC-formatted reason string. */
@@ -486,6 +492,9 @@ export function CollectionMintPanel({
           {priceBits ? ` · ${priceBits}` : ''}
           {' · '}
           {platformFeeLabel}
+          {selectedQty > 1 && elig?.mint_sol_needed_lamports
+            ? ` · total ~${(Number(BigInt(elig.mint_sol_needed_lamports) * BigInt(selectedQty)) / 1e9).toFixed(3)} SOL for ${selectedQty}`
+            : ''}
           {' · '}
           limit {elig?.wallet_mint_limit ?? launch.wallet_mint_limit} from this phase
           {elig && connected ? ` · you: ${elig.wallet_minted}/${elig.wallet_mint_limit} this phase` : ''} ·{' '}

@@ -35,6 +35,10 @@ import {
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
 import { resolveOwlCenterPlatformMintFeeLamports } from '@/lib/solana/owl-center-platform-mint-fee'
 import { getOwlCenterMintRentReservePerNftLamports } from '@/lib/solana/owl-center-mint-rent'
+import {
+  capMintableByOwlCenterSolBudget,
+  owlCenterMintSolNeededPerNftLamports,
+} from '@/lib/owl-center/mint-sol-budget'
 import { resolveEffectiveCmRemaining } from '@/lib/owl-center/effective-cm-remaining'
 import { syncLaunchSoldOutPhaseIfExhausted } from '@/lib/owl-center/sync-launch-sold-out'
 import { getLaunchSolanaRpcUrl } from '@/lib/solana/launch-cm'
@@ -181,10 +185,53 @@ export async function buildGen2Eligibility(
     }
   }
   const rentReservePerNft = await getOwlCenterMintRentReservePerNftLamports(network, 'gen2_full')
+  const platformFeeLamports =
+    platformFeeEnabled && platformFeeQuote?.ok === true ? platformFeeQuote.lamports : 0n
+  // Unit price is filled per phase below; free phases stay fee + rent only until finalize.
   const mint_sol_needed_lamports =
-    platformFeeEnabled && platformFeeQuote?.ok === true
-      ? String(platformFeeQuote.lamports + rentReservePerNft)
+    platformFeeLamports > 0n || rentReservePerNft > 0n
+      ? String(
+          owlCenterMintSolNeededPerNftLamports({
+            platformFeeLamports,
+            rentReservePerNftLamports: rentReservePerNft,
+            mintPriceLamportsPerNft: 0n,
+          })
+        )
       : null
+  const walletBalancePrefetch =
+    wallet_sol_balance_lamports != null ? BigInt(wallet_sol_balance_lamports) : null
+
+  const finalizeSolBudget = (res: Gen2EligibilityResponse): Gen2EligibilityResponse => {
+    const price =
+      res.unit_lamports_estimate != null && res.unit_lamports_estimate !== ''
+        ? BigInt(res.unit_lamports_estimate)
+        : 0n
+    const perNft = owlCenterMintSolNeededPerNftLamports({
+      platformFeeLamports,
+      rentReservePerNftLamports: rentReservePerNft,
+      mintPriceLamportsPerNft: price,
+    })
+    const withNeeded: Gen2EligibilityResponse = {
+      ...res,
+      mint_sol_needed_lamports: perNft > 0n ? String(perNft) : res.mint_sol_needed_lamports,
+    }
+    if (!withNeeded.is_eligible || withNeeded.max_mintable <= 0 || perNft <= 0n) {
+      return withNeeded
+    }
+    const capped = capMintableByOwlCenterSolBudget({
+      maxMintable: withNeeded.max_mintable,
+      isEligible: withNeeded.is_eligible,
+      reason: withNeeded.reason,
+      walletBalanceLamports: walletBalancePrefetch,
+      perNftNeededLamports: perNft,
+    })
+    return {
+      ...withNeeded,
+      max_mintable: capped.maxMintable,
+      is_eligible: capped.isEligible,
+      reason: capped.reason,
+    }
+  }
 
   const base: Gen2EligibilityResponse = {
     active_phase: phase,
@@ -253,7 +300,7 @@ export async function buildGen2Eligibility(
   if (!phaseOverride && phase !== 'AIRDROP' && isGen1AirdropWindowOpen(launch, nowMs)) {
     const gen1Concurrent = await buildGen1AirdropEligibility(launch, w, network, remaining, base)
     if (gen1Concurrent.is_eligible && gen1Concurrent.max_mintable > 0) {
-      return gen1Concurrent
+      return finalizeSolBudget(gen1Concurrent)
     }
   }
 
@@ -268,7 +315,7 @@ export async function buildGen2Eligibility(
   }
 
   if (phase === 'AIRDROP') {
-    return buildGen1AirdropEligibility(launch, w, network, remaining, base)
+    return finalizeSolBudget(await buildGen1AirdropEligibility(launch, w, network, remaining, base))
   }
 
   // GEN1 holder mint is optional — presale/overage open when admin flips the phase, regardless
@@ -289,7 +336,7 @@ export async function buildGen2Eligibility(
       supplyRemaining: remaining,
     })
     const overageReserved = overageReservedGiftedMints(bal, overage)
-    return {
+    return finalizeSolBudget({
       ...base,
       presale_balance: {
         purchased_mints: allowance.purchased_mints,
@@ -315,7 +362,7 @@ export async function buildGen2Eligibility(
               ? 'presale_pool_exhausted'
               : null,
       price_usdc: 0,
-    }
+    })
   }
 
   if (phase === 'PRESALE_OVERAGE') {
@@ -333,7 +380,7 @@ export async function buildGen2Eligibility(
       overagePoolRemaining: pool.overage_mints_remaining,
       supplyRemaining: remaining,
     })
-    return {
+    return finalizeSolBudget({
       ...base,
       presale_balance: bal
         ? {
@@ -371,7 +418,7 @@ export async function buildGen2Eligibility(
                 ? 'overage_pool_exhausted'
                 : null,
       price_usdc: 0,
-    }
+    })
   }
 
   if (phase === 'WHITELIST') {
@@ -389,7 +436,7 @@ export async function buildGen2Eligibility(
       wlPoolRemaining,
       supplyRemaining: remaining,
     })
-    return {
+    return finalizeSolBudget({
       ...base,
       wl_allocation: {
         allowed_mints: allowed,
@@ -404,7 +451,7 @@ export async function buildGen2Eligibility(
       unit_lamports_estimate: quote ? quote.unitLamports.toString() : null,
       sol_usd_price: quote?.solUsdPrice ?? null,
       price_usdc: usdc,
-    }
+    })
   }
 
   if (phase === 'PUBLIC') {
@@ -434,7 +481,7 @@ export async function buildGen2Eligibility(
           .filter((x): x is string => Boolean(x))
       )
       if (team.has(w)) {
-        return {
+        return finalizeSolBudget({
           ...base,
           is_eligible: true,
           max_mintable: Math.min(25, remaining),
@@ -442,11 +489,11 @@ export async function buildGen2Eligibility(
           unit_lamports_estimate: null,
           sol_usd_price: quote?.solUsdPrice ?? null,
           price_usdc: 0,
-        }
+        })
       }
     }
 
-    return {
+    return finalizeSolBudget({
       ...base,
       is_eligible: max > 0,
       max_mintable: max,
@@ -454,7 +501,7 @@ export async function buildGen2Eligibility(
       unit_lamports_estimate: quote ? quote.unitLamports.toString() : null,
       sol_usd_price: quote?.solUsdPrice ?? null,
       price_usdc: usdc,
-    }
+    })
   }
 
   return { ...base, reason: 'unknown_phase' }
