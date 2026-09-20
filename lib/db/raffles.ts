@@ -42,6 +42,7 @@ import {
   sendDrawRevealMemoTransaction,
   defaultDrawAlgoForCreate,
   raffleUsesDrawVrf,
+  isSwitchboardOracleFleetUnavailableError,
 } from '@/lib/raffles/draw'
 import { runRaffleVrfFlow } from '@/lib/raffles/draw/vrf-draw-flow'
 import {
@@ -2109,7 +2110,7 @@ export async function deleteRaffle(id: string) {
 export async function selectWinner(
   raffleId: string,
   forceOverride: boolean = false,
-  opts?: { forceVrfRetry?: boolean }
+  opts?: { forceVrfRetry?: boolean; revealWaitMs?: number }
 ): Promise<string | null> {
   const raffle = await getRaffleById(raffleId)
   if (!raffle) {
@@ -2147,6 +2148,8 @@ export async function selectWinner(
 
   // Provably-auditable draw: v3 VRF (flag/pilot), else v2 commit–reveal, else v1 at draw time.
   let draw
+  /** When Switchboard oracle fleet is down, we still settle with a local seed and record why. */
+  let vrfLocalFallbackError: string | null = null
   try {
     const useVrf =
       (await checkDrawVrfColumnsApplied()) &&
@@ -2159,27 +2162,52 @@ export async function selectWinner(
         raffle,
         entries: confirmedEntries,
         forceNewRequest: opts?.forceVrfRetry === true,
+        revealWaitMs: opts?.revealWaitMs,
       })
       const afterVrf = await getRaffleById(raffleId)
       if ((afterVrf?.winner_wallet ?? '').trim()) {
         return afterVrf!.winner_wallet!.trim()
       }
       if (vrf.status !== 'fulfilled') {
-        console.warn(
-          `[selectWinner] VRF not fulfilled for ${raffleId}: ${vrf.status} ${vrf.error || ''}`
-        )
-        return null
-      }
-      draw = performDraw(confirmedEntries, {
-        algo: DRAW_ALGO_V3_VRF,
-        drawSeed: vrf.drawSeed,
-      })
-      // Ensure ledger fields match the frozen VRF snapshot.
-      if (draw.ledgerHash !== vrf.ledgerHash || draw.soldCount !== vrf.soldCount) {
-        console.error(
-          `[selectWinner] VRF ledger mismatch for ${raffleId}: draw=${draw.ledgerHash}/${draw.soldCount} vrf=${vrf.ledgerHash}/${vrf.soldCount}`
-        )
-        return null
+        const vrfErr = (vrf.error || '').trim()
+        // Commit never creates an account when the default queue has zero healthy
+        // oracles — leave tickets stuck forever if we only retry Switchboard.
+        // Fall back to the same v1 local-seed math packs use when VRF is down.
+        if (
+          isSwitchboardOracleFleetUnavailableError(vrfErr) &&
+          !(vrf.randomnessAccount ?? '').trim()
+        ) {
+          console.warn(
+            `[selectWinner] Switchboard oracle fleet unavailable for ${raffleId}; completing with local seed fallback: ${vrfErr}`
+          )
+          vrfLocalFallbackError = vrfErr || 'No eligible randomness oracle candidates were found'
+          draw = performDraw(confirmedEntries, { algo: DRAW_ALGO_V1 })
+          if (vrf.ledgerHash && vrf.soldCount > 0) {
+            if (draw.ledgerHash !== vrf.ledgerHash || draw.soldCount !== vrf.soldCount) {
+              console.error(
+                `[selectWinner] VRF local-fallback ledger mismatch for ${raffleId}: draw=${draw.ledgerHash}/${draw.soldCount} vrf=${vrf.ledgerHash}/${vrf.soldCount}`
+              )
+              return null
+            }
+          }
+        } else {
+          console.warn(
+            `[selectWinner] VRF not fulfilled for ${raffleId}: ${vrf.status} ${vrf.error || ''}`
+          )
+          return null
+        }
+      } else {
+        draw = performDraw(confirmedEntries, {
+          algo: DRAW_ALGO_V3_VRF,
+          drawSeed: vrf.drawSeed,
+        })
+        // Ensure ledger fields match the frozen VRF snapshot.
+        if (draw.ledgerHash !== vrf.ledgerHash || draw.soldCount !== vrf.soldCount) {
+          console.error(
+            `[selectWinner] VRF ledger mismatch for ${raffleId}: draw=${draw.ledgerHash}/${draw.soldCount} vrf=${vrf.ledgerHash}/${vrf.soldCount}`
+          )
+          return null
+        }
       }
     } else {
       const commitHash = (raffle.draw_commit_hash ?? '').trim().toLowerCase()
@@ -2265,10 +2293,16 @@ export async function selectWinner(
 
   // Persist fulfilled VRF status with the winner row so a concurrent failed
   // reveal write cannot leave draw_vrf_status=failed after settlement.
+  // Local-seed recovery after oracle-fleet outage records the failure reason.
   const vrfSettleFields =
     draw.algo === DRAW_ALGO_V3_VRF
       ? { draw_vrf_status: 'fulfilled' as const, draw_vrf_error: null }
-      : {}
+      : vrfLocalFallbackError
+        ? {
+            draw_vrf_status: 'failed' as const,
+            draw_vrf_error: `Switchboard oracles unavailable; completed with local seed fallback: ${vrfLocalFallbackError}`,
+          }
+        : {}
 
   const { data: updatedRaffle, error } = await getSupabaseAdmin()
     .from('raffles')

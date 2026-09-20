@@ -418,6 +418,14 @@ export function RaffleCard({
   const statusBadgeClass = isPendingDraft
     ? 'bg-amber-500 hover:bg-amber-600 text-white'
     : (isFuture ? 'bg-red-500 hover:bg-red-600 text-white' : (isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'))
+  const vrfDrawStatus = (raffle.draw_vrf_status ?? '').trim()
+  const awaitingVrfDraw =
+    !isActive &&
+    !isFuture &&
+    !isPendingDraft &&
+    !(raffle.winner_wallet ?? '').trim() &&
+    (vrfDrawStatus === 'pending' || vrfDrawStatus === 'failed')
+  const drawPendingLabel = vrfDrawStatus === 'failed' ? 'Draw delayed' : 'Drawing…'
   
   // Calculate available tickets
   const totalTicketsSold = entryStats
@@ -852,6 +860,17 @@ export function RaffleCard({
                 </span>
               </Link>
             )}
+            {awaitingVrfDraw && (
+              <Link
+                href={smallRaffleHref}
+                className="relative z-10 mt-1 flex items-center gap-1 border-t border-border/40 px-1.5 pt-1 min-w-0 sm:mt-1.5 sm:px-2 sm:pt-1.5"
+                onClick={(e) => handleLinkClick(e)}
+              >
+                <span className="truncate text-[11px] font-medium text-amber-600 dark:text-amber-400 min-w-0">
+                  {drawPendingLabel}
+                </span>
+              </Link>
+            )}
             </div>
             </div>
             </div>
@@ -1058,6 +1077,11 @@ export function RaffleCard({
                     </span>
                   </div>
                 )}
+                {awaitingVrfDraw && (
+                  <div className={`${classes.footer} text-amber-200 flex items-center gap-1.5 mt-1 pt-1 border-t border-white/20`}>
+                    <span className="truncate font-medium">{drawPendingLabel}</span>
+                  </div>
+                )}
               </div>
             </div>
               </LinkifiedTextInsideLinkProvider>
@@ -1195,6 +1219,15 @@ export function RaffleCard({
                         </span>
                       )}
                     </span>
+                  </Link>
+                )}
+                {awaitingVrfDraw && (
+                  <Link
+                    href={mediumRaffleHref}
+                    className={`mt-2 flex w-full items-center gap-2 border-t pt-2 ${displaySize === 'large' ? 'text-sm' : 'text-xs'}`}
+                    onClick={(e) => handleLinkClick(e, isFuture)}
+                  >
+                    <span className="font-medium text-amber-600 dark:text-amber-400">{drawPendingLabel}</span>
                   </Link>
                 )}
                 {!showQuickBuy && (
