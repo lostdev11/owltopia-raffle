@@ -90,6 +90,7 @@ import { formatDateTimeWithTimezone, formatDateTimeLocal } from '@/lib/utils'
 import {
   buildRaffleImageAttemptChain,
   getRaffleDisplayImageUrl,
+  isLegacyOwltopiaPlaceholderImageUrl,
 } from '@/lib/raffle-display-image-url'
 import { useImageAttemptTimeout } from '@/lib/use-image-attempt-timeout'
 import Image from 'next/image'
@@ -386,11 +387,12 @@ export function RaffleDetailClient({
   const [mintHeroLoading, setMintHeroLoading] = useState(false)
   const mobileLinkTouchRef = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   const heroImageChain = useMemo(() => {
-    const fromDb = getRaffleDisplayImageUrl(raffle.image_url)
+    const storedImageUrl = isLegacyOwltopiaPlaceholderImageUrl(raffle.image_url)
+      ? null
+      : raffle.image_url
+    const fromDb = getRaffleDisplayImageUrl(storedImageUrl)
     const prizeCurrency = (raffle.prize_currency || '').trim().toUpperCase()
-    const isLegacyOwltopiaPlaceholder =
-      typeof raffle.image_url === 'string' &&
-      (/\/logo\.gif$/i.test(raffle.image_url.trim()) || /\/icon\.png$/i.test(raffle.image_url.trim()))
+    const isLegacyOwltopiaPlaceholder = isLegacyOwltopiaPlaceholderImageUrl(raffle.image_url)
     const cryptoCurrencyArt =
       (raffle.prize_type === 'crypto' || raffle.prize_type == null) &&
       (prizeCurrency === 'SOL' || prizeCurrency === 'USDC')
@@ -401,7 +403,8 @@ export function RaffleDetailClient({
     if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) {
       return [cryptoCurrencyArt]
     }
-    return buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url).filter(Boolean)
+    // NFT + site brand mark: skip placeholder so mint-metadata fallback can run.
+    return buildRaffleImageAttemptChain(storedImageUrl, raffle.image_fallback_url).filter(Boolean)
   }, [raffle.image_url, raffle.image_fallback_url, raffle.prize_type, raffle.prize_currency])
   const heroImageChainKey = heroImageChain.join('\0')
   const canMintImageFallback =

@@ -19,6 +19,7 @@ import { getAdminRole } from '@/lib/db/admins'
 import { SESSION_COOKIE_NAME, parseSessionCookieValue } from '@/lib/auth-server'
 import { canViewerSeeRafflePending } from '@/lib/raffles/visibility'
 import { scheduleRaffleDrawOnVisit } from '@/lib/raffles/schedule-raffle-draw-on-visit'
+import { repairNftRafflePlaceholderImage } from '@/lib/raffles/repair-nft-raffle-placeholder-image'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import { canonicalRaffleSlug, raffleSlugNeedsRedirect } from '@/lib/raffles/slug-aliases'
 // Force dynamic rendering to prevent caching stale data
@@ -87,11 +88,13 @@ export default async function RaffleDetailPage({
     redirect(`/raffles/${encodeURIComponent(redirectTo)}`)
   }
 
-  const raffle = await getRaffleBySlug(slug)
+  const raffleRow = await getRaffleBySlug(slug)
   
-  if (!raffle) {
+  if (!raffleRow) {
     notFound()
   }
+
+  let raffle = raffleRow
 
   // If DB still has a deprecated slug, bounce to the canonical public path.
   const canonical = canonicalRaffleSlug(raffle.slug)
@@ -111,6 +114,12 @@ export default async function RaffleDetailPage({
   // Draw / min-threshold processing runs after the response (see scheduleRaffleDrawOnVisit).
   // Blocking selectWinner() during SSR left ended undrawn raffles stuck on "Loading raffles..." for up to ~75s (VRF).
   scheduleRaffleDrawOnVisit(raffle)
+
+  // NFT listings that stored /icon.png (or empty art) — resolve mint metadata before first paint.
+  const repairedImageUrl = await repairNftRafflePlaceholderImage(raffle)
+  if (repairedImageUrl) {
+    raffle = { ...raffle, image_url: repairedImageUrl }
+  }
 
   const entries = await getEntriesByRaffleId(raffle.id)
   const milestones = await getMilestonesByRaffleId(raffle.id)

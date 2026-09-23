@@ -71,6 +71,8 @@ import { GOATS_TICKET_CURRENCY, canWalletUseGoatsTicketCurrency } from '@/lib/ra
 import { parsePromoXHandleInput } from '@/lib/raffles/promo-x-handle'
 import { recordPlatformProjectFromCreatedRaffleSafe } from '@/lib/platform-projects/record-from-raffle'
 import { sanitizeLaunchMintPubkey } from '@/lib/solana/validate-pubkey'
+import { fetchNftImageUriFromHelius } from '@/lib/nft-helius-image'
+import { isLegacyOwltopiaPlaceholderImageUrl } from '@/lib/raffle-display-image-url'
 
 /** Same as /api/me/dashboard — client sends the adapter’s pubkey so we can reject stale SIWS sessions after wallet switches. */
 const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
@@ -814,11 +816,38 @@ export async function handleCreateRafflePost(
         )
       }
 
+      let nftListingImage =
+        typeof body.image_url === 'string' && body.image_url.trim() ? body.image_url.trim() : ''
+      if (!nftListingImage || isLegacyOwltopiaPlaceholderImageUrl(nftListingImage)) {
+        const assetId = String(nftTokenId || nftMintAddress || '').trim()
+        if (assetId) {
+          try {
+            const fromHelius = await withTimeout(
+              fetchNftImageUriFromHelius(assetId, { preferMainnet: true }),
+              SUPABASE_TIMEOUT_MS,
+              'timeout'
+            )
+            const resolved = fromHelius?.trim() || ''
+            if (resolved && !isLegacyOwltopiaPlaceholderImageUrl(resolved)) {
+              nftListingImage = resolved
+            } else {
+              nftListingImage = ''
+            }
+          } catch {
+            nftListingImage = isLegacyOwltopiaPlaceholderImageUrl(nftListingImage)
+              ? ''
+              : nftListingImage
+          }
+        } else if (isLegacyOwltopiaPlaceholderImageUrl(nftListingImage)) {
+          nftListingImage = ''
+        }
+      }
+
       raffleData = {
         slug,
         title: canonicalNftTitle,
         description: body.description || null,
-        image_url: body.image_url || null,
+        image_url: nftListingImage || null,
         image_fallback_url:
           typeof body.image_fallback_url === 'string' && body.image_fallback_url.trim()
             ? body.image_fallback_url.trim()

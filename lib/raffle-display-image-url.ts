@@ -13,6 +13,26 @@ import {
 } from '@/lib/nft-media-uri'
 
 /**
+ * Site brand assets sometimes leaked into NFT raffle `image_url` (e.g. create form
+ * switched from SOL token prize → NFT and kept `/icon.png`). Those URLs load fine,
+ * so mint-metadata fallback never runs — treat them as “no listing art”.
+ */
+export function isLegacyOwltopiaPlaceholderImageUrl(url: string | null | undefined): boolean {
+  if (!url?.trim()) return false
+  const trimmed = url.trim()
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+    return /^\/(icon\.png|logo\.gif)$/i.test(trimmed)
+  }
+  try {
+    const u = new URL(trimmed)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
+    return /^\/(icon\.png|logo\.gif)$/i.test(u.pathname)
+  } catch {
+    return /\/(icon\.png|logo\.gif)$/i.test(trimmed)
+  }
+}
+
+/**
  * Public HTTPS hosts where we load images in the browser instead of `/api/proxy-image`.
  * Firebase/GCS often work in-browser while server-side fetch returns 404 or blocks bots;
  * add matching `images.remotePatterns` in next.config.js for `next/image`.

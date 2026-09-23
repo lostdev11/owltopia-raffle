@@ -63,6 +63,7 @@ import {
   buildRaffleImageAttemptChain,
   getRaffleDisplayImageUrl,
   isDirectRaffleImageHost,
+  isLegacyOwltopiaPlaceholderImageUrl,
   proxyThumbImageUrl,
 } from '@/lib/raffle-display-image-url'
 import { useCart } from '@/components/cart/CartProvider'
@@ -160,11 +161,12 @@ export function RaffleCard({
   const [cartAddedHint, setCartAddedHint] = useState(false)
   const [winnerDisplayName, setWinnerDisplayName] = useState<string | null>(null)
   const imageAttemptChain = useMemo(() => {
-    const fromDb = getRaffleDisplayImageUrl(raffle.image_url)
+    const storedImageUrl = isLegacyOwltopiaPlaceholderImageUrl(raffle.image_url)
+      ? null
+      : raffle.image_url
+    const fromDb = getRaffleDisplayImageUrl(storedImageUrl)
     const prizeCurrency = (raffle.prize_currency || '').trim().toUpperCase()
-    const isLegacyOwltopiaPlaceholder =
-      typeof raffle.image_url === 'string' &&
-      (/\/logo\.gif$/i.test(raffle.image_url.trim()) || /\/icon\.png$/i.test(raffle.image_url.trim()))
+    const isLegacyOwltopiaPlaceholder = isLegacyOwltopiaPlaceholderImageUrl(raffle.image_url)
     const cryptoCurrencyArt =
       (raffle.prize_type === 'crypto' || raffle.prize_type == null) &&
       (prizeCurrency === 'SOL' || prizeCurrency === 'USDC')
@@ -175,7 +177,7 @@ export function RaffleCard({
     if (cryptoCurrencyArt && (!fromDb || isLegacyOwltopiaPlaceholder)) {
       return [cryptoCurrencyArt]
     }
-    return buildRaffleImageAttemptChain(raffle.image_url, raffle.image_fallback_url).filter(Boolean)
+    return buildRaffleImageAttemptChain(storedImageUrl, raffle.image_fallback_url).filter(Boolean)
   }, [raffle.image_url, raffle.image_fallback_url, raffle.prize_type, raffle.prize_currency])
   const imageAttemptChainKey = imageAttemptChain.join('\0')
   /**
