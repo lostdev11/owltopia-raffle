@@ -825,7 +825,7 @@ export async function handleCreateRafflePost(
             const fromHelius = await withTimeout(
               fetchNftImageUriFromHelius(assetId, { preferMainnet: true }),
               SUPABASE_TIMEOUT_MS,
-              'nft image resolve timeout'
+              'timeout'
             )
             const resolved = fromHelius?.trim() || ''
             if (resolved && !isLegacyOwltopiaPlaceholderImageUrl(resolved)) {
