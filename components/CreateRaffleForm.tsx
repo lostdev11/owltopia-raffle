@@ -93,6 +93,7 @@ import {
   listPartnerPrizeTokens,
   PARTNER_OWL_PRIZE_UI_ENABLED,
 } from '@/lib/partner-prize-tokens'
+import { isLegacyOwltopiaPlaceholderImageUrl } from '@/lib/raffle-display-image-url'
 import { humanPartnerPrizeToRawUnits } from '@/lib/partner-prize-amount'
 import { explainCreateRaffleThreshold } from '@/lib/raffle-profit'
 import {
@@ -444,7 +445,10 @@ export function CreateRaffleForm({ snsDomainHubFlow = false }: { snsDomainHubFlo
       setImageUrl(getPartnerPrizeListingImageUrl(tokenPrizeCurrency))
       setFloorPrice('')
       lastAutofillTicketRef.current = null
+      return
     }
+    // Switching back to NFT must not keep SOL/token brand art (/icon.png) as listing image.
+    setImageUrl((prev) => (isLegacyOwltopiaPlaceholderImageUrl(prev) ? null : prev))
   }, [prizeMode, tokenPrizeCurrency])
 
   useEffect(() => {
