@@ -727,7 +727,14 @@ export async function switchboardRevealRandomness(params: {
       const existing = await readRevealedValue(
         (params.knownRevealTx ?? '').trim() || ''
       )
-      if (existing) return existing
+      if (existing) {
+        if (params.timingScope && revealWall) {
+          logVrfPhase(params.timingScope, 'vrf.reveal_total', revealWall.elapsed(), {
+            path: 'already_revealed',
+          })
+        }
+        return existing
+      }
     } catch {
       // Account may not be ready yet — fall through to reveal loop.
     }
