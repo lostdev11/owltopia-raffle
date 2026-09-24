@@ -1,18 +1,23 @@
 import {
-  PACK_CATEGORY_WEIGHTS_BPS,
   PACK_DEFAULT_OWL_SOL_PRICE,
   PACK_NFT_EV_DEFAULT_BAND_AVGS,
   PACK_NFT_VALUE_BANDS,
   PACK_PRICE_SOL,
   PACK_RTP_BPS,
-  PACK_SOL_TIERS,
-  PACK_TARGET_EV_SOL,
   isPackNftFairValueSol,
   owlTiersWithPrice,
   resolveOwlSolPrice,
+  type PackPaymentCurrency,
   type PackRegularCategory,
 } from '@/lib/packs/config'
-import { PACK_JACKPOT_CONTRIBUTION_SOL } from '@/lib/packs/jackpot'
+import { packJackpotContributionForPrice, PACK_JACKPOT_CONTRIBUTION_SOL } from '@/lib/packs/jackpot'
+import {
+  PACK_ODDS_PROFILE_SOL,
+  owlTiersForProfile,
+  packOwlCheckoutTicketSolEquiv,
+  resolvePackOddsProfile,
+  type PackOddsProfile,
+} from '@/lib/packs/odds-profiles'
 import { buildWeightedNftPool } from '@/lib/packs/nft-weights'
 
 export type EvSimulatorResult = {
@@ -25,6 +30,8 @@ export type EvSimulatorResult = {
   jackpotEvSol: number
   owlSolPrice: number | null
   notes: string[]
+  paymentCurrency?: PackPaymentCurrency
+  oddsProfileId?: PackOddsProfile['id']
 }
 
 function weightedAverage(weights: number[], values: number[]): number {
@@ -37,6 +44,69 @@ function weightedAverage(weights: number[], values: number[]): number {
   return sum
 }
 
+function evFromProfile(input: {
+  profile: PackOddsProfile
+  packPriceSol: number
+  targetRtpBps: number
+  owlSolPrice: number
+  nftEv: number
+  jackpotEvSol: number
+  notes: string[]
+  paymentCurrency?: PackPaymentCurrency
+}): EvSimulatorResult {
+  const owlTiers =
+    input.profile.id === 'sol'
+      ? owlTiersWithPrice(input.owlSolPrice)
+      : owlTiersForProfile(input.profile, input.owlSolPrice)
+  const owlEv = weightedAverage(
+    owlTiers.map((t) => t.weight),
+    owlTiers.map((t) => t.fairValueSol)
+  )
+  const solEv = weightedAverage(
+    input.profile.solTiers.map((t) => t.weight),
+    input.profile.solTiers.map((t) => t.amountSol)
+  )
+
+  const weights = input.profile.categoryWeightsBps
+  const catTotal = weights.owl + weights.sol + weights.nft
+
+  const categoryEv: Record<PackRegularCategory, number> = {
+    owl: (weights.owl / catTotal) * owlEv,
+    sol: (weights.sol / catTotal) * solEv,
+    nft: (weights.nft / catTotal) * input.nftEv,
+  }
+
+  const estimatedEvSol =
+    categoryEv.owl + categoryEv.sol + categoryEv.nft + input.jackpotEvSol
+  const targetEvSol = (input.packPriceSol * input.targetRtpBps) / 10_000
+  const estimatedRtpBps = Math.round((estimatedEvSol / input.packPriceSol) * 10_000)
+
+  const drift = Math.abs(estimatedEvSol - targetEvSol)
+  if (drift > 0.01) {
+    input.notes.push(
+      `Typical prize value (${estimatedEvSol.toFixed(4)} SOL) is more than 0.01 SOL off the ${targetEvSol.toFixed(4)} SOL target (${input.targetRtpBps / 100}% RTP). Adjust prize weights.`
+    )
+  } else {
+    input.notes.push(
+      `Typical prize value is close to the ${input.targetRtpBps / 100}% target (within 0.01 SOL).`
+    )
+  }
+
+  return {
+    packPriceSol: input.packPriceSol,
+    targetEvSol,
+    targetRtpBps: input.targetRtpBps,
+    estimatedEvSol,
+    estimatedRtpBps,
+    categoryEv,
+    jackpotEvSol: input.jackpotEvSol,
+    owlSolPrice: input.owlSolPrice,
+    notes: input.notes,
+    paymentCurrency: input.paymentCurrency,
+    oddsProfileId: input.profile.id,
+  }
+}
+
 /**
  * Estimate EV for the MVP pack given optional live OWL/SOL price and
  * optional average NFT fair value per band (defaults to band midpoint).
@@ -44,17 +114,12 @@ function weightedAverage(weights: number[], values: number[]): number {
 export function simulatePackEv(options?: {
   owlSolPrice?: number | null
   nftBandAvgFairValues?: number[]
+  paymentCurrency?: PackPaymentCurrency
+  paymentFeeSol?: number | null
 }): EvSimulatorResult {
+  const paymentCurrency = options?.paymentCurrency ?? 'SOL'
+  const profile = resolvePackOddsProfile(paymentCurrency)
   const owlSolPrice = resolveOwlSolPrice(options?.owlSolPrice)
-  const owlTiers = owlTiersWithPrice(owlSolPrice)
-  const owlEv = weightedAverage(
-    owlTiers.map((t) => t.weight),
-    owlTiers.map((t) => t.fairValueSol)
-  )
-  const solEv = weightedAverage(
-    PACK_SOL_TIERS.map((t) => t.weight),
-    PACK_SOL_TIERS.map((t) => t.amountSol)
-  )
 
   const nftAvgs =
     options?.nftBandAvgFairValues ??
@@ -64,51 +129,71 @@ export function simulatePackEv(options?: {
     nftAvgs
   )
 
-  const catTotal =
-    PACK_CATEGORY_WEIGHTS_BPS.owl +
-    PACK_CATEGORY_WEIGHTS_BPS.sol +
-    PACK_CATEGORY_WEIGHTS_BPS.nft
+  const packPriceSol =
+    paymentCurrency === 'OWL'
+      ? packOwlCheckoutTicketSolEquiv({
+          owlSolPrice,
+          paymentFeeSol: options?.paymentFeeSol ?? null,
+        })
+      : PACK_PRICE_SOL
 
-  const categoryEv: Record<PackRegularCategory, number> = {
-    owl: (PACK_CATEGORY_WEIGHTS_BPS.owl / catTotal) * owlEv,
-    sol: (PACK_CATEGORY_WEIGHTS_BPS.sol / catTotal) * solEv,
-    nft: (PACK_CATEGORY_WEIGHTS_BPS.nft / catTotal) * nftEv,
-  }
-
-  const jackpotEvSol = PACK_JACKPOT_CONTRIBUTION_SOL
-  const estimatedEvSol =
-    categoryEv.owl + categoryEv.sol + categoryEv.nft + jackpotEvSol
-  const estimatedRtpBps = Math.round((estimatedEvSol / PACK_PRICE_SOL) * 10_000)
+  const jackpotEvSol =
+    paymentCurrency === 'OWL'
+      ? packJackpotContributionForPrice(packPriceSol)
+      : PACK_JACKPOT_CONTRIBUTION_SOL
 
   const notes: string[] = []
   notes.push(
     `Jackpot slice (${jackpotEvSol} SOL/open) included in EV at steady-state pool equilibrium.`
   )
+  if (paymentCurrency === 'OWL') {
+    notes.push(
+      `$OWL checkout uses draft odds profile (${profile.id}); ticket SOL-equiv ≈ ${packPriceSol} SOL (20 $OWL + fee).`
+    )
+  }
   if (!options?.owlSolPrice) {
     notes.push(
       `OWL prize value uses default rate (${PACK_DEFAULT_OWL_SOL_PRICE} SOL per OWL; 10 OWL = 0.1 SOL). Override in Admin → Packs if needed.`
     )
   }
-  const drift = Math.abs(estimatedEvSol - PACK_TARGET_EV_SOL)
-  if (drift > 0.01) {
-    notes.push(
-      `Typical prize value (${estimatedEvSol.toFixed(4)} SOL) is more than 0.01 SOL off the ${PACK_TARGET_EV_SOL} SOL target. Adjust prize weights.`
-    )
-  } else {
-    notes.push('Typical prize value is close to the 80% target (within 0.01 SOL).')
-  }
 
-  return {
-    packPriceSol: PACK_PRICE_SOL,
-    targetEvSol: PACK_TARGET_EV_SOL,
+  return evFromProfile({
+    profile,
+    packPriceSol,
     targetRtpBps: PACK_RTP_BPS,
-    estimatedEvSol,
-    estimatedRtpBps,
-    categoryEv,
-    jackpotEvSol,
     owlSolPrice,
+    nftEv,
+    jackpotEvSol,
     notes,
-  }
+    paymentCurrency,
+  })
+}
+
+/** SOL-path EV using explicit profile (defaults to production SOL ladders). */
+export function simulatePackEvWithProfile(options: {
+  profile?: PackOddsProfile
+  owlSolPrice?: number | null
+  nftEv: number
+  packPriceSol?: number
+  jackpotEvSol?: number
+}): EvSimulatorResult {
+  const profile = options.profile ?? PACK_ODDS_PROFILE_SOL
+  const owlSolPrice = resolveOwlSolPrice(options?.owlSolPrice)
+  const packPriceSol = options.packPriceSol ?? PACK_PRICE_SOL
+  const jackpotEvSol = options.jackpotEvSol ?? PACK_JACKPOT_CONTRIBUTION_SOL
+  const notes: string[] = [
+    `Odds profile: ${profile.id}. Jackpot slice ${jackpotEvSol} SOL/open.`,
+  ]
+  return evFromProfile({
+    profile,
+    packPriceSol,
+    targetRtpBps: PACK_RTP_BPS,
+    owlSolPrice,
+    nftEv: options.nftEv,
+    jackpotEvSol,
+    notes,
+    paymentCurrency: profile.id === 'owl' ? 'OWL' : 'SOL',
+  })
 }
 
 export type PackNftBandLabel = 'common' | 'mid' | 'high' | 'premium'
@@ -170,6 +255,8 @@ export function simulatePackEvFromInventory(options: {
   owlSolPrice?: number | null
   inventory: InventoryFairValueRow[]
   draftFloors?: number[]
+  paymentCurrency?: PackPaymentCurrency
+  paymentFeeSol?: number | null
 }): EvSimulatorResult {
   const draftFloors = options.draftFloors ?? []
   const available = options.inventory
@@ -185,6 +272,8 @@ export function simulatePackEvFromInventory(options: {
     const ev = simulatePackEv({
       owlSolPrice: options.owlSolPrice,
       nftBandAvgFairValues: averages,
+      paymentCurrency: options.paymentCurrency,
+      paymentFeeSol: options.paymentFeeSol,
     })
     return { ...ev, notes: [...ev.notes, ...notes, ...bandNotes] }
   }
@@ -206,60 +295,38 @@ export function simulatePackEvFromInventory(options: {
     `NFT EV uses per-mint floor weights (${values.length} NFT${values.length === 1 ? '' : 's'}; higher FP = rarer${maxFp > PACK_NFT_VALUE_BANDS[2]!.maxFairValueSol ? `; pool max ${maxFp} SOL` : ''}).`
   )
 
+  const paymentCurrency = options.paymentCurrency ?? 'SOL'
+  const profile = resolvePackOddsProfile(paymentCurrency)
   const owlSolPrice = resolveOwlSolPrice(options.owlSolPrice)
-  const owlTiers = owlTiersWithPrice(owlSolPrice)
-  const owlEv = weightedAverage(
-    owlTiers.map((t) => t.weight),
-    owlTiers.map((t) => t.fairValueSol)
-  )
-  const solEv = weightedAverage(
-    PACK_SOL_TIERS.map((t) => t.weight),
-    PACK_SOL_TIERS.map((t) => t.amountSol)
-  )
+  const packPriceSol =
+    paymentCurrency === 'OWL'
+      ? packOwlCheckoutTicketSolEquiv({
+          owlSolPrice,
+          paymentFeeSol: options.paymentFeeSol ?? null,
+        })
+      : PACK_PRICE_SOL
+  const jackpotEvSol =
+    paymentCurrency === 'OWL'
+      ? packJackpotContributionForPrice(packPriceSol)
+      : PACK_JACKPOT_CONTRIBUTION_SOL
 
-  const catTotal =
-    PACK_CATEGORY_WEIGHTS_BPS.owl +
-    PACK_CATEGORY_WEIGHTS_BPS.sol +
-    PACK_CATEGORY_WEIGHTS_BPS.nft
-
-  const categoryEv: Record<PackRegularCategory, number> = {
-    owl: (PACK_CATEGORY_WEIGHTS_BPS.owl / catTotal) * owlEv,
-    sol: (PACK_CATEGORY_WEIGHTS_BPS.sol / catTotal) * solEv,
-    nft: (PACK_CATEGORY_WEIGHTS_BPS.nft / catTotal) * nftEv,
+  if (paymentCurrency === 'OWL') {
+    notes.push(
+      `$OWL checkout uses draft odds profile; ticket SOL-equiv ≈ ${packPriceSol} SOL (20 $OWL + fee).`
+    )
   }
-
-  const jackpotEvSol = PACK_JACKPOT_CONTRIBUTION_SOL
-  const estimatedEvSol =
-    categoryEv.owl + categoryEv.sol + categoryEv.nft + jackpotEvSol
-  const estimatedRtpBps = Math.round((estimatedEvSol / PACK_PRICE_SOL) * 10_000)
-
   if (!options.owlSolPrice) {
     notes.push(
       `OWL prize value uses default rate (${PACK_DEFAULT_OWL_SOL_PRICE} SOL per OWL; 10 OWL = 0.1 SOL). Override in Admin → Packs if needed.`
     )
   }
-  notes.push(
-    `Jackpot slice (${jackpotEvSol} SOL/open) included in EV at steady-state pool equilibrium.`
-  )
 
-  const drift = Math.abs(estimatedEvSol - PACK_TARGET_EV_SOL)
-  if (drift > 0.01) {
-    notes.push(
-      `Typical prize value (${estimatedEvSol.toFixed(4)} SOL) is more than 0.01 SOL off the ${PACK_TARGET_EV_SOL} SOL target. Adjust prize weights.`
-    )
-  } else {
-    notes.push('Typical prize value is close to the 80% target (within 0.01 SOL).')
-  }
-
-  return {
-    packPriceSol: PACK_PRICE_SOL,
-    targetEvSol: PACK_TARGET_EV_SOL,
-    targetRtpBps: PACK_RTP_BPS,
-    estimatedEvSol,
-    estimatedRtpBps,
-    categoryEv,
+  const ev = simulatePackEvWithProfile({
+    profile,
+    owlSolPrice: options.owlSolPrice,
+    nftEv,
+    packPriceSol,
     jackpotEvSol,
-    owlSolPrice,
-    notes,
-  }
+  })
+  return { ...ev, notes: [...ev.notes, ...notes] }
 }

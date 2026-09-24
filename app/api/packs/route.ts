@@ -58,23 +58,6 @@ export async function GET() {
     const pauseReason = vaultConfig?.pause_reason ?? 'Packs not configured yet'
     const vault = getPacksVaultPublicKey() || vaultConfig?.vault_pubkey || null
 
-    const ev = simulatePackEvFromInventory({
-      owlSolPrice: vaultConfig?.owl_sol_price ?? null,
-      inventory,
-    })
-
-    const oddsPct = computePackOddsPercentages({
-      owlSolPrice: vaultConfig?.owl_sol_price ?? null,
-      nftInventory: inventory.map((r) => ({
-        id: r.id,
-        mint_address: r.mint_address,
-        fair_value_sol: Number(r.fair_value_sol),
-        name: r.name,
-        image_url: r.image_url,
-        odds_tier: r.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard',
-      })),
-    })
-
     let owlCheckoutEnabled = false
     let owlFeeSol: number | null = null
     let owlFeeLamports: string | null = null
@@ -90,6 +73,41 @@ export async function GET() {
     } catch {
       // Non-fatal — UI still shows fixed 20 $OWL + $1 fee label
     }
+
+    const nftInventory = inventory.map((r) => ({
+      id: r.id,
+      mint_address: r.mint_address,
+      fair_value_sol: Number(r.fair_value_sol),
+      name: r.name,
+      image_url: r.image_url,
+      odds_tier: (r.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard') as
+        | 'standard'
+        | 'premium_1pct',
+    }))
+
+    const ev = simulatePackEvFromInventory({
+      owlSolPrice: vaultConfig?.owl_sol_price ?? null,
+      inventory,
+    })
+
+    const evOwl = simulatePackEvFromInventory({
+      owlSolPrice: vaultConfig?.owl_sol_price ?? null,
+      inventory,
+      paymentCurrency: 'OWL',
+      paymentFeeSol: owlFeeSol,
+    })
+
+    const oddsPct = computePackOddsPercentages({
+      owlSolPrice: vaultConfig?.owl_sol_price ?? null,
+      nftInventory,
+      paymentCurrency: 'SOL',
+    })
+
+    const oddsPctOwl = computePackOddsPercentages({
+      owlSolPrice: vaultConfig?.owl_sol_price ?? null,
+      nftInventory,
+      paymentCurrency: 'OWL',
+    })
 
     return NextResponse.json({
       product: {
@@ -128,6 +146,22 @@ export async function GET() {
         owlTiersRaw: PACK_OWL_TIERS.map((t) => ({ amount: t.amount, weight: t.weight })),
         solTiersRaw: PACK_SOL_TIERS.map((t) => ({ amountSol: t.amountSol, weight: t.weight })),
       },
+      oddsByPayment: {
+        SOL: {
+          categories: oddsPct.categories,
+          owlTiers: oddsPct.owlTiers,
+          solTiers: oddsPct.solTiers,
+          premiumNft: oddsPct.premiumNft,
+          nftInventory: oddsPct.nftInventory.slice(0, 40),
+        },
+        OWL: {
+          categories: oddsPctOwl.categories,
+          owlTiers: oddsPctOwl.owlTiers,
+          solTiers: oddsPctOwl.solTiers,
+          premiumNft: oddsPctOwl.premiumNft,
+          nftInventory: oddsPctOwl.nftInventory.slice(0, 40),
+        },
+      },
       fairness: {
         openAlgo: resolvePackOpenAlgo(),
         vrfEnabled: isPackVrfEnabled(),
@@ -155,6 +189,20 @@ export async function GET() {
         targetEvSol: ev.targetEvSol,
         estimatedEvSol: ev.estimatedEvSol,
         estimatedRtpBps: ev.estimatedRtpBps,
+      },
+      evByPayment: {
+        SOL: {
+          packPriceSol: ev.packPriceSol,
+          targetEvSol: ev.targetEvSol,
+          estimatedEvSol: ev.estimatedEvSol,
+          estimatedRtpBps: ev.estimatedRtpBps,
+        },
+        OWL: {
+          packPriceSol: evOwl.packPriceSol,
+          targetEvSol: evOwl.targetEvSol,
+          estimatedEvSol: evOwl.estimatedEvSol,
+          estimatedRtpBps: evOwl.estimatedRtpBps,
+        },
       },
       recentOpens: recent.map((o) => ({
         id: o.id,

@@ -3,13 +3,16 @@
  */
 
 import {
-  PACK_CATEGORY_WEIGHTS_BPS,
   PACK_OWL_TIERS,
-  PACK_PREMIUM_NFT_OVERALL_BPS,
-  PACK_SOL_TIERS,
   owlTiersWithPrice,
+  type PackPaymentCurrency,
   type PackRegularCategory,
 } from '@/lib/packs/config'
+import {
+  owlTiersForProfile,
+  resolvePackOddsProfile,
+  type PackOddsProfile,
+} from '@/lib/packs/odds-profiles'
 import {
   buildWeightedNftPool,
   splitNftPoolByOddsTier,
@@ -67,23 +70,29 @@ export type PackOddsPercentages = {
 export function computePackOddsPercentages(options?: {
   owlSolPrice?: number | null
   nftInventory?: NftPoolEntry[]
+  paymentCurrency?: PackPaymentCurrency
+  profile?: PackOddsProfile
 }): PackOddsPercentages {
-  const catTotal =
-    PACK_CATEGORY_WEIGHTS_BPS.owl +
-    PACK_CATEGORY_WEIGHTS_BPS.sol +
-    PACK_CATEGORY_WEIGHTS_BPS.nft
+  const profile =
+    options?.profile ??
+    resolvePackOddsProfile(options?.paymentCurrency === 'OWL' ? 'OWL' : 'SOL')
+  const weights = profile.categoryWeightsBps
+  const catTotal = weights.owl + weights.sol + weights.nft
 
   const categories: PackOddsPercentages['categories'] = (
     ['owl', 'sol', 'nft'] as PackRegularCategory[]
   ).map((category) => ({
     category,
-    weightBps: PACK_CATEGORY_WEIGHTS_BPS[category],
-    percent: pct(PACK_CATEGORY_WEIGHTS_BPS[category], catTotal),
+    weightBps: weights[category],
+    percent: pct(weights[category], catTotal),
   }))
 
-  const owlTiersSrc = owlTiersWithPrice(options?.owlSolPrice)
+  const owlTiersSrc =
+    profile.id === 'sol'
+      ? owlTiersWithPrice(options?.owlSolPrice)
+      : owlTiersForProfile(profile, options?.owlSolPrice)
   const owlSum = sumWeights(owlTiersSrc.map((t) => t.weight))
-  const owlCatPct = PACK_CATEGORY_WEIGHTS_BPS.owl / catTotal
+  const owlCatPct = weights.owl / catTotal
   const owlTiers = owlTiersSrc.map((t) => {
     const ofCat = pct(t.weight, owlSum)
     return {
@@ -97,9 +106,9 @@ export function computePackOddsPercentages(options?: {
   // PACK_OWL_TIERS kept referenced so tree-shaking does not drop ladder exports used by docs/UI.
   void PACK_OWL_TIERS
 
-  const solSum = sumWeights(PACK_SOL_TIERS.map((t) => t.weight))
-  const solCatPct = PACK_CATEGORY_WEIGHTS_BPS.sol / catTotal
-  const solTiers = PACK_SOL_TIERS.map((t) => {
+  const solSum = sumWeights(profile.solTiers.map((t) => t.weight))
+  const solCatPct = weights.sol / catTotal
+  const solTiers = profile.solTiers.map((t) => {
     const ofCat = pct(t.weight, solSum)
     return {
       amountSol: t.amountSol,
@@ -113,7 +122,7 @@ export function computePackOddsPercentages(options?: {
   const { premium, standard } = splitNftPoolByOddsTier(inventory)
   const premiumPool = buildWeightedNftPool(premium)
   const premiumSum = sumWeights(premiumPool.map((p) => p.weight))
-  const premiumOverallPct = PACK_PREMIUM_NFT_OVERALL_BPS / 100
+  const premiumOverallPct = profile.premiumNftOverallBps / 100
   const premiumItems = premiumPool.map((p) => {
     const ofPrem = pct(p.weight, premiumSum)
     return {
@@ -123,16 +132,16 @@ export function computePackOddsPercentages(options?: {
       weight: p.weight,
       percentOfPremiumPool: ofPrem,
       // ofPrem is % of premium pool; overall = share * 1% overall
-      percentOverall: Math.round((ofPrem * PACK_PREMIUM_NFT_OVERALL_BPS) / 100) / 100,
+      percentOverall: Math.round((ofPrem * profile.premiumNftOverallBps) / 100) / 100,
       // Buyers see the chase *tier* rate (shared ~1%), not the diluted per-mint share.
       tierPercentOverall: premiumOverallPct,
     }
   })
 
-  const nftCatPct = PACK_CATEGORY_WEIGHTS_BPS.nft / catTotal
+  const nftCatPct = weights.nft / catTotal
   const standardShare =
     premiumPool.length > 0
-      ? Math.max(0, nftCatPct - PACK_PREMIUM_NFT_OVERALL_BPS / 10_000)
+      ? Math.max(0, nftCatPct - profile.premiumNftOverallBps / 10_000)
       : nftCatPct
   const standardPool = buildWeightedNftPool(standard.length > 0 ? standard : inventory)
   const nftSum = sumWeights(standardPool.map((p) => p.weight))
@@ -157,7 +166,7 @@ export function computePackOddsPercentages(options?: {
     solTiers,
     premiumNft: {
       overallPercent: premiumOverallPct,
-      overallBps: PACK_PREMIUM_NFT_OVERALL_BPS,
+      overallBps: profile.premiumNftOverallBps,
       items: premiumItems,
     },
     nftInventory,

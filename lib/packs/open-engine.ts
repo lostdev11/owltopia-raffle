@@ -6,6 +6,10 @@ import {
   type PackPaymentCurrency,
 } from '@/lib/packs/config'
 import {
+  packOwlCheckoutTicketSolEquiv,
+  resolvePackOddsProfile,
+} from '@/lib/packs/odds-profiles'
+import {
   packJackpotContributionForPrice,
   PACK_JACKPOT_MIN_PAYOUT_SOL,
 } from '@/lib/packs/jackpot'
@@ -296,10 +300,19 @@ export async function confirmAndOpenPack(input: {
     open_commit_hash: commit,
   })
 
+  const ticketSolForJackpot =
+    paymentCurrency === 'OWL'
+      ? packOwlCheckoutTicketSolEquiv({
+          owlSolPrice: config.owl_sol_price,
+          paymentFeeSol: Number(open.payment_fee_sol) || 0,
+          paymentOwlAmount: Number(open.payment_owl_amount) || PACK_PRICE_OWL,
+        })
+      : priceSol
+
   const jackpotContribution =
     Number(config.jackpot_contribution_sol) > 0
       ? Number(config.jackpot_contribution_sol)
-      : packJackpotContributionForPrice(priceSol)
+      : packJackpotContributionForPrice(ticketSolForJackpot)
   const jackpotOddsBps = Number(config.jackpot_win_odds_bps) || 20
   const poolBeforeJackpot = Number(config.jackpot_pool_sol ?? 0)
   const poolAfterContribution =
@@ -363,7 +376,8 @@ export async function confirmAndOpenPack(input: {
     return rowToResult(open, { jackpotPoolSol: jackpotResolution.poolAfterSol })
   }
 
-  const category = pickCategory(seed)
+  const oddsProfile = resolvePackOddsProfile(paymentCurrency)
+  const category = pickCategory(seed, oddsProfile)
 
   let prizeLabel = ''
   let owlAmount: number | null = null
@@ -377,13 +391,13 @@ export async function confirmAndOpenPack(input: {
   let nftPoolSnapshot: PackNftPoolSnapshotRow[] | null = null
 
   if (category === 'owl') {
-    const pick = pickTier(seed, 'owl', config.owl_sol_price)
+    const pick = pickTier(seed, 'owl', config.owl_sol_price, oddsProfile)
     if (pick.category !== 'owl') throw new Error('Invalid OWL pick')
     owlAmount = pick.amount
     fairValueSol = pick.fairValueSol
     prizeLabel = `${pick.amount} $OWL`
   } else if (category === 'sol') {
-    const pick = pickTier(seed, 'sol', config.owl_sol_price)
+    const pick = pickTier(seed, 'sol', config.owl_sol_price, oddsProfile)
     if (pick.category !== 'sol') throw new Error('Invalid SOL pick')
     solAmount = pick.amountSol
     fairValueSol = pick.fairValueSol
@@ -412,7 +426,8 @@ export async function confirmAndOpenPack(input: {
         name: r.name,
         image_url: r.image_url,
         odds_tier: r.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard',
-      }))
+      })),
+      oddsProfile
     )
     nftPoolSnapshot = nftPoolSnapshotForStorage(pool)
 
@@ -442,7 +457,8 @@ export async function confirmAndOpenPack(input: {
           name: r.name,
           image_url: r.image_url,
           odds_tier: r.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard',
-        }))
+        })),
+        oddsProfile
       )
       nftPoolSnapshot = nftPoolSnapshotForStorage(second.pool)
       const reserved2 = await reserveNftById(open.id, second.pick.id)

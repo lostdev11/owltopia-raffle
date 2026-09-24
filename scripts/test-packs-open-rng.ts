@@ -27,6 +27,7 @@ import {
   PACK_PREMIUM_NFT_OVERALL_BPS,
   PACK_SOL_TIERS,
 } from '../lib/packs/config'
+import { PACK_ODDS_PROFILE_OWL, PACK_ODDS_PROFILE_SOL } from '../lib/packs/odds-profiles'
 
 const seed = generatePackOpenSeed()
 const commit = hashPackOpenCommit(seed)
@@ -179,5 +180,21 @@ assert.ok(
       oddsMulti.premiumNft.overallPercent
   ) < 0.05
 )
+
+assert.equal(PACK_ODDS_PROFILE_SOL.categoryWeightsBps.owl, 3000)
+assert.equal(PACK_ODDS_PROFILE_OWL.categoryWeightsBps.nft, 2000)
+assert.equal(PACK_ODDS_PROFILE_OWL.premiumNftOverallBps, 50)
+
+const oddsOwl = computePackOddsPercentages({ paymentCurrency: 'OWL' })
+assert.equal(oddsOwl.categories.find((c) => c.category === 'owl')?.percent, 40)
+assert.equal(oddsOwl.categories.find((c) => c.category === 'nft')?.percent, 20)
+assert.equal(oddsOwl.premiumNft.overallBps, 50)
+assert.ok(oddsOwl.owlTiers.some((t) => t.amount === 4))
+
+let owlCat = 0
+for (let i = 0; i < 5000; i++) {
+  if (pickCategory(generatePackOpenSeed(), PACK_ODDS_PROFILE_OWL) === 'nft') owlCat++
+}
+assert.ok(owlCat > 800 && owlCat < 1200, `OWL profile NFT rate ~20% (got ${owlCat / 50}%)`)
 
 console.log('packs-open-rng: ok')

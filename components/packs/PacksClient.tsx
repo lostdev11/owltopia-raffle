@@ -92,6 +92,15 @@ type PacksConfig = {
       }[]
     }
     nftBands: { min: number; max: number; weight: number }[]
+    categories?: { category: string; weightBps: number; percent: number }[]
+  }
+  oddsByPayment?: {
+    SOL: PacksConfig['odds']
+    OWL: PacksConfig['odds']
+  }
+  evByPayment?: {
+    SOL: { packPriceSol: number; targetEvSol: number; estimatedEvSol: number; estimatedRtpBps: number }
+    OWL: { packPriceSol: number; targetEvSol: number; estimatedEvSol: number; estimatedRtpBps: number }
   }
   fairness?: {
     openAlgo: string
@@ -347,7 +356,22 @@ export function PacksClient({
       : null
   const showReveal = phase === 'reveal' && !!result
   const showExperience = phase === 'experience'
-  const weights = config?.product.categoryWeightsBps ?? { owl: 3000, sol: 3000, nft: 4000 }
+  const activeOdds =
+    config?.oddsByPayment?.[paymentCurrency] ??
+    (config?.odds as PacksConfig['odds'] | undefined)
+  const weightsFromOdds = activeOdds?.categories?.reduce(
+    (acc, c) => {
+      if (c.category === 'owl' || c.category === 'sol' || c.category === 'nft') {
+        acc[c.category] = c.weightBps
+      }
+      return acc
+    },
+    { owl: 3000, sol: 3000, nft: 4000 } as { owl: number; sol: number; nft: number }
+  )
+  const weights = weightsFromOdds ??
+    config?.product.categoryWeightsBps ?? { owl: 3000, sol: 3000, nft: 4000 }
+  const activeEv =
+    config?.evByPayment?.[paymentCurrency] ?? config?.ev ?? null
   const packsOpened = config?.recentOpens?.length ?? 0
   const phaseCaption =
     phase === 'paying'
@@ -658,8 +682,10 @@ export function PacksClient({
                 <RarityRow label="NFT" pct={bpsToPercent(weights.nft)} tone="text-amber-200" />
               </div>
               <p className="mt-3 text-xs leading-relaxed text-white/45">
-                Every open wins · prizes are worth about {bpsToPercent(config?.product.rtpBps ?? 8000)}{' '}
-                of the pack price on average · prize NFTs ready: {config?.vault.availableNfts ?? 0}
+                Every open wins · odds for{' '}
+                {paymentCurrency === 'OWL' ? '$OWL checkout' : '0.1 SOL checkout'} · typical prize ≈{' '}
+                {activeEv?.targetEvSol ?? config?.ev.targetEvSol ?? 0.08} SOL · prize NFTs ready:{' '}
+                {config?.vault.availableNfts ?? 0}
               </p>
               <a
                 href="#prize-tiers"
@@ -738,8 +764,12 @@ export function PacksClient({
         <div className="border-t border-white/10 pt-10">
           <h2 className="font-display text-3xl tracking-[0.12em] text-[#EAFBF4]">Prize odds</h2>
           <p className="mt-2 text-sm text-[#A9CBB9]">
-            Percentages are ME-style odds. Higher-value prizes are rarer. Typical prize ≈{' '}
-            {config?.ev.targetEvSol ?? 0.08} SOL per open (includes{' '}
+            Showing odds for{' '}
+            <span className="text-[#00FF9C]">
+              {paymentCurrency === 'OWL' ? '$OWL pack checkout' : '0.1 SOL checkout'}
+            </span>
+            . Percentages are ME-style odds. Typical prize ≈{' '}
+            {activeEv?.targetEvSol ?? config?.ev.targetEvSol ?? 0.08} SOL per open (includes{' '}
             {config?.jackpot?.contributionSol ?? 0.02} SOL jackpot slice).
             {config ? ` Prize NFTs ready: ${config.vault.availableNfts}.` : null}
             {config?.fairness?.vrfEnabled
@@ -762,7 +792,7 @@ export function PacksClient({
                 $OWL ({bpsToPercent(weights.owl)})
               </p>
               <ul className="mt-2 space-y-1 text-sm text-[#A9CBB9]">
-                {(config?.odds.owlTiers ?? []).map((t) => (
+                {(activeOdds?.owlTiers ?? config?.odds.owlTiers ?? []).map((t) => (
                   <li key={t.amount} className="flex justify-between gap-2">
                     <span>{t.amount} OWL</span>
                     <span className="tabular-nums text-[#00FF9C]/80">
@@ -781,7 +811,7 @@ export function PacksClient({
                 SOL ({bpsToPercent(weights.sol)})
               </p>
               <ul className="mt-2 space-y-1 text-sm text-[#A9CBB9]">
-                {(config?.odds.solTiers ?? []).map((t) => (
+                {(activeOdds?.solTiers ?? config?.odds.solTiers ?? []).map((t) => (
                   <li key={t.amountSol} className="flex justify-between gap-2">
                     <span>{t.amountSol} SOL</span>
                     <span className="tabular-nums text-[#00FF9C]/80">
@@ -800,14 +830,14 @@ export function PacksClient({
                 1% chase NFTs
               </p>
               <p className="mt-1 text-[11px] text-white/40">
-                Shared ~{config?.odds.premiumNft?.overallPercent ?? 1}% hit — when chase lands, one
+                Shared ~{activeOdds?.premiumNft?.overallPercent ?? config?.odds.premiumNft?.overallPercent ?? 1}% hit — when chase lands, one
                 of these is drawn by floor weight.
               </p>
               <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-sm text-[#A9CBB9]">
-                {(config?.odds.premiumNft?.items ?? []).length === 0 && (
+                {(activeOdds?.premiumNft?.items ?? config?.odds.premiumNft?.items ?? []).length === 0 && (
                   <li className="text-white/40">No 1% tier NFTs stocked yet</li>
                 )}
-                {(config?.odds.premiumNft?.items ?? []).map((n) => (
+                {(activeOdds?.premiumNft?.items ?? config?.odds.premiumNft?.items ?? []).map((n) => (
                   <li key={`prem-${n.mint}`} className="flex justify-between gap-2">
                     <span className="min-w-0 truncate">
                       {n.name || `${n.mint.slice(0, 4)}…`}{' '}
@@ -815,6 +845,7 @@ export function PacksClient({
                     </span>
                     <span className="shrink-0 tabular-nums text-amber-200/80">
                       {n.tierPercentOverall ??
+                        activeOdds?.premiumNft?.overallPercent ??
                         config?.odds.premiumNft?.overallPercent ??
                         1}
                       %
@@ -838,7 +869,7 @@ export function PacksClient({
                   <span>
                     Inventory
                     <span className="ml-1.5 text-white/40">
-                      ({(config?.odds.nftInventory ?? []).length})
+                      ({(activeOdds?.nftInventory ?? config?.odds.nftInventory ?? []).length})
                     </span>
                   </span>
                   <ChevronDown
@@ -847,10 +878,10 @@ export function PacksClient({
                   />
                 </summary>
                 <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto text-sm text-[#A9CBB9]">
-                  {(config?.odds.nftInventory ?? []).length === 0 && (
+                  {(activeOdds?.nftInventory ?? config?.odds.nftInventory ?? []).length === 0 && (
                     <li className="text-white/40">No NFTs in vault yet</li>
                   )}
-                  {(config?.odds.nftInventory ?? []).map((n) => (
+                  {(activeOdds?.nftInventory ?? config?.odds.nftInventory ?? []).map((n) => (
                     <li key={n.mint} className="flex justify-between gap-2">
                       <span className="min-w-0 truncate">
                         {n.name || `${n.mint.slice(0, 4)}…`}{' '}
