@@ -39,15 +39,22 @@ export async function GET(_request: NextRequest, context: Ctx) {
         ? verifyCommitHash(open.open_seed, open.open_commit_hash)
         : null
 
-      const oddsBps = Number(config?.jackpot_win_odds_bps ?? 20)
-      const contribution = Number(open.jackpot_contribution_sol ?? 0.02)
+      const oddsBps = Number(
+        openProduct?.jackpot_win_odds_bps ?? config?.jackpot_win_odds_bps ?? 20
+      )
+      const contribution = Number(
+        open.jackpot_contribution_sol ??
+          openProduct?.jackpot_contribution_sol ??
+          config?.jackpot_contribution_sol ??
+          0.02
+      )
       const poolBefore = open.is_jackpot_win
         ? Math.max(0, Number(open.jackpot_amount_sol ?? 0) - contribution)
         : null
       const poolAfterContrib =
         poolBefore != null
           ? poolBefore + contribution
-          : Number(config?.jackpot_pool_sol ?? 0)
+          : Number(openProduct?.jackpot_pool_sol ?? config?.jackpot_pool_sol ?? 0)
       recomputedJackpotWin =
         pickJackpotWin(open.open_seed, oddsBps) &&
         (open.is_jackpot_win
