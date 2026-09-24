@@ -4,6 +4,11 @@ import {
   PACK_PRICE_SOL,
   PACK_RTP_BPS,
 } from '@/lib/packs/config'
+import { type PackPaymentCurrency } from '@/lib/packs/config'
+import {
+  PACKS_PRODUCT_SLUG_MAIN,
+  packProductSlugForPaymentCurrency,
+} from '@/lib/packs/product-pools'
 import { expectedJackpotPoolSol } from '@/lib/packs/jackpot'
 import type {
   PackInventoryPrizeStandard,
@@ -17,15 +22,82 @@ import type {
 } from '@/lib/packs/types'
 import { getPacksVaultPublicKey } from '@/lib/packs/vault'
 
-export async function getActivePackProduct(): Promise<PackProductRow | null> {
+function normalizePackProduct(row: PackProductRow): PackProductRow {
+  return {
+    ...row,
+    jackpot_pool_sol: Number(row.jackpot_pool_sol ?? 0),
+    jackpot_contribution_sol:
+      row.jackpot_contribution_sol != null ? Number(row.jackpot_contribution_sol) : null,
+    jackpot_win_odds_bps: Number(row.jackpot_win_odds_bps ?? 20),
+    min_nft_count: Number(row.min_nft_count ?? 1),
+    shelf_paused: row.shelf_paused === true,
+  }
+}
+
+export async function getPackProductBySlug(slug: string): Promise<PackProductRow | null> {
   const { data, error } = await getSupabaseAdmin()
     .from('pack_products')
     .select('*')
-    .eq('slug', PACKS_PRODUCT_SLUG)
+    .eq('slug', slug)
     .eq('active', true)
     .maybeSingle()
   if (error) throw error
-  return (data as PackProductRow | null) ?? null
+  return data ? normalizePackProduct(data as PackProductRow) : null
+}
+
+export async function getPackProductById(id: string): Promise<PackProductRow | null> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('pack_products')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
+  if (error) throw error
+  return data ? normalizePackProduct(data as PackProductRow) : null
+}
+
+export async function listPackProducts(): Promise<PackProductRow[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('pack_products')
+    .select('*')
+    .eq('active', true)
+    .order('slug', { ascending: true })
+  if (error) throw error
+  return ((data as PackProductRow[]) ?? []).map(normalizePackProduct)
+}
+
+export async function getPackProductForCheckout(
+  currency: PackPaymentCurrency
+): Promise<PackProductRow | null> {
+  return getPackProductBySlug(packProductSlugForPaymentCurrency(currency))
+}
+
+/** Main 0.1 SOL shelf product. */
+export async function getActivePackProduct(): Promise<PackProductRow | null> {
+  return getPackProductBySlug(PACKS_PRODUCT_SLUG_MAIN)
+}
+
+export async function updatePackProduct(
+  id: string,
+  patch: Partial<
+    Pick<
+      PackProductRow,
+      | 'jackpot_pool_sol'
+      | 'jackpot_contribution_sol'
+      | 'jackpot_win_odds_bps'
+      | 'shelf_paused'
+      | 'shelf_pause_reason'
+      | 'min_nft_count'
+    >
+  >
+): Promise<PackProductRow> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('pack_products')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single()
+  if (error) throw error
+  return normalizePackProduct(data as PackProductRow)
 }
 
 export async function getPackVaultConfig(): Promise<PackVaultConfigRow> {
@@ -99,6 +171,7 @@ export async function updatePackVaultConfig(
  * Returns pool state after this open's contribution is applied.
  */
 export async function resolvePackJackpotForOpen(input: {
+  productId: string
   contributionSol: number
   won: boolean
 }): Promise<{
@@ -106,14 +179,15 @@ export async function resolvePackJackpotForOpen(input: {
   poolAfterSol: number
   jackpotPayoutSol: number | null
 }> {
-  const config = await getPackVaultConfig()
-  const poolBefore = Number(config.jackpot_pool_sol ?? 0)
+  const product = await getPackProductById(input.productId)
+  if (!product) throw new Error('Pack product not found')
+  const poolBefore = Number(product.jackpot_pool_sol ?? 0)
   const poolWithContribution =
     Math.round((poolBefore + input.contributionSol) * 1_000_000_000) / 1_000_000_000
 
   if (input.won) {
     const payout = poolWithContribution
-    await updatePackVaultConfig({ jackpot_pool_sol: 0 })
+    await updatePackProduct(input.productId, { jackpot_pool_sol: 0 })
     return {
       poolBeforeSol: poolBefore,
       poolAfterSol: 0,
@@ -121,7 +195,7 @@ export async function resolvePackJackpotForOpen(input: {
     }
   }
 
-  await updatePackVaultConfig({ jackpot_pool_sol: poolWithContribution })
+  await updatePackProduct(input.productId, { jackpot_pool_sol: poolWithContribution })
   return {
     poolBeforeSol: poolBefore,
     poolAfterSol: poolWithContribution,
@@ -133,7 +207,10 @@ export async function resolvePackJackpotForOpen(input: {
  * Recompute jackpot_pool_sol from pack_opens history (completed + paid unfinished).
  * Use after stuck paid opens or manual corrections so the visible pool matches purchases.
  */
-export async function recalculatePackJackpotPool(): Promise<{
+export async function recalculatePackJackpotPool(input?: {
+  productId: string
+  defaultContributionSol?: number
+}): Promise<{
   previousPoolSol: number
   expectedPoolSol: number
   completedContribSol: number
@@ -142,16 +219,27 @@ export async function recalculatePackJackpotPool(): Promise<{
   paidUnfinishedOpens: number
   sinceJackpotWinAt: string | null
 }> {
-  const config = await getPackVaultConfig()
+  const product = input?.productId
+    ? await getPackProductById(input.productId)
+    : await getActivePackProduct()
+  if (!product) throw new Error('Pack product not found')
+
   const { data, error } = await getSupabaseAdmin()
     .from('pack_opens')
     .select(
-      'status, payment_signature, jackpot_contribution_sol, is_jackpot_win, completed_at, created_at'
+      'status, payment_signature, jackpot_contribution_sol, is_jackpot_win, completed_at, created_at, product_id'
     )
+    .eq('product_id', product.id)
   if (error) throw error
 
+  const contributionSol =
+    input?.defaultContributionSol ??
+    (product.jackpot_contribution_sol != null && Number(product.jackpot_contribution_sol) > 0
+      ? Number(product.jackpot_contribution_sol)
+      : Number((await getPackVaultConfig()).jackpot_contribution_sol ?? 0.02))
+
   const accounting = expectedJackpotPoolSol({
-    contributionSol: Number(config.jackpot_contribution_sol ?? 0.02),
+    contributionSol,
     opens: (data ?? []) as {
       status: string
       payment_signature: string | null
@@ -162,9 +250,9 @@ export async function recalculatePackJackpotPool(): Promise<{
     }[],
   })
 
-  const previousPoolSol = Number(config.jackpot_pool_sol ?? 0)
+  const previousPoolSol = Number(product.jackpot_pool_sol ?? 0)
   if (previousPoolSol !== accounting.expectedPoolSol) {
-    await updatePackVaultConfig({ jackpot_pool_sol: accounting.expectedPoolSol })
+    await updatePackProduct(product.id, { jackpot_pool_sol: accounting.expectedPoolSol })
   }
 
   return {
@@ -187,24 +275,31 @@ export async function countAvailableNftsInBand(
   return count ?? 0
 }
 
-export async function countAvailableNfts(): Promise<number> {
-  const { count, error } = await getSupabaseAdmin()
+export async function countAvailableNfts(productId?: string): Promise<number> {
+  let q = getSupabaseAdmin()
     .from('pack_inventory')
     .select('id', { count: 'exact', head: true })
     .eq('status', 'available')
+  if (productId) q = q.eq('product_id', productId)
+  const { count, error } = await q
   if (error) throw error
   return count ?? 0
 }
 
-export async function listPackInventory(status?: string): Promise<PackInventoryRow[]> {
+export async function listPackInventory(
+  status?: string,
+  productId?: string
+): Promise<PackInventoryRow[]> {
   let q = getSupabaseAdmin().from('pack_inventory').select('*').order('created_at', { ascending: false })
   if (status) q = q.eq('status', status)
+  if (productId) q = q.eq('product_id', productId)
   const { data, error } = await q.limit(500)
   if (error) throw error
   return (data as PackInventoryRow[]) ?? []
 }
 
 export async function addPackInventoryNft(input: {
+  product_id: string
   mint_address: string
   name?: string | null
   image_url?: string | null
@@ -216,6 +311,7 @@ export async function addPackInventoryNft(input: {
   const { data, error } = await getSupabaseAdmin()
     .from('pack_inventory')
     .insert({
+      product_id: input.product_id,
       kind: 'nft',
       mint_address: input.mint_address.trim(),
       name: input.name ?? null,
@@ -259,10 +355,11 @@ export async function updatePackInventoryOddsTier(
 }
 
 
-export async function listAvailableNftsForOpen(): Promise<PackInventoryRow[]> {
+export async function listAvailableNftsForOpen(productId: string): Promise<PackInventoryRow[]> {
   const { data, error } = await getSupabaseAdmin()
     .from('pack_inventory')
     .select('*')
+    .eq('product_id', productId)
     .eq('status', 'available')
     .gte('fair_value_sol', 0.05)
     .order('mint_address', { ascending: true })

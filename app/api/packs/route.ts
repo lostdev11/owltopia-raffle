@@ -14,6 +14,7 @@ import {
   countAvailableNfts,
   defaultProductFallback,
   getActivePackProduct,
+  getPackProductForCheckout,
   getPackVaultConfig,
   listPackInventory,
   listRecentCompletedOpens,
@@ -28,25 +29,51 @@ import {
   formatJackpotPoolSol,
   jackpotWinPercentLabel,
 } from '@/lib/packs/jackpot'
+import { PACKS_PRODUCT_SLUG_MAIN, PACKS_PRODUCT_SLUG_OWL } from '@/lib/packs/product-pools'
 import { getPacksVaultPublicKey } from '@/lib/packs/vault'
 import { isPackVrfEnabled, resolvePackOpenAlgo } from '@/lib/packs/vrf-config'
 
 export const dynamic = 'force-dynamic'
 
+function mapInventoryRows(
+  inventory: Awaited<ReturnType<typeof listPackInventory>>
+) {
+  return inventory.map((r) => ({
+    id: r.id,
+    mint_address: r.mint_address,
+    fair_value_sol: Number(r.fair_value_sol),
+    name: r.name,
+    image_url: r.image_url,
+    odds_tier: (r.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard') as
+      | 'standard'
+      | 'premium_1pct',
+  }))
+}
+
 export async function GET() {
   try {
     let product = null as Awaited<ReturnType<typeof getActivePackProduct>>
+    let owlProduct = null as Awaited<ReturnType<typeof getPackProductForCheckout>>
     let vaultConfig = null as Awaited<ReturnType<typeof getPackVaultConfig>> | null
-    let nftCount = 0
+    let nftCountMain = 0
+    let nftCountOwl = 0
     let recent: Awaited<ReturnType<typeof listRecentCompletedOpens>> = []
-    let inventory: Awaited<ReturnType<typeof listPackInventory>> = []
+    let inventoryMain: Awaited<ReturnType<typeof listPackInventory>> = []
+    let inventoryOwl: Awaited<ReturnType<typeof listPackInventory>> = []
 
     try {
       product = await getActivePackProduct()
+      owlProduct = await getPackProductForCheckout('OWL')
       vaultConfig = await getPackVaultConfig()
-      nftCount = await countAvailableNfts()
+      if (product) {
+        nftCountMain = await countAvailableNfts(product.id)
+        inventoryMain = await listPackInventory('available', product.id)
+      }
+      if (owlProduct) {
+        nftCountOwl = await countAvailableNfts(owlProduct.id)
+        inventoryOwl = await listPackInventory('available', owlProduct.id)
+      }
       recent = await listRecentCompletedOpens(24)
-      inventory = await listPackInventory('available')
     } catch {
       vaultConfig = null
     }
@@ -74,40 +101,37 @@ export async function GET() {
       // Non-fatal — UI still shows fixed 20 $OWL + $1 fee label
     }
 
-    const nftInventory = inventory.map((r) => ({
-      id: r.id,
-      mint_address: r.mint_address,
-      fair_value_sol: Number(r.fair_value_sol),
-      name: r.name,
-      image_url: r.image_url,
-      odds_tier: (r.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard') as
-        | 'standard'
-        | 'premium_1pct',
-    }))
+    const nftMain = mapInventoryRows(inventoryMain)
+    const nftOwl = mapInventoryRows(inventoryOwl)
 
     const ev = simulatePackEvFromInventory({
       owlSolPrice: vaultConfig?.owl_sol_price ?? null,
-      inventory,
+      inventory: inventoryMain,
+      productShelfSlug: PACKS_PRODUCT_SLUG_MAIN,
     })
 
     const evOwl = simulatePackEvFromInventory({
       owlSolPrice: vaultConfig?.owl_sol_price ?? null,
-      inventory,
+      inventory: inventoryOwl,
       paymentCurrency: 'OWL',
       paymentFeeSol: owlFeeSol,
+      productShelfSlug: PACKS_PRODUCT_SLUG_OWL,
     })
 
     const oddsPct = computePackOddsPercentages({
       owlSolPrice: vaultConfig?.owl_sol_price ?? null,
-      nftInventory,
-      paymentCurrency: 'SOL',
+      nftInventory: nftMain,
+      productSlug: PACKS_PRODUCT_SLUG_MAIN,
     })
 
     const oddsPctOwl = computePackOddsPercentages({
       owlSolPrice: vaultConfig?.owl_sol_price ?? null,
-      nftInventory,
-      paymentCurrency: 'OWL',
+      nftInventory: nftOwl,
+      productSlug: PACKS_PRODUCT_SLUG_OWL,
     })
+
+    const mainJackpotPool = Number(product?.jackpot_pool_sol ?? vaultConfig?.jackpot_pool_sol ?? 0)
+    const owlJackpotPool = Number(owlProduct?.jackpot_pool_sol ?? 0)
 
     return NextResponse.json({
       product: {
@@ -122,6 +146,24 @@ export async function GET() {
           sol: product?.category_sol_bps ?? PACK_CATEGORY_WEIGHTS_BPS.sol,
           nft: product?.category_nft_bps ?? PACK_CATEGORY_WEIGHTS_BPS.nft,
         },
+      },
+      productShelves: {
+        main: {
+          slug: product?.slug ?? PACKS_PRODUCT_SLUG_MAIN,
+          name: product?.name ?? 'Owl Pack (0.1 SOL)',
+          availableNfts: nftCountMain,
+          shelfPaused: product?.shelf_paused === true,
+          shelfPauseReason: product?.shelf_pause_reason ?? null,
+        },
+        owl: owlProduct
+          ? {
+              slug: owlProduct.slug,
+              name: owlProduct.name,
+              availableNfts: nftCountOwl,
+              shelfPaused: owlProduct.shelf_paused === true,
+              shelfPauseReason: owlProduct.shelf_pause_reason ?? null,
+            }
+          : null,
       },
       owlCheckout: {
         enabled: owlCheckoutEnabled,
@@ -142,7 +184,6 @@ export async function GET() {
           weight: b.weight,
         })),
         categories: oddsPct.categories,
-        /** Raw weight ladders (admin / legacy). Prefer percent fields above. */
         owlTiersRaw: PACK_OWL_TIERS.map((t) => ({ amount: t.amount, weight: t.weight })),
         solTiersRaw: PACK_SOL_TIERS.map((t) => ({ amountSol: t.amountSol, weight: t.weight })),
       },
@@ -153,6 +194,7 @@ export async function GET() {
           solTiers: oddsPct.solTiers,
           premiumNft: oddsPct.premiumNft,
           nftInventory: oddsPct.nftInventory.slice(0, 40),
+          shelfLabel: '0.1 SOL pack shelf',
         },
         OWL: {
           categories: oddsPctOwl.categories,
@@ -160,6 +202,7 @@ export async function GET() {
           solTiers: oddsPctOwl.solTiers,
           premiumNft: oddsPctOwl.premiumNft,
           nftInventory: oddsPctOwl.nftInventory.slice(0, 40),
+          shelfLabel: '$OWL pack shelf (same hit %, cheaper stock)',
         },
       },
       fairness: {
@@ -167,21 +210,40 @@ export async function GET() {
         vrfEnabled: isPackVrfEnabled(),
       },
       jackpot: {
-        poolSol: Number(vaultConfig?.jackpot_pool_sol ?? 0),
+        poolSol: mainJackpotPool,
         contributionSol: Number(
-          vaultConfig?.jackpot_contribution_sol ?? PACK_JACKPOT_CONTRIBUTION_SOL
+          product?.jackpot_contribution_sol ??
+            vaultConfig?.jackpot_contribution_sol ??
+            PACK_JACKPOT_CONTRIBUTION_SOL
         ),
-        winOddsBps: Number(vaultConfig?.jackpot_win_odds_bps ?? PACK_JACKPOT_WIN_ODDS_BPS),
+        winOddsBps: Number(
+          product?.jackpot_win_odds_bps ?? vaultConfig?.jackpot_win_odds_bps ?? PACK_JACKPOT_WIN_ODDS_BPS
+        ),
         winPercentLabel: jackpotWinPercentLabel(
-          Number(vaultConfig?.jackpot_win_odds_bps ?? PACK_JACKPOT_WIN_ODDS_BPS)
+          Number(
+            product?.jackpot_win_odds_bps ??
+              vaultConfig?.jackpot_win_odds_bps ??
+              PACK_JACKPOT_WIN_ODDS_BPS
+          )
         ),
-        poolLabel: formatJackpotPoolSol(Number(vaultConfig?.jackpot_pool_sol ?? 0)),
+        poolLabel: formatJackpotPoolSol(mainJackpotPool),
+      },
+      jackpotByPayment: {
+        SOL: {
+          poolSol: mainJackpotPool,
+          poolLabel: formatJackpotPoolSol(mainJackpotPool),
+        },
+        OWL: {
+          poolSol: owlJackpotPool,
+          poolLabel: formatJackpotPoolSol(owlJackpotPool),
+        },
       },
       vault: {
         address: vault,
         paused,
         pauseReason: paused ? pauseReason : null,
-        availableNfts: nftCount,
+        availableNfts: nftCountMain,
+        availableNftsOwlShelf: nftCountOwl,
         owlSolPrice:
           vaultConfig?.owl_sol_price != null ? Number(vaultConfig.owl_sol_price) : null,
       },

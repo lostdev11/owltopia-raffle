@@ -1,17 +1,17 @@
 import { createHash } from 'node:crypto'
 import {
+  PACK_CATEGORY_WEIGHTS_BPS,
   PACK_NFT_VALUE_BANDS,
-  owlTiersWithPrice,
-  type PackPaymentCurrency,
+  PACK_PREMIUM_NFT_OVERALL_BPS,
+  PACKS_PRODUCT_SLUG,
+  packPremiumNftRollBpsWithinNftCategory,
   type PackRegularCategory,
 } from '@/lib/packs/config'
 import {
-  PACK_ODDS_PROFILE_SOL,
-  owlTiersForProfile,
-  premiumNftRollBpsWithinNftCategoryForProfile,
-  resolvePackOddsProfile,
-  type PackOddsProfile,
-} from '@/lib/packs/odds-profiles'
+  PACKS_PRODUCT_SLUG_MAIN,
+  resolvePackCashLadders,
+  type PackCashLadders,
+} from '@/lib/packs/product-pools'
 import type { WeightedTierPick } from '@/lib/packs/types'
 import {
   buildWeightedNftPool,
@@ -54,12 +54,9 @@ export function pickJackpotWin(seed: string, oddsBps: number): boolean {
   return hashMod(seed, 'jackpot', 10_000) < oddsBps
 }
 
-export function pickCategory(
-  seed: string,
-  profile: PackOddsProfile = PACK_ODDS_PROFILE_SOL
-): PackRegularCategory {
+export function pickCategory(seed: string): PackRegularCategory {
   const entries: PackRegularCategory[] = ['owl', 'sol', 'nft']
-  const weights = entries.map((c) => profile.categoryWeightsBps[c])
+  const weights = entries.map((c) => PACK_CATEGORY_WEIGHTS_BPS[c])
   const idx = pickWeightedIndex(seed, 'category', weights)
   return entries[idx]!
 }
@@ -71,13 +68,12 @@ export function pickTier(
   seed: string,
   category: PackRegularCategory,
   owlSolPrice?: number | null,
-  profile: PackOddsProfile = PACK_ODDS_PROFILE_SOL
+  ladders?: PackCashLadders
 ): WeightedTierPick {
+  const resolved =
+    ladders ?? resolvePackCashLadders(PACKS_PRODUCT_SLUG_MAIN, owlSolPrice)
   if (category === 'owl') {
-    const tiers =
-      profile.id === 'sol'
-        ? owlTiersWithPrice(owlSolPrice)
-        : owlTiersForProfile(profile, owlSolPrice)
+    const tiers = resolved.owlTiers
     const idx = pickWeightedIndex(
       seed,
       'tier:owl',
@@ -95,9 +91,9 @@ export function pickTier(
     const idx = pickWeightedIndex(
       seed,
       'tier:sol',
-      profile.solTiers.map((t) => t.weight)
+      resolved.solTiers.map((t) => t.weight)
     )
-    const t = profile.solTiers[idx]!
+    const t = resolved.solTiers[idx]!
     return {
       category: 'sol',
       amountSol: t.amountSol,
@@ -140,11 +136,9 @@ export function pickNftFromInventory(
 /** True when the open should draw from the premium_1pct NFT pool (~1% overall). */
 export function pickPremiumNftRoll(
   seed: string,
-  profile: PackOddsProfile = PACK_ODDS_PROFILE_SOL,
-  overallBps?: number
+  overallBps: number = PACK_PREMIUM_NFT_OVERALL_BPS
 ): boolean {
-  const bps = overallBps ?? profile.premiumNftOverallBps
-  const withinNftBps = premiumNftRollBpsWithinNftCategoryForProfile(profile, bps)
+  const withinNftBps = packPremiumNftRollBpsWithinNftCategory(overallBps)
   if (!(withinNftBps > 0)) return false
   return hashMod(seed, 'nft:premium', 10_000) < withinNftBps
 }
@@ -155,8 +149,7 @@ export function pickPremiumNftRoll(
  */
 export function pickNftFromAvailableInventory(
   seed: string,
-  inventory: NftPoolEntry[],
-  profile: PackOddsProfile = PACK_ODDS_PROFILE_SOL
+  inventory: NftPoolEntry[]
 ): {
   pick: WeightedNftPoolEntry
   pool: WeightedNftPoolEntry[]
@@ -164,7 +157,7 @@ export function pickNftFromAvailableInventory(
 } {
   if (inventory.length === 0) throw new Error('No eligible NFTs in inventory')
   const { premium, standard } = splitNftPoolByOddsTier(inventory)
-  const wantPremium = pickPremiumNftRoll(seed, profile) && premium.length > 0
+  const wantPremium = pickPremiumNftRoll(seed) && premium.length > 0
   const source = wantPremium ? premium : standard.length > 0 ? standard : inventory
   const pool = buildWeightedNftPool(source)
   if (pool.length === 0) throw new Error('No eligible NFTs in inventory')
@@ -187,12 +180,10 @@ export function pickNftFromSnapshot(
 export function recomputeOpenFromSeed(
   seed: string,
   owlSolPrice?: number | null,
-  paymentCurrency?: PackPaymentCurrency
+  productSlug?: string
 ): { category: PackRegularCategory; pick: WeightedTierPick } {
-  const profile = resolvePackOddsProfile(paymentCurrency ?? 'SOL')
-  const category = pickCategory(seed, profile)
+  const category = pickCategory(seed)
   if (category === 'nft') {
-    // NFT mint is recomputed via snapshot when present; return placeholder band pick.
     return {
       category: 'nft',
       pick: {
@@ -203,7 +194,8 @@ export function recomputeOpenFromSeed(
       },
     }
   }
-  const pick = pickTier(seed, category, owlSolPrice, profile)
+  const ladders = resolvePackCashLadders(productSlug ?? PACKS_PRODUCT_SLUG_MAIN, owlSolPrice)
+  const pick = pickTier(seed, category, owlSolPrice, ladders)
   return { category, pick }
 }
 

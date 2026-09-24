@@ -111,7 +111,17 @@ type PacksConfig = {
     paused: boolean
     pauseReason: string | null
     availableNfts: number
+    availableNftsOwlShelf?: number
     owlSolPrice?: number | null
+  }
+  productShelves?: {
+    main: { slug: string; name: string; availableNfts: number; shelfPaused?: boolean }
+    owl: {
+      slug: string
+      name: string
+      availableNfts: number
+      shelfPaused?: boolean
+    } | null
   }
   ev: { targetEvSol: number; estimatedEvSol: number; estimatedRtpBps: number }
   jackpot: {
@@ -682,10 +692,11 @@ export function PacksClient({
                 <RarityRow label="NFT" pct={bpsToPercent(weights.nft)} tone="text-amber-200" />
               </div>
               <p className="mt-3 text-xs leading-relaxed text-white/45">
-                Every open wins · odds for{' '}
-                {paymentCurrency === 'OWL' ? '$OWL checkout' : '0.1 SOL checkout'} · typical prize ≈{' '}
-                {activeEv?.targetEvSol ?? config?.ev.targetEvSol ?? 0.08} SOL · prize NFTs ready:{' '}
-                {config?.vault.availableNfts ?? 0}
+                Every open wins · same category odds % on every shelf ·{' '}
+                {paymentCurrency === 'OWL' ? '$OWL shelf' : '0.1 SOL shelf'} · prize NFTs ready:{' '}
+                {paymentCurrency === 'OWL'
+                  ? (config?.vault.availableNftsOwlShelf ?? 0)
+                  : (config?.vault.availableNfts ?? 0)}
               </p>
               <a
                 href="#prize-tiers"
@@ -764,11 +775,12 @@ export function PacksClient({
         <div className="border-t border-white/10 pt-10">
           <h2 className="font-display text-3xl tracking-[0.12em] text-[#EAFBF4]">Prize odds</h2>
           <p className="mt-2 text-sm text-[#A9CBB9]">
-            Showing odds for{' '}
+            Showing{' '}
             <span className="text-[#00FF9C]">
-              {paymentCurrency === 'OWL' ? '$OWL pack checkout' : '0.1 SOL checkout'}
+              {paymentCurrency === 'OWL' ? '$OWL pack shelf' : '0.1 SOL pack shelf'}
             </span>
-            . Percentages are ME-style odds. Typical prize ≈{' '}
+            . Same category hit rates (30/30/40) on both paths — prize stock and cash tiers differ
+            by shelf. Typical prize ≈{' '}
             {activeEv?.targetEvSol ?? config?.ev.targetEvSol ?? 0.08} SOL per open (includes{' '}
             {config?.jackpot?.contributionSol ?? 0.02} SOL jackpot slice).
             {config ? ` Prize NFTs ready: ${config.vault.availableNfts}.` : null}

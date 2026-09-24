@@ -6,7 +6,11 @@ import {
   PACK_SOL_TIERS,
   PACK_TARGET_EV_SOL,
 } from '../lib/packs/config'
-import { PACK_ODDS_PROFILE_OWL } from '../lib/packs/odds-profiles'
+import {
+  PACKS_PRODUCT_SLUG_MAIN,
+  PACKS_PRODUCT_SLUG_OWL,
+  PACK_OWL_CHECKOUT_OWL_TIERS,
+} from '../lib/packs/product-pools'
 import {
   pickCategory,
   pickTier,
@@ -21,6 +25,7 @@ const owlFeeSol = feeArg ? Number(feeArg.split('=')[1]) : 0.007
 
 function printEv(label: string, result: ReturnType<typeof simulatePackEv>) {
   console.log(`\n=== ${label} ===`)
+  console.log(`Shelf: ${result.productShelfSlug ?? 'n/a'}`)
   console.log(`Ticket (SOL-equiv): ${result.packPriceSol} SOL`)
   console.log(`Target EV (${result.targetRtpBps / 100}% RTP): ${result.targetEvSol.toFixed(6)} SOL`)
   console.log(`Estimated EV: ${result.estimatedEvSol.toFixed(6)} SOL`)
@@ -31,30 +36,30 @@ function printEv(label: string, result: ReturnType<typeof simulatePackEv>) {
 
 const solResult = simulatePackEv({
   owlSolPrice: owlSolPrice && owlSolPrice > 0 ? owlSolPrice : null,
-  paymentCurrency: 'SOL',
+  productShelfSlug: PACKS_PRODUCT_SLUG_MAIN,
 })
 const owlResult = simulatePackEv({
   owlSolPrice: owlSolPrice && owlSolPrice > 0 ? owlSolPrice : null,
   paymentCurrency: 'OWL',
   paymentFeeSol: owlFeeSol,
+  productShelfSlug: PACKS_PRODUCT_SLUG_OWL,
 })
 
-console.log('=== Owltopia Packs EV Simulator ===')
-printEv('SOL checkout (0.1 SOL pack)', solResult)
-printEv('$OWL checkout (draft odds profile)', owlResult)
+console.log('=== Owltopia Packs EV Simulator (separate shelves, same category %) ===')
+printEv('Main shelf — 0.1 SOL checkout', solResult)
+printEv('$OWL shelf — $OWL checkout', owlResult)
 
-console.log('\nSOL category weights (bps):', PACK_CATEGORY_WEIGHTS_BPS)
-console.log('OWL draft category weights (bps):', PACK_ODDS_PROFILE_OWL.categoryWeightsBps)
+console.log('\nCategory weights (bps, shared):', PACK_CATEGORY_WEIGHTS_BPS)
 console.log(
-  'SOL OWL tiers:',
+  'Main OWL tiers:',
   PACK_OWL_TIERS.map((t) => `${t.amount}@w${t.weight}`)
 )
 console.log(
-  'OWL-path OWL tiers:',
-  PACK_ODDS_PROFILE_OWL.owlTiers.map((t) => `${t.amount}@w${t.weight}`)
+  '$OWL shelf cash OWL tiers (same weights, smaller amounts):',
+  PACK_OWL_CHECKOUT_OWL_TIERS.map((t) => `${t.amount}@w${t.weight}`)
 )
 console.log(
-  'SOL tiers (SOL path):',
+  'Main SOL tiers:',
   PACK_SOL_TIERS.map((t) => `${t.amountSol}@w${t.weight}`)
 )
 
@@ -67,28 +72,22 @@ for (let i = 0; i < N; i++) {
   catCounts[c]++
   pickTier(seed, c, solResult.owlSolPrice)
 }
-console.log(`\nSimulated ${N} SOL-path category rolls:`, catCounts)
+console.log(`\nSimulated ${N} category rolls (same on all shelves):`, catCounts)
 
 const driftSol = Math.abs(solResult.estimatedEvSol - PACK_TARGET_EV_SOL)
 if (driftSol > 0.05) {
   console.error(`\nFAIL: SOL EV drift ${driftSol.toFixed(4)} > 0.05 from target`)
   process.exitCode = 1
 } else {
-  console.log(`\nOK: SOL EV within 0.05 SOL of target (pack ${PACK_PRICE_SOL} SOL)`)
+  console.log(`\nOK: Main shelf EV within 0.05 SOL of target (pack ${PACK_PRICE_SOL} SOL)`)
 }
 
 const cheapOwl = simulatePackEv({
   owlSolPrice: 0.0025,
   paymentCurrency: 'OWL',
   paymentFeeSol: owlFeeSol,
+  productShelfSlug: PACKS_PRODUCT_SLUG_OWL,
 })
-printEv('$OWL checkout @ 0.0025 SOL/OWL (stress / cheap token)', cheapOwl)
+printEv('$OWL shelf @ 0.0025 SOL/OWL (cheap token + lower stock)', cheapOwl)
 const cheapRtp = cheapOwl.estimatedRtpBps / 100
-if (cheapRtp < 75 || cheapRtp > 85) {
-  console.error(
-    `\nWARN: OWL-path RTP ${cheapRtp.toFixed(1)}% at 0.0025 SOL/OWL — target ~80% ±5 (retune PACK_ODDS_PROFILE_OWL)`
-  )
-  process.exitCode = 1
-} else {
-  console.log(`\nOK: OWL-path RTP ~${cheapRtp.toFixed(1)}% at 0.0025 SOL/OWL (draft profile)`)
-}
+console.log(`\nNote: EV on $OWL shelf depends on deposited NFT floors, not category %.`)

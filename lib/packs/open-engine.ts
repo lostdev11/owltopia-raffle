@@ -6,19 +6,16 @@ import {
   type PackPaymentCurrency,
 } from '@/lib/packs/config'
 import {
-  packOwlCheckoutTicketSolEquiv,
-  resolvePackOddsProfile,
-} from '@/lib/packs/odds-profiles'
-import {
   packJackpotContributionForPrice,
   PACK_JACKPOT_MIN_PAYOUT_SOL,
 } from '@/lib/packs/jackpot'
 import {
   countAvailableNfts,
   createPendingPackOpen,
-  getActivePackProduct,
   getPackOpenById,
   getPackOpenByPaymentSignature,
+  getPackProductById,
+  getPackProductForCheckout,
   getPackVaultConfig,
   listAvailableNftsForOpen,
   markNftPaid,
@@ -26,8 +23,13 @@ import {
   reserveNftById,
   resolvePackJackpotForOpen,
   updatePackOpen,
-  updatePackVaultConfig,
+  updatePackProduct,
 } from '@/lib/packs/db'
+import {
+  packOwlCheckoutTicketSolEquiv,
+  resolvePackCashLadders,
+} from '@/lib/packs/product-pools'
+import type { PackProductRow } from '@/lib/packs/types'
 import {
   generatePackOpenSeed,
   hashPackOpenCommit,
@@ -87,32 +89,54 @@ function rowToResult(
   }
 }
 
-export async function ensurePacksSolvencyOrPause(): Promise<{
-  ok: boolean
-  reason?: string
-}> {
+export async function ensureProductShelfReady(
+  product: PackProductRow
+): Promise<{ ok: boolean; reason?: string }> {
   const config = await getPackVaultConfig()
-  const nftCount = await countAvailableNfts()
-  if (nftCount < config.min_nft_count) {
-    if (!config.paused) {
-      await updatePackVaultConfig({
-        paused: true,
-        pause_reason: `Low NFT inventory (${nftCount} < min ${config.min_nft_count})`,
-      })
-    }
-    return {
-      ok: false,
-      reason: `Packs paused: need at least ${config.min_nft_count} NFT(s) in inventory (have ${nftCount})`,
-    }
-  }
   if (config.paused) {
     return { ok: false, reason: config.pause_reason || 'Packs are paused' }
+  }
+  if (product.shelf_paused) {
+    return {
+      ok: false,
+      reason: product.shelf_pause_reason || 'This pack shelf is temporarily unavailable',
+    }
+  }
+  const minNft = Number(product.min_nft_count ?? config.min_nft_count ?? 1)
+  const nftCount = await countAvailableNfts(product.id)
+  if (nftCount < minNft) {
+    return {
+      ok: false,
+      reason: `Need at least ${minNft} prize NFT(s) on this shelf (have ${nftCount})`,
+    }
   }
   const vault = getPacksVaultPublicKey()
   if (!vault) {
     return { ok: false, reason: 'Packs vault is not configured' }
   }
   return { ok: true }
+}
+
+async function pauseProductShelf(productId: string, reason: string): Promise<void> {
+  await updatePackProduct(productId, {
+    shelf_paused: true,
+    shelf_pause_reason: reason,
+  })
+}
+
+/** After an open completes, re-check shelf inventory without pausing other products. */
+export async function ensureProductShelfAfterOpen(productId: string): Promise<void> {
+  const product = await getPackProductById(productId)
+  if (!product) return
+  const config = await getPackVaultConfig()
+  const minNft = Number(product.min_nft_count ?? config.min_nft_count ?? 1)
+  const nftCount = await countAvailableNfts(productId)
+  if (nftCount < minNft && !product.shelf_paused) {
+    await pauseProductShelf(
+      productId,
+      `Low NFT inventory on this shelf (${nftCount} < min ${minNft})`
+    )
+  }
 }
 
 export async function startPackOpen(
@@ -128,18 +152,18 @@ export async function startPackOpen(
   feeSol?: number
   solUsdPrice?: number
 }> {
-  const solvency = await ensurePacksSolvencyOrPause()
-  if (!solvency.ok) {
-    throw new Error(solvency.reason || 'Packs unavailable')
-  }
-  const product = await getActivePackProduct()
+  const currency: PackPaymentCurrency = options?.currency === 'OWL' ? 'OWL' : 'SOL'
+  const product = await getPackProductForCheckout(currency)
   if (!product) {
-    throw new Error('No active pack product (apply migration 212)')
+    throw new Error('No active pack product for this checkout path (apply migration 247)')
+  }
+  const shelf = await ensureProductShelfReady(product)
+  if (!shelf.ok) {
+    throw new Error(shelf.reason || 'Packs unavailable')
   }
   const vault = getPacksVaultPublicKey()
   if (!vault) throw new Error('Packs vault is not configured')
 
-  const currency: PackPaymentCurrency = options?.currency === 'OWL' ? 'OWL' : 'SOL'
   const priceSol = Number(product.price_sol) || PACK_PRICE_SOL
 
   if (currency === 'OWL') {
@@ -210,8 +234,10 @@ export async function confirmAndOpenPack(input: {
     return rowToResult(open)
   }
 
-  const product = await getActivePackProduct()
-  const priceSol = product ? Number(product.price_sol) : PACK_PRICE_SOL
+  const openProduct =
+    (await getPackProductById(open.product_id)) ?? (await getPackProductForCheckout('SOL'))
+  if (!openProduct) throw new Error('Pack product not found for this open')
+  const priceSol = Number(openProduct.price_sol) || PACK_PRICE_SOL
   const paymentCurrency: PackPaymentCurrency =
     open.payment_currency === 'OWL' ? 'OWL' : 'SOL'
 
@@ -256,6 +282,7 @@ export async function confirmAndOpenPack(input: {
   }
 
   const config = await getPackVaultConfig()
+  const cashLadders = resolvePackCashLadders(openProduct.slug, config.owl_sol_price)
   let algo = resolvePackOpenAlgo()
 
   let seed: string
@@ -309,12 +336,17 @@ export async function confirmAndOpenPack(input: {
         })
       : priceSol
 
-  const jackpotContribution =
-    Number(config.jackpot_contribution_sol) > 0
-      ? Number(config.jackpot_contribution_sol)
-      : packJackpotContributionForPrice(ticketSolForJackpot)
-  const jackpotOddsBps = Number(config.jackpot_win_odds_bps) || 20
-  const poolBeforeJackpot = Number(config.jackpot_pool_sol ?? 0)
+  const productJackpotContribution =
+    openProduct.jackpot_contribution_sol != null &&
+    Number(openProduct.jackpot_contribution_sol) > 0
+      ? Number(openProduct.jackpot_contribution_sol)
+      : Number(config.jackpot_contribution_sol) > 0
+        ? Number(config.jackpot_contribution_sol)
+        : packJackpotContributionForPrice(ticketSolForJackpot)
+  const jackpotContribution = productJackpotContribution
+  const jackpotOddsBps =
+    Number(openProduct.jackpot_win_odds_bps ?? config.jackpot_win_odds_bps) || 20
+  const poolBeforeJackpot = Number(openProduct.jackpot_pool_sol ?? 0)
   const poolAfterContribution =
     Math.round((poolBeforeJackpot + jackpotContribution) * 1_000_000_000) / 1_000_000_000
   const jackpotRollWins =
@@ -322,6 +354,7 @@ export async function confirmAndOpenPack(input: {
     poolAfterContribution >= PACK_JACKPOT_MIN_PAYOUT_SOL
 
   const jackpotResolution = await resolvePackJackpotForOpen({
+    productId: openProduct.id,
     contributionSol: jackpotContribution,
     won: jackpotRollWins,
   })
@@ -365,7 +398,7 @@ export async function confirmAndOpenPack(input: {
       error_message: null,
     })
 
-    await ensurePacksSolvencyOrPause()
+    await ensureProductShelfAfterOpen(openProduct.id)
 
     logVrfPhase('pack', 'open.total', openWall.elapsed(), {
       openId: open.id,
@@ -376,8 +409,7 @@ export async function confirmAndOpenPack(input: {
     return rowToResult(open, { jackpotPoolSol: jackpotResolution.poolAfterSol })
   }
 
-  const oddsProfile = resolvePackOddsProfile(paymentCurrency)
-  const category = pickCategory(seed, oddsProfile)
+  const category = pickCategory(seed)
 
   let prizeLabel = ''
   let owlAmount: number | null = null
@@ -391,30 +423,27 @@ export async function confirmAndOpenPack(input: {
   let nftPoolSnapshot: PackNftPoolSnapshotRow[] | null = null
 
   if (category === 'owl') {
-    const pick = pickTier(seed, 'owl', config.owl_sol_price, oddsProfile)
+    const pick = pickTier(seed, 'owl', config.owl_sol_price, cashLadders)
     if (pick.category !== 'owl') throw new Error('Invalid OWL pick')
     owlAmount = pick.amount
     fairValueSol = pick.fairValueSol
     prizeLabel = `${pick.amount} $OWL`
   } else if (category === 'sol') {
-    const pick = pickTier(seed, 'sol', config.owl_sol_price, oddsProfile)
+    const pick = pickTier(seed, 'sol', config.owl_sol_price, cashLadders)
     if (pick.category !== 'sol') throw new Error('Invalid SOL pick')
     solAmount = pick.amountSol
     fairValueSol = pick.fairValueSol
     prizeLabel = `${pick.amountSol} SOL`
   } else {
-    const available = await listAvailableNftsForOpen()
+    const available = await listAvailableNftsForOpen(openProduct.id)
     if (available.length === 0) {
-      await updatePackVaultConfig({
-        paused: true,
-        pause_reason: 'NFT inventory empty during open — paused',
-      })
+      await pauseProductShelf(openProduct.id, 'NFT inventory empty during open — shelf paused')
       open = await updatePackOpen(open.id, {
         status: 'refund_needed',
         category: 'nft',
         error_message: 'No NFT inventory available for payout',
       })
-      throw new Error('No NFT inventory available. Packs paused — contact support for refund.')
+      throw new Error('No NFT inventory on this shelf. Contact support for refund.')
     }
 
     const { pick, pool } = pickNftFromAvailableInventory(
@@ -426,27 +455,23 @@ export async function confirmAndOpenPack(input: {
         name: r.name,
         image_url: r.image_url,
         odds_tier: r.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard',
-      })),
-      oddsProfile
+      }))
     )
     nftPoolSnapshot = nftPoolSnapshotForStorage(pool)
 
     const reserved = await reserveNftById(open.id, pick.id)
     if (!reserved) {
       // Race: mint taken between list and reserve — soft retry once with refreshed pool
-      const available2 = await listAvailableNftsForOpen()
+      const available2 = await listAvailableNftsForOpen(openProduct.id)
       if (available2.length === 0) {
-        await updatePackVaultConfig({
-          paused: true,
-          pause_reason: 'NFT inventory empty during open — paused',
-        })
+        await pauseProductShelf(openProduct.id, 'NFT inventory empty during open — shelf paused')
         open = await updatePackOpen(open.id, {
           status: 'refund_needed',
           category: 'nft',
           error_message: 'No NFT inventory available for payout',
           nft_pool_snapshot: nftPoolSnapshot,
         })
-        throw new Error('No NFT inventory available. Packs paused — contact support for refund.')
+        throw new Error('No NFT inventory on this shelf. Contact support for refund.')
       }
       const second = pickNftFromAvailableInventory(
         seed,
@@ -457,8 +482,7 @@ export async function confirmAndOpenPack(input: {
           name: r.name,
           image_url: r.image_url,
           odds_tier: r.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard',
-        })),
-        oddsProfile
+        }))
       )
       nftPoolSnapshot = nftPoolSnapshotForStorage(second.pool)
       const reserved2 = await reserveNftById(open.id, second.pick.id)
@@ -555,7 +579,7 @@ export async function confirmAndOpenPack(input: {
     error_message: null,
   })
 
-  await ensurePacksSolvencyOrPause()
+  await ensureProductShelfAfterOpen(openProduct.id)
 
   logVrfPhase('pack', 'open.total', openWall.elapsed(), {
     openId: open.id,

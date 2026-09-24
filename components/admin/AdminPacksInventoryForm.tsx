@@ -14,6 +14,7 @@ import {
   PACK_NFT_MAX_FAIR_SOL,
   PACK_NFT_MIN_FAIR_SOL,
 } from '@/lib/packs/config'
+import { PACKS_PRODUCT_SLUG_MAIN, PACKS_PRODUCT_SLUG_OWL } from '@/lib/packs/product-pools'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import {
   packNftBandLabel,
@@ -44,6 +45,7 @@ import { minimalWalletNftForEscrowTransfer } from '@/lib/solana/wallet-tokens'
 
 export type AdminPacksInventoryItem = {
   id: string
+  product_id?: string
   mint_address: string
   name: string | null
   image_url?: string | null
@@ -51,6 +53,13 @@ export type AdminPacksInventoryItem = {
   prize_standard?: PackInventoryPrizeStandard | string | null
   odds_tier?: 'standard' | 'premium_1pct' | string | null
   status: string
+}
+
+export type AdminPackProductShelf = {
+  id: string
+  slug: string
+  name: string
+  availableNfts: number
 }
 
 type DraftRow = {
@@ -81,6 +90,7 @@ function packsPrizeStandardForNft(nft: WalletNft): PackInventoryPrizeStandard {
 }
 
 async function registerInventoryNft(input: {
+  product_id: string
   mint_address: string
   fair_value_sol: number
   name: string | null
@@ -103,11 +113,13 @@ async function registerInventoryNft(input: {
 export function AdminPacksInventoryForm({
   vaultAddress,
   inventory,
+  products = [],
   owlSolPrice,
   onRegistered,
 }: {
   vaultAddress: string | null
   inventory: AdminPacksInventoryItem[]
+  products?: AdminPackProductShelf[]
   owlSolPrice: number | null
   onRegistered: () => Promise<void>
 }) {
@@ -125,6 +137,15 @@ export function AdminPacksInventoryForm({
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  const defaultProductId = useMemo(() => {
+    const owl = products.find((p) => p.slug === PACKS_PRODUCT_SLUG_OWL)
+    const main = products.find((p) => p.slug === PACKS_PRODUCT_SLUG_MAIN)
+    return owl?.id ?? main?.id ?? products[0]?.id ?? ''
+  }, [products])
+  const [depositProductId, setDepositProductId] = useState('')
+
+  const activeDepositProductId = depositProductId || defaultProductId
+  const depositProduct = products.find((p) => p.id === activeDepositProductId)
 
   const selectedMints = useMemo(() => new Set(drafts.map((d) => d.nft.mint)), [drafts])
   const problemMints = useMemo(
@@ -141,14 +162,24 @@ export function AdminPacksInventoryForm({
     [drafts]
   )
 
+  const shelfInventory = useMemo(
+    () =>
+      activeDepositProductId
+        ? inventory.filter((r) => r.product_id === activeDepositProductId)
+        : inventory,
+    [activeDepositProductId, inventory]
+  )
+
   const liveEv = useMemo(
     () =>
       simulatePackEvFromInventory({
         owlSolPrice,
-        inventory,
+        inventory: shelfInventory,
         draftFloors,
+        productShelfSlug: depositProduct?.slug,
+        paymentCurrency: depositProduct?.slug === PACKS_PRODUCT_SLUG_OWL ? 'OWL' : 'SOL',
       }),
-    [draftFloors, inventory, owlSolPrice]
+    [depositProduct?.slug, draftFloors, owlSolPrice, shelfInventory]
   )
 
   const allFloorsValid =
@@ -343,7 +374,11 @@ export function AdminPacksInventoryForm({
 
         setProgress(`Registering: ${live.nft.name || shortenMint(live.nft.mint)}`)
         try {
+          if (!activeDepositProductId) {
+            throw new Error('Select a prize shelf before registering NFTs')
+          }
           await registerInventoryNft({
+            product_id: activeDepositProductId,
             mint_address: live.nft.mint,
             fair_value_sol: floor,
             name: live.nft.name,
@@ -400,6 +435,31 @@ export function AdminPacksInventoryForm({
         </p>
         <PacksAdminExtraDetails notes={liveEv.notes} />
       </div>
+
+      {products.length > 0 ? (
+        <div>
+          <Label htmlFor="packs-deposit-shelf">Prize shelf (product pool)</Label>
+          <select
+            id="packs-deposit-shelf"
+            className="mt-1 flex min-h-[44px] w-full rounded-md border border-input bg-background px-3 text-sm"
+            value={activeDepositProductId}
+            onChange={(e) => setDepositProductId(e.target.value)}
+          >
+            {products.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.slug === PACKS_PRODUCT_SLUG_OWL
+                  ? '$OWL pack shelf'
+                  : '0.1 SOL pack shelf'}{' '}
+                — {p.name} ({p.availableNfts} NFT{p.availableNfts === 1 ? '' : 's'})
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Same category odds % on both shelves. Stock cheaper NFTs on the $OWL shelf so whale
+            $OWL opens do not drain the main 0.1 SOL vault.
+          </p>
+        </div>
+      ) : null}
 
       <div>
         <Label htmlFor="packs-default-floor">Default floor price (SOL)</Label>

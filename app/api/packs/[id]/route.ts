@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getPackOpenById, getPackVaultConfig } from '@/lib/packs/db'
+import { getPackOpenById, getPackProductById, getPackVaultConfig } from '@/lib/packs/db'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { packRevealMessage } from '@/lib/packs/reveal-message'
-import { resolvePackOddsProfile } from '@/lib/packs/odds-profiles'
 import { pickCategory, pickJackpotWin, pickNftFromSnapshot, hashPackOpenCommit, recomputeOpenFromSeed, verifyCommitHash } from '@/lib/packs/rng'
 import { PACK_JACKPOT_MIN_PAYOUT_SOL } from '@/lib/packs/jackpot'
 import { PACK_OPEN_ALGO_V2_VRF } from '@/lib/packs/config'
@@ -28,14 +27,13 @@ export async function GET(_request: NextRequest, context: Ctx) {
 
     let recomputedJackpotWin: boolean | null = null
 
-    const paymentCurrency = open.payment_currency === 'OWL' ? 'OWL' : 'SOL'
-    const oddsProfile = resolvePackOddsProfile(paymentCurrency)
+    const openProduct = await getPackProductById(open.product_id)
 
     if (open.open_seed && open.status === 'completed') {
       recomputed = recomputeOpenFromSeed(
         open.open_seed,
         config?.owl_sol_price ?? null,
-        paymentCurrency
+        openProduct?.slug
       )
       commitOk = open.open_commit_hash
         ? verifyCommitHash(open.open_seed, open.open_commit_hash)
@@ -59,7 +57,7 @@ export async function GET(_request: NextRequest, context: Ctx) {
       if (open.is_jackpot_win) {
         // Jackpot replaces category roll — skip NFT recompute
       } else {
-      const category = pickCategory(open.open_seed, oddsProfile)
+      const category = pickCategory(open.open_seed)
       if (category === 'nft' && open.nft_pool_snapshot && Array.isArray(open.nft_pool_snapshot)) {
         try {
           const pick = pickNftFromSnapshot(
