@@ -30,8 +30,30 @@ import {
 } from '@/lib/raffles/draw/vrf-switchboard-cu'
 import { resolveSwitchboardCommitOracle } from '@/lib/raffles/draw/vrf-oracle-select'
 import { confirmTxWithTimeout } from '@/lib/solana/confirm-tx-with-timeout'
+import { logVrfPhase, vrfPhaseTimer } from '@/lib/raffles/draw/vrf-timing-log'
 
 export const VRF_PROVIDER_SWITCHBOARD = 'switchboard' as const
+
+/** Post-commit wait before oracle reveal signatures are stable (Secp 6016). */
+export type SwitchboardSeedSlotWaitOptions = {
+  minWaitMs?: number
+  maxWaitMs?: number
+  maturitySlots?: number
+  /** Poll interval while waiting for confirmed tip (default 1000ms). */
+  pollIntervalMs?: number
+}
+
+export type SwitchboardCommitRandomnessOptions = {
+  /**
+   * Create + commit in one v0 transaction (one confirm round-trip).
+   * Used for pack opens; raffle draw keeps separate txs for minimal change risk.
+   */
+  bundleCreateAndCommit?: boolean
+  /** Override default post-commit seed wait; `null` skips (caller waits in reveal). */
+  postCommitSeedWait?: SwitchboardSeedSlotWaitOptions | null
+  /** When set, emits vrf_timing logs with this scope. */
+  timingScope?: 'pack' | 'raffle'
+}
 
 /**
  * Public RPCs Switchboard oracle gateways can call without our API keys.
@@ -60,10 +82,12 @@ export async function waitForSwitchboardSeedSlot(params: {
   minWaitMs?: number
   maxWaitMs?: number
   maturitySlots?: number
+  pollIntervalMs?: number
 }): Promise<void> {
   const minWaitMs = params.minWaitMs ?? 8_000
   const maxWaitMs = params.maxWaitMs ?? 20_000
   const maturity = params.maturitySlots ?? SWITCHBOARD_SEED_SLOT_MATURITY
+  const pollIntervalMs = Math.max(200, params.pollIntervalMs ?? 1_000)
   const started = Date.now()
   while (Date.now() - started < maxWaitMs) {
     const elapsed = Date.now() - started
@@ -81,8 +105,16 @@ export async function waitForSwitchboardSeedSlot(params: {
       // ignore tip read flakes
     }
     if (elapsed >= minWaitMs && params.seedSlot == null) return
-    await new Promise((r) => setTimeout(r, 1_000))
+    await new Promise((r) => setTimeout(r, pollIntervalMs))
   }
+}
+
+/** Pack opens: shorter wall-clock wait + faster polls; reveal retries cover early Secp. */
+export const PACK_SWITCHBOARD_SEED_WAIT: SwitchboardSeedSlotWaitOptions = {
+  minWaitMs: 5_000,
+  maxWaitMs: 18_000,
+  maturitySlots: SWITCHBOARD_SEED_SLOT_MATURITY,
+  pollIntervalMs: 400,
 }
 
 /**
@@ -460,7 +492,9 @@ async function buildRevealIxForGateway(params: {
  * Persist randomnessSecretKeyBase58 with the pending request (service-role secrets table or raffle row encrypted later).
  * For v1 of this integration we store the secret in raffle_draw_secrets.seed_hex prefixed — better: separate column.
  */
-export async function switchboardCommitRandomness(): Promise<SwitchboardVrfRequestResult> {
+export async function switchboardCommitRandomness(
+  options?: SwitchboardCommitRandomnessOptions
+): Promise<SwitchboardVrfRequestResult> {
   const payer = resolveVrfPayer()
   if (!payer) {
     return {
@@ -469,6 +503,9 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
         'No fee-payer key configured for VRF (set VRF_FEE_PAYER_SECRET_KEY, or PRIZE_ESCROW_SECRET_KEY / FUNDS_ESCROW_SECRET_KEY as fallback)',
     }
   }
+
+  const timingScope = options?.timingScope
+  const commitWall = timingScope ? vrfPhaseTimer() : null
 
   try {
     const sb = await loadSb()
@@ -505,23 +542,40 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
       commitOracle
     )
 
-    // Create must land before commit (commitIx accounts assume the account exists).
-    const createBuilt = await asSwitchboardV0Tx({
-      connection,
-      ixs: [createIx],
-      signers: [payer, rngKp],
-    })
-    await sendAndConfirmSwitchboardTx({ connection, built: createBuilt })
+    const sendPhase = timingScope ? vrfPhaseTimer() : null
+    let commitSig: string
+    if (options?.bundleCreateAndCommit) {
+      // Same block: create then commit — one confirm round-trip (~1–2s saved on pack opens).
+      const bundled = await asSwitchboardV0Tx({
+        connection,
+        ixs: [createIx, commitIx],
+        signers: [payer, rngKp],
+      })
+      commitSig = await sendAndConfirmSwitchboardTx({ connection, built: bundled })
+    } else {
+      // Create must land before commit when sent as separate txs.
+      const createBuilt = await asSwitchboardV0Tx({
+        connection,
+        ixs: [createIx],
+        signers: [payer, rngKp],
+      })
+      await sendAndConfirmSwitchboardTx({ connection, built: createBuilt })
 
-    const commitBuilt = await asSwitchboardV0Tx({
-      connection,
-      ixs: [commitIx],
-      signers: [payer],
-    })
-    const commitSig = await sendAndConfirmSwitchboardTx({
-      connection,
-      built: commitBuilt,
-    })
+      const commitBuilt = await asSwitchboardV0Tx({
+        connection,
+        ixs: [commitIx],
+        signers: [payer],
+      })
+      commitSig = await sendAndConfirmSwitchboardTx({
+        connection,
+        built: commitBuilt,
+      })
+    }
+    if (timingScope && sendPhase) {
+      logVrfPhase(timingScope, 'vrf.commit_tx', sendPhase.elapsed(), {
+        bundled: Boolean(options?.bundleCreateAndCommit),
+      })
+    }
 
     let seedSlot: number | undefined
     try {
@@ -532,9 +586,34 @@ export async function switchboardCommitRandomness(): Promise<SwitchboardVrfReque
       // optional
     }
 
-    // Wait until the seed slot is comfortably behind the tip so SlotHashes is stable
-    // for oracle signing. Fixed sleeps alone still produced Secp 6016 under load.
-    await waitForSwitchboardSeedSlot({ connection, seedSlot, minWaitMs: 8_000, maxWaitMs: 20_000 })
+    const seedWaitOpts =
+      options?.postCommitSeedWait === null
+        ? null
+        : options?.postCommitSeedWait ?? {
+            minWaitMs: 8_000,
+            maxWaitMs: 20_000,
+            maturitySlots: SWITCHBOARD_SEED_SLOT_MATURITY,
+          }
+
+    if (seedWaitOpts) {
+      const seedWaitPhase = timingScope ? vrfPhaseTimer() : null
+      await waitForSwitchboardSeedSlot({
+        connection,
+        seedSlot,
+        ...seedWaitOpts,
+      })
+      if (timingScope && seedWaitPhase) {
+        logVrfPhase(timingScope, 'vrf.seed_slot_wait', seedWaitPhase.elapsed(), {
+          seedSlot: seedSlot ?? null,
+        })
+      }
+    }
+
+    if (timingScope && commitWall) {
+      logVrfPhase(timingScope, 'vrf.commit_total', commitWall.elapsed(), {
+        seedSlot: seedSlot ?? null,
+      })
+    }
 
     const bs58 = (await import('bs58')).default
     return {
@@ -566,6 +645,10 @@ export async function switchboardRevealRandomness(params: {
   maxWaitMs?: number
   /** Optional known reveal tx (e.g. when recovering an already-revealed account). */
   knownRevealTx?: string | null
+  /** When commit skipped seed wait, run it once before the first reveal attempt. */
+  seedSlot?: number
+  seedSlotWait?: SwitchboardSeedSlotWaitOptions | null
+  timingScope?: 'pack' | 'raffle'
 }): Promise<SwitchboardVrfRevealResult> {
   const payer = resolveVrfPayer()
   if (!payer) {
@@ -578,6 +661,7 @@ export async function switchboardRevealRandomness(params: {
 
   const maxWaitMs = resolveVrfRevealWaitMs(params.maxWaitMs)
   const started = Date.now()
+  const revealWall = params.timingScope ? vrfPhaseTimer() : null
 
   try {
     const sb = await loadSb()
@@ -648,6 +732,21 @@ export async function switchboardRevealRandomness(params: {
       // Account may not be ready yet — fall through to reveal loop.
     }
 
+    if (params.seedSlotWait) {
+      const seedWaitPhase = params.timingScope ? vrfPhaseTimer() : null
+      await waitForSwitchboardSeedSlot({
+        connection,
+        seedSlot: params.seedSlot,
+        ...params.seedSlotWait,
+      })
+      if (params.timingScope && seedWaitPhase) {
+        logVrfPhase(params.timingScope, 'vrf.seed_slot_wait', seedWaitPhase.elapsed(), {
+          seedSlot: params.seedSlot ?? null,
+          during: 'reveal',
+        })
+      }
+    }
+
     let lastErr = 'Randomness not ready'
     let lastRevealSig = ''
     let attemptIndex = 0
@@ -656,7 +755,14 @@ export async function switchboardRevealRandomness(params: {
       try {
         // Re-check each iteration — another worker may have revealed.
         const raced = await readRevealedValue(lastRevealSig)
-        if (raced) return raced
+        if (raced) {
+          if (params.timingScope && revealWall) {
+            logVrfPhase(params.timingScope, 'vrf.reveal_total', revealWall.elapsed(), {
+              path: 'raced',
+            })
+          }
+          return raced
+        }
 
         const attemptReveal = async (
           revealIx: TransactionInstruction
@@ -714,7 +820,14 @@ export async function switchboardRevealRandomness(params: {
           const sdkResult = await attemptReveal(
             await oracleRandomness.revealIx(payer.publicKey)
           )
-          if (sdkResult) return sdkResult
+          if (sdkResult) {
+            if (params.timingScope && revealWall) {
+              logVrfPhase(params.timingScope, 'vrf.reveal_total', revealWall.elapsed(), {
+                path: 'sdk',
+              })
+            }
+            return sdkResult
+          }
         } catch (sdkErr) {
           lastErr = sdkErr instanceof Error ? sdkErr.message : 'SDK revealIx failed'
           sdkSecpFailure = isInvalidVrfSecpSignatureError(lastErr)
@@ -744,7 +857,14 @@ export async function switchboardRevealRandomness(params: {
                   rpcUrl: oracleRpcUrl,
                 })
               )
-              if (gatewayResult) return gatewayResult
+              if (gatewayResult) {
+                if (params.timingScope && revealWall) {
+                  logVrfPhase(params.timingScope, 'vrf.reveal_total', revealWall.elapsed(), {
+                    path: 'gateway',
+                  })
+                }
+                return gatewayResult
+              }
             } catch (gatewayErr) {
               const msg = gatewayErr instanceof Error ? gatewayErr.message : 'Gateway reveal failed'
               lastErr = msg

@@ -15,6 +15,12 @@ import {
   PACK_OPEN_CLIENT_TIMEOUT_MESSAGE,
 } from '../lib/client/execute-pack-purchase'
 import { isTxConfirmTimeoutError } from '../lib/solana/confirm-tx-with-timeout'
+import { resolvePackSwitchboardCommitOptions } from '../lib/packs/vrf-commit-options'
+import {
+  PACK_SWITCHBOARD_SEED_WAIT,
+  SWITCHBOARD_SEED_SLOT_MATURITY,
+} from '../lib/raffles/draw/vrf-switchboard'
+import { PACK_PAYMENT_CONFIRM_POLL_MS } from '../lib/client/execute-pack-purchase'
 
 function main() {
   // Longer first poll so InvalidSecpSignature can clear before recommit.
@@ -72,6 +78,14 @@ function main() {
   assert.ok(PACK_OPEN_CLIENT_TIMEOUT_MS < 120_000)
   assert.ok(PACK_OPEN_CLIENT_TIMEOUT_MS >= 90_000)
   assert.ok(/support|refund/i.test(PACK_OPEN_CLIENT_TIMEOUT_MESSAGE))
+
+  const packCommit = resolvePackSwitchboardCommitOptions()
+  assert.equal(packCommit.bundleCreateAndCommit, true)
+  assert.equal(packCommit.timingScope, 'pack')
+  assert.equal(PACK_SWITCHBOARD_SEED_WAIT.minWaitMs, 5_000)
+  assert.equal(PACK_SWITCHBOARD_SEED_WAIT.pollIntervalMs, 400)
+  assert.equal(PACK_SWITCHBOARD_SEED_WAIT.maturitySlots, SWITCHBOARD_SEED_SLOT_MATURITY)
+  assert.ok(PACK_PAYMENT_CONFIRM_POLL_MS <= 500)
 
   console.log(
     JSON.stringify(

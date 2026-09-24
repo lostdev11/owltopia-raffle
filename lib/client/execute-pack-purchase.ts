@@ -79,6 +79,9 @@ export type ExecutePackPurchaseOptions = {
 /** Client abort for /api/packs/open — under route maxDuration (120s) so UI never spins forever. */
 export const PACK_OPEN_CLIENT_TIMEOUT_MS = 110_000
 
+/** Faster payment confirmation polling before server VRF work starts. */
+export const PACK_PAYMENT_CONFIRM_POLL_MS = 300
+
 export const PACK_OPEN_CLIENT_TIMEOUT_MESSAGE =
   'Prize resolution timed out after payment. Your pack is queued for support/refund — contact support with your payment signature.'
 
@@ -329,7 +332,13 @@ export async function executePackPurchase(
     }
 
     try {
-      await confirmSignatureSuccessOnChain(opts.connection, signature)
+      await confirmSignatureSuccessOnChain(
+        opts.connection,
+        signature,
+        120_000,
+        undefined,
+        { pollIntervalMs: PACK_PAYMENT_CONFIRM_POLL_MS }
+      )
     } catch (e) {
       return {
         ok: false,
@@ -406,7 +415,13 @@ export async function executePackPurchase(
   }
 
   try {
-    await confirmSignatureSuccessOnChain(opts.connection, signature)
+    await confirmSignatureSuccessOnChain(
+      opts.connection,
+      signature,
+      120_000,
+      undefined,
+      { pollIntervalMs: PACK_PAYMENT_CONFIRM_POLL_MS }
+    )
   } catch (e) {
     return {
       ok: false,

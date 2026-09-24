@@ -17,6 +17,8 @@ import { isRetryableVrfRevealError } from '@/lib/raffles/draw/vrf-retry-policy'
 import { updatePackOpen } from '@/lib/packs/db'
 import { resolvePackVrfRevealWaitMs } from '@/lib/packs/vrf-config'
 import { PACK_OPEN_ALGO_V2_VRF } from '@/lib/packs/config'
+import { resolvePackSwitchboardCommitOptions } from '@/lib/packs/vrf-commit-options'
+import { logVrfPhase, vrfPhaseTimer } from '@/lib/raffles/draw/vrf-timing-log'
 
 export type PackVrfResult =
   | {
@@ -66,9 +68,15 @@ export function shouldStartPackVrfRecommit(params: {
 async function commitAndRevealOnce(params: {
   openId: string
   revealWaitMs: number
+  attemptLabel: 'first' | 'recommit'
 }): Promise<PackVrfResult> {
-  const commit = await switchboardCommitRandomness()
+  const attemptTimer = vrfPhaseTimer()
+  const commit = await switchboardCommitRandomness(resolvePackSwitchboardCommitOptions())
   if (!commit.ok) {
+    logVrfPhase('pack', 'vrf.attempt_failed', attemptTimer.elapsed(), {
+      attempt: params.attemptLabel,
+      stage: 'commit',
+    })
     await updatePackOpen(params.openId, {
       open_algo: PACK_OPEN_ALGO_V2_VRF,
       open_vrf_provider: VRF_PROVIDER_SWITCHBOARD,
@@ -95,9 +103,15 @@ async function commitAndRevealOnce(params: {
     randomnessAccount: commit.randomnessAccount,
     randomnessSecretKeyBase58: commit.randomnessSecretKeyBase58,
     maxWaitMs: params.revealWaitMs,
+    seedSlot: commit.seedSlot,
+    timingScope: 'pack',
   })
 
   if (!reveal.ok) {
+    logVrfPhase('pack', 'vrf.attempt_failed', attemptTimer.elapsed(), {
+      attempt: params.attemptLabel,
+      stage: 'reveal',
+    })
     await updatePackOpen(params.openId, {
       open_vrf_status: 'failed',
       open_vrf_error: reveal.error,
@@ -115,6 +129,10 @@ async function commitAndRevealOnce(params: {
     open_vrf_fulfill_tx: reveal.revealTx,
     open_vrf_error: null,
   } as Parameters<typeof updatePackOpen>[1])
+
+  logVrfPhase('pack', 'vrf.attempt_ok', attemptTimer.elapsed(), {
+    attempt: params.attemptLabel,
+  })
 
   return {
     ok: true,
@@ -134,9 +152,21 @@ export async function runPackOpenVrf(openId: string): Promise<PackVrfResult> {
   const wallStarted = Date.now()
   const totalBudgetMs = resolvePackVrfRevealWaitMs()
   const attemptWaitMs = resolvePackVrfAttemptRevealWaitMs(totalBudgetMs)
+  logVrfPhase('pack', 'vrf.run_start', 0, {
+    openId,
+    attemptWaitMs,
+    totalBudgetMs,
+  })
 
-  const first = await commitAndRevealOnce({ openId, revealWaitMs: attemptWaitMs })
-  if (first.ok) return first
+  const first = await commitAndRevealOnce({
+    openId,
+    revealWaitMs: attemptWaitMs,
+    attemptLabel: 'first',
+  })
+  if (first.ok) {
+    logVrfPhase('pack', 'vrf.run_ok', Date.now() - wallStarted, { openId, attempts: 1 })
+    return first
+  }
 
   // One fresh commit+reveal for transient oracle Secp / gateway / blockhash / confirm-timeout
   // failures before refund — but only if enough wall-clock remains under maxDuration.
@@ -166,8 +196,15 @@ export async function runPackOpenVrf(openId: string): Promise<PackVrfResult> {
     open_vrf_error: `Retrying with fresh Switchboard commit after: ${first.error}`,
   } as Parameters<typeof updatePackOpen>[1])
 
-  const second = await commitAndRevealOnce({ openId, revealWaitMs: secondWaitMs })
-  if (second.ok) return second
+  const second = await commitAndRevealOnce({
+    openId,
+    revealWaitMs: secondWaitMs,
+    attemptLabel: 'recommit',
+  })
+  if (second.ok) {
+    logVrfPhase('pack', 'vrf.run_ok', Date.now() - wallStarted, { openId, attempts: 2 })
+    return second
+  }
 
   // Prefer the second attempt's error (fresher), keep audit trail of first account in message.
   const combined = second.error
@@ -177,6 +214,8 @@ export async function runPackOpenVrf(openId: string): Promise<PackVrfResult> {
     open_vrf_status: 'failed',
     open_vrf_error: combined,
   } as Parameters<typeof updatePackOpen>[1])
+  logVrfPhase('pack', 'vrf.run_failed', Date.now() - wallStarted, { openId, attempts: 2 })
+
   return {
     ok: false,
     error: combined,

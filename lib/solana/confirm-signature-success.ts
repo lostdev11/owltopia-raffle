@@ -58,15 +58,17 @@ export async function confirmSignatureSuccessOnChain(
   /** Mobile / congested RPC: allow extra time before we ask the user to verify manually. */
   timeoutMs = 120_000,
   /** Override the default raffle-oriented timeout hint (e.g. OwlSend). */
-  timeoutHint?: string
+  timeoutHint?: string,
+  options?: { pollIntervalMs?: number }
 ): Promise<void> {
   const started = Date.now()
+  const pollIntervalMs = Math.max(200, options?.pollIntervalMs ?? 500)
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
   const hint = timeoutHint?.trim() || TIMEOUT_HINT
 
   while (Date.now() - started < timeoutMs) {
     if (await pollSignatureOnce(connection, signature)) return
-    await sleep(500)
+    await sleep(pollIntervalMs)
   }
 
   // Mobile: timers freeze while the tab is backgrounded (user inside the wallet app),

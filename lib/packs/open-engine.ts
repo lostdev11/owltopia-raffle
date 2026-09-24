@@ -49,6 +49,7 @@ import {
 import { isPackVrfEnabled, resolvePackOpenAlgo } from '@/lib/packs/vrf-config'
 import { runPackOpenVrf } from '@/lib/packs/vrf-open-flow'
 import { resolvePackSeedFromVrfResult } from '@/lib/packs/seed-after-payment'
+import { logVrfPhase, vrfPhaseTimer } from '@/lib/raffles/draw/vrf-timing-log'
 import { isPackOwlCheckoutEnabled } from '@/lib/db/pack-public-settings'
 import { quotePackOwlCheckoutFee } from '@/lib/packs/owl-checkout-fee'
 import { isOwlEnabled } from '@/lib/tokens'
@@ -190,6 +191,7 @@ export async function confirmAndOpenPack(input: {
   buyerWallet: string
   paymentSignature: string
 }): Promise<PackOpenResult> {
+  const openWall = vrfPhaseTimer()
   const existingBySig = await getPackOpenByPaymentSignature(input.paymentSignature)
   if (existingBySig?.status === 'completed' && existingBySig.open_seed) {
     return rowToResult(existingBySig)
@@ -209,6 +211,7 @@ export async function confirmAndOpenPack(input: {
   const paymentCurrency: PackPaymentCurrency =
     open.payment_currency === 'OWL' ? 'OWL' : 'SOL'
 
+  const verifyPhase = vrfPhaseTimer()
   const verified =
     paymentCurrency === 'OWL'
       ? await verifyPackOwlPayment({
@@ -222,6 +225,11 @@ export async function confirmAndOpenPack(input: {
           buyerWallet: input.buyerWallet,
           expectedSol: priceSol,
         })
+  logVrfPhase('pack', 'open.verify_payment', verifyPhase.elapsed(), {
+    openId: open.id,
+    currency: paymentCurrency,
+    ok: verified.ok,
+  })
   if (!verified.ok) {
     await updatePackOpen(open.id, {
       status: 'failed',
@@ -249,7 +257,12 @@ export async function confirmAndOpenPack(input: {
   let seed: string
   if (isPackVrfEnabled()) {
     open = await updatePackOpen(open.id, { status: 'rolling', open_algo: algo })
+    const vrfPhase = vrfPhaseTimer()
     const vrf = await runPackOpenVrf(open.id)
+    logVrfPhase('pack', 'open.vrf', vrfPhase.elapsed(), {
+      openId: open.id,
+      ok: vrf.ok,
+    })
     const resolved = resolvePackSeedFromVrfResult({
       vrfOk: vrf.ok,
       vrfOpenSeed: vrf.ok ? vrf.openSeed : undefined,
@@ -340,6 +353,12 @@ export async function confirmAndOpenPack(input: {
     })
 
     await ensurePacksSolvencyOrPause()
+
+    logVrfPhase('pack', 'open.total', openWall.elapsed(), {
+      openId: open.id,
+      category: 'jackpot',
+      vrf: isPackVrfEnabled(),
+    })
 
     return rowToResult(open, { jackpotPoolSol: jackpotResolution.poolAfterSol })
   }
@@ -521,6 +540,12 @@ export async function confirmAndOpenPack(input: {
   })
 
   await ensurePacksSolvencyOrPause()
+
+  logVrfPhase('pack', 'open.total', openWall.elapsed(), {
+    openId: open.id,
+    category: open.category,
+    vrf: isPackVrfEnabled(),
+  })
 
   return rowToResult(open, {
     nftName,
