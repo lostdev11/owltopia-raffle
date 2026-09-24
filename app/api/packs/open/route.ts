@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { PublicKey } from '@solana/web3.js'
 import { assertPacksAccess } from '@/lib/packs/assert-access'
 import { confirmAndOpenPack } from '@/lib/packs/open-engine'
+import { packRevealMessage } from '@/lib/packs/reveal-message'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
@@ -47,12 +48,11 @@ export async function POST(request: NextRequest) {
       success: true,
       result: {
         ...result,
-        revealMessage:
-          result.isJackpotWin
-            ? `You won the ${result.prizeLabel}!`
-            : result.category === 'owl'
-            ? `You won ${result.prizeLabel} — sent to your wallet`
-            : `You won ${result.prizeLabel}`,
+        revealMessage: packRevealMessage({
+          category: result.category,
+          prizeLabel: result.prizeLabel,
+          isJackpotWin: result.isJackpotWin,
+        }),
       },
     })
   } catch (e) {

@@ -121,6 +121,7 @@
     "test:packs-inventory-eligibility": "npx --yes tsx scripts/test-packs-inventory-eligibility.ts",
     "test:pack-purchase-errors": "npx --yes tsx scripts/test-pack-purchase-errors.ts",
     "test:pack-owl-checkout": "npx --yes tsx scripts/test-pack-owl-checkout.ts",
+    "test:pack-reveal-ledger": "npx --yes tsx scripts/test-pack-reveal-ledger.ts",
     "packs:ev-simulator": "npx --yes tsx scripts/packs-ev-simulator.ts",
     "packs:grind-vault": "npx --yes tsx scripts/grind-packs-vault-vanity.ts",
     "packs:normalize-vault-keypair": "node scripts/normalize-packs-vault-keypair.mjs",

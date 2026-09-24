@@ -141,6 +141,18 @@ export type PackTicketCreditRow = {
   created_at: string
 }
 
+export type PackLedgerEntry = {
+  id: string
+  completedAt: string
+  productName: string
+  productSlug: string
+  category: PackPrizeCategory | string
+  prizeLabel: string
+  paymentSignature: string | null
+  payoutSignature: string | null
+  isJackpotWin: boolean
+}
+
 export type PackOpenResult = {
   openId: string
   category: PackPrizeCategory

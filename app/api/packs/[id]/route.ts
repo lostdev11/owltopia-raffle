@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getPackOpenById, getPackVaultConfig } from '@/lib/packs/db'
+import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { packRevealMessage } from '@/lib/packs/reveal-message'
 import { pickCategory, pickJackpotWin, pickNftFromSnapshot, hashPackOpenCommit, recomputeOpenFromSeed, verifyCommitHash } from '@/lib/packs/rng'
 import { PACK_JACKPOT_MIN_PAYOUT_SOL } from '@/lib/packs/jackpot'
 import { PACK_OPEN_ALGO_V2_VRF } from '@/lib/packs/config'
@@ -70,6 +72,29 @@ export async function GET(_request: NextRequest, context: Ctx) {
 
     const isVrf = open.open_algo === PACK_OPEN_ALGO_V2_VRF || Boolean(open.open_vrf_fulfill_tx)
 
+    let nftName: string | null = null
+    let nftImageUrl: string | null = null
+    if (open.nft_inventory_id) {
+      const { data: inv } = await getSupabaseAdmin()
+        .from('pack_inventory')
+        .select('name, image_url')
+        .eq('id', open.nft_inventory_id)
+        .maybeSingle()
+      if (inv) {
+        nftName = typeof inv.name === 'string' ? inv.name : null
+        nftImageUrl = typeof inv.image_url === 'string' ? inv.image_url : null
+      }
+    }
+
+    const revealMessage =
+      open.status === 'completed' && open.category && open.prize_label
+        ? packRevealMessage({
+            category: open.category,
+            prizeLabel: open.prize_label,
+            isJackpotWin: open.is_jackpot_win === true,
+          })
+        : null
+
     return NextResponse.json({
       id: open.id,
       status: open.status,
@@ -84,6 +109,9 @@ export async function GET(_request: NextRequest, context: Ctx) {
       owlAmount: open.owl_amount,
       solAmount: open.sol_amount,
       nftMint: open.nft_mint_address,
+      nftName,
+      nftImageUrl,
+      revealMessage,
       fairValueSol: open.fair_value_sol,
       freeTicketCredits: open.free_ticket_credits,
       isJackpotWin: open.is_jackpot_win === true,
