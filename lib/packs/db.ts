@@ -8,6 +8,7 @@ import { expectedJackpotPoolSol } from '@/lib/packs/jackpot'
 import type {
   PackInventoryPrizeStandard,
   PackInventoryRow,
+  PackLedgerEntry,
   PackNftOddsTier,
   PackOpenRow,
   PackProductRow,
@@ -500,6 +501,75 @@ export async function consumePackTicketCredits(
     left -= take
   }
   return left === 0
+}
+
+export async function countCompletedPackOpensForWallet(wallet: string): Promise<number> {
+  const { count, error } = await getSupabaseAdmin()
+    .from('pack_opens')
+    .select('*', { count: 'exact', head: true })
+    .eq('buyer_wallet', wallet.trim())
+    .eq('status', 'completed')
+  if (error) throw error
+  return count ?? 0
+}
+
+type PackOpenLedgerDbRow = {
+  id: string
+  completed_at: string | null
+  category: string | null
+  prize_label: string | null
+  payment_signature: string | null
+  payout_signature: string | null
+  is_jackpot_win: boolean | null
+  pack_products: { name: string; slug: string } | { name: string; slug: string }[] | null
+}
+
+function mapPackOpenLedgerRow(row: PackOpenLedgerDbRow): PackLedgerEntry | null {
+  if (!row.completed_at) return null
+  const productRaw = row.pack_products
+  const product = Array.isArray(productRaw) ? productRaw[0] : productRaw
+  return {
+    id: row.id,
+    completedAt: row.completed_at,
+    productName: product?.name?.trim() || 'Owl Pack',
+    productSlug: product?.slug?.trim() || PACKS_PRODUCT_SLUG,
+    category: row.category ?? 'owl',
+    prizeLabel: row.prize_label?.trim() || 'Prize',
+    paymentSignature: row.payment_signature,
+    payoutSignature: row.payout_signature,
+    isJackpotWin: row.is_jackpot_win === true,
+  }
+}
+
+export async function listCompletedPackOpensForWallet(input: {
+  wallet: string
+  limit?: number
+  offset?: number
+}): Promise<PackLedgerEntry[]> {
+  const limit = Math.min(Math.max(input.limit ?? 20, 1), 50)
+  const offset = Math.max(input.offset ?? 0, 0)
+  const { data, error } = await getSupabaseAdmin()
+    .from('pack_opens')
+    .select(
+      `
+      id,
+      completed_at,
+      category,
+      prize_label,
+      payment_signature,
+      payout_signature,
+      is_jackpot_win,
+      pack_products ( name, slug )
+    `
+    )
+    .eq('buyer_wallet', input.wallet.trim())
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+  if (error) throw error
+  return ((data as PackOpenLedgerDbRow[]) ?? [])
+    .map(mapPackOpenLedgerRow)
+    .filter((r): r is PackLedgerEntry => r != null)
 }
 
 export function defaultProductFallback(): Pick<

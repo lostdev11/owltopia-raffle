@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import Link from 'next/link'
-import { CheckCircle2, ImageIcon } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ImageIcon } from 'lucide-react'
 import type { PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
 import { PACK_OWL_PRIZE_ART, PACK_SOL_PRIZE_ART } from '@/lib/packs/animations'
 import { cn } from '@/lib/utils'
@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils'
 type Props = {
   result: PackOpenClientResult
   onRipAgain: () => void
+  onBackToPacks: () => void
+  onViewLedger: () => void
   className?: string
 }
 
@@ -58,7 +60,13 @@ function PrizeArt({ result }: { result: PackOpenClientResult }) {
   return <ImageIcon className="h-16 w-16 text-[#00FF9C]" aria-hidden />
 }
 
-export function PackPrizeReveal({ result, onRipAgain, className }: Props) {
+export function PackPrizeReveal({
+  result,
+  onRipAgain,
+  onBackToPacks,
+  onViewLedger,
+  className,
+}: Props) {
   return (
     <div
       className={cn(
@@ -103,10 +111,10 @@ export function PackPrizeReveal({ result, onRipAgain, className }: Props) {
       <p className="mt-5 text-xl font-semibold text-amber-200 sm:text-2xl">{result.prizeLabel}</p>
       <p className="mt-2 text-sm leading-relaxed text-white/60">{result.revealMessage}</p>
 
-      <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:justify-center">
+      <div className="mt-7 flex w-full max-w-sm flex-col gap-3 sm:mx-auto">
         <Link
           href={`/packs/verify/${result.openId}`}
-          className="inline-flex min-h-[48px] min-w-[180px] items-center justify-center gap-2 rounded-xl bg-[#00FF9C] px-6 text-sm font-bold uppercase tracking-wider text-[#062016] transition hover:bg-[#7DFFB8]"
+          className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-[#00FF9C] px-6 text-sm font-bold uppercase tracking-wider text-[#062016] transition hover:bg-[#7DFFB8]"
         >
           <CheckCircle2 className="h-4 w-4" aria-hidden />
           Verify open
@@ -114,9 +122,24 @@ export function PackPrizeReveal({ result, onRipAgain, className }: Props) {
         <button
           type="button"
           onClick={onRipAgain}
-          className="inline-flex min-h-[48px] min-w-[180px] items-center justify-center rounded-xl border border-[#00FF9C]/45 bg-transparent px-6 text-sm font-bold uppercase tracking-wider text-[#00FF9C] transition hover:bg-[#00FF9C]/10"
+          className="inline-flex min-h-[48px] w-full items-center justify-center rounded-xl border border-[#00FF9C]/45 bg-transparent px-6 text-sm font-bold uppercase tracking-wider text-[#00FF9C] transition hover:bg-[#00FF9C]/10"
         >
           Open another
+        </button>
+        <button
+          type="button"
+          onClick={onBackToPacks}
+          className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/[0.04] px-6 text-sm font-bold uppercase tracking-wider text-white/85 transition hover:bg-white/[0.08]"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden />
+          Back to packs
+        </button>
+        <button
+          type="button"
+          onClick={onViewLedger}
+          className="inline-flex min-h-[44px] items-center justify-center text-xs font-semibold uppercase tracking-[0.18em] text-[#00FF9C]/75 hover:text-[#00FF9C]"
+        >
+          View my pack opens
         </button>
       </div>
     </div>

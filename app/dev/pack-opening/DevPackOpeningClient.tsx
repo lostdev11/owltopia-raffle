@@ -7,9 +7,10 @@ import {
 } from '@/components/packs/PackOpeningExperience'
 import { PackHoverVideo } from '@/components/packs/PackHoverVideo'
 import { preloadPackAnimationVideos } from '@/lib/packs/animations'
+import { PackPrizeReveal } from '@/components/packs/PackPrizeReveal'
 import { mockPackOpenReward } from '@/lib/packs/preview-reward'
 
-type Mode = 'hovering' | 'opening' | 'full' | 'reveal'
+type Mode = 'hovering' | 'opening' | 'full' | 'reveal' | 'result-ui'
 
 export function DevPackOpeningClient() {
   const [mode, setMode] = useState<Mode | null>(null)
@@ -23,7 +24,7 @@ export function DevPackOpeningClient() {
   }, [])
 
   const experienceProps = useMemo(() => {
-    if (!mode) return null
+    if (!mode || mode === 'result-ui') return null
     if (mode === 'hovering') {
       return {
         initialStage: 'hovering' as PackOpeningStage,
@@ -86,6 +87,7 @@ export function DevPackOpeningClient() {
               ['opening', 'Opening only'],
               ['full', 'Full sequence'],
               ['reveal', 'Reward reveal'],
+              ['result-ui', 'Result screen UI'],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -110,7 +112,19 @@ export function DevPackOpeningClient() {
         </div>
       </div>
 
-      {mode && experienceProps ? (
+      {mode === 'result-ui' ? (
+        <div className="mx-auto mt-8 max-w-md">
+          <PackPrizeReveal
+            key={`${category}-${runKey}`}
+            result={reward}
+            onRipAgain={() => setMode(null)}
+            onBackToPacks={() => setMode(null)}
+            onViewLedger={() => setMode(null)}
+          />
+        </div>
+      ) : null}
+
+      {mode && mode !== 'result-ui' && experienceProps ? (
         <PackOpeningExperience
           key={`${mode}-${category}-${runKey}`}
           reward={reward}

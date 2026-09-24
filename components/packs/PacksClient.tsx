@@ -2,12 +2,15 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { PackAnimationPreload } from '@/components/packs/PackAnimationPreload'
 import { PackOpeningExperience } from '@/components/packs/PackOpeningExperience'
+import { PackLedgerPanel } from '@/components/packs/PackLedgerPanel'
 import { PackPrizeReveal } from '@/components/packs/PackPrizeReveal'
+import { packOpenVerifyJsonToClientResult } from '@/lib/packs/pack-open-client-result'
 import { PackVault } from '@/components/packs/vault/PackVault'
 import { executePackPurchase, type PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
 import {
@@ -156,6 +159,9 @@ export function PacksClient({
   const sendTransaction = useSendTransactionForWallet()
   const access = usePacksAdminAccess({ initialViewerIsAdmin, isPublic })
   const { signIn, signingIn, error: signInError } = useSiwsSignIn()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const openQueryId = searchParams.get('open')?.trim() ?? ''
   const [config, setConfig] = useState<PacksConfig | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [ripping, setRipping] = useState(false)
@@ -165,6 +171,7 @@ export function PacksClient({
   const [paymentConfirmed, setPaymentConfirmed] = useState(false)
   const [balanceLamports, setBalanceLamports] = useState<number | null>(null)
   const [paymentCurrency, setPaymentCurrency] = useState<PackPaymentCurrency>('SOL')
+  const [ledgerRefreshKey, setLedgerRefreshKey] = useState(0)
 
   const allowed = access.allowed
   const showAdminPreview = access.isAdmin && !isPublic
@@ -197,6 +204,68 @@ export function PacksClient({
     void load()
     preloadConfetti()
   }, [allowed, load])
+
+  const syncOpenQuery = useCallback(
+    (openId: string | null) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (openId) params.set('open', openId)
+      else params.delete('open')
+      const qs = params.toString()
+      router.replace(qs ? `/packs?${qs}` : '/packs', { scroll: false })
+    },
+    [router, searchParams]
+  )
+
+  const dismissReveal = useCallback(() => {
+    setResult(null)
+    setPhase('idle')
+    setError(null)
+    setPaymentConfirmed(false)
+    syncOpenQuery(null)
+  }, [syncOpenQuery])
+
+  const viewPackLedger = useCallback(() => {
+    dismissReveal()
+    requestAnimationFrame(() => {
+      document.getElementById('my-pack-opens')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }, [dismissReveal])
+
+  useEffect(() => {
+    if (phase === 'reveal' && result?.openId) {
+      syncOpenQuery(result.openId)
+    }
+  }, [phase, result?.openId, syncOpenQuery])
+
+  useEffect(() => {
+    if (!openQueryId || !publicKey || !allowed) return
+    if (result?.openId === openQueryId && phase === 'reveal') return
+    if (phase === 'paying' || phase === 'experience') return
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/packs/${openQueryId}`)
+        const json = (await res.json()) as Record<string, unknown>
+        if (!res.ok || cancelled) return
+        if (json.buyerWallet !== publicKey.toBase58()) {
+          syncOpenQuery(null)
+          return
+        }
+        const restored = packOpenVerifyJsonToClientResult(json)
+        if (!restored || cancelled) return
+        setResult(restored)
+        setPhase('reveal')
+        setRipping(false)
+        setPaymentConfirmed(false)
+      } catch {
+        /* ignore — user can still use packs normally */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [openQueryId, publicKey, allowed, phase, result?.openId, syncOpenQuery])
 
 
 
@@ -253,6 +322,7 @@ export function PacksClient({
       setResult(out.result)
       setPhase('experience')
       setRipping(false)
+      setLedgerRefreshKey((k) => k + 1)
       void load()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Rip failed')
@@ -516,6 +586,14 @@ export function PacksClient({
                 Built on Solana — every pack wins
               </li>
             </ul>
+            {connected && publicKey ? (
+              <Link
+                href="#my-pack-opens"
+                className="inline-flex min-h-[44px] items-center text-sm font-semibold text-[#00FF9C] hover:text-[#7DFFB8]"
+              >
+                My pack opens →
+              </Link>
+            ) : null}
           </div>
 
           {/* Center pack / reveal */}
@@ -527,11 +605,10 @@ export function PacksClient({
               <PackPrizeReveal
                 result={result}
                 onRipAgain={() => {
-                  setResult(null)
-                  setPhase('idle')
-                  setError(null)
-                  setPaymentConfirmed(false)
+                  dismissReveal()
                 }}
+                onBackToPacks={dismissReveal}
+                onViewLedger={viewPackLedger}
               />
             ) : (
               <PackVault
@@ -618,6 +695,12 @@ export function PacksClient({
       {/* Below-fold */}
       <section className="mx-auto max-w-3xl px-4 pb-10 sm:px-6 pt-10">
         <div className="border-t border-white/10 pt-10">
+          <PackLedgerPanel
+            wallet={connected && publicKey ? publicKey.toBase58() : null}
+            refreshKey={ledgerRefreshKey}
+          />
+        </div>
+        <div className="mt-10 border-t border-white/10 pt-10">
           <h2 className="flex items-center gap-2 font-display text-3xl tracking-[0.12em] text-[#EAFBF4]">
             <Gift className="h-6 w-6 text-[#00FF9C]" aria-hidden />
             Recent opens
