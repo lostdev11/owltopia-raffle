@@ -1,6 +1,6 @@
 /**
  * Switchboard On-Demand randomness (commit → reveal) for owltopia-draw-v3-vrf.
- * Platform pays via VRF_FEE_PAYER_SECRET_KEY (preferred), else prize/funds escrow. Pure client path — no custom raffle program yet.
+ * Platform pays via VRF_FEE_PAYER_SECRET_KEY only (no prize/funds escrow fallback).
  */
 import {
   Keypair,
@@ -500,7 +500,7 @@ export async function switchboardCommitRandomness(
     return {
       ok: false,
       error:
-        'No fee-payer key configured for VRF (set VRF_FEE_PAYER_SECRET_KEY, or PRIZE_ESCROW_SECRET_KEY / FUNDS_ESCROW_SECRET_KEY as fallback)',
+        'No VRF fee-payer key configured (set VRF_FEE_PAYER_SECRET_KEY to the dedicated VRF wallet — fees are never taken from prize or funds escrow)',
     }
   }
 

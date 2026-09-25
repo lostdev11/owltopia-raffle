@@ -4,7 +4,8 @@ import {
   checkEscrowHoldsNft,
   getPrizeEscrowPublicKey,
   payoutFungibleSplFromEscrowToRecipient,
-  payoutNativeSolFromEscrowToRecipient,
+  payoutSolPartnerPrizeFromEscrowToRecipient,
+  wrapNativeSolPrizeInEscrow,
   payoutSplLegacyWithCoreCompressedFallback,
 } from '@/lib/raffles/prize-escrow'
 import { getSolanaReadConnection } from '@/lib/solana/connection'
@@ -73,6 +74,12 @@ export async function verifyAuctionPrizeDeposit(params: {
     if (!verified.valid) {
       return { ok: false, error: verified.error || 'Deposit tx invalid', httpStatus: 400 }
     }
+    if (currency === 'SOL') {
+      const wrap = await wrapNativeSolPrizeInEscrow(BigInt(Math.round(amount * LAMPORTS_PER_SOL)))
+      if (!wrap.ok) {
+        console.error('[auctions/prize] SOL prize wrap failed:', wrap.error)
+      }
+    }
     return { ok: true }
   }
 
@@ -81,12 +88,17 @@ export async function verifyAuctionPrizeDeposit(params: {
   const escrowPk = new PublicKey(escrow)
   if (currency === 'SOL') {
     const lamports = await connection.getBalance(escrowPk, 'confirmed')
-    if (lamports < Math.round(amount * LAMPORTS_PER_SOL)) {
+    const need = Math.round(amount * LAMPORTS_PER_SOL)
+    if (lamports < need) {
       return {
         ok: false,
         error: 'Escrow SOL balance is below the declared prize. Transfer the prize and retry (include deposit_tx).',
         httpStatus: 400,
       }
+    }
+    const wrap = await wrapNativeSolPrizeInEscrow(BigInt(need))
+    if (!wrap.ok) {
+      console.error('[auctions/prize] SOL prize wrap failed:', wrap.error)
     }
     return { ok: true }
   }
@@ -145,7 +157,7 @@ export async function transferAuctionPrizeToRecipient(params: {
 
   if (auction.prize_type === 'sol') {
     const lamports = BigInt(Math.round(amount * LAMPORTS_PER_SOL))
-    const result = await payoutNativeSolFromEscrowToRecipient(recipientWallet, lamports)
+    const result = await payoutSolPartnerPrizeFromEscrowToRecipient(recipientWallet, lamports)
     if (!result.ok || !result.signature) {
       return { ok: false, error: result.error || 'SOL prize transfer failed' }
     }

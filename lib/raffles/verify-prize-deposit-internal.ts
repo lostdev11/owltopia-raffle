@@ -5,6 +5,7 @@ import {
   getPrizeEscrowPublicKey,
   getEscrowTokenAccountForMint,
   isMplCoreAssetInEscrow,
+  wrapNativeSolPrizeInEscrow,
 } from '@/lib/raffles/prize-escrow'
 import {
   getMintFromDepositTxDetailed,
@@ -237,6 +238,18 @@ export async function verifyPrizeDepositInternal(
         prize_deposit_tx: depositTx,
         prize_standard: partner.tokenProgram === 'token2022' ? ('token2022' as const) : ('spl' as const),
       } as any)
+
+      // Segregate SOL prize principal into wSOL so NFT ATA rent / fees cannot drain it.
+      if (partner.currencyCode === 'SOL') {
+        const wrap = await wrapNativeSolPrizeInEscrow(requiredRaw)
+        if (!wrap.ok) {
+          console.error(
+            `[verify-prize-deposit] SOL prize wrap failed for raffle ${raffleId}:`,
+            wrap.error
+          )
+        }
+      }
+
       return {
         ok: true,
         prizeDepositedAt: now,

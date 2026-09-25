@@ -23,8 +23,11 @@ import {
   getAssociatedTokenAddress,
   createTransferInstruction,
   createAssociatedTokenAccountInstruction,
+  createAssociatedTokenAccountIdempotentInstruction,
+  createSyncNativeInstruction,
   getAccount,
   getMint,
+  NATIVE_MINT,
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -58,6 +61,40 @@ const NFT_AMOUNT = 1n
 
 /** Keep enough native SOL in escrow for a simple SystemProgram.transfer fee. */
 const NATIVE_SOL_PRIZE_TRANSFER_FEE_BUFFER_LAMPORTS = 5000n
+
+/** Typical Token account rent-exempt minimum (lamports) + small fee headroom. */
+const ESCROW_ATA_RENT_LAMPORTS = 2_050_000n
+
+/**
+ * Refuse NFT/fungible ATA creation (and similar native spends) when they would leave
+ * outstanding SOL crypto prizes under-covered in the shared prize escrow wallet.
+ */
+async function assertEscrowNativeSpendWontStrandSolPrizes(
+  spendLamports: bigint
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const { assertPrizeEscrowSolLiabilityCoveredAfterNativeSpend } = await import(
+      '@/lib/raffles/prize-escrow-sol-liability-service'
+    )
+    const spendSol = Number(spendLamports) / 1e9
+    const result = await assertPrizeEscrowSolLiabilityCoveredAfterNativeSpend(spendSol)
+    if (!result.ok) {
+      return {
+        ok: false,
+        error:
+          result.error ||
+          'Prize escrow cannot fund this NFT transfer without stranding outstanding SOL prizes. Top up prize escrow and retry.',
+      }
+    }
+    return { ok: true }
+  } catch (e) {
+    console.warn(
+      '[prize-escrow] SOL liability gate skipped:',
+      e instanceof Error ? e.message : e
+    )
+    return { ok: true }
+  }
+}
 
 /** SPL Token custom error 0x11 = account frozen; simulation logs often say "Account is frozen". */
 function humanizeSplPrizeTransferError(message: string): string {
@@ -397,6 +434,8 @@ export async function payoutSplFromEscrowToRecipient(
 
   const tx = new Transaction()
   if (!destAccountExists) {
+    const gate = await assertEscrowNativeSpendWontStrandSolPrizes(ESCROW_ATA_RENT_LAMPORTS)
+    if (!gate.ok) return gate
     tx.add(
       createAssociatedTokenAccountInstruction(
         keypair.publicKey,
@@ -518,6 +557,14 @@ export async function payoutFungibleSplFromEscrowToRecipient(
 
   const tx = new Transaction()
   if (!destAccountExists) {
+    // Creating the winner's ATA spends rent from prize escrow native SOL — do not strand SOL prizes.
+    // Skip the gate for wSOL payouts: that path is paying the SOL prize liability itself.
+    const isWsolPayout =
+      mint.equals(NATIVE_MINT) || mintAddress === WSOL_MINT_MAINNET || mintAddress === NATIVE_MINT.toBase58()
+    if (!isWsolPayout) {
+      const gate = await assertEscrowNativeSpendWontStrandSolPrizes(ESCROW_ATA_RENT_LAMPORTS)
+      if (!gate.ok) return gate
+    }
     tx.add(
       createAssociatedTokenAccountInstruction(
         keypair.publicKey,
@@ -566,6 +613,101 @@ export async function payoutFungibleSplFromEscrowToRecipient(
 }
 
 /**
+ * Move `lamports` of native SOL into the escrow's wSOL ATA so NFT rent / fee spends cannot
+ * eat that prize principal. Call after each verified SOL prize deposit with that prize amount.
+ *
+ * Requires native balance ≥ lamports + fee (+ ATA rent if the wSOL ATA does not exist yet).
+ */
+export async function wrapNativeSolPrizeInEscrow(
+  lamports: bigint
+): Promise<{ ok: boolean; signature?: string; error?: string; skipped?: boolean }> {
+  if (lamports <= 0n) {
+    return { ok: false, error: 'Wrap amount must be positive.' }
+  }
+  const keypair = getPrizeEscrowKeypair()
+  if (!keypair) {
+    return { ok: false, error: 'Prize escrow not configured (PRIZE_ESCROW_SECRET_KEY)' }
+  }
+  if (lamports > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return { ok: false, error: 'Wrap amount is too large for native SOL transfer encoding.' }
+  }
+
+  const connection = getSolanaConnection()
+  const readConn = getSolanaReadConnection()
+  const ata = await getAssociatedTokenAddress(
+    NATIVE_MINT,
+    keypair.publicKey,
+    false,
+    TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )
+
+  let ataExists = false
+  try {
+    await getAccount(readConn, ata, 'confirmed', TOKEN_PROGRAM_ID)
+    ataExists = true
+  } catch {
+    ataExists = false
+  }
+
+  const nativeBal = BigInt(await connection.getBalance(keypair.publicKey, 'confirmed'))
+  const rentNeed = ataExists ? 0n : ESCROW_ATA_RENT_LAMPORTS
+  const needed = lamports + rentNeed + NATIVE_SOL_PRIZE_TRANSFER_FEE_BUFFER_LAMPORTS
+  if (nativeBal < needed) {
+    const haveSol = (Number(nativeBal) / 1e9).toFixed(4)
+    const needSol = (Number(needed) / 1e9).toFixed(4)
+    return {
+      ok: false,
+      error: `Cannot wrap SOL prize into wSOL (have ~${haveSol} native SOL, need ~${needSol} including ATA rent/fees). Top up prize escrow ops float, then retry wrap.`,
+    }
+  }
+
+  const tx = new Transaction()
+  if (!ataExists) {
+    tx.add(
+      createAssociatedTokenAccountIdempotentInstruction(
+        keypair.publicKey,
+        ata,
+        keypair.publicKey,
+        NATIVE_MINT,
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+      )
+    )
+  }
+  tx.add(
+    SystemProgram.transfer({
+      fromPubkey: keypair.publicKey,
+      toPubkey: ata,
+      lamports: Number(lamports),
+    }),
+    createSyncNativeInstruction(ata, TOKEN_PROGRAM_ID)
+  )
+
+  try {
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
+    tx.recentBlockhash = blockhash
+    tx.feePayer = keypair.publicKey
+    tx.sign(keypair)
+    const sig = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed',
+    })
+    const confirmation = await connection.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      'confirmed'
+    )
+    if (confirmation.value.err) {
+      throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`)
+    }
+    return { ok: true, signature: sig }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: message }
+  }
+}
+
+/**
  * Native SOL: send `lamports` from prize escrow wallet to recipient.
  * Used as a fallback for SOL partner prizes that were deposited as native SOL (not wSOL token transfer).
  */
@@ -591,9 +733,10 @@ export async function payoutNativeSolFromEscrowToRecipient(
   if (BigInt(escrowBalance) < needed) {
     const haveSol = (Number(escrowBalance) / 1e9).toFixed(4)
     const needSol = (Number(needed) / 1e9).toFixed(4)
+    const shortfallSol = ((Number(needed) - Number(escrowBalance)) / 1e9).toFixed(4)
     return {
       ok: false,
-      error: `Escrow SOL balance is below the prize amount (have ~${haveSol} SOL, need ~${needSol} SOL including transfer fee). SOL crypto prizes are deposited as native SOL into the shared prize escrow wallet; NFT escrow rent and fees can reduce the available balance before the winner claims. If you just transferred, wait for confirmation and retry — otherwise contact support so an admin can top up prize escrow and retry the claim.`,
+      error: `Escrow SOL balance is below the prize amount (have ~${haveSol} SOL, need ~${needSol} SOL including transfer fee; shortfall ~${shortfallSol} SOL). SOL crypto prizes share the prize escrow wallet with NFT custody — NFT ATA rent and transfer fees can reduce the available native balance before the winner claims. If you just transferred, wait for confirmation and retry — otherwise contact support so an admin can top up prize escrow by at least ~${shortfallSol} SOL and retry the claim.`,
     }
   }
 
@@ -639,16 +782,13 @@ function splSolPayoutFailureShouldTryNativeFallback(error: string | undefined): 
 }
 
 /**
- * SOL partner/crypto prize payout. Creators deposit native SOL (see RaffleDetailClient), so try native
- * first, then wrapped SOL in the escrow ATA.
+ * SOL partner/crypto prize payout. New deposits are wrapped to wSOL after verify; legacy
+ * deposits may still be native. Prefer wSOL first, then native SOL.
  */
 export async function payoutSolPartnerPrizeFromEscrowToRecipient(
   recipientWallet: string,
   amount: bigint
 ): Promise<{ ok: boolean; signature?: string; error?: string }> {
-  const nativeResult = await payoutNativeSolFromEscrowToRecipient(recipientWallet, amount)
-  if (nativeResult.ok) return nativeResult
-
   const wsolResult = await payoutFungibleSplFromEscrowToRecipient(
     WSOL_MINT_MAINNET,
     recipientWallet,
@@ -656,16 +796,16 @@ export async function payoutSolPartnerPrizeFromEscrowToRecipient(
   )
   if (wsolResult.ok) return wsolResult
 
-  if (
-    !wsolResult.ok &&
-    splSolPayoutFailureShouldTryNativeFallback(wsolResult.error) &&
-    !nativeResult.error?.includes('Escrow SOL balance is below')
-  ) {
-    return nativeResult
-  }
+  const nativeResult = await payoutNativeSolFromEscrowToRecipient(recipientWallet, amount)
+  if (nativeResult.ok) return nativeResult
 
+  // Prefer the more actionable insufficient-balance message when native is short
+  // (shared-wallet drain); otherwise surface the wSOL/SPL error.
   if (nativeResult.error?.includes('Escrow SOL balance is below')) {
     return nativeResult
+  }
+  if (splSolPayoutFailureShouldTryNativeFallback(wsolResult.error)) {
+    return nativeResult.error ? nativeResult : wsolResult
   }
   return wsolResult.error ? wsolResult : nativeResult
 }
@@ -978,6 +1118,7 @@ export async function transferPartnerSplPrizeToWinner(raffleId: string): Promise
   if (!isPartnerSplPrizeRaffle(raffle) || !raffle.winner_wallet) {
     return { ok: false, error: 'Raffle is not a partner token prize raffle or has no winner' }
   }
+  const winnerWallet = raffle.winner_wallet.trim()
   if (raffle.nft_transfer_transaction) {
     return { ok: true, signature: raffle.nft_transfer_transaction }
   }
@@ -1016,12 +1157,18 @@ export async function transferPartnerSplPrizeToWinner(raffleId: string): Promise
 
   const transferResult =
     partner.currencyCode === 'SOL'
-      ? await payoutSolPartnerPrizeFromEscrowToRecipient(raffle.winner_wallet.trim(), raw)
-      : await payoutFungibleSplFromEscrowToRecipient(
-          partner.mint,
-          raffle.winner_wallet.trim(),
-          raw
-        )
+      ? await (async () => {
+          // Best-effort: segregate this prize into wSOL before payout (covers verify-time wrap misses).
+          const wrap = await wrapNativeSolPrizeInEscrow(raw)
+          if (!wrap.ok) {
+            console.warn(
+              `[prize-escrow] SOL wrap before winner payout skipped for raffle ${raffleId}:`,
+              wrap.error
+            )
+          }
+          return payoutSolPartnerPrizeFromEscrowToRecipient(winnerWallet, raw)
+        })()
+      : await payoutFungibleSplFromEscrowToRecipient(partner.mint, winnerWallet, raw)
   if (!transferResult.ok || !transferResult.signature) {
     if (!transferResult.ok) {
       console.error(`Partner SPL prize escrow transfer failed for raffle ${raffleId}:`, transferResult.error)
@@ -1339,6 +1486,8 @@ async function transferSplPrizeToCreatorFromEscrow(
 
   const tx = new Transaction()
   if (!destAccountExists) {
+    const gate = await assertEscrowNativeSpendWontStrandSolPrizes(ESCROW_ATA_RENT_LAMPORTS)
+    if (!gate.ok) return gate
     tx.add(
       createAssociatedTokenAccountInstruction(
         keypair.publicKey,
@@ -1618,7 +1767,16 @@ export async function transferPartnerSplPrizeToCreator(
 
   const transferResult =
     partner.currencyCode === 'SOL'
-      ? await payoutSolPartnerPrizeFromEscrowToRecipient(creatorWallet, raw)
+      ? await (async () => {
+          const wrap = await wrapNativeSolPrizeInEscrow(raw)
+          if (!wrap.ok) {
+            console.warn(
+              `[prize-escrow] SOL wrap before creator return skipped for raffle ${raffleId}:`,
+              wrap.error
+            )
+          }
+          return payoutSolPartnerPrizeFromEscrowToRecipient(creatorWallet, raw)
+        })()
       : await payoutFungibleSplFromEscrowToRecipient(partner.mint, creatorWallet, raw)
   if (!transferResult.ok || !transferResult.signature) {
     return transferResult
