@@ -8,6 +8,7 @@ import {
 import { getFundsEscrowKeypair, getFundsEscrowPublicKey } from '@/lib/raffles/funds-escrow'
 import { getVrfFeePayerKeypair, getVrfFeePayerPublicKey } from '@/lib/raffles/vrf-fee-payer'
 import { loadFundsEscrowLiabilityWithCoverage } from '@/lib/raffles/funds-escrow-liability-service'
+import { loadPrizeEscrowSolLiabilityWithCoverage } from '@/lib/raffles/prize-escrow-sol-liability-service'
 import { safeErrorMessage } from '@/lib/safe-error'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
@@ -38,8 +39,8 @@ function envKeyMeta(raw: string) {
 
 /**
  * GET /api/admin/escrow-health
- * Full-admin only. Prize escrow + funds escrow liability coverage + VRF fee payer config.
- * Used to debug pending deposits / claim-proceeds shortfalls without leaking secrets.
+ * Full-admin only. Prize escrow SOL liability + funds escrow liability + VRF fee payer config.
+ * Used to debug pending deposits / claim-proceeds / SOL prize shortfalls without leaking secrets.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -68,6 +69,16 @@ export async function GET(request: NextRequest) {
       fundsLiabilityError = e instanceof Error ? e.message : String(e)
     }
 
+    let prizeSolLiability: Awaited<
+      ReturnType<typeof loadPrizeEscrowSolLiabilityWithCoverage>
+    > | null = null
+    let prizeSolLiabilityError: string | null = null
+    try {
+      prizeSolLiability = await loadPrizeEscrowSolLiabilityWithCoverage()
+    } catch (e) {
+      prizeSolLiabilityError = e instanceof Error ? e.message : String(e)
+    }
+
     return NextResponse.json({
       ok: true,
       viewer: session.wallet,
@@ -75,6 +86,22 @@ export async function GET(request: NextRequest) {
         configured: Boolean(prizeKeypair && prizeAddress),
         publicKey: prizeAddress,
         ...envKeyMeta(prizeRaw),
+        solLiability: prizeSolLiability
+          ? {
+              covered: prizeSolLiability.coverage.covered,
+              shortfallSol: prizeSolLiability.coverage.shortfallSol,
+              error: prizeSolLiability.coverage.error,
+              requiredSol: prizeSolLiability.liability.requiredSol,
+              buckets: prizeSolLiability.liability.buckets,
+              counts: prizeSolLiability.liability.counts,
+              hold: {
+                nativeSol: prizeSolLiability.pool.nativeSol,
+                wsolSol: prizeSolLiability.pool.wsolSol,
+              },
+              feeReserveSol: prizeSolLiability.feeReserveSol,
+            }
+          : null,
+        solLiabilityError: prizeSolLiabilityError,
       },
       fundsEscrow: {
         configured: Boolean(fundsKeypair && fundsAddress),
@@ -105,8 +132,8 @@ export async function GET(request: NextRequest) {
         publicKey: vrfAddress,
         ...envKeyMeta(vrfRaw),
         note: vrfAddress
-          ? 'Preferred Switchboard / reveal memo fee payer'
-          : 'Unset — falls back to prize escrow, then funds escrow',
+          ? `VRF / reveal fees only — expected wallet ${process.env.VRF_FEE_PAYER_EXPECTED_WALLET?.trim() || 'HLDDmZYWfvntZRvXez3hRZErUADLyKK8d1VKJN1bcoyq'}`
+          : 'Unset — VRF/reveal will fail closed (no prize or funds escrow fallback)',
       },
       frozenSplDepositVerifyBypass: {
         enabled: isPrizeEscrowFrozenSplVerifyBypassEnabled(),
