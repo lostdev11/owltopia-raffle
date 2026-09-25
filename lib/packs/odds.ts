@@ -10,7 +10,10 @@ import {
   PACKS_PRODUCT_SLUG,
   type PackRegularCategory,
 } from '@/lib/packs/config'
-import { resolvePackCashLadders } from '@/lib/packs/product-pools'
+import {
+  packNftMinFairSolForProductSlug,
+  resolvePackCashLadders,
+} from '@/lib/packs/product-pools'
 import {
   buildWeightedNftPool,
   splitNftPoolByOddsTier,
@@ -113,8 +116,9 @@ export function computePackOddsPercentages(options?: {
   void PACK_SOL_TIERS
 
   const inventory = options?.nftInventory ?? []
+  const minFairSol = packNftMinFairSolForProductSlug(options?.productSlug)
   const { premium, standard } = splitNftPoolByOddsTier(inventory)
-  const premiumPool = buildWeightedNftPool(premium)
+  const premiumPool = buildWeightedNftPool(premium, { minFairSol })
   const premiumSum = sumWeights(premiumPool.map((p) => p.weight))
   const premiumOverallPct = PACK_PREMIUM_NFT_OVERALL_BPS / 100
   const premiumItems = premiumPool.map((p) => {
@@ -135,7 +139,9 @@ export function computePackOddsPercentages(options?: {
     premiumPool.length > 0
       ? Math.max(0, nftCatPct - PACK_PREMIUM_NFT_OVERALL_BPS / 10_000)
       : nftCatPct
-  const standardPool = buildWeightedNftPool(standard.length > 0 ? standard : inventory)
+  const standardPool = buildWeightedNftPool(standard.length > 0 ? standard : inventory, {
+    minFairSol,
+  })
   const nftSum = sumWeights(standardPool.map((p) => p.weight))
   const nftInventory = standardPool.map((p) => {
     const ofCat = pct(p.weight, nftSum)

@@ -6,6 +6,9 @@
  */
 
 import {
+  isPackNftFairValueSol,
+  PACK_NFT_MAX_FAIR_SOL,
+  PACK_NFT_MIN_FAIR_SOL,
   PACK_OWL_TIERS,
   PACK_PRICE_OWL,
   PACK_SOL_TIERS,
@@ -30,6 +33,27 @@ export function packProductSlugForPaymentCurrency(
 
 export function isOwlCheckoutProductSlug(slug: string): boolean {
   return slug.trim() === PACKS_PRODUCT_SLUG_OWL
+}
+
+/** Minimum admin-tagged NFT floor on the $OWL cheap shelf (main shelf stays 0.05). */
+export const PACK_NFT_MIN_FAIR_SOL_OWL_SHELF = 0.01
+
+export function packNftMinFairSolForProductSlug(slug: string | null | undefined): number {
+  return isOwlCheckoutProductSlug(slug ?? '')
+    ? PACK_NFT_MIN_FAIR_SOL_OWL_SHELF
+    : PACK_NFT_MIN_FAIR_SOL
+}
+
+export function isPackNftFairValueForProduct(
+  value: number,
+  productSlug: string | null | undefined
+): boolean {
+  return isPackNftFairValueSol(value, packNftMinFairSolForProductSlug(productSlug))
+}
+
+export function packNftFairValueRangeLabel(productSlug: string | null | undefined): string {
+  const min = packNftMinFairSolForProductSlug(productSlug)
+  return `${min}–${PACK_NFT_MAX_FAIR_SOL} SOL`
 }
 
 /**

@@ -9,6 +9,7 @@ import {
 } from '@/lib/packs/config'
 import {
   PACKS_PRODUCT_SLUG_MAIN,
+  packNftMinFairSolForProductSlug,
   resolvePackCashLadders,
   type PackCashLadders,
 } from '@/lib/packs/product-pools'
@@ -149,7 +150,8 @@ export function pickPremiumNftRoll(
  */
 export function pickNftFromAvailableInventory(
   seed: string,
-  inventory: NftPoolEntry[]
+  inventory: NftPoolEntry[],
+  options?: { minFairSol?: number }
 ): {
   pick: WeightedNftPoolEntry
   pool: WeightedNftPoolEntry[]
@@ -159,7 +161,7 @@ export function pickNftFromAvailableInventory(
   const { premium, standard } = splitNftPoolByOddsTier(inventory)
   const wantPremium = pickPremiumNftRoll(seed) && premium.length > 0
   const source = wantPremium ? premium : standard.length > 0 ? standard : inventory
-  const pool = buildWeightedNftPool(source)
+  const pool = buildWeightedNftPool(source, { minFairSol: options?.minFairSol })
   if (pool.length === 0) throw new Error('No eligible NFTs in inventory')
   return {
     pick: pickNftFromInventory(seed, pool),
@@ -184,12 +186,13 @@ export function recomputeOpenFromSeed(
 ): { category: PackRegularCategory; pick: WeightedTierPick } {
   const category = pickCategory(seed)
   if (category === 'nft') {
+    const minFair = packNftMinFairSolForProductSlug(productSlug)
     return {
       category: 'nft',
       pick: {
         category: 'nft',
         bandIndex: 0,
-        minFairValueSol: 0.05,
+        minFairValueSol: minFair,
         maxFairValueSol: 0.5,
       },
     }

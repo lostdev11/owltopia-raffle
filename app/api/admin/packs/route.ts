@@ -5,6 +5,7 @@ import {
   addPackInventoryNft,
   countAvailableNfts,
   getActivePackProduct,
+  getPackProductById,
   getPackProductBySlug,
   getPackVaultConfig,
   listPackInventory,
@@ -15,12 +16,15 @@ import {
   updatePackVaultConfig,
   recalculatePackJackpotPool,
 } from '@/lib/packs/db'
-import { PACKS_PRODUCT_SLUG_MAIN, PACKS_PRODUCT_SLUG_OWL } from '@/lib/packs/product-pools'
+import {
+  isPackNftFairValueForProduct,
+  PACKS_PRODUCT_SLUG_MAIN,
+  PACKS_PRODUCT_SLUG_OWL,
+  packNftFairValueRangeLabel,
+} from '@/lib/packs/product-pools'
 import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
 import { isPackInventoryPrizeStandard } from '@/lib/packs/types'
-import { isPackNftFairValueSol, PACK_NFT_MAX_FAIR_SOL, PACK_NFT_MIN_FAIR_SOL,
-  isPackNftOddsTier,
-} from '@/lib/packs/config'
+import { isPackNftOddsTier } from '@/lib/packs/config'
 import {
   getPacksVaultPublicKey,
   getPacksVaultSolBalance,
@@ -221,10 +225,24 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}))
     const mint = typeof body.mint_address === 'string' ? body.mint_address.trim() : ''
     const fair = Number(body.fair_value_sol)
-    if (!mint || !isPackNftFairValueSol(fair)) {
+
+    let productId =
+      typeof body.product_id === 'string' ? body.product_id.trim() : ''
+    if (!productId && typeof body.product_slug === 'string') {
+      const bySlug = await getPackProductBySlug(body.product_slug.trim())
+      productId = bySlug?.id ?? ''
+    }
+    if (!productId) {
+      const main = await getActivePackProduct()
+      productId = main?.id ?? ''
+    }
+    const depositProduct = productId ? await getPackProductById(productId) : null
+    const productSlug = depositProduct?.slug ?? PACKS_PRODUCT_SLUG_MAIN
+
+    if (!mint || !isPackNftFairValueForProduct(fair, productSlug)) {
       return NextResponse.json(
         {
-          error: `mint_address and fair_value_sol (${PACK_NFT_MIN_FAIR_SOL}–${PACK_NFT_MAX_FAIR_SOL}) required`,
+          error: `mint_address and fair_value_sol (${packNftFairValueRangeLabel(productSlug)}) required`,
         },
         { status: 400 }
       )
@@ -259,16 +277,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    let productId =
-      typeof body.product_id === 'string' ? body.product_id.trim() : ''
-    if (!productId && typeof body.product_slug === 'string') {
-      const bySlug = await getPackProductBySlug(body.product_slug.trim())
-      productId = bySlug?.id ?? ''
-    }
-    if (!productId) {
-      const main = await getActivePackProduct()
-      productId = main?.id ?? ''
-    }
     if (!productId) {
       return NextResponse.json({ error: 'product_id or active pack product required' }, { status: 400 })
     }

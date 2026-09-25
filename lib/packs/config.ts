@@ -132,12 +132,22 @@ export const PACK_NFT_MAX_FAIR_SOL = 50
  */
 export const PACK_NFT_WEIGHT_BASELINE_FAIR_SOL = 0.5
 
-export function isPackNftFairValueSol(value: number): boolean {
+export function isPackNftFairValueSol(
+  value: number,
+  minFairSol: number = PACK_NFT_MIN_FAIR_SOL
+): boolean {
   return (
     Number.isFinite(value) &&
-    value >= PACK_NFT_MIN_FAIR_SOL &&
+    value >= minFairSol &&
     value <= PACK_NFT_MAX_FAIR_SOL
   )
+}
+
+/** NFT band midpoints for EV / admin; first band floor follows shelf min (0.05 main, 0.01 $OWL). */
+export function packNftValueBandsForMinFair(minFairSol: number): PackNftValueBand[] {
+  const bands = PACK_NFT_VALUE_BANDS
+  if (minFairSol >= bands[0]!.minFairValueSol) return bands
+  return [{ ...bands[0]!, minFairValueSol: minFairSol }, ...bands.slice(1)]
 }
 
 /**

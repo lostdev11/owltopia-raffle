@@ -6,6 +6,7 @@ import {
   PACK_PRICE_SOL,
   PACK_RTP_BPS,
   isPackNftFairValueSol,
+  packNftValueBandsForMinFair,
   resolveOwlSolPrice,
   type PackPaymentCurrency,
   type PackRegularCategory,
@@ -14,6 +15,7 @@ import { packJackpotContributionForPrice, PACK_JACKPOT_CONTRIBUTION_SOL } from '
 import {
   PACKS_PRODUCT_SLUG_MAIN,
   PACKS_PRODUCT_SLUG_OWL,
+  packNftMinFairSolForProductSlug,
   packOwlCheckoutTicketSolEquiv,
   resolvePackCashLadders,
 } from '@/lib/packs/product-pools'
@@ -173,17 +175,24 @@ export type PackNftBandLabel = 'common' | 'mid' | 'high' | 'premium'
 
 const BAND_LABELS: PackNftBandLabel[] = ['common', 'mid', 'high']
 
-export function packNftFairValueInRange(value: number): boolean {
-  return isPackNftFairValueSol(value)
+export function packNftFairValueInRange(
+  value: number,
+  productSlug?: string | null
+): boolean {
+  return isPackNftFairValueSol(value, packNftMinFairSolForProductSlug(productSlug))
 }
 
 /** First matching band (inclusive). Above 0.5 SOL → premium. */
-export function packNftBandLabel(fairValueSol: number): PackNftBandLabel | null {
-  if (!packNftFairValueInRange(fairValueSol)) return null
-  if (fairValueSol > PACK_NFT_VALUE_BANDS[PACK_NFT_VALUE_BANDS.length - 1]!.maxFairValueSol) {
+export function packNftBandLabel(
+  fairValueSol: number,
+  productSlug?: string | null
+): PackNftBandLabel | null {
+  if (!packNftFairValueInRange(fairValueSol, productSlug)) return null
+  const bands = packNftValueBandsForMinFair(packNftMinFairSolForProductSlug(productSlug))
+  if (fairValueSol > bands[bands.length - 1]!.maxFairValueSol) {
     return 'premium'
   }
-  const idx = PACK_NFT_VALUE_BANDS.findIndex(
+  const idx = bands.findIndex(
     (b) => fairValueSol >= b.minFairValueSol && fairValueSol <= b.maxFairValueSol
   )
   return idx >= 0 ? (BAND_LABELS[idx] ?? null) : null
@@ -200,17 +209,20 @@ export type InventoryFairValueRow = {
  */
 export function nftBandAveragesFromInventory(
   rows: InventoryFairValueRow[],
-  draftFloors: number[] = []
+  draftFloors: number[] = [],
+  productSlug?: string | null
 ): { averages: number[]; notes: string[] } {
+  const bands = packNftValueBandsForMinFair(packNftMinFairSolForProductSlug(productSlug))
+  const inRange = (v: number) => packNftFairValueInRange(v, productSlug)
   const available = rows
     .filter((r) => (r.status ?? 'available') === 'available')
     .map((r) => Number(r.fair_value_sol))
-    .filter((v) => packNftFairValueInRange(v))
-  const extras = draftFloors.filter((v) => packNftFairValueInRange(v))
+    .filter(inRange)
+  const extras = draftFloors.filter(inRange)
   const values = [...available, ...extras]
 
   const notes: string[] = []
-  const averages = PACK_NFT_VALUE_BANDS.map((b, i) => {
+  const averages = bands.map((b, i) => {
     const inBand = values.filter((v) => v >= b.minFairValueSol && v <= b.maxFairValueSol)
     if (inBand.length === 0) {
       notes.push(
@@ -232,17 +244,26 @@ export function simulatePackEvFromInventory(options: {
   paymentFeeSol?: number | null
   productShelfSlug?: string
 }): EvSimulatorResult {
+  const productShelfSlug =
+    options.productShelfSlug ??
+    (options.paymentCurrency === 'OWL' ? PACKS_PRODUCT_SLUG_OWL : PACKS_PRODUCT_SLUG_MAIN)
+  const minFairSol = packNftMinFairSolForProductSlug(productShelfSlug)
   const draftFloors = options.draftFloors ?? []
+  const inRange = (v: number) => packNftFairValueInRange(v, productShelfSlug)
   const available = options.inventory
     .filter((r) => (r.status ?? 'available') === 'available')
     .map((r) => Number(r.fair_value_sol))
-    .filter((v) => packNftFairValueInRange(v))
-  const values = [...available, ...draftFloors.filter((v) => packNftFairValueInRange(v))]
+    .filter(inRange)
+  const values = [...available, ...draftFloors.filter(inRange)]
 
   const notes: string[] = []
   if (values.length === 0) {
     notes.push('No prize NFTs in inventory yet — NFT EV uses band midpoints until you deposit.')
-    const { averages, notes: bandNotes } = nftBandAveragesFromInventory(options.inventory, draftFloors)
+    const { averages, notes: bandNotes } = nftBandAveragesFromInventory(
+      options.inventory,
+      draftFloors,
+      productShelfSlug
+    )
     const ev = simulatePackEv({
       owlSolPrice: options.owlSolPrice,
       nftBandAvgFairValues: averages,
@@ -259,7 +280,8 @@ export function simulatePackEvFromInventory(options: {
       id: `ev-${i}`,
       mint_address: `ev-${i}`,
       fair_value_sol,
-    }))
+    })),
+    { minFairSol }
   )
   const nftEv = weightedAverage(
     weighted.map((row) => row.weight),
@@ -271,9 +293,6 @@ export function simulatePackEvFromInventory(options: {
   )
 
   const paymentCurrency = options.paymentCurrency ?? 'SOL'
-  const productShelfSlug =
-    options.productShelfSlug ??
-    (paymentCurrency === 'OWL' ? PACKS_PRODUCT_SLUG_OWL : PACKS_PRODUCT_SLUG_MAIN)
   const owlSolPrice = resolveOwlSolPrice(options.owlSolPrice)
   const packPriceSol =
     paymentCurrency === 'OWL'

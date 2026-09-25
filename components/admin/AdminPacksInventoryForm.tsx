@@ -10,11 +10,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { packRtpPercentLabel } from '@/lib/packs/admin-copy'
+import { PACK_NFT_MAX_FAIR_SOL } from '@/lib/packs/config'
 import {
-  PACK_NFT_MAX_FAIR_SOL,
-  PACK_NFT_MIN_FAIR_SOL,
-} from '@/lib/packs/config'
-import { PACKS_PRODUCT_SLUG_MAIN, PACKS_PRODUCT_SLUG_OWL } from '@/lib/packs/product-pools'
+  PACKS_PRODUCT_SLUG_MAIN,
+  PACKS_PRODUCT_SLUG_OWL,
+  packNftFairValueRangeLabel,
+} from '@/lib/packs/product-pools'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
 import {
   packNftBandLabel,
@@ -71,11 +72,6 @@ type DraftRow = {
   depositSig?: string
   registerError?: string
   status: 'pending' | 'deposited' | 'registered' | 'failed'
-}
-
-function parseFloor(raw: string): number | null {
-  const n = Number(raw)
-  return packNftFairValueInRange(n) ? n : null
 }
 
 function shortenMint(mint: string): string {
@@ -146,6 +142,16 @@ export function AdminPacksInventoryForm({
 
   const activeDepositProductId = depositProductId || defaultProductId
   const depositProduct = products.find((p) => p.id === activeDepositProductId)
+  const depositProductSlug = depositProduct?.slug ?? PACKS_PRODUCT_SLUG_MAIN
+  const floorRangeLabel = packNftFairValueRangeLabel(depositProductSlug)
+
+  const parseFloor = useCallback(
+    (raw: string): number | null => {
+      const n = Number(raw)
+      return packNftFairValueInRange(n, depositProductSlug) ? n : null
+    },
+    [depositProductSlug]
+  )
 
   const selectedMints = useMemo(() => new Set(drafts.map((d) => d.nft.mint)), [drafts])
   const problemMints = useMemo(
@@ -159,7 +165,7 @@ export function AdminPacksInventoryForm({
         .filter((d) => d.status !== 'registered')
         .map((d) => parseFloor(d.floor))
         .filter((n): n is number => n != null),
-    [drafts]
+    [drafts, parseFloor]
   )
 
   const shelfInventory = useMemo(
@@ -183,7 +189,8 @@ export function AdminPacksInventoryForm({
   )
 
   const allFloorsValid =
-    drafts.length > 0 && drafts.every((d) => d.status === 'registered' || parseFloor(d.floor) != null)
+    drafts.length > 0 &&
+    drafts.every((d) => d.status === 'registered' || parseFloor(d.floor) != null)
   const pendingDrafts = drafts.filter((d) => d.status !== 'registered')
   const depositRequirements = useMemo(
     () =>
@@ -193,8 +200,9 @@ export function AdminPacksInventoryForm({
         pendingCount: pendingDrafts.length,
         allFloorsValid,
         busy,
+        productSlug: depositProductSlug,
       }),
-    [allFloorsValid, busy, pendingDrafts.length, publicKey, vaultAddress]
+    [allFloorsValid, busy, depositProductSlug, pendingDrafts.length, publicKey, vaultAddress]
   )
   const depositDisabledReason = useMemo(
     () =>
@@ -204,8 +212,9 @@ export function AdminPacksInventoryForm({
         pendingCount: pendingDrafts.length,
         allFloorsValid,
         busy,
+        productSlug: depositProductSlug,
       }),
-    [allFloorsValid, busy, pendingDrafts.length, publicKey, vaultAddress]
+    [allFloorsValid, busy, depositProductSlug, pendingDrafts.length, publicKey, vaultAddress]
   )
   const canDeposit = depositDisabledReason == null
 
@@ -325,7 +334,7 @@ export function AdminPacksInventoryForm({
         if (parseFloor(row.floor) == null) {
           patch(row.nft.mint, {
             status: 'failed',
-            registerError: `Floor must be ${PACK_NFT_MIN_FAIR_SOL}–${PACK_NFT_MAX_FAIR_SOL} SOL`,
+            registerError: `Floor must be ${floorRangeLabel}`,
           })
         } else {
           ready.push(row)
@@ -367,7 +376,7 @@ export function AdminPacksInventoryForm({
         if (floor == null) {
           patch(live.nft.mint, {
             status: 'failed',
-            registerError: `Floor must be ${PACK_NFT_MIN_FAIR_SOL}–${PACK_NFT_MAX_FAIR_SOL} SOL`,
+            registerError: `Floor must be ${floorRangeLabel}`,
           })
           continue
         }
@@ -418,8 +427,8 @@ export function AdminPacksInventoryForm({
       <div>
         <h2 className="font-medium">Add NFTs to inventory</h2>
         <p className="text-xs text-muted-foreground">
-          Load this wallet, pick NFTs, set a floor price ({PACK_NFT_MIN_FAIR_SOL}–{PACK_NFT_MAX_FAIR_SOL}{' '}
-          SOL; higher floors = rarer odds), then send them to the packs vault. Classic SPL NFTs
+          Load this wallet, pick NFTs, set a floor price ({floorRangeLabel}; higher floors = rarer
+          odds), then send them to the packs vault. Classic SPL NFTs
           pack up to {PACK_DEPOSIT_MAX_PER_TX} per on-chain tx; Phantom (and wallets with
           multi-approve) signs all classic txs in <span className="font-medium">one sheet</span>.
           Core / compressed / pNFT still need one approval each. Frozen or nested
@@ -520,7 +529,7 @@ export function AdminPacksInventoryForm({
         <ul className="divide-y rounded-md border">
           {drafts.map((row) => {
             const floorNum = parseFloor(row.floor)
-            const band = floorNum != null ? packNftBandLabel(floorNum) : null
+            const band = floorNum != null ? packNftBandLabel(floorNum, depositProductSlug) : null
             return (
               <li key={row.nft.mint} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
