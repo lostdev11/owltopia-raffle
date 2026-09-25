@@ -22,7 +22,8 @@ import { DEFAULT_VRF_FEE_PAYER_WALLET } from '../lib/raffles/vrf-fee-payer'
 
 const FEE_BUFFER_LAMPORTS = 5_000
 const VRF_LEAVE_LAMPORTS = 50_000_000 // keep ~0.05 SOL in VRF after send
-const DEFAULT_PRIZE_NEED_LAMPORTS = 1_000_000_000 + FEE_BUFFER_LAMPORTS // 1 SOL prize + fee
+/** 1 SOL prize + tx fee + system-account rent-exempt reserve (~0.00065–0.00089 SOL). */
+const DEFAULT_PRIZE_NEED_LAMPORTS = 1_000_000_000 + FEE_BUFFER_LAMPORTS + 890_880
 
 function parseSecretKey(raw: string | undefined): Keypair | null {
   const trimmed = raw?.trim()

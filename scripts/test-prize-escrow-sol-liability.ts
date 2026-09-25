@@ -99,4 +99,16 @@ const afterAtaOk = evaluatePrizeEscrowSolCoverageAfterNativeSpend({
 })
 assert.equal(afterAtaOk.covered, true, 'wSOL-segregated prizes survive native ATA rent')
 
-console.log('ok: prize-escrow SOL liability coverage')
+// Reproduce the claim sim failure: ~1.0001 SOL cannot pay 1 SOL + fee and stay rent-exempt.
+const prizeLamports = 1_000_000_000n
+const feeBuffer = 5_000n
+const rentExempt = 650_240n // live mainnet getMinimumBalanceForRentExemption(0)
+const have = 1_000_096_490n
+const neededWithRent = prizeLamports + feeBuffer + rentExempt
+assert.equal(have < neededWithRent, true, 'topped-up escrow still short rent reserve')
+assert.equal(neededWithRent - have, 558_750n)
+
+const neededFeeOnly = prizeLamports + feeBuffer
+assert.equal(have >= neededFeeOnly, true, 'old fee-only check would incorrectly allow payout')
+
+console.log('ok: prize-escrow SOL liability coverage + rent-aware native payout preflight')
