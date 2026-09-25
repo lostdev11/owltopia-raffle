@@ -10,7 +10,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { packRtpPercentLabel } from '@/lib/packs/admin-copy'
-import { PACK_NFT_MAX_FAIR_SOL } from '@/lib/packs/config'
 import {
   PACKS_PRODUCT_SLUG_MAIN,
   PACKS_PRODUCT_SLUG_OWL,
