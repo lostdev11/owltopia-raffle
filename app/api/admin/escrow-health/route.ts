@@ -132,8 +132,8 @@ export async function GET(request: NextRequest) {
         publicKey: vrfAddress,
         ...envKeyMeta(vrfRaw),
         note: vrfAddress
-          ? 'Preferred Switchboard / reveal memo fee payer'
-          : 'Unset — falls back to funds escrow only (never prize escrow; SOL prizes share that wallet)',
+          ? `VRF / reveal fees only — expected wallet ${process.env.VRF_FEE_PAYER_EXPECTED_WALLET?.trim() || 'HLDDmZYWfvntZRvXez3hRZErUADLyKK8d1VKJN1bcoyq'}`
+          : 'Unset — VRF/reveal will fail closed (no prize or funds escrow fallback)',
       },
       frozenSplDepositVerifyBypass: {
         enabled: isPrizeEscrowFrozenSplVerifyBypassEnabled(),

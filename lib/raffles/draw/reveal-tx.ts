@@ -35,7 +35,7 @@ export async function sendDrawRevealMemoTransaction(
     return {
       ok: false,
       error:
-        'No fee-payer key configured to sign reveal (set VRF_FEE_PAYER_SECRET_KEY, or PRIZE_ESCROW_SECRET_KEY / FUNDS_ESCROW_SECRET_KEY as fallback)',
+        'No VRF fee-payer key configured to sign reveal (set VRF_FEE_PAYER_SECRET_KEY — reveal fees are never taken from prize or funds escrow)',
       memo,
     }
   }

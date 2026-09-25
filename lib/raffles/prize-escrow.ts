@@ -736,7 +736,7 @@ export async function payoutNativeSolFromEscrowToRecipient(
     const shortfallSol = ((Number(needed) - Number(escrowBalance)) / 1e9).toFixed(4)
     return {
       ok: false,
-      error: `Escrow SOL balance is below the prize amount (have ~${haveSol} SOL, need ~${needSol} SOL including transfer fee; shortfall ~${shortfallSol} SOL). SOL crypto prizes share the prize escrow wallet with NFT custody — NFT ATA rent, transfer fees, and (when VRF_FEE_PAYER_SECRET_KEY is unset) Switchboard fees can reduce the available native balance before the winner claims. If you just transferred, wait for confirmation and retry — otherwise contact support so an admin can top up prize escrow by at least ~${shortfallSol} SOL and retry the claim.`,
+      error: `Escrow SOL balance is below the prize amount (have ~${haveSol} SOL, need ~${needSol} SOL including transfer fee; shortfall ~${shortfallSol} SOL). SOL crypto prizes share the prize escrow wallet with NFT custody — NFT ATA rent and transfer fees can reduce the available native balance before the winner claims. If you just transferred, wait for confirmation and retry — otherwise contact support so an admin can top up prize escrow by at least ~${shortfallSol} SOL and retry the claim.`,
     }
   }
 

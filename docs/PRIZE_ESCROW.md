@@ -10,10 +10,17 @@ SOL raffle/auction prizes are deposited as **native SOL** into the same `PRIZE_E
 
 1. After a SOL prize deposit verifies, the server **wraps** that amount into the escrow **wSOL** ATA so NFT rent/fees cannot spend prize principal.
 2. NFT ATA creation from prize escrow is **gated** when it would leave outstanding SOL prizes under-covered.
-3. VRF fee payer falls back to **funds escrow only** — never prize escrow.
+3. VRF fee payer is **only** `VRF_FEE_PAYER_SECRET_KEY` (production: `HLDDmZYWfvntZRvXez3hRZErUADLyKK8d1VKJN1bcoyq`) — never prize or funds escrow.
 4. `GET /api/admin/escrow-health` surfaces prize-escrow SOL liability (native + wSOL vs outstanding prizes).
 
-**Ops:** If a winner still sees “Escrow SOL balance is below the prize amount”, top up the prize escrow wallet by at least the reported shortfall, then retry the claim. Prefer keeping `VRF_FEE_PAYER_SECRET_KEY` funded so draw fees never touch liability wallets.
+**Ops:** If a winner still sees “Escrow SOL balance is below the prize amount”, top up the prize escrow wallet by at least the reported shortfall, then retry the claim. From a machine with production secrets:
+
+```bash
+npx --yes tsx --env-file=.env.local scripts/ops-topup-prize-escrow-from-vrf.ts --dry-run
+npx --yes tsx --env-file=.env.local scripts/ops-topup-prize-escrow-from-vrf.ts
+```
+
+Prefer keeping `VRF_FEE_PAYER_SECRET_KEY` funded so draw fees never touch liability wallets.
 
 ## Setup
 
