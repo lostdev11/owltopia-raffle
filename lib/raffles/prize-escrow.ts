@@ -62,8 +62,41 @@ const NFT_AMOUNT = 1n
 /** Keep enough native SOL in escrow for a simple SystemProgram.transfer fee. */
 const NATIVE_SOL_PRIZE_TRANSFER_FEE_BUFFER_LAMPORTS = 5000n
 
+/**
+ * System-account rent-exempt minimum (0 data bytes). Solana rejects fee-payer
+ * SystemProgram.transfer sims that would leave account(0) below this.
+ * Prefer live RPC via {@link getSystemAccountRentExemptLamports}; this is the fallback.
+ */
+const SYSTEM_ACCOUNT_RENT_EXEMPT_FALLBACK_LAMPORTS = 890_880n
+
 /** Typical Token account rent-exempt minimum (lamports) + small fee headroom. */
 const ESCROW_ATA_RENT_LAMPORTS = 2_050_000n
+
+async function getSystemAccountRentExemptLamports(
+  connection: Connection
+): Promise<bigint> {
+  try {
+    const n = await connection.getMinimumBalanceForRentExemption(0)
+    if (Number.isFinite(n) && n > 0) return BigInt(n)
+  } catch {
+    // fall through
+  }
+  return SYSTEM_ACCOUNT_RENT_EXEMPT_FALLBACK_LAMPORTS
+}
+
+function humanizeNativeSolPayoutError(message: string): string {
+  const m = message.toLowerCase()
+  if (
+    m.includes('insufficient funds for rent') ||
+    (m.includes('account (0)') && m.includes('rent'))
+  ) {
+    return (
+      'Prize escrow would drop below the rent-exempt minimum after paying this SOL prize. ' +
+      'Top up prize escrow with a small ops float (~0.001 SOL or more), then retry the claim.'
+    )
+  }
+  return message
+}
 
 /**
  * Refuse NFT/fungible ATA creation (and similar native spends) when they would leave
@@ -651,14 +684,18 @@ export async function wrapNativeSolPrizeInEscrow(
   }
 
   const nativeBal = BigInt(await connection.getBalance(keypair.publicKey, 'confirmed'))
+  const rentExempt = await getSystemAccountRentExemptLamports(connection)
   const rentNeed = ataExists ? 0n : ESCROW_ATA_RENT_LAMPORTS
-  const needed = lamports + rentNeed + NATIVE_SOL_PRIZE_TRANSFER_FEE_BUFFER_LAMPORTS
+  // Leave the system account rent-exempt after wrapping prize principal into wSOL.
+  const needed =
+    lamports + rentNeed + NATIVE_SOL_PRIZE_TRANSFER_FEE_BUFFER_LAMPORTS + rentExempt
   if (nativeBal < needed) {
     const haveSol = (Number(nativeBal) / 1e9).toFixed(4)
     const needSol = (Number(needed) / 1e9).toFixed(4)
+    const shortfallSol = (Number(needed - nativeBal) / 1e9).toFixed(4)
     return {
       ok: false,
-      error: `Cannot wrap SOL prize into wSOL (have ~${haveSol} native SOL, need ~${needSol} including ATA rent/fees). Top up prize escrow ops float, then retry wrap.`,
+      error: `Cannot wrap SOL prize into wSOL (have ~${haveSol} native SOL, need ~${needSol} including ATA rent, tx fee, and rent-exempt reserve; shortfall ~${shortfallSol} SOL). Top up prize escrow ops float, then retry wrap.`,
     }
   }
 
@@ -703,7 +740,7 @@ export async function wrapNativeSolPrizeInEscrow(
     return { ok: true, signature: sig }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return { ok: false, error: message }
+    return { ok: false, error: humanizeNativeSolPayoutError(message) }
   }
 }
 
@@ -728,15 +765,17 @@ export async function payoutNativeSolFromEscrowToRecipient(
   if (lamports > BigInt(Number.MAX_SAFE_INTEGER)) {
     return { ok: false, error: 'Prize amount is too large for native SOL transfer encoding.' }
   }
-  const escrowBalance = await connection.getBalance(keypair.publicKey, 'confirmed')
-  const needed = lamports + NATIVE_SOL_PRIZE_TRANSFER_FEE_BUFFER_LAMPORTS
-  if (BigInt(escrowBalance) < needed) {
+  const escrowBalance = BigInt(await connection.getBalance(keypair.publicKey, 'confirmed'))
+  const rentExempt = await getSystemAccountRentExemptLamports(connection)
+  // Fee payer (account 0) must stay rent-exempt after prize + tx fee leave the wallet.
+  const needed = lamports + NATIVE_SOL_PRIZE_TRANSFER_FEE_BUFFER_LAMPORTS + rentExempt
+  if (escrowBalance < needed) {
     const haveSol = (Number(escrowBalance) / 1e9).toFixed(4)
     const needSol = (Number(needed) / 1e9).toFixed(4)
-    const shortfallSol = ((Number(needed) - Number(escrowBalance)) / 1e9).toFixed(4)
+    const shortfallSol = (Number(needed - escrowBalance) / 1e9).toFixed(4)
     return {
       ok: false,
-      error: `Escrow SOL balance is below the prize amount (have ~${haveSol} SOL, need ~${needSol} SOL including transfer fee; shortfall ~${shortfallSol} SOL). SOL crypto prizes share the prize escrow wallet with NFT custody — NFT ATA rent and transfer fees can reduce the available native balance before the winner claims. If you just transferred, wait for confirmation and retry — otherwise contact support so an admin can top up prize escrow by at least ~${shortfallSol} SOL and retry the claim.`,
+      error: `Escrow SOL balance is below the prize amount (have ~${haveSol} SOL, need ~${needSol} SOL including transfer fee and rent-exempt reserve; shortfall ~${shortfallSol} SOL). SOL crypto prizes share the prize escrow wallet with NFT custody — NFT ATA rent and transfer fees can reduce the available native balance before the winner claims. If you just transferred, wait for confirmation and retry — otherwise contact support so an admin can top up prize escrow by at least ~${shortfallSol} SOL and retry the claim.`,
     }
   }
 
@@ -768,7 +807,7 @@ export async function payoutNativeSolFromEscrowToRecipient(
     return { ok: true, signature: sig }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return { ok: false, error: message }
+    return { ok: false, error: humanizeNativeSolPayoutError(message) }
   }
 }
 
@@ -799,9 +838,12 @@ export async function payoutSolPartnerPrizeFromEscrowToRecipient(
   const nativeResult = await payoutNativeSolFromEscrowToRecipient(recipientWallet, amount)
   if (nativeResult.ok) return nativeResult
 
-  // Prefer the more actionable insufficient-balance message when native is short
+  // Prefer the more actionable insufficient-balance / rent-reserve message when native is short
   // (shared-wallet drain); otherwise surface the wSOL/SPL error.
-  if (nativeResult.error?.includes('Escrow SOL balance is below')) {
+  if (
+    nativeResult.error?.includes('Escrow SOL balance is below') ||
+    nativeResult.error?.includes('rent-exempt')
+  ) {
     return nativeResult
   }
   if (splSolPayoutFailureShouldTryNativeFallback(wsolResult.error)) {
@@ -1841,7 +1883,8 @@ export async function checkEscrowHoldsPartnerSplPrize(raffle: Raffle): Promise<{
   if (partner.currencyCode === 'SOL') {
     try {
       const lamports = await connection.getBalance(keypair.publicKey, 'confirmed')
-      const needed = raw + NATIVE_SOL_PRIZE_TRANSFER_FEE_BUFFER_LAMPORTS
+      const rentExempt = await getSystemAccountRentExemptLamports(connection)
+      const needed = raw + NATIVE_SOL_PRIZE_TRANSFER_FEE_BUFFER_LAMPORTS + rentExempt
       return { holds: BigInt(lamports) >= needed }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
