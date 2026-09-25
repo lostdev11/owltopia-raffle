@@ -101,6 +101,21 @@ export async function updatePackProduct(
   return normalizePackProduct(data as PackProductRow)
 }
 
+/** Admin vault top-up: ledger SOL into a product-scoped jackpot pool (shared on-chain vault). */
+export async function creditPackProductJackpotPool(input: {
+  productId: string
+  amountSol: number
+}): Promise<{ poolBeforeSol: number; poolAfterSol: number }> {
+  const amount = Number(input.amountSol)
+  if (!(amount > 0)) throw new Error('amountSol must be positive')
+  const product = await getPackProductById(input.productId)
+  if (!product) throw new Error('Pack product not found')
+  const poolBefore = Number(product.jackpot_pool_sol ?? 0)
+  const poolAfter = Math.round((poolBefore + amount) * 1_000_000_000) / 1_000_000_000
+  await updatePackProduct(input.productId, { jackpot_pool_sol: poolAfter })
+  return { poolBeforeSol: poolBefore, poolAfterSol: poolAfter }
+}
+
 export async function getPackVaultConfig(): Promise<PackVaultConfigRow> {
   const { data, error } = await getSupabaseAdmin()
     .from('pack_vault_config')

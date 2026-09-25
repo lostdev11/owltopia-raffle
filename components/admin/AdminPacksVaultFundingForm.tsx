@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { OWL_TICKER } from '@/lib/council/owl-ticker'
 import { useSendTransactionForWallet } from '@/lib/hooks/useSendTransactionForWallet'
+import { formatJackpotPoolSol } from '@/lib/packs/jackpot'
+import { PACKS_PRODUCT_SLUG_OWL } from '@/lib/packs/product-pools'
 import { depositOwlToWalletFromWallet } from '@/lib/solana/deposit-owl-to-marketplace-escrow'
 import { depositSolToWalletFromWallet } from '@/lib/solana/deposit-sol-to-wallet'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
@@ -23,16 +25,40 @@ function parsePositive(raw: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
+async function creditShelfJackpot(productId: string, amountSol: number): Promise<string | null> {
+  const res = await fetch('/api/admin/packs', {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ product_id: productId, credit_jackpot_sol: amountSol }),
+  })
+  const json = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    return typeof json.error === 'string' ? json.error : 'Jackpot ledger update failed'
+  }
+  return null
+}
+
 export function AdminPacksVaultFundingForm({
   vaultAddress,
   vaultSolBalance,
   vaultOwlBalance,
   onDeposited,
+  embedded = false,
+  productId,
+  productSlug,
+  shelfLabel,
+  jackpotPoolSol,
 }: {
   vaultAddress: string | null
   vaultSolBalance: number | null
   vaultOwlBalance: number | null
   onDeposited: () => Promise<void>
+  embedded?: boolean
+  productId?: string
+  productSlug?: string
+  shelfLabel?: string
+  jackpotPoolSol?: number
 }) {
   const { connection } = useConnection()
   const { publicKey } = useWallet()
@@ -128,7 +154,22 @@ export function AdminPacksVaultFundingForm({
           setError(dep.error)
           return
         }
-        setSuccess(`Deposited ${value} SOL to the packs vault.`)
+        let jackpotNote = ''
+        if (productId?.trim()) {
+          const ledgerErr = await creditShelfJackpot(productId.trim(), value)
+          if (ledgerErr) {
+            setError(
+              `SOL reached the vault, but the shelf jackpot ledger did not update: ${ledgerErr}. Refresh and retry credit from support tools, or deposit again after fixing.`
+            )
+            await onDeposited()
+            await loadBalances()
+            return
+          }
+          jackpotNote = shelfLabel
+            ? ` Credited ${value} SOL to ${shelfLabel} jackpot ledger.`
+            : ` Credited ${value} SOL to this shelf's jackpot ledger.`
+        }
+        setSuccess(`Deposited ${value} SOL to the shared packs vault.${jackpotNote}`)
       } else {
         if (!isOwlEnabled()) {
           setError(`${OWL_TICKER} is not configured (NEXT_PUBLIC_OWL_MINT_ADDRESS).`)
@@ -145,7 +186,12 @@ export function AdminPacksVaultFundingForm({
           setError(dep.error)
           return
         }
-        setSuccess(`Deposited ${value.toLocaleString()} ${OWL_TICKER} to the packs vault.`)
+        const shelf =
+          shelfLabel ??
+          (productSlug === PACKS_PRODUCT_SLUG_OWL ? '$OWL pack shelf' : 'pack shelf')
+        setSuccess(
+          `Deposited ${value.toLocaleString()} ${OWL_TICKER} to the shared vault (prize liquidity for ${shelf}).`
+        )
       }
 
       await onDeposited()
@@ -165,18 +211,36 @@ export function AdminPacksVaultFundingForm({
     amountNum != null &&
     (asset !== 'owl' || owlEnabled)
 
+  const showShelfJackpot = embedded && jackpotPoolSol != null && shelfLabel
+
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="font-medium">Fund vault (SOL / {OWL_TICKER})</h2>
-        <p className="text-xs text-muted-foreground">
-          Send SOL or {OWL_TICKER} from your connected wallet to the packs vault for prize payouts and
-          tx fees. NFT prizes use the section below.
-        </p>
-      </div>
+      {!embedded ? (
+        <div>
+          <h2 className="font-medium">Fund vault (SOL / {OWL_TICKER})</h2>
+          <p className="text-xs text-muted-foreground">
+            Send SOL or {OWL_TICKER} from your connected wallet to the packs vault for prize payouts
+            and tx fees. NFT prizes use the section below.
+          </p>
+        </div>
+      ) : (
+        <div>
+          <h3 className="text-sm font-medium">SOL / {OWL_TICKER}</h3>
+          <p className="text-xs text-muted-foreground">
+            SOL deposits credit the selected shelf&apos;s jackpot pool in the ledger and add liquidity
+            to the shared vault. {OWL_TICKER} adds shared vault liquidity for cash prizes on that
+            shelf.
+          </p>
+        </div>
+      )}
 
       <div className="rounded-md border bg-muted/30 p-3 text-sm">
-        <p>
+        {showShelfJackpot ? (
+          <p>
+            {shelfLabel} jackpot (ledger): {formatJackpotPoolSol(jackpotPoolSol)} SOL
+          </p>
+        ) : null}
+        <p className={showShelfJackpot ? 'mt-1' : undefined}>
           Vault SOL: {vaultSolBalance != null ? vaultSolBalance.toFixed(4) : '—'} · Vault {OWL_TICKER}:{' '}
           {vaultOwlBalance != null
             ? vaultOwlBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })
