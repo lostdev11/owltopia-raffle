@@ -1,4 +1,4 @@
-import { PACK_NFT_MAX_FAIR_SOL, PACK_NFT_MIN_FAIR_SOL } from '@/lib/packs/config'
+import { packNftFairValueRangeLabel } from '@/lib/packs/product-pools'
 
 export type PackDepositRequirement = {
   id: 'vault' | 'wallet' | 'selection' | 'floors' | 'busy'
@@ -12,7 +12,10 @@ export function packDepositRequirements(input: {
   pendingCount: number
   allFloorsValid: boolean
   busy: boolean
+  /** Prize shelf slug — sets min floor (0.01 $OWL shelf, 0.05 main). */
+  productSlug?: string | null
 }): PackDepositRequirement[] {
+  const floorRange = packNftFairValueRangeLabel(input.productSlug)
   return [
     {
       id: 'vault',
@@ -31,7 +34,7 @@ export function packDepositRequirements(input: {
     },
     {
       id: 'floors',
-      label: `Each selected NFT has a floor between ${PACK_NFT_MIN_FAIR_SOL} and ${PACK_NFT_MAX_FAIR_SOL} SOL`,
+      label: `Each selected NFT has a floor in ${floorRange}`,
       met: input.pendingCount === 0 || input.allFloorsValid,
     },
     {
@@ -48,7 +51,9 @@ export function packDepositDisabledReason(input: {
   pendingCount: number
   allFloorsValid: boolean
   busy: boolean
+  productSlug?: string | null
 }): string | null {
+  const floorRange = packNftFairValueRangeLabel(input.productSlug)
   const requirements = packDepositRequirements(input)
   const unmet = requirements.find((r) => !r.met)
   if (!unmet) return null
@@ -62,7 +67,7 @@ export function packDepositDisabledReason(input: {
     return 'Load your wallet NFTs, select at least one, then deposit.'
   }
   if (unmet.id === 'floors') {
-    return `Set a valid floor (${PACK_NFT_MIN_FAIR_SOL}–${PACK_NFT_MAX_FAIR_SOL} SOL) on every selected NFT before depositing.`
+    return `Set a valid floor (${floorRange}) on every selected NFT before depositing.`
   }
   if (unmet.id === 'busy') {
     return 'Wait for the current deposit to finish.'

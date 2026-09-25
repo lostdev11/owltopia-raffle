@@ -7,6 +7,7 @@ import {
 import { type PackPaymentCurrency } from '@/lib/packs/config'
 import {
   PACKS_PRODUCT_SLUG_MAIN,
+  packNftMinFairSolForProductSlug,
   packProductSlugForPaymentCurrency,
 } from '@/lib/packs/product-pools'
 import { expectedJackpotPoolSol } from '@/lib/packs/jackpot'
@@ -356,12 +357,14 @@ export async function updatePackInventoryOddsTier(
 
 
 export async function listAvailableNftsForOpen(productId: string): Promise<PackInventoryRow[]> {
+  const product = await getPackProductById(productId)
+  const minFair = packNftMinFairSolForProductSlug(product?.slug)
   const { data, error } = await getSupabaseAdmin()
     .from('pack_inventory')
     .select('*')
     .eq('product_id', productId)
     .eq('status', 'available')
-    .gte('fair_value_sol', 0.05)
+    .gte('fair_value_sol', minFair)
     .order('mint_address', { ascending: true })
   if (error) throw error
   return (data as PackInventoryRow[]) ?? []

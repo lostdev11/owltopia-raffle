@@ -28,10 +28,13 @@ import {
   PACK_SOL_TIERS,
 } from '../lib/packs/config'
 import {
+  isPackNftFairValueForProduct,
   PACKS_PRODUCT_SLUG_MAIN,
   PACKS_PRODUCT_SLUG_OWL,
+  packNftMinFairSolForProductSlug,
   resolvePackCashLadders,
 } from '../lib/packs/product-pools'
+import { isPackNftFairValueSol } from '../lib/packs/config'
 
 const seed = generatePackOpenSeed()
 const commit = hashPackOpenCommit(seed)
@@ -200,5 +203,31 @@ assert.ok(
       oddsMulti.premiumNft.overallPercent
   ) < 0.05
 )
+
+assert.equal(packNftMinFairSolForProductSlug(PACKS_PRODUCT_SLUG_MAIN), 0.05)
+assert.equal(packNftMinFairSolForProductSlug(PACKS_PRODUCT_SLUG_OWL), 0.01)
+assert.equal(isPackNftFairValueForProduct(0.01, PACKS_PRODUCT_SLUG_OWL), true)
+assert.equal(isPackNftFairValueForProduct(0.01, PACKS_PRODUCT_SLUG_MAIN), false)
+assert.equal(isPackNftFairValueForProduct(0.05, PACKS_PRODUCT_SLUG_MAIN), true)
+assert.equal(isPackNftFairValueSol(0.01), false)
+
+const owlPool = buildWeightedNftPool(
+  [{ id: 'g', mint_address: 'GenBeta', fair_value_sol: 0.01 }],
+  { minFairSol: 0.01 }
+)
+assert.equal(owlPool.length, 1)
+assert.equal(owlPool[0]!.fair_value_sol, 0.01)
+
+const { pick: cheapPick } = pickNftFromAvailableInventory(
+  seed,
+  [{ id: 'g', mint_address: 'GenBeta', fair_value_sol: 0.01 }],
+  { minFairSol: 0.01 }
+)
+assert.equal(cheapPick.fair_value_sol, 0.01)
+
+const owlNftRecompute = recomputeOpenFromSeed(seed, null, PACKS_PRODUCT_SLUG_OWL)
+if (owlNftRecompute.category === 'nft' && owlNftRecompute.pick.category === 'nft') {
+  assert.equal(owlNftRecompute.pick.minFairValueSol, 0.01)
+}
 
 console.log('packs-open-rng: ok')

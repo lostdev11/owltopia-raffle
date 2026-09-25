@@ -26,6 +26,7 @@ import {
   updatePackProduct,
 } from '@/lib/packs/db'
 import {
+  packNftMinFairSolForProductSlug,
   packOwlCheckoutTicketSolEquiv,
   resolvePackCashLadders,
 } from '@/lib/packs/product-pools'
@@ -446,6 +447,7 @@ export async function confirmAndOpenPack(input: {
       throw new Error('No NFT inventory on this shelf. Contact support for refund.')
     }
 
+    const nftMinFair = packNftMinFairSolForProductSlug(openProduct.slug)
     const { pick, pool } = pickNftFromAvailableInventory(
       seed,
       available.map((r) => ({
@@ -455,7 +457,8 @@ export async function confirmAndOpenPack(input: {
         name: r.name,
         image_url: r.image_url,
         odds_tier: r.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard',
-      }))
+      })),
+      { minFairSol: nftMinFair }
     )
     nftPoolSnapshot = nftPoolSnapshotForStorage(pool)
 
@@ -482,7 +485,8 @@ export async function confirmAndOpenPack(input: {
           name: r.name,
           image_url: r.image_url,
           odds_tier: r.odds_tier === 'premium_1pct' ? 'premium_1pct' : 'standard',
-        }))
+        })),
+        { minFairSol: nftMinFair }
       )
       nftPoolSnapshot = nftPoolSnapshotForStorage(second.pool)
       const reserved2 = await reserveNftById(open.id, second.pick.id)

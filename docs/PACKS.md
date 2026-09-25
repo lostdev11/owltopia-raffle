@@ -50,7 +50,7 @@ Buying stays off until a full admin turns packs on (`pack_vault_config.paused`):
 | Categories | **30% $OWL · 30% SOL · 40% NFT** (same % on **0.1 SOL** and **$OWL** checkout — separate inventory shelves) |
 | OWL scale | **10 → 50** (10 OWL = 0.1 SOL at default rate) |
 | SOL scale | 0.05 → 0.5 SOL (Gembird ladder; 0.1 / 0.2 / 0.5 chase tiers) |
-| NFT fair value | 0.05+ SOL (admin-tagged, up to 50 SOL); **higher FP = rarer** |
+| NFT fair value | **0.05+ SOL** on the main 0.1 SOL shelf; **0.01+ SOL** on the $OWL cheap shelf (`owl-pack-owl-v1`); up to 50 SOL; **higher FP = rarer** |
 | NFT 1% tier | Admin `odds_tier=premium_1pct` (Owltopia Gen1/Gen2/Coins + optional chase); **~1% overall** shared pool; UI shows **1%** per chase mint (tier rate); FP still weights which chase mint wins *inside* the pool |
 | RTP target | **80%** (EV ≈ 0.08 SOL / open) |
 | OWL win UX | “You won N $OWL — sent to your wallet” |
@@ -69,7 +69,7 @@ Two **`pack_products`** rows share the **same category odds %** and tier **weigh
 
 Admin → Packs: choose **Prize shelf** when depositing NFTs. Solvency pause is **per shelf** — an empty $OWL shelf does not pause the main 0.1 SOL shelf.
 
-Apply migration **247** (`packs_product_pools`) for `pack_inventory.product_id` and the $OWL product row.
+Apply migrations **247** (`packs_product_pools`) and **248** (`packs_inventory_owl_shelf_min_floor`) for product shelves and 0.01 SOL floors on the $OWL shelf.
 
 ## Jackpot
 
@@ -91,7 +91,7 @@ Guaranteed win ≠ profitable EV. Prize **values** are weighted so expected payo
    `npm run packs:install-vault-env` → merges into `.env.local` without printing the secret.
    For Vercel Production, add `PACKS_VAULT_SECRET_KEY` and `NEXT_PUBLIC_PACKS_VAULT_WALLET` in the dashboard (or `vercel env add` interactively).
 3. Fund the vault with SOL, OWL, and NFTs. **All pack purchase SOL goes to this wallet**; prize payouts leave from it (house edge stays as residual balance).
-4. Admin → Packs: load wallet NFTs, set floors (0.05+ SOL; grails above 0.5 are allowed), **Deposit & add**. Classic SPL NFTs pack up to **3 per on-chain tx**; Phantom (and other multi-sign wallets) approve **all classic txs in one sheet**. Metaplex Core, compressed, and pNFTs need one approval each; frozen/nested assets are not supported. Aim for ~30 NFTs at launch.
+4. Admin → Packs: pick **Prize shelf**, load wallet NFTs, set floors (main shelf **0.05+** SOL; $OWL shelf **0.01+**; grails above 0.5 allowed), **Deposit & add**. Classic SPL NFTs pack up to **3 per on-chain tx**; Phantom (and other multi-sign wallets) approve **all classic txs in one sheet**. Metaplex Core, compressed, and pNFTs need one approval each; frozen/nested assets are not supported. Aim for ~30 NFTs at launch.
 5. Apply migration **227** (`packs_vrf_and_nft_snapshot`).
 6. Pack VRF is on by default (`owltopia-pack-open-v2-vrf`). Prefers `VRF_FEE_PAYER_SECRET_KEY` for Switchboard fees (falls back to prize/funds escrow) — same as raffle VRF. Set `PACK_VRF_ENABLED=false` only to fall back to local commit–reveal.
 7. Run `npm run packs:ev-simulator` before going live; set `owl_sol_price` until EV ≈ 0.08 SOL. Use Admin → **Launch checklist**.

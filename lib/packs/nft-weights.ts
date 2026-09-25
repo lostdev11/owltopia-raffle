@@ -53,17 +53,19 @@ export function nftFpWeight(
 
 export function buildWeightedNftPool(
   inventory: NftPoolEntry[],
-  options?: { alpha?: number }
+  options?: { alpha?: number; minFairSol?: number }
 ): WeightedNftPoolEntry[] {
+  const minFairSol = options?.minFairSol ?? PACK_NFT_MIN_FAIR_SOL
   const eligible = inventory.filter(
     (row) =>
-      Number.isFinite(row.fair_value_sol) && isPackNftFairValueSol(row.fair_value_sol)
+      Number.isFinite(row.fair_value_sol) &&
+      isPackNftFairValueSol(row.fair_value_sol, minFairSol)
   )
   const maxFp = resolveNftPoolMaxFairSol(eligible.map((row) => row.fair_value_sol))
   return eligible
     .map((row) => ({
       ...row,
-      weight: nftFpWeight(row.fair_value_sol, { ...options, maxFp }),
+      weight: nftFpWeight(row.fair_value_sol, { ...options, maxFp, minFp: minFairSol }),
     }))
     // Stable order for verify: mint ascending then id
     .sort((a, b) => {
