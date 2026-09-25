@@ -27,6 +27,11 @@ import {
   PACK_PREMIUM_NFT_OVERALL_BPS,
   PACK_SOL_TIERS,
 } from '../lib/packs/config'
+import {
+  PACKS_PRODUCT_SLUG_MAIN,
+  PACKS_PRODUCT_SLUG_OWL,
+  resolvePackCashLadders,
+} from '../lib/packs/product-pools'
 
 const seed = generatePackOpenSeed()
 const commit = hashPackOpenCommit(seed)
@@ -48,6 +53,22 @@ for (let i = 0; i < 20; i++) {
 assert.equal(PACK_CATEGORY_WEIGHTS_BPS.owl, 3000)
 assert.equal(PACK_CATEGORY_WEIGHTS_BPS.sol, 3000)
 assert.equal(PACK_CATEGORY_WEIGHTS_BPS.nft, 4000)
+
+const mainLadders = resolvePackCashLadders(PACKS_PRODUCT_SLUG_MAIN)
+const owlLadders = resolvePackCashLadders(PACKS_PRODUCT_SLUG_OWL)
+assert.ok(mainLadders.owlTiers.some((t) => t.amount === 10))
+assert.ok(owlLadders.owlTiers.some((t) => t.amount === 2))
+assert.equal(
+  mainLadders.owlTiers.reduce((s, t) => s + t.weight, 0),
+  owlLadders.owlTiers.reduce((s, t) => s + t.weight, 0)
+)
+
+const oddsMain = computePackOddsPercentages({ productSlug: PACKS_PRODUCT_SLUG_MAIN })
+const oddsOwlShelf = computePackOddsPercentages({ productSlug: PACKS_PRODUCT_SLUG_OWL })
+assert.equal(oddsMain.categories.find((c) => c.category === 'owl')?.percent, 30)
+assert.equal(oddsOwlShelf.categories.find((c) => c.category === 'owl')?.percent, 30)
+assert.equal(oddsOwlShelf.categories.find((c) => c.category === 'nft')?.percent, 40)
+assert.notEqual(oddsMain.owlTiers[0]?.amount, oddsOwlShelf.owlTiers[0]?.amount)
 
 assert.ok(PACK_OWL_TIERS.every((t) => t.amount >= 10 && t.amount <= 50))
 assert.ok(PACK_OWL_TIERS.some((t) => t.amount === 10))

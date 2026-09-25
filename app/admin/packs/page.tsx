@@ -46,8 +46,17 @@ type AdminPacksData = {
     targetEvSol: number
     notes: string[]
   }
+  products?: {
+    id: string
+    slug: string
+    name: string
+    availableNfts: number
+    shelfPaused?: boolean
+    shelfPauseReason?: string | null
+  }[]
   inventory: {
     id: string
+    product_id?: string
     mint_address: string
     name: string | null
     image_url?: string | null
@@ -331,6 +340,7 @@ export default function AdminPacksPage() {
             <AdminPacksInventoryForm
               vaultAddress={data.vault.configuredAddress}
               inventory={data.inventory}
+              products={data.products ?? []}
               owlSolPrice={data.vault.owlSolPrice}
               onRegistered={load}
             />

@@ -24,6 +24,12 @@ export type PackProductRow = {
   category_sol_bps: number
   category_nft_bps: number
   active: boolean
+  jackpot_pool_sol?: number
+  jackpot_contribution_sol?: number | null
+  jackpot_win_odds_bps?: number
+  min_nft_count?: number
+  shelf_paused?: boolean
+  shelf_pause_reason?: string | null
   created_at: string
   updated_at: string
 }
@@ -69,6 +75,7 @@ export function packInventoryPrizeStandardLabel(
 
 export type PackInventoryRow = {
   id: string
+  product_id: string
   kind: 'nft'
   mint_address: string
   name: string | null

@@ -47,7 +47,7 @@ Buying stays off until a full admin turns packs on (`pack_vault_config.paused`):
 |------|--------|
 | Pack price | **0.1 SOL** |
 | Outcome | Every pack wins |
-| Categories | **30% $OWL · 30% SOL · 40% NFT** |
+| Categories | **30% $OWL · 30% SOL · 40% NFT** (same % on **0.1 SOL** and **$OWL** checkout — separate inventory shelves) |
 | OWL scale | **10 → 50** (10 OWL = 0.1 SOL at default rate) |
 | SOL scale | 0.05 → 0.5 SOL (Gembird ladder; 0.1 / 0.2 / 0.5 chase tiers) |
 | NFT fair value | 0.05+ SOL (admin-tagged, up to 50 SOL); **higher FP = rarer** |
@@ -58,9 +58,22 @@ Buying stays off until a full admin turns packs on (`pack_vault_config.paused`):
 | Odds UI | ME-style **percentages** (category + tier + per-NFT) |
 | Randomness | Switchboard VRF by default (`owltopia-pack-open-v2-vrf`); set `PACK_VRF_ENABLED=false` for local commit–reveal (`v1`) |
 
+## Product shelves (0.1 SOL vs $OWL checkout)
+
+Two **`pack_products`** rows share the **same category odds %** and tier **weight shape**, but **separate NFT inventory** and **separate jackpot pools**:
+
+| Checkout | Product slug | Shelf |
+|----------|--------------|--------|
+| **0.1 SOL** | `owl-pack-v1` | Main vault NFTs + Gembird SOL/OWL ladders + main jackpot |
+| **$OWL** (~20 $OWL + fee) | `owl-pack-owl-v1` | Lower-floor NFTs + smaller cash tiers (~$1 ticket EV); cheap jackpot |
+
+Admin → Packs: choose **Prize shelf** when depositing NFTs. Solvency pause is **per shelf** — an empty $OWL shelf does not pause the main 0.1 SOL shelf.
+
+Apply migration **247** (`packs_product_pools`) for `pack_inventory.product_id` and the $OWL product row.
+
 ## Jackpot
 
-Each **0.1 SOL** pack contributes **0.02 SOL** to a visible accumulating jackpot pool (~**0.2%** win chance per open by default). On a jackpot hit, the buyer receives the **full pool** in SOL and the pool resets to zero. Regular OWL/SOL/NFT prizes apply when the jackpot roll misses.
+Each pack open contributes to that **product’s** jackpot pool (default **0.02 SOL** per **0.1 SOL**-equivalent ticket, ~**0.2%** win chance). On a hit, the buyer receives the **full product pool** in SOL and that pool resets to zero. Regular OWL/SOL/NFT prizes apply when the jackpot roll misses.
 
 Paid opens that never finished (e.g. historical VRF `refund_needed`) still count toward the pool when recalculated. Admins can sync with `PATCH /api/admin/packs` `{ "recalculate_jackpot": true }`.
 

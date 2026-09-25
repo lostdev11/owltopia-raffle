@@ -7,9 +7,10 @@ import {
   PACK_OWL_TIERS,
   PACK_PREMIUM_NFT_OVERALL_BPS,
   PACK_SOL_TIERS,
-  owlTiersWithPrice,
+  PACKS_PRODUCT_SLUG,
   type PackRegularCategory,
 } from '@/lib/packs/config'
+import { resolvePackCashLadders } from '@/lib/packs/product-pools'
 import {
   buildWeightedNftPool,
   splitNftPoolByOddsTier,
@@ -44,12 +45,7 @@ export type PackOddsPercentages = {
       fairValueSol: number
       weight: number
       percentOfPremiumPool: number
-      /**
-       * True chance this exact mint is won (share of the shared chase pool).
-       * With many chase NFTs this is often ≪ 1% — UI should prefer `tierPercentOverall`.
-       */
       percentOverall: number
-      /** Chase-tier rate shown to buyers (always the shared pool %, e.g. 1%). */
       tierPercentOverall: number
     }[]
   }
@@ -67,6 +63,8 @@ export type PackOddsPercentages = {
 export function computePackOddsPercentages(options?: {
   owlSolPrice?: number | null
   nftInventory?: NftPoolEntry[]
+  /** Product shelf slug — only affects cash tier amounts shown, not category %. */
+  productSlug?: string
 }): PackOddsPercentages {
   const catTotal =
     PACK_CATEGORY_WEIGHTS_BPS.owl +
@@ -81,7 +79,11 @@ export function computePackOddsPercentages(options?: {
     percent: pct(PACK_CATEGORY_WEIGHTS_BPS[category], catTotal),
   }))
 
-  const owlTiersSrc = owlTiersWithPrice(options?.owlSolPrice)
+  const ladders = resolvePackCashLadders(
+    options?.productSlug ?? PACKS_PRODUCT_SLUG,
+    options?.owlSolPrice
+  )
+  const owlTiersSrc = ladders.owlTiers
   const owlSum = sumWeights(owlTiersSrc.map((t) => t.weight))
   const owlCatPct = PACK_CATEGORY_WEIGHTS_BPS.owl / catTotal
   const owlTiers = owlTiersSrc.map((t) => {
@@ -94,12 +96,11 @@ export function computePackOddsPercentages(options?: {
     }
   })
 
-  // PACK_OWL_TIERS kept referenced so tree-shaking does not drop ladder exports used by docs/UI.
   void PACK_OWL_TIERS
 
-  const solSum = sumWeights(PACK_SOL_TIERS.map((t) => t.weight))
+  const solSum = sumWeights(ladders.solTiers.map((t) => t.weight))
   const solCatPct = PACK_CATEGORY_WEIGHTS_BPS.sol / catTotal
-  const solTiers = PACK_SOL_TIERS.map((t) => {
+  const solTiers = ladders.solTiers.map((t) => {
     const ofCat = pct(t.weight, solSum)
     return {
       amountSol: t.amountSol,
@@ -108,6 +109,8 @@ export function computePackOddsPercentages(options?: {
       percentOverall: Math.round(ofCat * solCatPct * 100) / 100,
     }
   })
+
+  void PACK_SOL_TIERS
 
   const inventory = options?.nftInventory ?? []
   const { premium, standard } = splitNftPoolByOddsTier(inventory)
@@ -122,9 +125,7 @@ export function computePackOddsPercentages(options?: {
       fairValueSol: p.fair_value_sol,
       weight: p.weight,
       percentOfPremiumPool: ofPrem,
-      // ofPrem is % of premium pool; overall = share * 1% overall
       percentOverall: Math.round((ofPrem * PACK_PREMIUM_NFT_OVERALL_BPS) / 100) / 100,
-      // Buyers see the chase *tier* rate (shared ~1%), not the diluted per-mint share.
       tierPercentOverall: premiumOverallPct,
     }
   })

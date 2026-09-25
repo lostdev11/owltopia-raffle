@@ -4,13 +4,18 @@ import { requireFullAdminSession } from '@/lib/auth-server'
 import {
   addPackInventoryNft,
   countAvailableNfts,
+  getActivePackProduct,
+  getPackProductBySlug,
   getPackVaultConfig,
   listPackInventory,
+  listPackProducts,
   removePackInventoryNft,
   updatePackInventoryOddsTier,
+  updatePackProduct,
   updatePackVaultConfig,
   recalculatePackJackpotPool,
 } from '@/lib/packs/db'
+import { PACKS_PRODUCT_SLUG_MAIN, PACKS_PRODUCT_SLUG_OWL } from '@/lib/packs/product-pools'
 import { simulatePackEvFromInventory } from '@/lib/packs/ev-simulator'
 import { isPackInventoryPrizeStandard } from '@/lib/packs/types'
 import { isPackNftFairValueSol, PACK_NFT_MAX_FAIR_SOL, PACK_NFT_MIN_FAIR_SOL,
@@ -37,16 +42,38 @@ export async function GET(request: NextRequest) {
 
   try {
     const config = await getPackVaultConfig()
+    const products = await listPackProducts().catch(() => [])
+    const mainProduct =
+      products.find((p) => p.slug === PACKS_PRODUCT_SLUG_MAIN) ?? (await getActivePackProduct())
+    const owlProduct =
+      products.find((p) => p.slug === PACKS_PRODUCT_SLUG_OWL) ??
+      (await getPackProductBySlug(PACKS_PRODUCT_SLUG_OWL))
     const inventory = await listPackInventory()
-    const nftCount = await countAvailableNfts()
+    const nftCountMain = mainProduct ? await countAvailableNfts(mainProduct.id) : 0
+    const nftCountOwl = owlProduct ? await countAvailableNfts(owlProduct.id) : 0
     const solBal = await getPacksVaultSolBalance()
     const owlBal = await getPacksVaultOwlBalanceUi()
     const ev = simulatePackEvFromInventory({
       owlSolPrice: config.owl_sol_price,
-      inventory,
+      inventory: mainProduct
+        ? inventory.filter((r) => r.product_id === mainProduct.id)
+        : inventory,
+      productShelfSlug: PACKS_PRODUCT_SLUG_MAIN,
     })
 
     return NextResponse.json({
+      products: await Promise.all(
+        products.map(async (p) => ({
+          id: p.id,
+          slug: p.slug,
+          name: p.name,
+          availableNfts: await countAvailableNfts(p.id),
+          shelfPaused: p.shelf_paused === true,
+          shelfPauseReason: p.shelf_pause_reason ?? null,
+          jackpotPoolSol: Number(p.jackpot_pool_sol ?? 0),
+          minNftCount: Number(p.min_nft_count ?? 1),
+        }))
+      ),
       vault: {
         configuredAddress: getPacksVaultPublicKey(),
         dbPubkey: config.vault_pubkey,
@@ -58,7 +85,8 @@ export async function GET(request: NextRequest) {
         owlSolPrice: config.owl_sol_price,
         solBalance: solBal,
         owlBalance: owlBal,
-        availableNfts: nftCount,
+        availableNfts: nftCountMain,
+        availableNftsOwlShelf: nftCountOwl,
         jackpotPoolSol: Number(config.jackpot_pool_sol ?? 0),
         jackpotContributionSol: Number(
           config.jackpot_contribution_sol ?? PACK_JACKPOT_CONTRIBUTION_SOL
@@ -103,8 +131,23 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: true, item })
     }
 
+    if (typeof body.product_id === 'string' && body.clear_shelf_pause === true) {
+      const updated = await updatePackProduct(body.product_id.trim(), {
+        shelf_paused: false,
+        shelf_pause_reason: null,
+      })
+      return NextResponse.json({ ok: true, product: updated })
+    }
+
     if (body.recalculate_jackpot === true) {
-      const result = await recalculatePackJackpotPool()
+      const productId =
+        typeof body.product_id === 'string'
+          ? body.product_id.trim()
+          : (await getActivePackProduct())?.id
+      if (!productId) {
+        return NextResponse.json({ error: 'product_id required' }, { status: 400 })
+      }
+      const result = await recalculatePackJackpotPool({ productId })
       return NextResponse.json({
         ok: true,
         jackpot: {
@@ -137,7 +180,8 @@ export async function PATCH(request: NextRequest) {
     if (vault) patch.vault_pubkey = vault
 
     if (body.paused === false) {
-      const nftCount = await countAvailableNfts()
+      const main = await getActivePackProduct()
+      const nftCount = main ? await countAvailableNfts(main.id) : 0
       const minNft = typeof body.min_nft_count === 'number' ? body.min_nft_count : undefined
       const config = await getPackVaultConfig()
       const need = minNft ?? config.min_nft_count
@@ -215,7 +259,22 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    let productId =
+      typeof body.product_id === 'string' ? body.product_id.trim() : ''
+    if (!productId && typeof body.product_slug === 'string') {
+      const bySlug = await getPackProductBySlug(body.product_slug.trim())
+      productId = bySlug?.id ?? ''
+    }
+    if (!productId) {
+      const main = await getActivePackProduct()
+      productId = main?.id ?? ''
+    }
+    if (!productId) {
+      return NextResponse.json({ error: 'product_id or active pack product required' }, { status: 400 })
+    }
+
     const row = await addPackInventoryNft({
+      product_id: productId,
       mint_address: mint,
       name: typeof body.name === 'string' ? body.name : null,
       image_url: typeof body.image_url === 'string' ? body.image_url : null,

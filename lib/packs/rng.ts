@@ -3,12 +3,15 @@ import {
   PACK_CATEGORY_WEIGHTS_BPS,
   PACK_NFT_VALUE_BANDS,
   PACK_PREMIUM_NFT_OVERALL_BPS,
-  PACK_SOL_TIERS,
-  owlTiersWithPrice,
+  PACKS_PRODUCT_SLUG,
   packPremiumNftRollBpsWithinNftCategory,
-  type PackPrizeCategory,
   type PackRegularCategory,
 } from '@/lib/packs/config'
+import {
+  PACKS_PRODUCT_SLUG_MAIN,
+  resolvePackCashLadders,
+  type PackCashLadders,
+} from '@/lib/packs/product-pools'
 import type { WeightedTierPick } from '@/lib/packs/types'
 import {
   buildWeightedNftPool,
@@ -64,10 +67,13 @@ export function pickCategory(seed: string): PackRegularCategory {
 export function pickTier(
   seed: string,
   category: PackRegularCategory,
-  owlSolPrice?: number | null
+  owlSolPrice?: number | null,
+  ladders?: PackCashLadders
 ): WeightedTierPick {
+  const resolved =
+    ladders ?? resolvePackCashLadders(PACKS_PRODUCT_SLUG_MAIN, owlSolPrice)
   if (category === 'owl') {
-    const tiers = owlTiersWithPrice(owlSolPrice)
+    const tiers = resolved.owlTiers
     const idx = pickWeightedIndex(
       seed,
       'tier:owl',
@@ -85,9 +91,9 @@ export function pickTier(
     const idx = pickWeightedIndex(
       seed,
       'tier:sol',
-      PACK_SOL_TIERS.map((t) => t.weight)
+      resolved.solTiers.map((t) => t.weight)
     )
-    const t = PACK_SOL_TIERS[idx]!
+    const t = resolved.solTiers[idx]!
     return {
       category: 'sol',
       amountSol: t.amountSol,
@@ -173,11 +179,11 @@ export function pickNftFromSnapshot(
 /** Recompute category + OWL/SOL tier from a published seed (verify page). */
 export function recomputeOpenFromSeed(
   seed: string,
-  owlSolPrice?: number | null
+  owlSolPrice?: number | null,
+  productSlug?: string
 ): { category: PackRegularCategory; pick: WeightedTierPick } {
   const category = pickCategory(seed)
   if (category === 'nft') {
-    // NFT mint is recomputed via snapshot when present; return placeholder band pick.
     return {
       category: 'nft',
       pick: {
@@ -188,7 +194,8 @@ export function recomputeOpenFromSeed(
       },
     }
   }
-  const pick = pickTier(seed, category, owlSolPrice)
+  const ladders = resolvePackCashLadders(productSlug ?? PACKS_PRODUCT_SLUG_MAIN, owlSolPrice)
+  const pick = pickTier(seed, category, owlSolPrice, ladders)
   return { category, pick }
 }
 
