@@ -1118,6 +1118,7 @@ export async function transferPartnerSplPrizeToWinner(raffleId: string): Promise
   if (!isPartnerSplPrizeRaffle(raffle) || !raffle.winner_wallet) {
     return { ok: false, error: 'Raffle is not a partner token prize raffle or has no winner' }
   }
+  const winnerWallet = raffle.winner_wallet.trim()
   if (raffle.nft_transfer_transaction) {
     return { ok: true, signature: raffle.nft_transfer_transaction }
   }
@@ -1165,13 +1166,9 @@ export async function transferPartnerSplPrizeToWinner(raffleId: string): Promise
               wrap.error
             )
           }
-          return payoutSolPartnerPrizeFromEscrowToRecipient(raffle.winner_wallet.trim(), raw)
+          return payoutSolPartnerPrizeFromEscrowToRecipient(winnerWallet, raw)
         })()
-      : await payoutFungibleSplFromEscrowToRecipient(
-          partner.mint,
-          raffle.winner_wallet.trim(),
-          raw
-        )
+      : await payoutFungibleSplFromEscrowToRecipient(partner.mint, winnerWallet, raw)
   if (!transferResult.ok || !transferResult.signature) {
     if (!transferResult.ok) {
       console.error(`Partner SPL prize escrow transfer failed for raffle ${raffleId}:`, transferResult.error)
