@@ -111,12 +111,20 @@ export function AdminPacksInventoryForm({
   products = [],
   owlSolPrice,
   onRegistered,
+  embedded = false,
+  shelfProductId: shelfProductIdProp,
+  hideShelfSelector = false,
 }: {
   vaultAddress: string | null
   inventory: AdminPacksInventoryItem[]
   products?: AdminPackProductShelf[]
   owlSolPrice: number | null
   onRegistered: () => Promise<void>
+  /** When true, omit the section title (used inside unified Deposits). */
+  embedded?: boolean
+  /** Controlled prize shelf from parent (unified Deposits). */
+  shelfProductId?: string
+  hideShelfSelector?: boolean
 }) {
   const { connection } = useConnection()
   const { publicKey, wallet } = useWallet()
@@ -139,7 +147,8 @@ export function AdminPacksInventoryForm({
   }, [products])
   const [depositProductId, setDepositProductId] = useState('')
 
-  const activeDepositProductId = depositProductId || defaultProductId
+  const activeDepositProductId =
+    shelfProductIdProp?.trim() || depositProductId || defaultProductId
   const depositProduct = products.find((p) => p.id === activeDepositProductId)
   const depositProductSlug = depositProduct?.slug ?? PACKS_PRODUCT_SLUG_MAIN
   const floorRangeLabel = packNftFairValueRangeLabel(depositProductSlug)
@@ -423,17 +432,28 @@ export function AdminPacksInventoryForm({
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="font-medium">Add NFTs to inventory</h2>
-        <p className="text-xs text-muted-foreground">
-          Load this wallet, pick NFTs, set a floor price ({floorRangeLabel}; higher floors = rarer
-          odds), then send them to the packs vault. Classic SPL NFTs
-          pack up to {PACK_DEPOSIT_MAX_PER_TX} per on-chain tx; Phantom (and wallets with
-          multi-approve) signs all classic txs in <span className="font-medium">one sheet</span>.
-          Core / compressed / pNFT still need one approval each. Frozen or nested
-          assets can’t be deposited.
-        </p>
-      </div>
+      {!embedded ? (
+        <div>
+          <h2 className="font-medium">Add NFTs to inventory</h2>
+          <p className="text-xs text-muted-foreground">
+            Load this wallet, pick NFTs, set a floor price ({floorRangeLabel}; higher floors = rarer
+            odds), then send them to the packs vault. Classic SPL NFTs pack up to{' '}
+            {PACK_DEPOSIT_MAX_PER_TX} per on-chain tx; Phantom (and wallets with multi-approve)
+            signs all classic txs in <span className="font-medium">one sheet</span>. Core /
+            compressed / pNFT still need one approval each. Frozen or nested assets can’t be
+            deposited.
+          </p>
+        </div>
+      ) : (
+        <div>
+          <h3 className="text-sm font-medium">NFT prizes</h3>
+          <p className="text-xs text-muted-foreground">
+            Deposit NFTs onto <span className="font-medium">{depositProduct?.name ?? 'this shelf'}</span>{' '}
+            ({floorRangeLabel}). Classic SPL batch up to {PACK_DEPOSIT_MAX_PER_TX} per tx; Core /
+            compressed / pNFT one approval each.
+          </p>
+        </div>
+      )}
 
       <div className="rounded-md border bg-muted/30 p-3 text-sm">
         <p>
@@ -444,7 +464,7 @@ export function AdminPacksInventoryForm({
         <PacksAdminExtraDetails notes={liveEv.notes} />
       </div>
 
-      {products.length > 0 ? (
+      {products.length > 0 && !hideShelfSelector ? (
         <div>
           <Label htmlFor="packs-deposit-shelf">Prize shelf (product pool)</Label>
           <select

@@ -15,6 +15,7 @@ import {
   updatePackProduct,
   updatePackVaultConfig,
   recalculatePackJackpotPool,
+  creditPackProductJackpotPool,
 } from '@/lib/packs/db'
 import {
   isPackNftFairValueForProduct,
@@ -141,6 +142,30 @@ export async function PATCH(request: NextRequest) {
         shelf_pause_reason: null,
       })
       return NextResponse.json({ ok: true, product: updated })
+    }
+
+    if (typeof body.product_id === 'string' && typeof body.credit_jackpot_sol === 'number') {
+      const productId = body.product_id.trim()
+      if (!productId) {
+        return NextResponse.json({ error: 'product_id required' }, { status: 400 })
+      }
+      try {
+        const result = await creditPackProductJackpotPool({
+          productId,
+          amountSol: body.credit_jackpot_sol,
+        })
+        return NextResponse.json({
+          ok: true,
+          jackpot: {
+            poolBeforeSol: result.poolBeforeSol,
+            poolSol: result.poolAfterSol,
+            poolLabel: formatJackpotPoolSol(result.poolAfterSol),
+          },
+        })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Jackpot credit failed'
+        return NextResponse.json({ error: msg }, { status: 400 })
+      }
     }
 
     if (body.recalculate_jackpot === true) {

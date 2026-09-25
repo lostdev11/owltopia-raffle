@@ -7,9 +7,8 @@ import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { AdminPacksInventoryForm } from '@/components/admin/AdminPacksInventoryForm'
+import { AdminPacksDepositsSection } from '@/components/admin/AdminPacksDepositsSection'
 import { AdminPacksLaunchPanel } from '@/components/admin/AdminPacksLaunchPanel'
-import { AdminPacksVaultFundingForm } from '@/components/admin/AdminPacksVaultFundingForm'
 import { PacksOpeningPreviewPanel } from '@/components/admin/PacksOpeningPreviewPanel'
 import { PacksLaunchChecklist } from '@/components/admin/PacksLaunchChecklist'
 import { PacksAdminExtraDetails } from '@/components/admin/PacksAdminExtraDetails'
@@ -51,6 +50,7 @@ type AdminPacksData = {
     slug: string
     name: string
     availableNfts: number
+    jackpotPoolSol?: number
     shelfPaused?: boolean
     shelfPauseReason?: string | null
   }[]
@@ -328,21 +328,14 @@ export default function AdminPacksPage() {
           <PacksOpeningPreviewPanel inventory={data.inventory} />
 
           <div className="rounded-lg border p-4">
-            <AdminPacksVaultFundingForm
+            <AdminPacksDepositsSection
               vaultAddress={data.vault.configuredAddress}
               vaultSolBalance={data.vault.solBalance}
               vaultOwlBalance={data.vault.owlBalance}
-              onDeposited={load}
-            />
-          </div>
-
-          <div className="rounded-lg border p-4">
-            <AdminPacksInventoryForm
-              vaultAddress={data.vault.configuredAddress}
               inventory={data.inventory}
               products={data.products ?? []}
               owlSolPrice={data.vault.owlSolPrice}
-              onRegistered={load}
+              onRefresh={load}
             />
           </div>
 
