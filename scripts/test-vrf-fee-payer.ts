@@ -40,10 +40,14 @@ try {
   clearVrfFeePayerKeypairCacheForTests()
   assert.equal(getVrfFeePayerKeypair(), null)
 
-  // Without dedicated key, prize escrow is preferred over funds escrow.
-  // Prize/funds keypair caches live in their modules — set env before first resolve in a fresh process.
-  // Here we only assert dedicated-key preference + null when unset; fallback order is covered by source.
-  console.log('ok: VRF fee payer prefers VRF_FEE_PAYER_SECRET_KEY when set')
+  // Without dedicated key, fall back to funds escrow — never prize escrow (SOL prizes share that wallet).
+  assert.equal(
+    resolveVrfOrRevealFeePayer()?.publicKey.toBase58(),
+    fundsKp.publicKey.toBase58(),
+    'without VRF_FEE_PAYER_SECRET_KEY, funds escrow is last resort (not prize escrow)'
+  )
+
+  console.log('ok: VRF fee payer prefers VRF_FEE_PAYER_SECRET_KEY; never prize escrow')
 } finally {
   if (originalVrf === undefined) delete process.env.VRF_FEE_PAYER_SECRET_KEY
   else process.env.VRF_FEE_PAYER_SECRET_KEY = originalVrf

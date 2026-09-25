@@ -1,13 +1,13 @@
 /**
  * Dedicated fee payer for Switchboard VRF + draw-reveal memo txs.
- * Keeps operating fees off FUNDS_ESCROW (ticket / bid / milestone liability).
+ * Keeps operating fees off FUNDS_ESCROW (ticket / bid / milestone liability) and off
+ * PRIZE_ESCROW (NFT custody + SOL crypto prize liability).
  *
  * VRF_FEE_PAYER_SECRET_KEY — same formats as FUNDS_ESCROW_SECRET_KEY / PRIZE_ESCROW_SECRET_KEY
  * (JSON byte array or base58).
  */
 import { Keypair } from '@solana/web3.js'
 import { getFundsEscrowKeypair } from '@/lib/raffles/funds-escrow'
-import { getPrizeEscrowKeypair } from '@/lib/raffles/prize-escrow'
 
 function parseVrfFeePayerKeypair(): Keypair | null {
   const raw = process.env.VRF_FEE_PAYER_SECRET_KEY?.trim()
@@ -43,11 +43,12 @@ export function getVrfFeePayerPublicKey(): string | null {
 }
 
 /**
- * Prefer dedicated VRF fee wallet, then prize escrow, then funds escrow (last resort).
- * Funds escrow is liability for tickets/bids — avoid draining it for Switchboard fees.
+ * Prefer dedicated VRF fee wallet, then funds escrow as last resort.
+ * Never use prize escrow — SOL crypto prizes share that wallet and were being drained
+ * by Switchboard fees when VRF_FEE_PAYER_SECRET_KEY was unset.
  */
 export function resolveVrfOrRevealFeePayer(): Keypair | null {
-  return getVrfFeePayerKeypair() ?? getPrizeEscrowKeypair() ?? getFundsEscrowKeypair() ?? null
+  return getVrfFeePayerKeypair() ?? getFundsEscrowKeypair() ?? null
 }
 
 /** @internal test helper — clear cached keypair between env mutations. */

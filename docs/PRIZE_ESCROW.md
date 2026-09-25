@@ -2,6 +2,19 @@
 
 When an NFT raffle uses the **prize escrow**, the creator sends the NFT to a platform-held wallet at creation time. At settlement, the platform automatically transfers that NFT to the winner—no manual “send to winner” step.
 
+## SOL crypto prizes (shared wallet risk)
+
+SOL raffle/auction prizes are deposited as **native SOL** into the same `PRIZE_ESCROW` wallet that holds NFT prizes and pays NFT transfer / ATA rent fees. Historically, when `VRF_FEE_PAYER_SECRET_KEY` was unset, Switchboard fees also fell back to this wallet.
+
+**Prevention (current):**
+
+1. After a SOL prize deposit verifies, the server **wraps** that amount into the escrow **wSOL** ATA so NFT rent/fees cannot spend prize principal.
+2. NFT ATA creation from prize escrow is **gated** when it would leave outstanding SOL prizes under-covered.
+3. VRF fee payer falls back to **funds escrow only** — never prize escrow.
+4. `GET /api/admin/escrow-health` surfaces prize-escrow SOL liability (native + wSOL vs outstanding prizes).
+
+**Ops:** If a winner still sees “Escrow SOL balance is below the prize amount”, top up the prize escrow wallet by at least the reported shortfall, then retry the claim. Prefer keeping `VRF_FEE_PAYER_SECRET_KEY` funded so draw fees never touch liability wallets.
+
 ## Setup
 
 1. **Run the migration**  
