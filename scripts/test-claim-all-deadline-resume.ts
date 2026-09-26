@@ -20,6 +20,9 @@ import {
   CLAIM_FEE_RECOVERY_MAX_PAGES,
   CLAIM_FEE_RECOVERY_PAGE_SIZE,
 } from '../lib/nesting/find-reusable-claim-platform-fee'
+import { shouldShowClaimAllClosePageMessage } from '../lib/nesting/claim-all-ui-copy'
+import { claimAllJobToPublicView } from '../lib/nesting/claim-all-job-runner'
+import type { StakingClaimAllJobRow } from '../lib/db/staking-claim-all-jobs'
 
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret-32chars-min!!'
 
@@ -107,6 +110,54 @@ process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret-
   const deadline = Date.now() + 20_000
   assert.equal(shouldStopClaimAllBatchesForDeadline(deadline, deadline - 14_000), true)
   assert.equal(shouldStopClaimAllBatchesForDeadline(deadline, deadline - 16_000), false)
+}
+
+// Close-page copy only after fee (not during wallet signature) and when a background job exists.
+{
+  assert.equal(
+    shouldShowClaimAllClosePageMessage({
+      phase: 'awaiting_wallet_signature',
+      hasActiveBackgroundJob: true,
+    }),
+    false
+  )
+  assert.equal(
+    shouldShowClaimAllClosePageMessage({ phase: 'submitting', hasActiveBackgroundJob: true }),
+    true
+  )
+  assert.equal(
+    shouldShowClaimAllClosePageMessage({ phase: 'submitting', hasActiveBackgroundJob: false }),
+    false
+  )
+}
+
+// Cron/admin job view exposes pending work for server-side resume (no browser required).
+{
+  const row = {
+    id: '11111111-1111-4111-8111-111111111111',
+    wallet_address: '4Fo8qRnCM6d1RtFRz69T9MzwnGxhVkb1n4EpfC1FGuaG',
+    platform_fee_signature: 'sig',
+    pool_id: '22222222-2222-4222-8222-222222222222',
+    status: 'processing' as const,
+    pending_position_ids: ['a', 'b'],
+    completed_position_ids: ['c'],
+    fee_units: 3,
+    claim_all_eligibility_token: null,
+    total_claimed_ui: 10,
+    batches_completed: 1,
+    batch_count_estimate: 2,
+    attempt_count: 1,
+    max_attempts: 48,
+    last_error: null,
+    lock_owner: 'cron',
+    locked_at: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    completed_at: null,
+  } satisfies StakingClaimAllJobRow
+  const view = claimAllJobToPublicView(row)
+  assert.equal(view.claim_all_complete, false)
+  assert.equal(view.pending_nest_count, 2)
 }
 
 console.log('test-claim-all-deadline-resume: ok')

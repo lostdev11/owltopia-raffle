@@ -270,6 +270,14 @@ export function DashboardNestingClient() {
    * only the server confirm remains, so the progress card can say "safe to close". */
   const [stakeCloseSafe, setStakeCloseSafe] = useState(false)
   const [claimAllTxPhase, setClaimAllTxPhase] = useState<NestingTxPhase>('idle')
+  const [claimAllServerJob, setClaimAllServerJob] = useState<{
+    job_id: string
+    pending_nest_count: number
+    total_claimed: number
+    batches_completed: number
+    batch_count_estimate: number | null
+    status: string
+  } | null>(null)
   /** Multi NFT confirm: show which coin the wallet is locking so the flow does not look frozen. */
   const [nftStakeBatchHint, setNftStakeBatchHint] = useState<string | null>(null)
   const [posPhases, setPosPhases] = useState<Record<string, { claim: NestingTxPhase; unstake: NestingTxPhase }>>({})
@@ -790,7 +798,12 @@ export function DashboardNestingClient() {
     return formatStakingPlatformFeePerNestLabel()
   }, [platformFeeActive])
 
-  const claimAllBusy = claimAllTxPhase !== 'idle'
+  const claimAllServerContinues = Boolean(
+    claimAllServerJob &&
+      claimAllServerJob.status === 'processing' &&
+      claimAllServerJob.pending_nest_count > 0
+  )
+  const claimAllBusy = claimAllTxPhase !== 'idle' || claimAllServerContinues
 
   /** Deploy kill switch only — admin “pause holder actions” still allows claims. */
   const nestingClaimsBlocked = nestingPausedByDeployEnv
@@ -807,6 +820,64 @@ export function DashboardNestingClient() {
     if (stakeTxPhase !== 'idle') return 'Finish the nest you are opening above, then try again.'
     return null
   }, [claimAllButtonDisabled, claimAllReady, claimAllBusy, nestingClaimsBlocked, stakeTxPhase])
+
+  useEffect(() => {
+    if (!connected || !publicKey) {
+      setClaimAllServerJob(null)
+      return
+    }
+    let cancelled = false
+    const pollClaimAllJob = async () => {
+      const res = await fetchNestingJson<{
+        job?: {
+          job_id: string
+          status: string
+          pending_nest_count: number
+          total_claimed: number
+          batches_completed: number
+          batch_count_estimate: number | null
+          claim_all_complete?: boolean
+        } | null
+      }>('/api/me/staking/claim-all/job', {
+        method: 'GET',
+        credentials: 'include',
+        timeoutMs: NESTING_CLAIM_FETCH_TIMEOUT_MS,
+        headers: { 'X-Connected-Wallet': publicKey.toBase58() },
+      })
+      if (cancelled || !res.json) return
+      const job = res.json.job
+      if (!job || job.status === 'failed') {
+        setClaimAllServerJob(null)
+        if (claimAllTxPhase === 'submitting' && !job) {
+          setClaimAllTxPhase('idle')
+        }
+        return
+      }
+      if (job.status === 'processing' && job.pending_nest_count > 0) {
+        setClaimAllServerJob({
+          job_id: job.job_id,
+          status: job.status,
+          pending_nest_count: job.pending_nest_count,
+          total_claimed: job.total_claimed,
+          batches_completed: job.batches_completed,
+          batch_count_estimate: job.batch_count_estimate,
+        })
+        setClaimAllTxPhase('submitting')
+        return
+      }
+      if (job.claim_all_complete || job.pending_nest_count === 0) {
+        setClaimAllServerJob(null)
+        setClaimAllTxPhase('idle')
+        void loadPositions({ heal: true, silent: true })
+      }
+    }
+    void pollClaimAllJob()
+    const intervalId = window.setInterval(() => void pollClaimAllJob(), 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [connected, publicKey, walletAddr])
 
   /** Match staked mints to the user’s last wallet NFT scan (image + name hints). */
   const nestingWalletMintHints = useMemo(() => {
@@ -3561,83 +3632,42 @@ export function DashboardNestingClient() {
             transaction_signature?: string | null
           }
 
-          const maxClaimAllResumeAttempts = 48
-          let resumeAttempt = 0
-          let runningTotalClaimed = 0
-          const runningClaims: NonNullable<ClaimAllPostJson['claims']> = []
-          let lastTxSig: string | null = null
-          let executionPath: 'onchain_transfer' | 'database_only' = 'database_only'
-          let skippedLockCount = 0
-          let skippedOwl = 0
+          const result = await fetchNestingJson<ClaimAllPostJson & {
+            job_id?: string | null
+            server_continues_in_background?: boolean
+            pending_nest_count?: number
+            batches_completed?: number
+            batch_count_estimate?: number | null
+          }>('/api/me/staking/claim-all', {
+            method: 'POST',
+            credentials: 'include',
+            timeoutMs: NESTING_CLAIM_ALL_FETCH_TIMEOUT_MS,
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Connected-Wallet': publicKey.toBase58(),
+            },
+            body: JSON.stringify({
+              ...(platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}),
+              ...(claimAllEligibilityToken
+                ? { claim_all_eligibility: claimAllEligibilityToken }
+                : {}),
+            }),
+          })
 
-          const postClaimAllOnce = () =>
-            fetchNestingJson<ClaimAllPostJson>('/api/me/staking/claim-all', {
-              method: 'POST',
-              credentials: 'include',
-              timeoutMs: NESTING_CLAIM_ALL_FETCH_TIMEOUT_MS,
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Connected-Wallet': publicKey.toBase58(),
-              },
-              body: JSON.stringify({
-                ...(platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}),
-                ...(claimAllEligibilityToken
-                  ? { claim_all_eligibility: claimAllEligibilityToken }
-                  : {}),
-              }),
-            })
+          if (result.status === 0 && !result.ok) {
+            setActionError(
+              (result.clientTimeout
+                ? nestingFetchTimeoutMessage('claim')
+                : nestingFetchNetworkErrorMessage('claim')) +
+                (platformFeeSig ? ` ${claimRetryWithoutRepayMessage(feeUnits)}` : '')
+            )
+            throw new Error('claim-all')
+          }
 
-          let result = await postClaimAllOnce()
+          const json = result.json ?? {}
 
-          while (resumeAttempt < maxClaimAllResumeAttempts) {
-            resumeAttempt += 1
-
-            if (result.status === 0 && !result.ok) {
-              if (platformFeeSig && resumeAttempt < maxClaimAllResumeAttempts) {
-                setClaimAllTxPhase('submitting')
-                await loadPositions({ heal: false, silent: true })
-                result = await postClaimAllOnce()
-                continue
-              }
-              setActionError(
-                (result.clientTimeout
-                  ? nestingFetchTimeoutMessage('claim')
-                  : nestingFetchNetworkErrorMessage('claim')) +
-                  (platformFeeSig ? ` ${claimRetryWithoutRepayMessage(feeUnits)}` : '')
-              )
-              throw new Error('claim-all')
-            }
-
-            const json = result.json ?? {}
-
-            if (!result.ok && json.code === 'claim_all_partial_batch') {
-              const batchClaimed =
-                typeof json.total_claimed === 'number' && Number.isFinite(json.total_claimed)
-                  ? json.total_claimed
-                  : 0
-              runningTotalClaimed = batchClaimed
-              if (json.claims?.length) {
-                runningClaims.length = 0
-                runningClaims.push(...json.claims)
-              }
-              const batchesDone =
-                typeof json.batches_completed === 'number' ? json.batches_completed : 0
-              const batchTotal =
-                typeof json.batch_count === 'number' ? json.batch_count : batchesDone + 1
-              setClaimAllTxPhase('submitting')
-              setSuccessNotice({
-                placement: 'modal',
-                title: 'Claim all in progress',
-                message: `Sent ${runningTotalClaimed.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL so far (${batchesDone} of ${batchTotal} batches). Continuing automatically…`,
-                hint: 'Keep this page open — your platform fee covers all nests.',
-              })
-              await loadPositions({ heal: false, silent: true })
-              result = await postClaimAllOnce()
-              continue
-            }
-
-            if (!result.ok && json.ledger_sync_failed && json.transaction_signature?.trim()) {
-              const pending: PendingClaimLedgerSync = {
+          if (!result.ok && json.ledger_sync_failed && json.transaction_signature?.trim()) {
+            const pending: PendingClaimLedgerSync = {
               transaction_signature: json.transaction_signature.trim(),
               total_claimed:
                 typeof json.total_claimed === 'number' && Number.isFinite(json.total_claimed)
@@ -3689,73 +3719,59 @@ export function DashboardNestingClient() {
             setActionError(
               'OWL was sent to your wallet, but nest totals are still syncing. Refresh the page in a few seconds — do not claim again yet.'
             )
-              throw new Error('claim-all')
-            }
-
-            if (!result.ok) {
-              const err = typeof json.error === 'string' ? json.error : 'Claim all failed'
-              const feeRejected =
-                err.toLowerCase().includes('platform fee') ||
-                err.toLowerCase().includes('fee payment') ||
-                err.toLowerCase().includes('fee transaction')
-              if (feeRejected) {
-                clearPendingClaimPlatformFee()
-                setActionError(err)
-              } else {
-                setActionError(
-                  platformFeeSig ? `${err} ${claimRetryWithoutRepayMessage(feeUnits)}` : err
-                )
-              }
-              throw new Error('claim-all')
-            }
-
-            if (typeof window !== 'undefined') {
-              sessionStorage.removeItem(PENDING_CLAIM_LEDGER_STORAGE_KEY)
-            }
-            clearPendingClaimPlatformFee()
-
-            const finalTotal =
-              (typeof json.total_claimed === 'number' && Number.isFinite(json.total_claimed)
-                ? json.total_claimed
-                : 0) + runningTotalClaimed
-            const mergedClaims = [
-              ...runningClaims,
-              ...(json.claims?.length ? json.claims : []),
-            ]
-            lastTxSig =
-              typeof json.transaction_signature === 'string' ? json.transaction_signature.trim() : null
-            executionPath =
-              json.execution?.path === 'onchain_transfer' ? 'onchain_transfer' : executionPath
-            skippedLockCount =
-              typeof json.skipped_lock_count === 'number' ? json.skipped_lock_count : skippedLockCount
-            skippedOwl = typeof json.skipped_owl === 'number' ? json.skipped_owl : skippedOwl
-
-            const rows = (mergedClaims.length ? mergedClaims : claimPlans).map((c) => ({
-              position_id: 'positionId' in c ? c.positionId : c.position_id,
-              claimed_rewards_total:
-                'newClaimedTotal' in c
-                  ? c.newClaimedTotal
-                  : Number((c as { claimed_rewards_total?: number }).claimed_rewards_total),
-            }))
-            ledgerClaims.push(
-              ...rows.filter((r) => r.position_id && Number.isFinite(r.claimed_rewards_total))
-            )
-            return {
-              ...json,
-              total_claimed: finalTotal,
-              claim_count: mergedClaims.length || json.claim_count,
-              claims: mergedClaims.length ? mergedClaims : json.claims,
-              transaction_signature: lastTxSig,
-              execution: { path: executionPath },
-              skipped_lock_count: skippedLockCount,
-              skipped_owl: skippedOwl,
-            }
+            throw new Error('claim-all')
           }
 
-          setActionError(
-            'Claim all stopped after many resume attempts. Refresh your nest — OWL may still be arriving; your platform fee can be reused.'
+          if (!result.ok) {
+            const err = typeof json.error === 'string' ? json.error : 'Claim all failed'
+            const feeRejected =
+              err.toLowerCase().includes('platform fee') ||
+              err.toLowerCase().includes('fee payment') ||
+              err.toLowerCase().includes('fee transaction')
+            if (feeRejected) {
+              clearPendingClaimPlatformFee()
+              setActionError(err)
+            } else {
+              setActionError(
+                platformFeeSig ? `${err} ${claimRetryWithoutRepayMessage(feeUnits)}` : err
+              )
+            }
+            throw new Error('claim-all')
+          }
+
+          const serverContinues = Boolean(json.server_continues_in_background && json.job_id)
+          if (serverContinues) {
+            setClaimAllServerJob({
+              job_id: String(json.job_id),
+              status: 'processing',
+              pending_nest_count: Number(json.pending_nest_count ?? 0),
+              total_claimed: Number(json.total_claimed ?? 0),
+              batches_completed: Number(json.batches_completed ?? 0),
+              batch_count_estimate:
+                typeof json.batch_count_estimate === 'number' ? json.batch_count_estimate : null,
+            })
+            setClaimAllTxPhase('submitting')
+          } else if (typeof window !== 'undefined') {
+            sessionStorage.removeItem(PENDING_CLAIM_LEDGER_STORAGE_KEY)
+            clearPendingClaimPlatformFee()
+            setClaimAllServerJob(null)
+            setClaimAllTxPhase('idle')
+          }
+
+          const rows = (json.claims?.length ? json.claims : claimPlans).map((c) => ({
+            position_id: 'positionId' in c ? c.positionId : c.position_id,
+            claimed_rewards_total:
+              'newClaimedTotal' in c
+                ? c.newClaimedTotal
+                : Number((c as { claimed_rewards_total?: number }).claimed_rewards_total),
+          }))
+          ledgerClaims.push(
+            ...rows.filter((r) => r.position_id && Number.isFinite(r.claimed_rewards_total))
           )
-          throw new Error('claim-all')
+          return {
+            ...json,
+            claim_all_in_background: serverContinues,
+          }
         },
         afterSuccess: async () => {
           if (ledgerClaims.length > 0) {
@@ -3788,6 +3804,17 @@ export function DashboardNestingClient() {
         skippedLocks > 0
           ? ` ${skippedOwlLabel} OWL still pending on ${skippedLocks} nest${skippedLocks === 1 ? '' : 's'} that need Finish opening (lock not on-chain yet) — claim those after the lock is restored.`
           : ''
+      const inBackground =
+        (claimJson as { claim_all_in_background?: boolean }).claim_all_in_background === true
+      if (inBackground) {
+        setSuccessNotice({
+          placement: 'modal',
+          title: 'Claim all in progress',
+          message: `${totalLabel} OWL sent so far — remaining nests finish on the server (about once a minute).`,
+          hint: 'You can close this page — your claims will keep sending to your wallet.',
+        })
+        return
+      }
       setSuccessNotice({
         placement: 'modal',
         title: skippedLocks > 0 ? 'Partial claim successful' : 'Claim successful',
@@ -5147,6 +5174,12 @@ export function DashboardNestingClient() {
           disabled={claimAllButtonDisabled}
           disabledReason={claimAllDisabledReason}
           phase={claimAllTxPhase}
+          serverContinuesInBackground={Boolean(claimAllServerJob && claimAllServerContinues)}
+          backgroundProgressLabel={
+            claimAllServerJob
+              ? `${claimAllServerJob.total_claimed.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL sent · ${claimAllServerJob.pending_nest_count} nest${claimAllServerJob.pending_nest_count === 1 ? '' : 's'} left`
+              : null
+          }
           onClaimAll={() => void handleClaimAll()}
         />
         {openPositions.length === 0 ? (

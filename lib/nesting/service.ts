@@ -26,7 +26,7 @@ import {
   minOwlClaimThresholdMessage,
   noClaimableRewardsMessage,
 } from '@/lib/nesting/claim-plan'
-import { executeChunkedBatchOwlClaims } from '@/lib/nesting/chunked-claim-all'
+import { ensureClaimAllJob, runClaimAllJobTick } from '@/lib/nesting/claim-all-job-runner'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { resolveMutationAdapter } from '@/lib/nesting/resolve-adapter'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
@@ -56,7 +56,6 @@ import {
 import { assertAdminOnlyStakingPoolAccess } from '@/lib/nesting/gen1-staking-pools'
 import { tryClearCrossWalletBlockerForMint } from '@/lib/nesting/clear-cross-wallet-stale-nests'
 import { assertNftEligibleForPoolStake } from '@/lib/nesting/nft-lock-service'
-import { appendStakingPlatformFeePositionIds } from '@/lib/db/staking-platform-fee-payments'
 import {
   commitStakingPlatformFeeLinked,
   requireStakingPlatformFeeLinked,
@@ -64,7 +63,6 @@ import {
   resolveStakingPlatformFeeSignature,
   validateStakingPlatformFeeLinked,
 } from '@/lib/nesting/link-staking-platform-fee'
-import { claimAllExecutionDeadlineMs } from '@/lib/nesting/claim-all-deadline'
 import { verifyClaimAllEligibilityToken } from '@/lib/nesting/claim-all-eligibility'
 import { isEarlyUnstakeFeeEnabled } from '@/lib/nesting/staking-platform-fee'
 
@@ -703,30 +701,49 @@ export async function executeClaimAll(params: {
 
   const feeSignature =
     typeof feeParams.feeSignature === 'string' ? feeParams.feeSignature.trim() : ''
-  const deadlineMs = claimAllExecutionDeadlineMs(params.startedAtMs ?? Date.now())
+  const jobFeeSignature = feeSignature || 'no_platform_fee'
 
-  const result = await executeChunkedBatchOwlClaims({
+  const job = await ensureClaimAllJob({
     wallet: params.wallet,
-    pool,
-    plans: claimPlans,
-    deadlineMs,
-    onBatchCompleted: feeSignature
-      ? async (positionIds) => {
-          await appendStakingPlatformFeePositionIds(feeSignature, positionIds)
-        }
-      : undefined,
+    platform_fee_signature: jobFeeSignature,
+    pool_id: pool.id,
+    pending_position_ids: claimPlans.map((p) => p.positionId),
+    fee_units: feeUnitCount,
+    claim_all_eligibility_token:
+      typeof params.claim_all_eligibility === 'string'
+        ? params.claim_all_eligibility.trim()
+        : null,
+  })
+
+  const tick = await runClaimAllJobTick({
+    jobId: job.id,
+    lockOwner: 'client',
+    startedAtMs: params.startedAtMs ?? Date.now(),
   })
 
   const skippedOwl = skippedOwlPreview
 
   return {
-    ...result,
-    skipped_lock_count: skippedLocks.length,
-    skipped_owl: skippedOwl,
-    skipped_locks: skippedLocks.map((s) => ({
-      position_id: s.positionId,
-      asset_id: s.assetId,
-      reason: s.message,
-    })),
+    total_claimed: tick.total_claimed,
+    claims: tick.claims,
+    transaction_signature: tick.transaction_signature,
+    transaction_signatures: tick.transaction_signatures,
+    execution_path: tick.execution_path,
+    batch_count: tick.batch_count_estimate ?? 1,
+    skipped_lock_count: tick.skipped_lock_count ?? skippedLocks.length,
+    skipped_owl: tick.skipped_owl ?? skippedOwl,
+    skipped_locks:
+      tick.skipped_locks ??
+      skippedLocks.map((s) => ({
+        position_id: s.positionId,
+        asset_id: s.assetId,
+        reason: s.message,
+      })),
+    claim_all_complete: tick.claim_all_complete,
+    job_id: job.id,
+    job_status: tick.status,
+    pending_nest_count: tick.pending_nest_count,
+    batches_completed: tick.batches_completed,
+    batch_count_estimate: tick.batch_count_estimate,
   }
 }

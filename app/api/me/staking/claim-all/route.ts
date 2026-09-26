@@ -45,6 +45,8 @@ export async function POST(request: NextRequest) {
         ? [txSig]
         : []
 
+    const claimAllComplete = result.claim_all_complete !== false
+
     return NextResponse.json({
       total_claimed: result.total_claimed,
       claim_count: result.claims.length,
@@ -59,7 +61,13 @@ export async function POST(request: NextRequest) {
       execution: {
         path: result.execution_path,
       },
-      claim_all_complete: true,
+      claim_all_complete: claimAllComplete,
+      job_id: result.job_id ?? null,
+      job_status: result.job_status ?? null,
+      pending_nest_count: result.pending_nest_count ?? 0,
+      batches_completed: result.batches_completed ?? 0,
+      batch_count_estimate: result.batch_count_estimate ?? null,
+      server_continues_in_background: Boolean(result.job_id && !claimAllComplete),
     })
   } catch (e) {
     if (isStakingUserError(e)) {
