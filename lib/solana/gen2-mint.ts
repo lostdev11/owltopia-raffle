@@ -203,6 +203,8 @@ export type MintGen2Params = {
   guardGroupOverride?: string | null
   /** Allowlist proof phase when different from mint phase (e.g. TEAM_BACKSTOP). */
   allowListProofPhase?: Gen2MintablePhase | 'TEAM_BACKSTOP'
+  /** Partner public_simple allowList proof source (Token Metadata CM). */
+  partnerAllowList?: { slug: string; phaseKey: string } | null
 }
 
 export type MintGen2Result =
@@ -420,6 +422,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
     onMintProgress,
     guardGroupOverride,
     allowListProofPhase,
+    partnerAllowList,
   } = params
   if (!walletAdapter.publicKey) {
     return { ok: false, error: 'Wallet not connected' }
@@ -505,6 +508,7 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
           groupLabel: plan.groupLabel,
           merkleRoot: plan.allowListMerkleRoot,
           phase: allowListProofPhase ?? phase,
+          partnerWl: partnerAllowList ?? undefined,
         }).then((routeRes) => {
           if (!routeRes.ok) throw new Error(routeRes.error)
           allowListRoutePlan = routeRes.plan

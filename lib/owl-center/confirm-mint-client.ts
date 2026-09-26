@@ -5,6 +5,8 @@ export type CollectionConfirmMintBody = {
   phase: string
   mintedNftMints: string[]
   network: string
+  guard_group_label?: string | null
+  allowlist_phase_key?: string | null
 }
 
 export type CollectionConfirmMintResponse = {

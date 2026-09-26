@@ -4,6 +4,7 @@
  */
 
 import { OWL_CENTER_MAX_WALLET_MINT_LIMIT } from '@/lib/owl-center/launch-limits'
+import { listOpenPartnerAllowlistPhases } from '@/lib/owl-center/partner-phase-window'
 
 export const PARTNER_ALLOWLIST_PRESETS = [
   { key: 'team', label: 'Team' },
@@ -46,6 +47,17 @@ export type PartnerAllowlistPhase = {
   redeem_token_amount?: number | null
   /** Only `burn` supported for v1. */
   redeem_mode?: 'burn' | null
+  /** Optional hard end; null / omit = legacy sequential end (next phase or public start). */
+  ends_at?: string | null
+  /** When true with open-ended window, phase stays mintable after public starts. */
+  concurrent_with_public?: boolean
+  /**
+   * MPL Core collection for holder gate (`assetGate` / `assetMintLimit`).
+   * Token Metadata launches use `nftGate` / `nftMintLimit` with the same address.
+   */
+  holder_collection_mint?: string | null
+  /** One mint per held asset in `holder_collection_mint` (assetMintLimit / nftMintLimit). */
+  holder_one_per_asset?: boolean
 }
 
 export type PartnerAllowlistPhaseFormRow = {
@@ -63,9 +75,22 @@ export type PartnerAllowlistPhaseFormRow = {
   redeem_token_mint?: string
   /** Raw burn amount (default 1). */
   redeem_token_amount?: string
+  /** Empty = sequential end; set datetime for hard end; use open_ended with concurrent for overlap with public. */
+  end?: string
+  open_ended?: boolean
+  concurrent_with_public?: boolean
+  holder_collection_mint?: string
+  holder_one_per_asset?: boolean
 }
 
 /** True when phase redeems via SPL Free Mint Token burn (no soft WL required). */
+export function partnerPhaseHasHolderGate(
+  phase: Pick<PartnerAllowlistPhase, 'holder_collection_mint'> | null | undefined
+): boolean {
+  const mint = phase?.holder_collection_mint?.trim()
+  return Boolean(mint && mint.length >= 32)
+}
+
 export function partnerPhaseHasRedeemTokenBurn(
   phase: Pick<PartnerAllowlistPhase, 'redeem_token_mint' | 'redeem_mode'> | null | undefined
 ): boolean {
@@ -191,6 +216,13 @@ export function parsePartnerAllowlistPhases(raw: unknown): PartnerAllowlistPhase
           ? 1
           : null
     const redeem_mode = redeem_token_mint ? ('burn' as const) : null
+    const endsRaw = typeof row.ends_at === 'string' ? row.ends_at : null
+    const endsMs = parseIsoMs(endsRaw)
+    const holderRaw =
+      typeof row.holder_collection_mint === 'string' ? row.holder_collection_mint.trim() : ''
+    const holder_collection_mint = holderRaw.length >= 32 ? holderRaw : null
+    const holder_one_per_asset = Boolean(row.holder_one_per_asset)
+    const concurrent_with_public = Boolean(row.concurrent_with_public)
     out.push({
       key,
       label,
@@ -202,6 +234,10 @@ export function parsePartnerAllowlistPhases(raw: unknown): PartnerAllowlistPhase
       redeem_token_mint,
       redeem_token_amount,
       redeem_mode,
+      ends_at: endsMs != null ? new Date(endsMs).toISOString() : null,
+      concurrent_with_public,
+      holder_collection_mint,
+      holder_one_per_asset,
     })
     if (out.length >= PARTNER_ALLOWLIST_MAX_PHASES) break
   }
@@ -322,20 +358,9 @@ export function getActivePartnerAllowlistPhase(
   },
   nowMs: number = Date.now()
 ): PartnerAllowlistPhase | null {
-  if (launch.is_paused) return null
-  const phases = resolveEffectivePartnerAllowlistPhases(launch).filter((p) => p.starts_at)
-  if (phases.length < 1) return null
-
-  const publicMs = parseIsoMs(launch.phase_schedule?.PUBLIC)
-  if (publicMs != null && nowMs >= publicMs) return null
-
-  let active: PartnerAllowlistPhase | null = null
-  for (const p of phases) {
-    const startMs = parseIsoMs(p.starts_at)
-    if (startMs == null || nowMs < startMs) break
-    active = p
-  }
-  return active
+  const open = listOpenPartnerAllowlistPhases(launch, nowMs)
+  if (open.length < 1) return null
+  return open[open.length - 1]!.phase
 }
 
 export function isPartnerAllowlistWaiting(
@@ -397,6 +422,11 @@ export function formRowsFromPartnerAllowlistPhases(
           : p.redeem_token_mint
             ? '1'
             : '',
+      end: p.ends_at ? isoToLocal(p.ends_at) : '',
+      open_ended: Boolean(p.concurrent_with_public && !p.ends_at),
+      concurrent_with_public: Boolean(p.concurrent_with_public),
+      holder_collection_mint: p.holder_collection_mint ?? '',
+      holder_one_per_asset: Boolean(p.holder_one_per_asset),
     }
   })
 }
@@ -448,6 +478,18 @@ export function partnerAllowlistPhasesFromFormRows(
         : redeem_token_mint
           ? 1
           : null
+    const endTrim = (row.end ?? '').trim()
+    const endIso =
+      row.open_ended && row.concurrent_with_public
+        ? null
+        : endTrim
+          ? datetimeLocalToIso(endTrim)
+          : null
+    if (endTrim && !endIso && !row.open_ended) {
+      return { error: `Invalid end time for ${label}` }
+    }
+    const holderMint = (row.holder_collection_mint ?? '').trim()
+    const holder_collection_mint = holderMint.length >= 32 ? holderMint : null
     built.push({
       key,
       label,
@@ -459,6 +501,10 @@ export function partnerAllowlistPhasesFromFormRows(
       redeem_token_mint,
       redeem_token_amount,
       redeem_mode: redeem_token_mint ? 'burn' : null,
+      ends_at: endIso,
+      concurrent_with_public: Boolean(row.concurrent_with_public),
+      holder_collection_mint,
+      holder_one_per_asset: Boolean(row.holder_one_per_asset),
     })
   }
   return sortPartnerAllowlistPhases(built)

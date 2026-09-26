@@ -3,8 +3,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { consumeLaunchWlMints, recordLaunchPhaseMintUsage } from '@/lib/db/owl-center-launch-wl-wallets'
 import { canConfirmVerifiedMintQuantity } from '@/lib/owl-center/confirm-mint-eligibility'
 import { partnerPhaseHasRedeemTokenBurn, resolvePartnerPhaseWalletMintLimit } from '@/lib/owl-center/partner-allowlist-phases'
+import { resolvePartnerMintGroupForWallet } from '@/lib/owl-center/partner-mint-group'
+import {
+  publicSimpleGuardGroupLabelForLaunch,
+  uniquePublicSimpleGuardGroupLabels,
+} from '@/lib/owl-center/public-simple-guard-plan'
+import { resolvePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
 import { buildSimpleMintEligibility } from '@/lib/owl-center/simple-mint-eligibility'
-import { getLaunchActiveAllowlistPhase, isLaunchWhitelistWindowOpen } from '@/lib/owl-center/launch-wl-window'
+import { detectPublicSimpleMintGuardGroupLabel } from '@/lib/owl-center/verify-gen2-mint-tx'
 import type { OwlCenterPhase } from '@/lib/owl-center/types'
 import { shouldRequireOwlCenterPlatformMintFeeServer } from '@/lib/owl-center/platform-mint-fee'
 import { verifyGen2MintTransaction } from '@/lib/owl-center/verify-gen2-mint-tx'
@@ -41,6 +47,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     phase?: string
     mintedNftMints?: string[]
     network?: string
+    /** Candy guard group label the client intended (e.g. wl / pub). */
+    guard_group_label?: string
+    /** Allowlist phase key when minting a WL group. */
+    allowlist_phase_key?: string
   }
   try {
     body = await request.json()
@@ -86,6 +96,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     )
   }
 
+  const groupPick = wallet ? await resolvePartnerMintGroupForWallet(launch, wallet) : null
+  const expectedGuardGroup =
+    body.guard_group_label?.trim() ||
+    groupPick?.guard_group_label ||
+    null
+
   const verified = await verifyGen2MintTransaction({
     txSignature: txSig,
     wallet,
@@ -96,6 +112,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     minMintedNfts: qty,
     mintStandard: launch.mint_standard === 'core' ? 'core' : 'token_metadata',
     coreAssetAddresses: Array.isArray(body.mintedNftMints) ? body.mintedNftMints : undefined,
+    expectedGuardGroupLabel: expectedGuardGroup,
   })
   if (!verified.ok) {
     const map: Record<string, string> = {
@@ -106,6 +123,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
       platform_fee_missing: 'Transaction must include the SOL platform mint fee to Owltopia treasury',
       no_nft_minted:
         'No NFT was minted in this transaction — the mint did not go through (you may have only paid the bot tax). Tap Mint to try again.',
+      wrong_guard_group:
+        'Mint group mismatch — the on-chain mint used a different guard group. Refresh and try again.',
     }
     return NextResponse.json({ error: map[verified.reason] ?? 'Verification failed' }, { status: 400 })
   }
@@ -178,22 +197,46 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     await ensureCoreMintRoyaltiesAfterConfirm(launch, mintedList)
   }
 
-  // Soft-consume launch WL spots after a successful (non-duplicate) confirm during the WL window.
-  // Free Mint Token (tokenBurn) phases skip soft WL *membership* but still record phase usage so
-  // soft supply (~1500) counts down via sumLaunchWlPhaseUsedMints.
-  if (!row.duplicate_tx && isLaunchWhitelistWindowOpen(launch)) {
-    const activePhase = getLaunchActiveAllowlistPhase(launch)
-    const phaseKey = activePhase?.key ?? 'wl'
-    if (partnerPhaseHasRedeemTokenBurn(activePhase)) {
-      const allowed = resolvePartnerPhaseWalletMintLimit(activePhase, launch.wallet_mint_limit)
-      const recorded = await recordLaunchPhaseMintUsage(launch.id, wallet, qty, phaseKey, allowed)
-      if (!recorded.ok) {
-        console.error('recordLaunchPhaseMintUsage after confirm', slug, wallet, recorded.error)
+  // Debit WL used_mints only when the confirmed tx actually minted through that WL guard group.
+  if (!row.duplicate_tx) {
+    const mintStd = launch.mint_standard === 'core' ? 'core' : 'token_metadata'
+    const allowlists = resolvePartnerAllowlistPhases(launch)
+    const candidateLabels = uniquePublicSimpleGuardGroupLabels([
+      ...allowlists.map((p) => p.key),
+      'public',
+    ])
+    let txGroupLabel: string | null = null
+    try {
+      const { Connection } = await import('@solana/web3.js')
+      const { fetchParsedTransactionWithPoll } = await import('@/lib/gen2-presale/verify-payment')
+      const { resolveOwlCenterMintVerifyRpcUrl } = await import('@/lib/solana/network')
+      const conn = new Connection(resolveOwlCenterMintVerifyRpcUrl(network), 'confirmed')
+      const parsed = await fetchParsedTransactionWithPoll(conn, txSig, { maxWaitMs: 4000, intervalMs: 200 })
+      if (parsed) {
+        txGroupLabel = detectPublicSimpleMintGuardGroupLabel(parsed, candidateLabels, mintStd)
       }
-    } else {
-      const consumed = await consumeLaunchWlMints(launch.id, wallet, qty, phaseKey)
-      if (!consumed.ok) {
-        console.error('consumeLaunchWlMints after confirm', slug, wallet, consumed.error)
+    } catch (e) {
+      console.error('detectPublicSimpleMintGuardGroupLabel', slug, e)
+    }
+
+    const intendedWlKey = body.allowlist_phase_key?.trim() || groupPick?.phase_key
+    if (txGroupLabel && intendedWlKey) {
+      const expectedLabel = publicSimpleGuardGroupLabelForLaunch(launch, intendedWlKey)
+      if (txGroupLabel === expectedLabel) {
+        const activePhase = allowlists.find((p) => p.key === intendedWlKey) ?? null
+        const phaseKey = activePhase?.key ?? intendedWlKey
+        if (partnerPhaseHasRedeemTokenBurn(activePhase)) {
+          const allowed = resolvePartnerPhaseWalletMintLimit(activePhase, launch.wallet_mint_limit)
+          const recorded = await recordLaunchPhaseMintUsage(launch.id, wallet, qty, phaseKey, allowed)
+          if (!recorded.ok) {
+            console.error('recordLaunchPhaseMintUsage after confirm', slug, wallet, recorded.error)
+          }
+        } else if (activePhase) {
+          const consumed = await consumeLaunchWlMints(launch.id, wallet, qty, phaseKey)
+          if (!consumed.ok) {
+            console.error('consumeLaunchWlMints after confirm', slug, wallet, consumed.error)
+          }
+        }
       }
     }
   }

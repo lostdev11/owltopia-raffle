@@ -32,7 +32,17 @@ import {
   withMintSessionBudget,
   type MintSessionDeadline,
 } from '@/lib/owl-center/mint-time-budget'
-import { fetchCandyMachine, mintV1, safeFetchCandyGuard } from '@/lib/solana/core-candy-machine'
+import {
+  fetchCandyMachine,
+  mintV1,
+  route,
+  safeFetchAllowListProofFromSeeds,
+  safeFetchCandyGuard,
+} from '@/lib/solana/core-candy-machine'
+import {
+  fetchPartnerAllowListProofResponse,
+  validatePartnerAllowListProofBody,
+} from '@/lib/owl-center/partner-allowlist-proof-client'
 import { assertCoreWalletMintLimitRemaining } from '@/lib/solana/core-mint-limit'
 import {
   getLaunchCandyMachineId,
@@ -84,6 +94,9 @@ function coreGuardMintArgs(guards: DefaultGuardSet): {
   if (isSome(guards.tokenBurn)) {
     mintArgs.tokenBurn = some({ mint: guards.tokenBurn.value.mint })
   }
+  if (isSome(guards.allowList)) {
+    mintArgs.allowList = some({ merkleRoot: guards.allowList.value.merkleRoot })
+  }
   return {
     mintArgs: Object.keys(mintArgs).length > 0 ? mintArgs : undefined,
     mintPriceLamports,
@@ -120,6 +133,8 @@ export type MintCoreCmParams = {
   onMintProgress?: (current: number, total: number) => void
   /** Candy Guard group label (`wl` / `pub` / …). Null mints against default guards. */
   guardGroup?: string | null
+  /** Partner allowList merkle proof source when the active group uses allowList. */
+  partnerAllowList?: { slug: string; phaseKey: string } | null
 }
 
 export type MintCoreCmResult =
@@ -228,6 +243,48 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
       ? coreGuardMintArgs(mergedGuards)
       : { mintArgs: undefined, mintPriceLamports: 0n }
 
+    let allowListProofTx: Transaction | null = null
+    if (
+      mergedGuards &&
+      isSome(mergedGuards.allowList) &&
+      candyGuardAccount &&
+      params.partnerAllowList?.slug &&
+      params.partnerAllowList.phaseKey
+    ) {
+      const merkleRoot = new Uint8Array(mergedGuards.allowList.value.merkleRoot)
+      const walletB58Early = walletAdapter.publicKey.toBase58()
+      const existingProof = await safeFetchAllowListProofFromSeeds(umi, {
+        merkleRoot,
+        user: publicKey(walletB58Early),
+        candyGuard: candyGuardAccount.publicKey,
+        candyMachine,
+      })
+      if (!existingProof) {
+        const proofRes = await fetchPartnerAllowListProofResponse(
+          walletB58Early,
+          params.partnerAllowList.slug,
+          params.partnerAllowList.phaseKey
+        )
+        if (!proofRes.ok) return { ok: false, error: proofRes.error }
+        const validated = validatePartnerAllowListProofBody(proofRes.body, merkleRoot)
+        if (!validated.ok) return { ok: false, error: validated.error }
+        const blockhash = await umi.rpc.getLatestBlockhash({ commitment: 'confirmed' })
+        allowListProofTx = route(umi, {
+          candyMachine,
+          candyGuard: candyGuardAccount.publicKey,
+          guard: 'allowList',
+          group: groupLabel,
+          routeArgs: {
+            path: 'proof',
+            merkleRoot,
+            merkleProof: validated.merkleProof,
+          },
+        })
+          .setBlockhash(blockhash)
+          .build(umi)
+      }
+    }
+
     const walletB58 = walletAdapter.publicKey.toBase58()
     // Candy Guard botTax makes AllowedMintLimitReached look like a successful tx (platform fee +
     // bot tax charged, no NFT). Block before the wallet prompt when the on-chain counter is full.
@@ -317,6 +374,9 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
       }
 
       const builtMints: Transaction[] = []
+      if (allowListProofTx) {
+        builtMints.push(allowListProofTx)
+      }
       for (let i = 0; i < quantity; i++) {
         const res = buildSingle(assets[i]!)
         if (!res.ok) {

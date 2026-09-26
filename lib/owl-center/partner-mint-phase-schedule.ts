@@ -13,6 +13,12 @@ import {
   resolvePartnerPhaseWalletMintLimit,
   type PartnerAllowlistPhase,
 } from '@/lib/owl-center/partner-allowlist-phases'
+import {
+  isPartnerAllowlistPhaseWindowOpen,
+  isScheduledPublicMintOpen,
+  listOpenPartnerAllowlistPhases,
+  resolvePartnerAllowlistPhaseEndDateIso,
+} from '@/lib/owl-center/partner-phase-window'
 import { formatCreatorMintPriceLabel } from '@/lib/owl-center/platform-mint-fee'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
@@ -174,14 +180,13 @@ export function buildPartnerMintPhaseSchedule(
 
   const allowlists = resolveEffectivePartnerAllowlistPhases(launch)
   const publicStarts = launch.phase_schedule?.PUBLIC ?? null
-  const activeAllowlist = getActivePartnerAllowlistPhase(launch, nowMs)
+  const openPhases = new Set(listOpenPartnerAllowlistPhases(launch, nowMs).map((x) => x.phase.key))
 
   for (let i = 0; i < allowlists.length; i++) {
     const phase = allowlists[i]!
-    const next = allowlists[i + 1]
-    const ends_at = next?.starts_at ?? publicStarts
+    const ends_at = resolvePartnerAllowlistPhaseEndDateIso(phase, i, allowlists, publicStarts)
     const status = rowStatus(phase.starts_at, ends_at, nowMs, terminal)
-    const is_active = !terminal && activeAllowlist?.key === phase.key
+    const is_active = !terminal && openPhases.has(phase.key)
     const phaseLimit = resolvePartnerPhaseWalletMintLimit(phase, launch.wallet_mint_limit)
     rows.push({
       key: phase.key,
@@ -203,9 +208,9 @@ export function buildPartnerMintPhaseSchedule(
     let status: 'upcoming' | 'live' | 'ended' = 'upcoming'
     if (terminal) {
       status = launch.active_phase === 'TRADING_ACTIVE' ? 'ended' : 'ended'
-    } else if (publicStartMs != null && nowMs >= publicStartMs) {
+    } else if (isScheduledPublicMintOpen(launch, nowMs)) {
       status = 'live'
-    } else if (publicStartMs == null && !activeAllowlist && launch.active_phase === 'PUBLIC') {
+    } else if (publicStartMs == null && openPhases.size === 0 && launch.active_phase === 'PUBLIC') {
       status = 'live'
     } else if (publicStartMs != null && nowMs < publicStartMs) {
       status = 'upcoming'
@@ -222,7 +227,7 @@ export function buildPartnerMintPhaseSchedule(
       ends_at: null,
       wallet_mint_limit: launch.wallet_mint_limit > 0 ? launch.wallet_mint_limit : null,
       status,
-      is_active: status === 'live' && !terminal && !activeAllowlist,
+      is_active: status === 'live' && !terminal,
     })
   }
 
@@ -254,8 +259,9 @@ export function partnerAllowlistPhaseEndsAt(
   index: number,
   publicStartsAt: string | null
 ): string | null {
-  const next = phases[index + 1]
-  return next?.starts_at ?? publicStartsAt
+  const phase = phases[index]
+  if (!phase) return publicStartsAt
+  return resolvePartnerAllowlistPhaseEndDateIso(phase, index, phases, publicStartsAt)
 }
 
 /** Active phase, else the next upcoming window (so pre-mint UI does not fall through to Public/Free). */

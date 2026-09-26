@@ -9,7 +9,7 @@ import {
 } from '@metaplex-foundation/mpl-candy-machine'
 
 import {
-  buildPublicSimpleGuardPlan,
+  buildPublicSimpleGuardPlanForLaunch,
   type PublicSimpleGuardPlan,
 } from '@/lib/owl-center/public-simple-guard-plan'
 import {
@@ -67,6 +67,24 @@ function optionTokenBurn(opt: TokenBurnOpt): string {
   return `${opt.value.amount}:${String(opt.value.mint)}`
 }
 
+type AllowListOpt =
+  | Option<{ merkleRoot: Uint8Array | unknown }>
+  | null
+  | undefined
+
+function optionAllowList(opt: AllowListOpt): string {
+  if (!opt || !isSome(opt)) return 'none'
+  const root = opt.value.merkleRoot
+  if (root instanceof Uint8Array) return bs58.encode(root)
+  return String(root)
+}
+
+function optionCollectionGate(opt: Option<object> | null | undefined): string {
+  if (!opt || !isSome(opt)) return 'none'
+  const v = opt.value as { requiredCollection?: unknown }
+  return v.requiredCollection != null ? String(v.requiredCollection) : 'none'
+}
+
 function guardFingerprint(input: {
   mintLimit: Option<{ id: number; limit: number }> | null | undefined
   startDate: DateOpt
@@ -80,6 +98,9 @@ function guardFingerprint(input: {
       solPayment: PayOpt
       mintLimit?: Option<{ id: number; limit: number }> | null | undefined
       tokenBurn?: TokenBurnOpt
+      allowList?: AllowListOpt
+      assetGate?: Option<object> | null | undefined
+      nftGate?: Option<object> | null | undefined
     }
   }>
 }): string {
@@ -94,7 +115,7 @@ function guardFingerprint(input: {
         g.guards.mintLimit && isSome(g.guards.mintLimit)
           ? `${g.guards.mintLimit.value.id}:${g.guards.mintLimit.value.limit}`
           : 'none'
-      return `${g.label}|${optionUnixSeconds(g.guards.startDate)}|${optionUnixSeconds(g.guards.endDate)}|${optionSolPayment(g.guards.solPayment)}|${ml}|${optionTokenBurn(g.guards.tokenBurn)}`
+      return `${g.label}|${optionUnixSeconds(g.guards.startDate)}|${optionUnixSeconds(g.guards.endDate)}|${optionSolPayment(g.guards.solPayment)}|${ml}|${optionTokenBurn(g.guards.tokenBurn)}|${optionAllowList(g.guards.allowList)}|${optionCollectionGate(g.guards.assetGate)}|${optionCollectionGate(g.guards.nftGate)}`
     })
     .join(';')
   return [
@@ -125,7 +146,10 @@ function planMatchesOnChain(current: string, plan: PublicSimpleGuardPlan): boole
         g.tokenBurn?.mint && g.tokenBurn.amount > 0
           ? `${g.tokenBurn.amount}:${g.tokenBurn.mint}`
           : 'none'
-      return `${g.label}|${isoUnixSeconds(g.startDateIso)}|${isoUnixSeconds(g.endDateIso)}|${pay}|${ml}|${burn}`
+      const allow = g.allowListMerkleRoot ?? 'none'
+      const asset = g.assetGateCollection ?? g.assetMintLimit?.collection ?? 'none'
+      const nft = g.nftGateCollection ?? g.nftMintLimit?.collection ?? 'none'
+      return `${g.label}|${isoUnixSeconds(g.startDateIso)}|${isoUnixSeconds(g.endDateIso)}|${pay}|${ml}|${burn}|${allow}|${asset}|${nft}`
     })
     .join(';')
 
@@ -155,7 +179,7 @@ export async function syncPublicSimpleCandyGuards(
     return { ok: true, status: 'skipped', reason: 'no_candy_machine' }
   }
 
-  const planned = await buildPublicSimpleGuardPlan(launch)
+  const planned = await buildPublicSimpleGuardPlanForLaunch(launch)
   if (!planned.ok) return { ok: false, error: planned.error }
 
   const nextDefault = publicSimpleCandyGuardUmiGuardsFromPlan(planned.plan)
@@ -186,6 +210,9 @@ export async function syncPublicSimpleCandyGuards(
             solPayment: g.guards.solPayment,
             mintLimit: g.guards.mintLimit,
             tokenBurn: g.guards.tokenBurn,
+            allowList: g.guards.allowList,
+            assetGate: g.guards.assetGate,
+            nftGate: g.guards.nftGate,
           },
         })),
       })
@@ -232,6 +259,9 @@ export async function syncPublicSimpleCandyGuards(
           solPayment: g.guards.solPayment,
           mintLimit: g.guards.mintLimit,
           tokenBurn: g.guards.tokenBurn,
+          allowList: g.guards.allowList,
+          assetGate: g.guards.assetGate,
+          nftGate: g.guards.nftGate,
         },
       })),
     })

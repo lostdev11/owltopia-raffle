@@ -169,6 +169,8 @@ export function CollectionMintPanel({
             phase: 'PUBLIC',
             mintedNftMints,
             network: mintNetwork,
+            guard_group_label: elig?.guard_group_label ?? null,
+            allowlist_phase_key: elig?.active_allowlist_key ?? null,
           })
         },
         onProgress: () => {
@@ -270,7 +272,7 @@ export function CollectionMintPanel({
     try {
       setStep('preparing_mint')
       setMintProgress({ current: 0, total: n, phase: 'chain' })
-      const guardGroup = publicSimpleMintGuardGroupLabel(launch, elig.active_allowlist_key)
+      const guardGroup = elig.guard_group_label ?? publicSimpleMintGuardGroupLabel(launch, elig.active_allowlist_key)
       const mintPhase = elig.active_allowlist_key ? 'WHITELIST' : 'PUBLIC'
       const minted = await raceMintSessionBudget(
         outerDeadline,
@@ -284,6 +286,10 @@ export function CollectionMintPanel({
               mintNetwork,
               sessionDeadline,
               guardGroup,
+              partnerAllowList:
+                elig.active_allowlist_key && launch.slug
+                  ? { slug: launch.slug, phaseKey: elig.active_allowlist_key }
+                  : null,
               collectPlatformMintFee: shouldCollectOwlCenterPlatformMintFeeClient(),
               platformFeeLamports:
                 elig?.platform_mint_fee_lamports_estimate != null
@@ -305,6 +311,10 @@ export function CollectionMintPanel({
               quantity: n,
               phase: mintPhase,
               guardGroupOverride: guardGroup,
+              partnerAllowList:
+                elig.active_allowlist_key && launch.slug
+                  ? { slug: launch.slug, phaseKey: elig.active_allowlist_key }
+                  : null,
               launch,
               mintNetwork,
               sessionDeadline,
@@ -346,6 +356,8 @@ export function CollectionMintPanel({
             phase: 'PUBLIC',
             mintedNftMints,
             network: mintNetwork,
+            guard_group_label: guardGroup,
+            allowlist_phase_key: elig.active_allowlist_key,
           })
         },
         onSuccess: ({ lastSig, mintedAddresses, mintedCount, warning }) => {

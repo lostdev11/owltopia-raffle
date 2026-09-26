@@ -7,6 +7,7 @@ import { syncLaunchHubCoverImage } from '@/lib/owl-center/launch-cover-image'
 import { getAssetPackageByLaunchId, upsertAssetPackageForLaunch } from '@/lib/db/owl-center-asset-package'
 import { getOwlCenterLaunchByIdAdmin, updateOwlCenterLaunchByIdAdmin } from '@/lib/db/owl-center-launch'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
+import { buildPartnerMintConfigWarnings } from '@/lib/owl-center/partner-mint-config-warnings'
 import { syncPublicSimpleCandyGuards } from '@/lib/owl-center/sync-public-simple-guards'
 
 export const dynamic = 'force-dynamic'
@@ -117,6 +118,11 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     ? await safeGuardSync(updated)
     : { guard_sync: null, warning: null as string | null }
   if (guardWarning) warnings.push(guardWarning)
+  if (hasMintFields) {
+    for (const w of buildPartnerMintConfigWarnings(updated)) {
+      warnings.push(w.message)
+    }
+  }
   if (hasMintFields && updated.total_supply !== launch.total_supply) {
     try {
       const existing = await getAssetPackageByLaunchId(id)
