@@ -10,6 +10,13 @@ export type OnchainDeployStatus =
   | 'completed'
   | 'failed'
 
+export type OnchainDeployHistoryEntry = {
+  at: string
+  label: string
+  address?: string | null
+  signature?: string | null
+}
+
 export type OnchainDeployState = {
   status: OnchainDeployStatus
   candy_machine_id: string | null
@@ -22,6 +29,8 @@ export type OnchainDeployState = {
   config_lines_total: number | null
   error: string | null
   completed_at: string | null
+  /** Append-only log of created accounts and confirmed signatures. */
+  history?: OnchainDeployHistoryEntry[]
 }
 
 export function parseOnchainDeployState(
@@ -58,6 +67,26 @@ export function parseOnchainDeployState(
       : typeof totalRaw === 'string' && Number.isFinite(Number(totalRaw))
         ? Math.max(0, Math.floor(Number(totalRaw)))
         : null
+  const historyRaw = o.history
+  const history = Array.isArray(historyRaw)
+    ? historyRaw
+        .filter((h) => h && typeof h === 'object')
+        .map((h) => {
+          const row = h as Record<string, unknown>
+          const label = typeof row.label === 'string' ? row.label : ''
+          const at = typeof row.at === 'string' ? row.at : ''
+          if (!label || !at) return null
+          const entry: OnchainDeployHistoryEntry = {
+            at,
+            label,
+            address: typeof row.address === 'string' ? row.address : null,
+            signature: typeof row.signature === 'string' ? row.signature : null,
+          }
+          return entry
+        })
+        .filter((h): h is OnchainDeployHistoryEntry => h != null)
+    : undefined
+
   return {
     status: status as OnchainDeployStatus,
     candy_machine_id: typeof o.candy_machine_id === 'string' ? o.candy_machine_id : null,
@@ -69,6 +98,7 @@ export function parseOnchainDeployState(
     config_lines_total: total,
     error: typeof o.error === 'string' ? o.error : null,
     completed_at: typeof o.completed_at === 'string' ? o.completed_at : null,
+    history: history?.length ? history : undefined,
   }
 }
 

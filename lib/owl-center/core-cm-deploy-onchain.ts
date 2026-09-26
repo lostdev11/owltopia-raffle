@@ -47,6 +47,12 @@ import {
   isOwlCenterCreatorUaHandoffEnabled,
   handOffCoreCollectionUpdateAuthority,
 } from '@/lib/owl-center/core-collection-ua-handoff'
+import {
+  estimateCoreShellDeployRentLamports,
+  formatSolFromLamports,
+} from '@/lib/owl-center/core-cm-rent-estimate'
+import { sendAndConfirmUmiWithRetry } from '@/lib/solana/server-umi-send'
+import { isBlockhashOrTxExpiryError } from '@/lib/solana/tx-expiry-patterns'
 
 const CONFIG_LINES_PER_TX = 10
 
@@ -79,6 +85,9 @@ export type OnchainCoreDeployInput = {
   configLines: SugarDeployConfigLine[]
   collectionMetadataUri: string
   collectionName: string
+  /** Reuse collection after a failed CM create (same deploy session / checkpoint). */
+  existingCollectionMint?: string
+  onCollectionCreated?: (collectionMint: string) => void | Promise<void>
 }
 
 export type CoreConfigLineLoadResult =
@@ -152,6 +161,41 @@ function resolveCreatorAddress(
   return { ok: true, creatorAddress }
 }
 
+async function assertDeployerBalanceForCoreShell(
+  umi: Umi,
+  params: { supply: number; nameLength: number; uriLength: number; skipCollectionRent?: boolean }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    let need = await estimateCoreShellDeployRentLamports(umi, {
+      itemsAvailable: params.supply,
+      nameLength: params.nameLength,
+      uriLength: params.uriLength,
+    })
+    if (params.skipCollectionRent) {
+      const collectionOnly = await umi.rpc.getRent(2048)
+      need -= collectionOnly.basisPoints
+    }
+    const balance = await umi.rpc.getBalance(umi.identity.publicKey)
+    if (balance.basisPoints < need) {
+      return {
+        ok: false,
+        error: `Deployer wallet needs ${formatSolFromLamports(need)} for Core Candy Machine rent and fees, have ${formatSolFromLamports(balance.basisPoints)}.`,
+      }
+    }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+function formatInsufficientSolError(msg: string): string {
+  const low = msg.toLowerCase()
+  if (low.includes('insufficient')) {
+    return `Deployer wallet needs more SOL for Core Candy Machine rent and fees. (${msg})`
+  }
+  return msg
+}
+
 /**
  * Create Core collection + Core Candy Machine (empty items). Caller loads config lines via
  * `loadCoreCandyMachineConfigLines` (resumable for large supply).
@@ -198,8 +242,27 @@ export async function createPublicSimpleCoreCandyMachineShell(
     percentage: row.share,
   }))
 
-  const collection = generateSigner(umi)
+  const nameLen = maxNameLength(configLines)
+  const uriLen = maxUriLength(configLines)
+  const existingCol = input.existingCollectionMint?.trim()
+  let collectionPk: ReturnType<typeof publicKey> | null = null
+  if (existingCol) {
+    const colCheck = validateSolanaPubkeyInput(existingCol, 'Collection mint')
+    if (!colCheck.ok) return { ok: false, error: colCheck.error }
+    collectionPk = publicKey(colCheck.pubkey)
+  }
+
+  const balanceCheck = await assertDeployerBalanceForCoreShell(umi, {
+    supply,
+    nameLength: nameLen,
+    uriLength: uriLen,
+    skipCollectionRent: Boolean(collectionPk),
+  })
+  if (!balanceCheck.ok) return balanceCheck
+
+  const collection = collectionPk ? null : generateSigner(umi)
   const candyMachine = generateSigner(umi)
+  const collectionAddress = collectionPk ?? collection!.publicKey
 
   const plugins: Parameters<typeof createCollection>[1]['plugins'] = [
     {
@@ -225,48 +288,64 @@ export async function createPublicSimpleCoreCandyMachineShell(
   }
 
   try {
-    await createCollection(umi, {
-      collection,
-      name: collectionName.slice(0, 32) || 'Collection',
-      uri: collectionMetadataUri,
-      plugins,
-    }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
+    if (collection) {
+      await sendAndConfirmUmiWithRetry(
+        umi,
+        createCollection(umi, {
+          collection,
+          name: collectionName.slice(0, 32) || 'Collection',
+          uri: collectionMetadataUri,
+          plugins,
+        }),
+        {
+          label: 'create_core_collection',
+          accountAlreadyCreated: async () => {
+            const acct = await umi.rpc.getAccount(collection.publicKey)
+            return acct.exists
+          },
+        }
+      )
+      await input.onCollectionCreated?.(String(collection.publicKey))
+    }
 
     const planned = await buildPublicSimpleGuardPlan(launch)
     if (!planned.ok) return { ok: false, error: planned.error }
 
     const createIx = await create(umi, {
       candyMachine,
-      collection: collection.publicKey,
+      collection: collectionAddress,
       collectionUpdateAuthority: umi.identity,
       itemsAvailable: supply,
       isMutable: true,
       configLineSettings: some({
-        prefixName: sugarConfigLinePrefixName(collectionName, maxNameLength(configLines)),
-        nameLength: maxNameLength(configLines),
+        prefixName: sugarConfigLinePrefixName(collectionName, nameLen),
+        nameLength: nameLen,
         prefixUri: '',
-        uriLength: maxUriLength(configLines),
+        uriLength: uriLen,
         isSequential: false,
       }),
       guards: publicSimpleCandyGuardUmiGuardsFromPlan(planned.plan),
       groups: publicSimpleCandyGuardUmiGroupsFromPlan(planned.plan),
     })
-    await createIx.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
+    await sendAndConfirmUmiWithRetry(umi, createIx, {
+      label: 'create_core_candy_machine',
+      accountAlreadyCreated: async () => {
+        const acct = await umi.rpc.getAccount(candyMachine.publicKey)
+        return acct.exists
+      },
+    })
 
     const candyGuard = findCandyGuardPda(umi, { base: candyMachine.publicKey })
     return {
       ok: true,
       candyMachineId: String(candyMachine.publicKey),
-      collectionMint: String(collection.publicKey),
+      collectionMint: String(collectionAddress),
       candyGuardId: String(candyGuard),
       configLinesTotal: supply,
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    if (msg.toLowerCase().includes('insufficient')) {
-      return { ok: false, error: 'Deployer wallet needs more SOL for Core Candy Machine rent and fees.' }
-    }
-    return { ok: false, error: msg }
+    return { ok: false, error: formatInsufficientSolError(msg) }
   }
 }
 
@@ -283,6 +362,7 @@ export async function loadCoreCandyMachineConfigLines(params: {
   /** Preferred start index from checkpoint; overridden by on-chain itemsLoaded when higher. */
   startIndex?: number
   timeBudgetMs?: number
+  onProgress?: (configLinesLoaded: number) => void | Promise<void>
 }): Promise<CoreConfigLineLoadResult> {
   const {
     network,
@@ -292,6 +372,7 @@ export async function loadCoreCandyMachineConfigLines(params: {
     configLines,
     startIndex: preferredStart = 0,
     timeBudgetMs = owlCenterCoreDeployLoadTimeBudgetMs(),
+    onProgress,
   } = params
 
   if (configLines.length === 0) {
@@ -330,8 +411,14 @@ export async function loadCoreCandyMachineConfigLines(params: {
 
     const deadline = Date.now() + Math.max(5_000, timeBudgetMs)
 
+    const readLoadedIndex = async (): Promise<number> => {
+      const fresh = await fetchCandyMachine(umi, cmPk)
+      return Math.max(index, Number(fresh.itemsLoaded))
+    }
+
     while (index < total) {
       if (Date.now() >= deadline) {
+        index = await readLoadedIndex()
         return {
           ok: true,
           candyMachineId,
@@ -344,12 +431,33 @@ export async function loadCoreCandyMachineConfigLines(params: {
       }
 
       const chunk = configLines.slice(index, index + CONFIG_LINES_PER_TX)
-      await addConfigLines(umi, {
-        candyMachine: cmPk,
-        index,
-        configLines: chunk,
-      }).sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } })
-      index += chunk.length
+      try {
+        await sendAndConfirmUmiWithRetry(
+          umi,
+          addConfigLines(umi, {
+            candyMachine: cmPk,
+            index,
+            configLines: chunk,
+          }),
+          { label: `add_config_lines_${index}` }
+        )
+        index += chunk.length
+        await onProgress?.(index)
+      } catch (chunkErr) {
+        index = await readLoadedIndex()
+        if (isBlockhashOrTxExpiryError(chunkErr)) {
+          return {
+            ok: true,
+            candyMachineId,
+            collectionMint,
+            candyGuardId,
+            configLinesLoaded: index,
+            configLinesTotal: total,
+            complete: false,
+          }
+        }
+        throw chunkErr
+      }
     }
 
     return {
@@ -363,10 +471,26 @@ export async function loadCoreCandyMachineConfigLines(params: {
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    if (msg.toLowerCase().includes('insufficient')) {
-      return { ok: false, error: 'Deployer wallet needs more SOL for Core Candy Machine rent and fees.' }
+    if (isBlockhashOrTxExpiryError(e)) {
+      try {
+        const umi = createIrysDeployerCoreUmi(network)
+        const cmPk = publicKey(cmCheck.pubkey)
+        const fresh = await fetchCandyMachine(umi, cmPk)
+        const loaded = Number(fresh.itemsLoaded)
+        return {
+          ok: true,
+          candyMachineId,
+          collectionMint,
+          candyGuardId,
+          configLinesLoaded: loaded,
+          configLinesTotal: configLines.length,
+          complete: loaded >= configLines.length,
+        }
+      } catch {
+        return { ok: false, error: msg }
+      }
     }
-    return { ok: false, error: msg }
+    return { ok: false, error: formatInsufficientSolError(msg) }
   }
 }
 
