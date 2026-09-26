@@ -68,7 +68,7 @@ export async function listAdminPackOpens(
   const { data, error, count } = await query
   if (error) throw error
 
-  const rows = ((data as PackOpenAdminDbRow[]) ?? []).map(mapPackOpenToAdminListRow)
+  const rows = ((data as unknown as PackOpenAdminDbRow[]) ?? []).map(mapPackOpenToAdminListRow)
   return { rows, total: count ?? rows.length }
 }
 
@@ -80,7 +80,7 @@ export async function getAdminPackOpenById(id: string): Promise<AdminPackOpenDet
     .maybeSingle()
   if (error) throw error
   if (!data) return null
-  return mapPackOpenToAdminDetailRow(data as PackOpenAdminDbRow)
+  return mapPackOpenToAdminDetailRow(data as unknown as PackOpenAdminDbRow)
 }
 
 export async function listAdminPackOpenProducts(): Promise<

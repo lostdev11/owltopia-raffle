@@ -1,4 +1,5 @@
-import type { PackOpenStatus, PackOpenVrfStatus, PackPrizeCategory } from '@/lib/packs/types'
+import type { PackPrizeCategory } from '@/lib/packs/config'
+import type { PackOpenStatus, PackOpenVrfStatus } from '@/lib/packs/types'
 
 export type AdminPackOpenProductSummary = {
   id: string
