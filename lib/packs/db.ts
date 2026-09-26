@@ -371,6 +371,16 @@ export async function updatePackInventoryOddsTier(
 }
 
 
+export async function getPackInventoryById(id: string): Promise<PackInventoryRow | null> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('pack_inventory')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
+  if (error) throw error
+  return (data as PackInventoryRow | null) ?? null
+}
+
 export async function listAvailableNftsForOpen(productId: string): Promise<PackInventoryRow[]> {
   const product = await getPackProductById(productId)
   const minFair = packNftMinFairSolForProductSlug(product?.slug)
@@ -618,45 +628,73 @@ export async function consumePackTicketCredits(
   return left === 0
 }
 
-export async function countCompletedPackOpensForWallet(wallet: string): Promise<number> {
+const PACK_LEDGER_VISIBLE_STATUSES = [
+  'completed',
+  'pending_payment',
+  'paid',
+  'rolling',
+  'reserved',
+  'paying_out',
+  'refund_needed',
+  'failed',
+] as const
+
+export async function countPackOpensForWalletLedger(wallet: string): Promise<number> {
   const { count, error } = await getSupabaseAdmin()
     .from('pack_opens')
     .select('*', { count: 'exact', head: true })
     .eq('buyer_wallet', wallet.trim())
-    .eq('status', 'completed')
+    .in('status', [...PACK_LEDGER_VISIBLE_STATUSES])
   if (error) throw error
   return count ?? 0
 }
 
+/** @deprecated use countPackOpensForWalletLedger */
+export async function countCompletedPackOpensForWallet(wallet: string): Promise<number> {
+  return countPackOpensForWalletLedger(wallet)
+}
+
 type PackOpenLedgerDbRow = {
   id: string
+  status: string
+  created_at: string
   completed_at: string | null
   category: string | null
   prize_label: string | null
   payment_signature: string | null
   payout_signature: string | null
   is_jackpot_win: boolean | null
+  error_message: string | null
   pack_products: { name: string; slug: string } | { name: string; slug: string }[] | null
 }
 
-function mapPackOpenLedgerRow(row: PackOpenLedgerDbRow): PackLedgerEntry | null {
-  if (!row.completed_at) return null
+function mapPackOpenLedgerRow(row: PackOpenLedgerDbRow): PackLedgerEntry {
   const productRaw = row.pack_products
   const product = Array.isArray(productRaw) ? productRaw[0] : productRaw
+  const status = row.status as PackLedgerEntry['status']
   return {
     id: row.id,
+    status,
     completedAt: row.completed_at,
+    createdAt: row.created_at,
     productName: product?.name?.trim() || 'Owl Pack',
     productSlug: product?.slug?.trim() || PACKS_PRODUCT_SLUG,
     category: row.category ?? 'owl',
-    prizeLabel: row.prize_label?.trim() || 'Prize',
+    prizeLabel:
+      row.prize_label?.trim() ||
+      (status === 'refund_needed'
+        ? 'Needs support / refund'
+        : status === 'pending_payment'
+          ? 'Awaiting payment'
+          : 'Resolving…'),
     paymentSignature: row.payment_signature,
     payoutSignature: row.payout_signature,
     isJackpotWin: row.is_jackpot_win === true,
+    errorMessage: row.error_message,
   }
 }
 
-export async function listCompletedPackOpensForWallet(input: {
+export async function listPackOpensForWalletLedger(input: {
   wallet: string
   limit?: number
   offset?: number
@@ -668,23 +706,34 @@ export async function listCompletedPackOpensForWallet(input: {
     .select(
       `
       id,
+      status,
+      created_at,
       completed_at,
       category,
       prize_label,
       payment_signature,
       payout_signature,
       is_jackpot_win,
+      error_message,
       pack_products ( name, slug )
     `
     )
     .eq('buyer_wallet', input.wallet.trim())
-    .eq('status', 'completed')
-    .order('completed_at', { ascending: false })
+    .in('status', [...PACK_LEDGER_VISIBLE_STATUSES])
+    .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1)
   if (error) throw error
-  return ((data as PackOpenLedgerDbRow[]) ?? [])
-    .map(mapPackOpenLedgerRow)
-    .filter((r): r is PackLedgerEntry => r != null)
+  return ((data as PackOpenLedgerDbRow[]) ?? []).map(mapPackOpenLedgerRow)
+}
+
+/** @deprecated use listPackOpensForWalletLedger */
+export async function listCompletedPackOpensForWallet(input: {
+  wallet: string
+  limit?: number
+  offset?: number
+}): Promise<PackLedgerEntry[]> {
+  const rows = await listPackOpensForWalletLedger(input)
+  return rows.filter((r) => r.status === 'completed')
 }
 
 export function defaultProductFallback(): Pick<
