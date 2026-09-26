@@ -14,6 +14,7 @@ import {
   countAvailableNfts,
   defaultProductFallback,
   getActivePackProduct,
+  getPackProductById,
   getPackProductForCheckout,
   getPackVaultConfig,
   listPackInventory,
@@ -31,6 +32,7 @@ import {
 } from '@/lib/packs/jackpot'
 import { PACKS_PRODUCT_SLUG_MAIN, PACKS_PRODUCT_SLUG_OWL } from '@/lib/packs/product-pools'
 import { getPacksVaultPublicKey } from '@/lib/packs/vault'
+import { reconcileProductShelfPause } from '@/lib/packs/shelf'
 import { isPackVrfEnabled, resolvePackOpenAlgo } from '@/lib/packs/vrf-config'
 
 export const dynamic = 'force-dynamic'
@@ -65,6 +67,14 @@ export async function GET() {
       product = await getActivePackProduct()
       owlProduct = await getPackProductForCheckout('OWL')
       vaultConfig = await getPackVaultConfig()
+      if (product) {
+        await reconcileProductShelfPause(product.id)
+        product = (await getPackProductById(product.id)) ?? product
+      }
+      if (owlProduct) {
+        await reconcileProductShelfPause(owlProduct.id)
+        owlProduct = (await getPackProductForCheckout('OWL')) ?? owlProduct
+      }
       if (product) {
         nftCountMain = await countAvailableNfts(product.id)
         inventoryMain = await listPackInventory('available', product.id)

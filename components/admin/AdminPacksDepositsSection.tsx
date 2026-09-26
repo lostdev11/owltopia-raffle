@@ -1,6 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
   AdminPacksInventoryForm,
@@ -9,6 +11,7 @@ import {
 } from '@/components/admin/AdminPacksInventoryForm'
 import { AdminPacksInventoryList } from '@/components/admin/AdminPacksInventoryList'
 import { AdminPacksVaultFundingForm } from '@/components/admin/AdminPacksVaultFundingForm'
+import { packPauseReasonLabel } from '@/lib/packs/admin-copy'
 import { packAdminShelfBadgeLabel } from '@/lib/packs/admin-inventory-shelf'
 import { PACKS_PRODUCT_SLUG_MAIN, PACKS_PRODUCT_SLUG_OWL } from '@/lib/packs/product-pools'
 import { formatJackpotPoolSol } from '@/lib/packs/jackpot'
@@ -46,6 +49,33 @@ export function AdminPacksDepositsSection({
   }, [products])
 
   const [shelfProductId, setShelfProductId] = useState('')
+  const [clearPauseBusyId, setClearPauseBusyId] = useState<string | null>(null)
+  const [clearPauseError, setClearPauseError] = useState<string | null>(null)
+
+  const clearShelfPause = useCallback(
+    async (productId: string) => {
+      setClearPauseError(null)
+      setClearPauseBusyId(productId)
+      try {
+        const res = await fetch('/api/admin/packs', {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ product_id: productId, clear_shelf_pause: true }),
+        })
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          throw new Error(typeof json.error === 'string' ? json.error : 'Could not clear shelf pause')
+        }
+        await onRefresh()
+      } catch (e) {
+        setClearPauseError(e instanceof Error ? e.message : 'Could not clear shelf pause')
+      } finally {
+        setClearPauseBusyId(null)
+      }
+    },
+    [onRefresh]
+  )
 
   const activeProductId = shelfProductId || defaultProductId
   const activeProduct = products.find((p) => p.id === activeProductId)
@@ -89,6 +119,72 @@ export function AdminPacksDepositsSection({
             Same category odds % on both shelves. Stock cheaper NFTs on the $OWL shelf so whale{' '}
             {OWL_TICKER} opens do not drain the main 0.1 SOL vault.
           </p>
+        </div>
+      ) : null}
+
+      {products.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">Shelf pause status</p>
+          {products.map((p) => {
+            const paused = p.shelfPaused === true
+            const reasonLabel = packPauseReasonLabel(p.shelfPauseReason)
+            const minNeed = p.minNftCount ?? 1
+            return (
+              <div
+                key={p.id}
+                className={`rounded-md border p-3 text-sm ${paused ? 'border-amber-500/40 bg-amber-500/5' : 'bg-muted/20'}`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium">
+                      {shelfShortLabel(p.slug)}{' '}
+                      <span className="font-normal text-muted-foreground">
+                        — {paused ? 'Paused' : 'Open for opens'}
+                      </span>
+                    </p>
+                    {paused && reasonLabel ? (
+                      <p className="mt-1 text-xs text-muted-foreground">{reasonLabel}</p>
+                    ) : null}
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {p.availableNfts} prize NFT{p.availableNfts === 1 ? '' : 's'} available
+                      {minNeed > 1 ? ` (min ${minNeed})` : ''}
+                    </p>
+                  </div>
+                  {paused ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="min-h-[44px] shrink-0 touch-manipulation"
+                      disabled={
+                        clearPauseBusyId !== null || p.availableNfts < minNeed
+                      }
+                      onClick={() => void clearShelfPause(p.id)}
+                    >
+                      {clearPauseBusyId === p.id ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                          Clearing…
+                        </>
+                      ) : (
+                        'Clear shelf pause'
+                      )}
+                    </Button>
+                  ) : null}
+                </div>
+                {paused && p.availableNfts < minNeed ? (
+                  <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
+                    Deposit more NFTs on this shelf before clearing pause (need at least {minNeed}).
+                  </p>
+                ) : null}
+              </div>
+            )
+          })}
+          {clearPauseError ? (
+            <p className="text-xs text-destructive" role="alert">
+              {clearPauseError}
+            </p>
+          ) : null}
         </div>
       ) : null}
 

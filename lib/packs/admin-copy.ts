@@ -1,4 +1,4 @@
-const LOW_NFT_INVENTORY_RE = /^Low NFT inventory \((\d+) < min (\d+)\)$/
+const LOW_NFT_INVENTORY_RE = /^Low NFT inventory(?: on this shelf)? \((\d+) < min (\d+)\)$/
 
 const LAUNCH_PAUSE_REASONS = new Set([
   'Fund vault and unpause when inventory is ready',

@@ -38,6 +38,7 @@ import {
   PACK_JACKPOT_CONTRIBUTION_SOL,
   PACK_JACKPOT_WIN_ODDS_BPS,
 } from '@/lib/packs/jackpot'
+import { reconcileProductShelfPause } from '@/lib/packs/shelf'
 
 export const dynamic = 'force-dynamic'
 
@@ -137,7 +138,23 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (typeof body.product_id === 'string' && body.clear_shelf_pause === true) {
-      const updated = await updatePackProduct(body.product_id.trim(), {
+      const productId = body.product_id.trim()
+      const product = await getPackProductById(productId)
+      if (!product) {
+        return NextResponse.json({ error: 'product_id not found' }, { status: 400 })
+      }
+      const config = await getPackVaultConfig()
+      const minNft = Number(product.min_nft_count ?? config.min_nft_count ?? 1)
+      const nftCount = await countAvailableNfts(productId)
+      if (nftCount < minNft) {
+        return NextResponse.json(
+          {
+            error: `Cannot clear shelf pause: need at least ${minNft} available prize NFT(s) on this shelf (have ${nftCount})`,
+          },
+          { status: 400 }
+        )
+      }
+      const updated = await updatePackProduct(productId, {
         shelf_paused: false,
         shelf_pause_reason: null,
       })
@@ -315,6 +332,7 @@ export async function POST(request: NextRequest) {
       prize_standard,
       odds_tier,
     })
+    await reconcileProductShelfPause(productId)
     return NextResponse.json({ ok: true, item: row })
   } catch (e) {
     console.error('[admin packs] POST inventory', e)

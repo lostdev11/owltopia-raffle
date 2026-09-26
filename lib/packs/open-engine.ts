@@ -52,7 +52,10 @@ import { isOwlEnabled } from '@/lib/tokens'
 import { PackOpenRetryableError } from '@/lib/packs/pack-open-errors'
 import { payoutCommittedPackOpen } from '@/lib/packs/open-payout'
 import { withPackSolanaRpcRetry } from '@/lib/packs/rpc-retry'
-import { pauseProductShelfForReason as pauseProductShelf } from '@/lib/packs/shelf'
+import {
+  pauseProductShelfForReason as pauseProductShelf,
+  reconcileProductShelfPause,
+} from '@/lib/packs/shelf'
 import { isTransientSolanaRpcError } from '@/lib/solana/rpc-retry'
 
 export { ensureProductShelfAfterOpen } from '@/lib/packs/shelf'
@@ -93,14 +96,16 @@ export async function ensureProductShelfReady(
   if (config.paused) {
     return { ok: false, reason: config.pause_reason || 'Packs are paused' }
   }
-  if (product.shelf_paused) {
+  await reconcileProductShelfPause(product.id)
+  const fresh = (await getPackProductById(product.id)) ?? product
+  if (fresh.shelf_paused) {
     return {
       ok: false,
-      reason: product.shelf_pause_reason || 'This pack shelf is temporarily unavailable',
+      reason: fresh.shelf_pause_reason || 'This pack shelf is temporarily unavailable',
     }
   }
-  const minNft = Number(product.min_nft_count ?? config.min_nft_count ?? 1)
-  const nftCount = await countAvailableNfts(product.id)
+  const minNft = Number(fresh.min_nft_count ?? config.min_nft_count ?? 1)
+  const nftCount = await countAvailableNfts(fresh.id)
   if (nftCount < minNft) {
     return {
       ok: false,
