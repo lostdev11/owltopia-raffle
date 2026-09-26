@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { AdminPacksDepositsSection } from '@/components/admin/AdminPacksDepositsSection'
 import { AdminPacksLaunchPanel } from '@/components/admin/AdminPacksLaunchPanel'
+import { AdminPacksResolveOpenPanel } from '@/components/admin/AdminPacksResolveOpenPanel'
 import { PacksOpeningPreviewPanel } from '@/components/admin/PacksOpeningPreviewPanel'
 import { PacksLaunchChecklist } from '@/components/admin/PacksLaunchChecklist'
 import { PacksAdminExtraDetails } from '@/components/admin/PacksAdminExtraDetails'
@@ -227,6 +228,8 @@ export default function AdminPacksPage() {
             onBusy={setBusy}
             onError={setError}
           />
+
+          <AdminPacksResolveOpenPanel busy={busy} onBusy={setBusy} onError={setError} />
 
           <PacksLaunchChecklist
             vaultConfigured={Boolean(data.vault.configuredAddress)}
