@@ -3,7 +3,6 @@
  */
 
 import {
-  PACK_CATEGORY_WEIGHTS_BPS,
   PACK_OWL_TIERS,
   PACK_PREMIUM_NFT_OVERALL_BPS,
   PACK_SOL_TIERS,
@@ -13,6 +12,7 @@ import {
 import {
   packNftMinFairSolForProductSlug,
   resolvePackCashLadders,
+  resolvePackCategoryWeightsBps,
 } from '@/lib/packs/product-pools'
 import {
   buildWeightedNftPool,
@@ -66,20 +66,21 @@ export type PackOddsPercentages = {
 export function computePackOddsPercentages(options?: {
   owlSolPrice?: number | null
   nftInventory?: NftPoolEntry[]
-  /** Product shelf slug — only affects cash tier amounts shown, not category %. */
+  /** Product shelf slug — category mix + cash tier amounts. */
   productSlug?: string
 }): PackOddsPercentages {
+  const categoryWeights = resolvePackCategoryWeightsBps(
+    options?.productSlug ?? PACKS_PRODUCT_SLUG
+  )
   const catTotal =
-    PACK_CATEGORY_WEIGHTS_BPS.owl +
-    PACK_CATEGORY_WEIGHTS_BPS.sol +
-    PACK_CATEGORY_WEIGHTS_BPS.nft
+    categoryWeights.owl + categoryWeights.sol + categoryWeights.nft
 
   const categories: PackOddsPercentages['categories'] = (
     ['owl', 'sol', 'nft'] as PackRegularCategory[]
   ).map((category) => ({
     category,
-    weightBps: PACK_CATEGORY_WEIGHTS_BPS[category],
-    percent: pct(PACK_CATEGORY_WEIGHTS_BPS[category], catTotal),
+    weightBps: categoryWeights[category],
+    percent: pct(categoryWeights[category], catTotal),
   }))
 
   const ladders = resolvePackCashLadders(
@@ -88,7 +89,7 @@ export function computePackOddsPercentages(options?: {
   )
   const owlTiersSrc = ladders.owlTiers
   const owlSum = sumWeights(owlTiersSrc.map((t) => t.weight))
-  const owlCatPct = PACK_CATEGORY_WEIGHTS_BPS.owl / catTotal
+  const owlCatPct = categoryWeights.owl / catTotal
   const owlTiers = owlTiersSrc.map((t) => {
     const ofCat = pct(t.weight, owlSum)
     return {
@@ -102,7 +103,7 @@ export function computePackOddsPercentages(options?: {
   void PACK_OWL_TIERS
 
   const solSum = sumWeights(ladders.solTiers.map((t) => t.weight))
-  const solCatPct = PACK_CATEGORY_WEIGHTS_BPS.sol / catTotal
+  const solCatPct = categoryWeights.sol / catTotal
   const solTiers = ladders.solTiers.map((t) => {
     const ofCat = pct(t.weight, solSum)
     return {
@@ -134,7 +135,7 @@ export function computePackOddsPercentages(options?: {
     }
   })
 
-  const nftCatPct = PACK_CATEGORY_WEIGHTS_BPS.nft / catTotal
+  const nftCatPct = categoryWeights.nft / catTotal
   const standardShare =
     premiumPool.length > 0
       ? Math.max(0, nftCatPct - PACK_PREMIUM_NFT_OVERALL_BPS / 10_000)

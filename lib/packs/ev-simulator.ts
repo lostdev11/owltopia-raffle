@@ -1,5 +1,4 @@
 import {
-  PACK_CATEGORY_WEIGHTS_BPS,
   PACK_DEFAULT_OWL_SOL_PRICE,
   PACK_NFT_EV_DEFAULT_BAND_AVGS,
   PACK_NFT_VALUE_BANDS,
@@ -13,11 +12,13 @@ import {
 } from '@/lib/packs/config'
 import { packJackpotContributionForPrice, PACK_JACKPOT_CONTRIBUTION_SOL } from '@/lib/packs/jackpot'
 import {
+  isOwlCheckoutProductSlug,
   PACKS_PRODUCT_SLUG_MAIN,
   PACKS_PRODUCT_SLUG_OWL,
   packNftMinFairSolForProductSlug,
   packOwlCheckoutTicketSolEquiv,
   resolvePackCashLadders,
+  resolvePackCategoryWeightsBps,
 } from '@/lib/packs/product-pools'
 import { buildWeightedNftPool } from '@/lib/packs/nft-weights'
 
@@ -65,15 +66,14 @@ function evForProductShelf(input: {
     ladders.solTiers.map((t) => t.amountSol)
   )
 
+  const categoryWeights = resolvePackCategoryWeightsBps(input.productShelfSlug)
   const catTotal =
-    PACK_CATEGORY_WEIGHTS_BPS.owl +
-    PACK_CATEGORY_WEIGHTS_BPS.sol +
-    PACK_CATEGORY_WEIGHTS_BPS.nft
+    categoryWeights.owl + categoryWeights.sol + categoryWeights.nft
 
   const categoryEv: Record<PackRegularCategory, number> = {
-    owl: (PACK_CATEGORY_WEIGHTS_BPS.owl / catTotal) * owlEv,
-    sol: (PACK_CATEGORY_WEIGHTS_BPS.sol / catTotal) * solEv,
-    nft: (PACK_CATEGORY_WEIGHTS_BPS.nft / catTotal) * input.nftEv,
+    owl: (categoryWeights.owl / catTotal) * owlEv,
+    sol: (categoryWeights.sol / catTotal) * solEv,
+    nft: (categoryWeights.nft / catTotal) * input.nftEv,
   }
 
   const estimatedEvSol =
@@ -149,7 +149,11 @@ export function simulatePackEv(options?: {
   notes.push(
     `Jackpot slice (${jackpotEvSol} SOL/open) included in EV at steady-state pool equilibrium.`
   )
-  notes.push(`Same category odds % on all shelves; shelf ${productShelfSlug}.`)
+  notes.push(
+    isOwlCheckoutProductSlug(productShelfSlug)
+      ? `$OWL shelf ${productShelfSlug}: 70% OWL / 30% NFT (no SOL cash).`
+      : `Main shelf ${productShelfSlug}: 30% OWL / 30% SOL / 40% NFT.`
+  )
   if (paymentCurrency === 'OWL') {
     notes.push(`$OWL checkout ticket SOL-equiv ≈ ${packPriceSol} SOL (20 $OWL + fee).`)
   }
@@ -306,7 +310,11 @@ export function simulatePackEvFromInventory(options: {
       ? packJackpotContributionForPrice(packPriceSol)
       : PACK_JACKPOT_CONTRIBUTION_SOL
 
-  notes.push(`Shelf ${productShelfSlug}: same category % as 0.1 SOL pack; EV from this inventory.`)
+  notes.push(
+    isOwlCheckoutProductSlug(productShelfSlug)
+      ? `$OWL shelf: 70% OWL / 30% NFT; EV from this inventory.`
+      : `Main shelf: 30/30/40 category mix; EV from this inventory.`
+  )
   if (!options.owlSolPrice) {
     notes.push(
       `OWL prize value uses default rate (${PACK_DEFAULT_OWL_SOL_PRICE} SOL per OWL). Override in Admin → Packs if needed.`

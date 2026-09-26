@@ -1,12 +1,13 @@
 /**
  * Product-scoped prize shelves (0.1 SOL pack vs $OWL checkout).
  *
- * Same category hit-rate % and tier weight shape on both products; shelves differ
- * by which NFTs are deposited and (for $OWL product) smaller cash ladder amounts.
+ * Main shelf: 30% OWL / 30% SOL / 40% NFT (Gembird 0.1 SOL pack).
+ * $OWL shelf: 70% OWL / 0% SOL / 30% NFT — separate inventory + jackpot.
  */
 
 import {
   isPackNftFairValueSol,
+  PACK_CATEGORY_WEIGHTS_BPS,
   PACK_NFT_MAX_FAIR_SOL,
   PACK_NFT_MIN_FAIR_SOL,
   PACK_OWL_TIERS,
@@ -16,6 +17,7 @@ import {
   resolveOwlSolPrice,
   type PackOwlTier,
   type PackPaymentCurrency,
+  type PackRegularCategory,
   type PackSolTier,
 } from '@/lib/packs/config'
 
@@ -33,6 +35,21 @@ export function packProductSlugForPaymentCurrency(
 
 export function isOwlCheckoutProductSlug(slug: string): boolean {
   return slug.trim() === PACKS_PRODUCT_SLUG_OWL
+}
+
+/** Category mix for $OWL checkout shelf (70 / 0 / 30). Main shelf uses PACK_CATEGORY_WEIGHTS_BPS. */
+export const PACK_CATEGORY_WEIGHTS_BPS_OWL_SHELF: Record<PackRegularCategory, number> = {
+  owl: 7000,
+  sol: 0,
+  nft: 3000,
+}
+
+export function resolvePackCategoryWeightsBps(
+  productSlug: string | null | undefined
+): Record<PackRegularCategory, number> {
+  return isOwlCheckoutProductSlug(productSlug ?? '')
+    ? PACK_CATEGORY_WEIGHTS_BPS_OWL_SHELF
+    : PACK_CATEGORY_WEIGHTS_BPS
 }
 
 /** Minimum admin-tagged NFT floor on the $OWL cheap shelf (main shelf stays 0.05). */
@@ -57,25 +74,19 @@ export function packNftFairValueRangeLabel(productSlug: string | null | undefine
 }
 
 /**
- * Cash ladders for $OWL product: same tier weights as production, smaller amounts (~$1 ticket EV).
- * Main SOL product uses constants in config.ts unchanged.
+ * $OWL shelf OWL ladder (10 → 50 OWL). Bottom-heavy within the OWL category.
+ * No SOL cash tiers on this shelf.
  */
 export const PACK_OWL_CHECKOUT_OWL_TIERS: PackOwlTier[] = [
-  { category: 'owl', amount: 2, weight: 980, fairValueSol: 0.02 },
-  { category: 'owl', amount: 5, weight: 15, fairValueSol: 0.05 },
-  { category: 'owl', amount: 10, weight: 5, fairValueSol: 0.1 },
+  { category: 'owl', amount: 10, weight: 980, fairValueSol: 0.1 },
+  { category: 'owl', amount: 20, weight: 10, fairValueSol: 0.2 },
+  { category: 'owl', amount: 30, weight: 5, fairValueSol: 0.3 },
+  { category: 'owl', amount: 40, weight: 3, fairValueSol: 0.4 },
+  { category: 'owl', amount: 50, weight: 2, fairValueSol: 0.5 },
 ]
 
-/** Same weight shape as PACK_SOL_TIERS (60/10/10/10/5/3/2), capped at 0.1 SOL top tier. */
-export const PACK_OWL_CHECKOUT_SOL_TIERS: PackSolTier[] = [
-  { category: 'sol', amountSol: 0.01, weight: 60 },
-  { category: 'sol', amountSol: 0.02, weight: 10 },
-  { category: 'sol', amountSol: 0.03, weight: 10 },
-  { category: 'sol', amountSol: 0.05, weight: 10 },
-  { category: 'sol', amountSol: 0.07, weight: 5 },
-  { category: 'sol', amountSol: 0.08, weight: 3 },
-  { category: 'sol', amountSol: 0.1, weight: 2 },
-]
+/** $OWL shelf has no SOL cash prizes (category weight 0). */
+export const PACK_OWL_CHECKOUT_SOL_TIERS: PackSolTier[] = []
 
 export type PackCashLadders = {
   owlTiers: PackOwlTier[]

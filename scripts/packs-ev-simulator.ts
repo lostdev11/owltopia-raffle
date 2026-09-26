@@ -10,6 +10,7 @@ import {
   PACKS_PRODUCT_SLUG_MAIN,
   PACKS_PRODUCT_SLUG_OWL,
   PACK_OWL_CHECKOUT_OWL_TIERS,
+  resolvePackCategoryWeightsBps,
 } from '../lib/packs/product-pools'
 import {
   pickCategory,
@@ -45,17 +46,19 @@ const owlResult = simulatePackEv({
   productShelfSlug: PACKS_PRODUCT_SLUG_OWL,
 })
 
-console.log('=== Owltopia Packs EV Simulator (separate shelves, same category %) ===')
+console.log('=== Owltopia Packs EV Simulator (separate shelves) ===')
 printEv('Main shelf — 0.1 SOL checkout', solResult)
 printEv('$OWL shelf — $OWL checkout', owlResult)
 
-console.log('\nCategory weights (bps, shared):', PACK_CATEGORY_WEIGHTS_BPS)
+console.log('\nCategory weights (bps):')
+console.log('  Main:', PACK_CATEGORY_WEIGHTS_BPS)
+console.log('  $OWL shelf:', resolvePackCategoryWeightsBps(PACKS_PRODUCT_SLUG_OWL))
 console.log(
   'Main OWL tiers:',
   PACK_OWL_TIERS.map((t) => `${t.amount}@w${t.weight}`)
 )
 console.log(
-  '$OWL shelf cash OWL tiers (same weights, smaller amounts):',
+  '$OWL shelf OWL tiers:',
   PACK_OWL_CHECKOUT_OWL_TIERS.map((t) => `${t.amount}@w${t.weight}`)
 )
 console.log(
@@ -64,15 +67,21 @@ console.log(
 )
 
 const N = 10_000
-const catCounts = { owl: 0, sol: 0, nft: 0 }
+const mainWeights = resolvePackCategoryWeightsBps(PACKS_PRODUCT_SLUG_MAIN)
+const owlWeights = resolvePackCategoryWeightsBps(PACKS_PRODUCT_SLUG_OWL)
+const mainCounts = { owl: 0, sol: 0, nft: 0 }
+const owlCounts = { owl: 0, sol: 0, nft: 0 }
 for (let i = 0; i < N; i++) {
   const seed = generatePackOpenSeed()
   hashPackOpenCommit(seed)
-  const c = pickCategory(seed)
-  catCounts[c]++
-  pickTier(seed, c, solResult.owlSolPrice)
+  const mainC = pickCategory(seed, mainWeights)
+  mainCounts[mainC]++
+  const owlC = pickCategory(seed, owlWeights)
+  owlCounts[owlC]++
+  pickTier(seed, mainC, solResult.owlSolPrice)
 }
-console.log(`\nSimulated ${N} category rolls (same on all shelves):`, catCounts)
+console.log(`\nSimulated ${N} category rolls — main shelf:`, mainCounts)
+console.log(`Simulated ${N} category rolls — $OWL shelf:`, owlCounts)
 
 const driftSol = Math.abs(solResult.estimatedEvSol - PACK_TARGET_EV_SOL)
 if (driftSol > 0.05) {
@@ -89,5 +98,4 @@ const cheapOwl = simulatePackEv({
   productShelfSlug: PACKS_PRODUCT_SLUG_OWL,
 })
 printEv('$OWL shelf @ 0.0025 SOL/OWL (cheap token + lower stock)', cheapOwl)
-const cheapRtp = cheapOwl.estimatedRtpBps / 100
-console.log(`\nNote: EV on $OWL shelf depends on deposited NFT floors, not category %.`)
+console.log(`\nNote: EV on $OWL shelf depends on deposited NFT floors and 70/30 category mix.`)

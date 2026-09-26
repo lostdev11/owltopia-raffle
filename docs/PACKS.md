@@ -60,16 +60,16 @@ Buying stays off until a full admin turns packs on (`pack_vault_config.paused`):
 
 ## Product shelves (0.1 SOL vs $OWL checkout)
 
-Two **`pack_products`** rows share the **same category odds %** and tier **weight shape**, but **separate NFT inventory** and **separate jackpot pools**:
+Two **`pack_products`** rows use **separate NFT inventory** and **separate jackpot pools**. Category mix differs by shelf:
 
-| Checkout | Product slug | Shelf |
-|----------|--------------|--------|
-| **0.1 SOL** | `owl-pack-v1` | Main vault NFTs + Gembird SOL/OWL ladders + main jackpot |
-| **$OWL** (~20 $OWL + fee) | `owl-pack-owl-v1` | Lower-floor NFTs + smaller cash tiers (~$1 ticket EV); cheap jackpot |
+| Checkout | Product slug | Category mix | Shelf |
+|----------|--------------|--------------|--------|
+| **0.1 SOL** | `owl-pack-v1` | 30% OWL / 30% SOL / 40% NFT | Main vault NFTs + Gembird SOL/OWL ladders + main jackpot |
+| **$OWL** (~20 $OWL + fee) | `owl-pack-owl-v1` | **70% OWL / 30% NFT** (no SOL cash) | OWL ladder 10–50 $OWL; NFT rules match main pack (inverse FP + ~1% premium); min NFT floor 0.01 SOL |
 
 Admin → Packs: choose **Prize shelf** when depositing NFTs. Solvency pause is **per shelf** — an empty $OWL shelf does not pause the main 0.1 SOL shelf.
 
-Apply migrations **247** (`packs_product_pools`) and **248** (`packs_inventory_owl_shelf_min_floor`) for product shelves and 0.01 SOL floors on the $OWL shelf.
+Apply migrations **247** (`packs_product_pools`), **248** (`packs_inventory_owl_shelf_min_floor`), and **249** (`packs_owl_shelf_70_30_category`) for product shelves, 0.01 SOL floors on the $OWL shelf, and the 70/30 $OWL-shelf category mix.
 
 ## Jackpot
 

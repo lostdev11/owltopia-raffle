@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getPackOpenById, getPackProductById, getPackVaultConfig } from '@/lib/packs/db'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import { packRevealMessage } from '@/lib/packs/reveal-message'
+import { resolvePackCategoryWeightsBps } from '@/lib/packs/product-pools'
 import { pickCategory, pickJackpotWin, pickNftFromSnapshot, hashPackOpenCommit, recomputeOpenFromSeed, verifyCommitHash } from '@/lib/packs/rng'
 import { PACK_JACKPOT_MIN_PAYOUT_SOL } from '@/lib/packs/jackpot'
 import { PACK_OPEN_ALGO_V2_VRF } from '@/lib/packs/config'
@@ -64,7 +65,10 @@ export async function GET(_request: NextRequest, context: Ctx) {
       if (open.is_jackpot_win) {
         // Jackpot replaces category roll — skip NFT recompute
       } else {
-      const category = pickCategory(open.open_seed)
+      const category = pickCategory(
+        open.open_seed,
+        resolvePackCategoryWeightsBps(openProduct?.slug)
+      )
       if (category === 'nft' && open.nft_pool_snapshot && Array.isArray(open.nft_pool_snapshot)) {
         try {
           const pick = pickNftFromSnapshot(

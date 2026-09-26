@@ -29,6 +29,7 @@ import {
   packNftMinFairSolForProductSlug,
   packOwlCheckoutTicketSolEquiv,
   resolvePackCashLadders,
+  resolvePackCategoryWeightsBps,
 } from '@/lib/packs/product-pools'
 import type { PackProductRow } from '@/lib/packs/types'
 import {
@@ -410,7 +411,8 @@ export async function confirmAndOpenPack(input: {
     return rowToResult(open, { jackpotPoolSol: jackpotResolution.poolAfterSol })
   }
 
-  const category = pickCategory(seed)
+  const categoryWeights = resolvePackCategoryWeightsBps(openProduct.slug)
+  const category = pickCategory(seed, categoryWeights)
 
   let prizeLabel = ''
   let owlAmount: number | null = null
