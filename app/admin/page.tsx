@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { OwlVisionDisclosure } from '@/components/OwlVisionDisclosure'
-import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, Coins, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot, ShieldAlert, Rocket, Trophy, Store, Send, Library } from 'lucide-react'
+import { Plus, BarChart3, Users, Trash2, CheckCircle2, Loader2, RotateCcw, Megaphone, Coins, Radar, Share2, ListTodo, Gift, Radio, Banknote, Construction, HeartHandshake, Landmark, Sparkles, Inbox, Bird, Flame, ArrowUpRight, ArrowDownRight, Minus, Bot, ShieldAlert, Rocket, Trophy, Store, Send, Library, ClipboardList } from 'lucide-react'
 import { WalletConnectButton } from '@/components/WalletConnectButton'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -3441,6 +3441,22 @@ export default function AdminDashboardPage() {
               </CardHeader>
             </Link>
           </Card>
+
+          {canUseModTools && (
+            <Card className="hover:border-primary transition-colors cursor-pointer">
+              <Link href="/admin/ops-log">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <ClipboardList className="h-5 w-5" />
+                    Ops Log
+                  </CardTitle>
+                  <CardDescription>
+                    Log manual refunds, prize payouts, wallet top-ups, mis-sends, and support incidents with Solscan links and CSV export.
+                  </CardDescription>
+                </CardHeader>
+              </Link>
+            </Card>
+          )}
 
           <Card className="hover:border-primary transition-colors cursor-pointer">
             <Link href="/admin/discord-broadcast">
