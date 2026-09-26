@@ -229,6 +229,15 @@ export default function AdminPacksPage() {
             onError={setError}
           />
 
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-4 py-3 text-sm">
+            <span className="text-muted-foreground">
+              Browse all pack opens (DB ledger) — junior admins use the read-only Pack opens tab.
+            </span>
+            <Button type="button" variant="outline" size="sm" asChild>
+              <Link href="/admin/pack-opens">Open Pack opens ledger</Link>
+            </Button>
+          </div>
+
           <AdminPacksResolveOpenPanel busy={busy} onBusy={setBusy} onError={setError} />
 
           <PacksLaunchChecklist

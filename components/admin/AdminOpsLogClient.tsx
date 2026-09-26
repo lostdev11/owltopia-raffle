@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -134,6 +135,7 @@ const emptyForm = {
 type AdminOpsLogAsset = (typeof ADMIN_OPS_LOG_ASSETS)[number]
 
 export function AdminOpsLogClient() {
+  const searchParams = useSearchParams()
   const { publicKey, connected } = useWallet()
   const wallet = publicKey?.toBase58() ?? ''
   const cachedTrue = typeof window !== 'undefined' && wallet && getCachedAdmin(wallet) === true
@@ -167,6 +169,21 @@ export function AdminOpsLogClient() {
     const t = setTimeout(() => setSearchDebounced(search.trim()), 300)
     return () => clearTimeout(t)
   }, [search])
+
+  useEffect(() => {
+    const pw = searchParams.get('prefill_wallet')?.trim()
+    const pr = searchParams.get('prefill_related')?.trim()
+    const pt = searchParams.get('prefill_title')?.trim()
+    if (!pw && !pr && !pt) return
+    setShowForm(true)
+    setForm((f) => ({
+      ...f,
+      wallet: pw ?? f.wallet,
+      related: pr ?? f.related,
+      title: pt ?? f.title,
+      type: 'incident',
+    }))
+  }, [searchParams])
 
   useEffect(() => {
     setOffset(0)
