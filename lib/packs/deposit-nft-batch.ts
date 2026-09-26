@@ -31,7 +31,10 @@ import {
   walletNftsToPackDepositLines,
 } from '@/lib/packs/deposit-nft-batch-plan'
 import { depositPrizeNftToEscrowFromWallet } from '@/lib/solana/deposit-prize-nft-to-escrow-wallet'
+import { fetchMplCoreAssetOwnerB58 } from '@/lib/solana/mpl-core-asset-owner-client'
+import { isDasMplCoreInterface } from '@/lib/solana/prize-nft-standard'
 import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
+import { isBlockhashOrTxExpiryError } from '@/lib/solana/wallet-tx-expiry'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
 
 export {
@@ -200,6 +203,65 @@ async function buildClassicPackTxs(params: {
   return { ok: true, built }
 }
 
+async function tryRecoverOrRetrySpecialPackDeposit(params: {
+  connection: Connection
+  owner: PublicKey
+  sendTransaction: WalletSendTransactionFn
+  walletAdapter: WalletAdapter | null
+  vaultAddress: string
+  nft: WalletNft
+  firstError: string
+  depositedMints: Set<string>
+  onProgress?: (msg: string) => void
+}): Promise<
+  | { ok: true; signature: string }
+  | { ok: false; error: string }
+> {
+  const vault = params.vaultAddress.trim()
+  if (
+    isDasMplCoreInterface(params.nft.interface) &&
+    !params.depositedMints.has(params.nft.mint)
+  ) {
+    try {
+      const ownerOnChain = await fetchMplCoreAssetOwnerB58(params.connection, params.nft.mint)
+      if (ownerOnChain === vault) {
+        params.onProgress?.(
+          `${params.nft.name || params.nft.mint.slice(0, 8)} is already in the packs vault — registering…`
+        )
+        return { ok: true, signature: 'recovered-in-vault' }
+      }
+    } catch {
+      // Best-effort — fall through to retry / surface error.
+    }
+  }
+
+  if (!isBlockhashOrTxExpiryError(params.firstError)) {
+    return { ok: false, error: params.firstError }
+  }
+
+  params.onProgress?.(
+    `Retrying ${params.nft.name || params.nft.mint.slice(0, 8)} with a fresh transaction…`
+  )
+  const retry = await depositPrizeNftToEscrowFromWallet({
+    connection: params.connection,
+    publicKey: params.owner,
+    sendTransaction: params.sendTransaction,
+    walletAdapter: params.walletAdapter,
+    selectedNft: params.nft,
+    prizeMintAddress: params.nft.mint,
+    escrowAddress: params.vaultAddress,
+    logCtx: {
+      raffleId: 'packs-inventory-retry',
+      nftMint: params.nft.mint,
+      transferAssetId: params.nft.mint,
+      escrowAddress: params.vaultAddress,
+      fromWallet: params.owner.toBase58(),
+    },
+  })
+  if (retry.ok) return { ok: true, signature: retry.signature }
+  return { ok: false, error: retry.error }
+}
+
 /**
  * Deposit selected inventory NFTs: classic SPL via multi-transfer (+ sign-all when
  * possible); Core/compressed via the existing single-NFT escrow path.
@@ -215,6 +277,7 @@ export async function depositPackInventoryNfts(params: {
 }): Promise<PackDepositNftResult> {
   const deposited: PackDepositNftResult['deposited'] = []
   const failed: PackDepositNftResult['failed'] = []
+  const depositedMintSet = new Set<string>()
   let usedSignAll = false
 
   const classic: WalletNft[] = []
@@ -256,8 +319,10 @@ export async function depositPackInventoryNfts(params: {
             fromWallet: params.owner.toBase58(),
           },
         })
-        if (dep.ok) deposited.push({ mint: nft.mint, signature: dep.signature })
-        else failed.push({ mint: nft.mint, error: dep.error })
+        if (dep.ok) {
+          deposited.push({ mint: nft.mint, signature: dep.signature })
+          depositedMintSet.add(nft.mint)
+        } else failed.push({ mint: nft.mint, error: dep.error })
         await new Promise((r) => setTimeout(r, packDepositApprovalGapMs()))
       }
     } else if (builtResult.built.length > 0) {
@@ -293,6 +358,7 @@ export async function depositPackInventoryNfts(params: {
             const lines = builtResult.built[i]!.lines
             for (const line of lines) {
               deposited.push({ mint: line.mint, signature: row.signature })
+              depositedMintSet.add(line.mint)
             }
           }
         } catch (e) {
@@ -327,6 +393,7 @@ export async function depositPackInventoryNfts(params: {
             if (dep.ok) {
               for (const mint of dep.sentMints) {
                 deposited.push({ mint, signature: dep.signature })
+                depositedMintSet.add(mint)
               }
             } else if (dep.packetTooLarge && nfts.length > 1) {
               for (const half of halvePackDepositChunk(nfts)) {
@@ -341,6 +408,7 @@ export async function depositPackInventoryNfts(params: {
                 if (halfDep.ok) {
                   for (const mint of halfDep.sentMints) {
                     deposited.push({ mint, signature: halfDep.signature })
+                    depositedMintSet.add(mint)
                   }
                 } else {
                   for (const nft of half) {
@@ -457,6 +525,7 @@ export async function depositPackInventoryNfts(params: {
   }
 
   for (const nft of special) {
+    if (depositedMintSet.has(nft.mint)) continue
     params.onProgress?.(
       `Depositing ${nft.name || nft.mint.slice(0, 8)}… (Core/cNFT/pNFT — 1 approval)`
     )
@@ -476,8 +545,28 @@ export async function depositPackInventoryNfts(params: {
         fromWallet: params.owner.toBase58(),
       },
     })
-    if (dep.ok) deposited.push({ mint: nft.mint, signature: dep.signature })
-    else failed.push({ mint: nft.mint, error: dep.error })
+    if (dep.ok) {
+      deposited.push({ mint: nft.mint, signature: dep.signature })
+      depositedMintSet.add(nft.mint)
+    } else {
+      const followUp = await tryRecoverOrRetrySpecialPackDeposit({
+        connection: params.connection,
+        owner: params.owner,
+        sendTransaction: params.sendTransaction,
+        walletAdapter: params.walletAdapter,
+        vaultAddress: params.vaultAddress,
+        nft,
+        firstError: dep.error,
+        depositedMints: depositedMintSet,
+        onProgress: params.onProgress,
+      })
+      if (followUp.ok) {
+        deposited.push({ mint: nft.mint, signature: followUp.signature })
+        depositedMintSet.add(nft.mint)
+      } else {
+        failed.push({ mint: nft.mint, error: followUp.error })
+      }
+    }
     await new Promise((r) => setTimeout(r, packDepositApprovalGapMs()))
   }
 

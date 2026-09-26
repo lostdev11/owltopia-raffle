@@ -125,6 +125,7 @@ export async function transferTokenMetadataNftToEscrow({
           builder,
           connection,
           sendTransaction,
+          deferPresimulateToWallet: true,
         })
       }
 

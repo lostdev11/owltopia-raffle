@@ -7,6 +7,11 @@ import {
   assertTransactionSimulatesClean,
   isPhantomPresimulateError,
 } from '@/lib/solana/phantom-presimulate'
+import {
+  isBlockhashOrTxExpiryError,
+  isWalletUserRejectionError,
+  refreshLegacyTransactionRecentBlockhash,
+} from '@/lib/solana/wallet-tx-expiry'
 
 type PhantomSendOptions = {
   skipPreflight?: boolean
@@ -171,6 +176,7 @@ export async function sendTransactionPreferPhantomSignAndSend(
             publicKey,
             options
           )
+          await refreshLegacyTransactionRecentBlockhash(connection, tx, 'confirmed')
         }
         // Phantom docs: pre-sim with sigVerify:false so doomed txs do not look "malicious".
         await assertTransactionSimulatesClean(connection, tx)
@@ -189,6 +195,10 @@ export async function sendTransactionPreferPhantomSignAndSend(
       } catch (err) {
         // Doomed txs must not fall through to another wallet prompt (still looks "malicious").
         if (isPhantomPresimulateError(err)) throw err
+        if (isWalletUserRejectionError(err)) throw err
+        if (!isVersionedTransaction(transaction) && isBlockhashOrTxExpiryError(err)) {
+          await refreshLegacyTransactionRecentBlockhash(connection, transaction, 'confirmed')
+        }
         if (process.env.NODE_ENV === 'development') {
           console.warn(
             '[sendTransactionPreferPhantomSignAndSend] Phantom signAndSendTransaction failed; using adapter.',
@@ -197,6 +207,9 @@ export async function sendTransactionPreferPhantomSignAndSend(
         }
       }
     }
+  }
+  if (!isVersionedTransaction(transaction) && !transaction.recentBlockhash) {
+    await refreshLegacyTransactionRecentBlockhash(connection, transaction, 'confirmed')
   }
   return fallbackSendTransaction(transaction, connection, options)
 }
@@ -237,14 +250,14 @@ export async function sendAllTransactionsPreferPhantomSignAndSend(
         const prepared: Array<Transaction | VersionedTransaction> = []
         for (const transaction of transactions) {
           if (!isVersionedTransaction(transaction)) {
-            prepared.push(
-              await prepareLegacyTransactionLikeAdapter(
-                transaction,
-                connection,
-                publicKey,
-                options
-              )
+            const tx = await prepareLegacyTransactionLikeAdapter(
+              transaction,
+              connection,
+              publicKey,
+              options
             )
+            await refreshLegacyTransactionRecentBlockhash(connection, tx, 'confirmed')
+            prepared.push(tx)
           } else {
             prepared.push(transaction)
           }
@@ -266,6 +279,7 @@ export async function sendAllTransactionsPreferPhantomSignAndSend(
         return signatures.map(normalizeSignature)
       } catch (err) {
         if (isPhantomPresimulateError(err)) throw err
+        if (isWalletUserRejectionError(err)) throw err
         if (process.env.NODE_ENV === 'development') {
           console.warn(
             '[sendAllTransactionsPreferPhantomSignAndSend] Phantom signAndSendAll failed; using per-tx send.',

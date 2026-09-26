@@ -13,6 +13,11 @@ import {
   walletNftsToPackDepositLines,
 } from '@/lib/packs/deposit-nft-batch-plan'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
+import {
+  formatPackDepositError,
+  isPackDepositTxExpiryError,
+} from '@/lib/packs/deposit-requirements'
+import { isBlockhashOrTxExpiryError } from '@/lib/solana/wallet-tx-expiry'
 
 function nft(
   mint: string,
@@ -87,5 +92,23 @@ assert.deepEqual(
   [2, 2]
 )
 assert.deepEqual(halvePackDepositChunk([1]), [[1]])
+
+assert.equal(isPackDepositTxExpiryError('Block height exceeded'), true)
+assert.equal(isPackDepositTxExpiryError('Blockhash not found'), true)
+assert.equal(isPackDepositTxExpiryError('Transaction expired before it was approved'), true)
+assert.equal(isBlockhashOrTxExpiryError('wallet transaction expired before it was approved'), true)
+assert.equal(isPackDepositTxExpiryError('Failed to fetch blockhash for simulation'), false)
+assert.equal(
+  formatPackDepositError('Block height exceeded').includes('Block height exceeded'),
+  true
+)
+assert.equal(
+  formatPackDepositError('No SPL holder resolved').includes('No SPL holder'),
+  true
+)
+assert.equal(
+  formatPackDepositError('No SPL holder resolved').includes('expired before it was approved'),
+  false
+)
 
 console.log('test-packs-deposit-batch: ok')

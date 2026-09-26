@@ -17,7 +17,11 @@ import {
   isMplCoreWrongAccountTypeError,
   sanitizeEscrowTransferFallbackError,
 } from '@/lib/solana/mpl-core-transfer-errors'
-import { orderedEscrowFallbacks, type EscrowFallbackKind } from '@/lib/solana/prize-nft-standard'
+import {
+  isDasMplCoreInterface,
+  orderedEscrowFallbacks,
+  type EscrowFallbackKind,
+} from '@/lib/solana/prize-nft-standard'
 import type { WalletSendTransactionFn } from '@/lib/solana/send-umi-builder-via-wallet'
 import { transferTokenMetadataNftToEscrow } from '@/lib/solana/token-metadata-transfer'
 
@@ -91,6 +95,7 @@ export async function tryEscrowDepositFallbacks(
   })
 
   let lastError: string | null = null
+  const knownCoreAsset = isDasMplCoreInterface(dasInterface)
 
   for (const kind of order) {
     const path = pathForKind(kind)
@@ -130,17 +135,20 @@ export async function tryEscrowDepositFallbacks(
       return { ok: true, signature, path }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
+      const coreWrongType = kind === 'mpl_core' && isMplCoreWrongAccountTypeError(msg)
       // Wrong-account-type Core errors are expected when probing non-Core mints — keep probing.
-      if (!(kind === 'mpl_core' && isMplCoreWrongAccountTypeError(msg))) {
+      if (!coreWrongType) {
         lastError = msg
       } else if (!lastError) {
         lastError = msg
       }
       logEscrowDepositAbort(logCtx, `${path}_failed`, {
         detail: msg,
-        wrongAccountType:
-          kind === 'mpl_core' && isMplCoreWrongAccountTypeError(msg) ? true : undefined,
+        wrongAccountType: coreWrongType ? true : undefined,
       })
+      if (knownCoreAsset && kind === 'mpl_core' && !coreWrongType) {
+        break
+      }
     }
   }
 

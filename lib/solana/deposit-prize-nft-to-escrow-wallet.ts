@@ -38,6 +38,7 @@ import {
   isNftHolderTransferLocked,
   isProgrammableNftInterface,
 } from '@/lib/solana/nft-transfer-lock'
+import { isDasMplCoreInterface } from '@/lib/solana/prize-nft-standard'
 
 export type SendTxFn = WalletSendTransactionFn
 
@@ -80,8 +81,11 @@ export async function depositPrizeNftToEscrowFromWallet(
     displayLabel: selectedNft.name,
   })
 
+  const dasIsMplCore = isDasMplCoreInterface(selectedNft.interface)
+
   let resolvedHolder: NftHolderInWallet | null = null
   if (
+    !dasIsMplCore &&
     selectedNft?.tokenAccount &&
     selectedNft.tokenAccount !== selectedNft.mint
   ) {
@@ -133,7 +137,11 @@ export async function depositPrizeNftToEscrowFromWallet(
     }
   }
 
-  for (let attempt = 0; attempt < HOLDER_LOOKUP_MAX_ATTEMPTS; attempt++) {
+  for (
+    let attempt = 0;
+    !dasIsMplCore && attempt < HOLDER_LOOKUP_MAX_ATTEMPTS;
+    attempt++
+  ) {
     if (resolvedHolder) break
     const h = await getNftHolderInWalletWithRpcFallback(connection, mintPk, publicKey, 'processed')
     if (h && 'tokenProgram' in h && 'tokenAccount' in h) {
