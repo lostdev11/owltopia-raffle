@@ -150,7 +150,9 @@ export type PackTicketCreditRow = {
 
 export type PackLedgerEntry = {
   id: string
-  completedAt: string
+  status: PackOpenStatus
+  completedAt: string | null
+  createdAt: string
   productName: string
   productSlug: string
   category: PackPrizeCategory | string
@@ -158,6 +160,7 @@ export type PackLedgerEntry = {
   paymentSignature: string | null
   payoutSignature: string | null
   isJackpotWin: boolean
+  errorMessage: string | null
 }
 
 export type PackOpenResult = {

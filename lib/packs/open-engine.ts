@@ -2,7 +2,6 @@ import {
   PACK_PRICE_OWL,
   PACK_PRICE_SOL,
   PACK_OPEN_ALGO_V1,
-  solToLamports,
   type PackPaymentCurrency,
 } from '@/lib/packs/config'
 import {
@@ -18,8 +17,6 @@ import {
   getPackProductForCheckout,
   getPackVaultConfig,
   listAvailableNftsForOpen,
-  markNftPaid,
-  releaseNftReservation,
   reserveNftById,
   resolvePackJackpotForOpen,
   updatePackOpen,
@@ -41,19 +38,9 @@ import {
   pickTier,
 } from '@/lib/packs/rng'
 import { nftPoolSnapshotForStorage } from '@/lib/packs/nft-weights'
-import type {
-  PackInventoryPrizeStandard,
-  PackNftPoolSnapshotRow,
-  PackOpenResult,
-  PackOpenRow,
-} from '@/lib/packs/types'
+import type { PackNftPoolSnapshotRow, PackOpenResult, PackOpenRow } from '@/lib/packs/types'
 import { verifyPackOwlPayment, verifyPackPayment } from '@/lib/packs/verify-payment'
-import {
-  getPacksVaultPublicKey,
-  payoutNftFromPacksVault,
-  payoutOwlFromPacksVault,
-  payoutSolFromPacksVault,
-} from '@/lib/packs/vault'
+import { getPacksVaultPublicKey } from '@/lib/packs/vault'
 import { isPackVrfEnabled, resolvePackOpenAlgo } from '@/lib/packs/vrf-config'
 import { runPackOpenVrf } from '@/lib/packs/vrf-open-flow'
 import { resolvePackSeedFromVrfResult } from '@/lib/packs/seed-after-payment'
@@ -61,6 +48,13 @@ import { logVrfPhase, vrfPhaseTimer } from '@/lib/raffles/draw/vrf-timing-log'
 import { isPackOwlCheckoutEnabled } from '@/lib/db/pack-public-settings'
 import { quotePackOwlCheckoutFee } from '@/lib/packs/owl-checkout-fee'
 import { isOwlEnabled } from '@/lib/tokens'
+import { PackOpenRetryableError } from '@/lib/packs/pack-open-errors'
+import { payoutCommittedPackOpen } from '@/lib/packs/open-payout'
+import { withPackSolanaRpcRetry } from '@/lib/packs/rpc-retry'
+import { pauseProductShelfForReason as pauseProductShelf } from '@/lib/packs/shelf'
+import { isTransientSolanaRpcError } from '@/lib/solana/rpc-retry'
+
+export { ensureProductShelfAfterOpen } from '@/lib/packs/shelf'
 
 function rowToResult(
   row: PackOpenRow,
@@ -117,28 +111,6 @@ export async function ensureProductShelfReady(
     return { ok: false, reason: 'Packs vault is not configured' }
   }
   return { ok: true }
-}
-
-async function pauseProductShelf(productId: string, reason: string): Promise<void> {
-  await updatePackProduct(productId, {
-    shelf_paused: true,
-    shelf_pause_reason: reason,
-  })
-}
-
-/** After an open completes, re-check shelf inventory without pausing other products. */
-export async function ensureProductShelfAfterOpen(productId: string): Promise<void> {
-  const product = await getPackProductById(productId)
-  if (!product) return
-  const config = await getPackVaultConfig()
-  const minNft = Number(product.min_nft_count ?? config.min_nft_count ?? 1)
-  const nftCount = await countAvailableNfts(productId)
-  if (nftCount < minNft && !product.shelf_paused) {
-    await pauseProductShelf(
-      productId,
-      `Low NFT inventory on this shelf (${nftCount} < min ${minNft})`
-    )
-  }
 }
 
 export async function startPackOpen(
@@ -236,6 +208,30 @@ export async function confirmAndOpenPack(input: {
     return rowToResult(open)
   }
 
+  if (open.status === 'refund_needed') {
+    throw new Error(
+      'This pack open is waiting for support — your prize roll is locked and will not change on retry. Contact support with your payment signature.'
+    )
+  }
+
+  const paymentSigMatches =
+    (open.payment_signature?.trim() ?? '') === input.paymentSignature.trim()
+  const postPaymentStatuses = new Set([
+    'paid',
+    'rolling',
+    'reserved',
+    'paying_out',
+    'failed',
+  ])
+
+  if (open.open_seed && open.open_commit_hash && open.category) {
+    const payoutResult = await payoutCommittedPackOpen({
+      open,
+      buyerWallet: input.buyerWallet,
+    })
+    return payoutResult
+  }
+
   const openProduct =
     (await getPackProductById(open.product_id)) ?? (await getPackProductForCheckout('SOL'))
   if (!openProduct) throw new Error('Pack product not found for this open')
@@ -243,44 +239,56 @@ export async function confirmAndOpenPack(input: {
   const paymentCurrency: PackPaymentCurrency =
     open.payment_currency === 'OWL' ? 'OWL' : 'SOL'
 
-  const verifyPhase = vrfPhaseTimer()
-  const verified =
-    paymentCurrency === 'OWL'
-      ? await verifyPackOwlPayment({
-          signature: input.paymentSignature,
-          buyerWallet: input.buyerWallet,
-          expectedOwl: Number(open.payment_owl_amount) || PACK_PRICE_OWL,
-          expectedFeeSol: Number(open.payment_fee_sol) || 0,
-        })
-      : await verifyPackPayment({
-          signature: input.paymentSignature,
-          buyerWallet: input.buyerWallet,
-          expectedSol: priceSol,
-        })
-  logVrfPhase('pack', 'open.verify_payment', verifyPhase.elapsed(), {
-    openId: open.id,
-    currency: paymentCurrency,
-    ok: verified.ok,
-  })
-  if (!verified.ok) {
-    await updatePackOpen(open.id, {
-      status: 'failed',
-      error_message: verified.error,
-      payment_signature: input.paymentSignature,
-    })
-    throw new Error(verified.error)
-  }
+  const skipPaymentVerify = paymentSigMatches && postPaymentStatuses.has(open.status)
 
-  try {
+  if (!skipPaymentVerify) {
+    const verifyPhase = vrfPhaseTimer()
+    const verified =
+      paymentCurrency === 'OWL'
+        ? await verifyPackOwlPayment({
+            signature: input.paymentSignature,
+            buyerWallet: input.buyerWallet,
+            expectedOwl: Number(open.payment_owl_amount) || PACK_PRICE_OWL,
+            expectedFeeSol: Number(open.payment_fee_sol) || 0,
+          })
+        : await verifyPackPayment({
+            signature: input.paymentSignature,
+            buyerWallet: input.buyerWallet,
+            expectedSol: priceSol,
+          })
+    logVrfPhase('pack', 'open.verify_payment', verifyPhase.elapsed(), {
+      openId: open.id,
+      currency: paymentCurrency,
+      ok: verified.ok,
+    })
+    if (!verified.ok) {
+      if (verified.retryable) {
+        throw new PackOpenRetryableError(verified.error)
+      }
+      await updatePackOpen(open.id, {
+        status: 'failed',
+        error_message: verified.error,
+        payment_signature: input.paymentSignature,
+      })
+      throw new Error(verified.error)
+    }
+
+    try {
+      open = await updatePackOpen(open.id, {
+        status: 'paid',
+        payment_signature: input.paymentSignature,
+        error_message: null,
+      })
+    } catch (e) {
+      const again = await getPackOpenByPaymentSignature(input.paymentSignature)
+      if (again?.status === 'completed' && again.open_seed) return rowToResult(again)
+      throw e
+    }
+  } else if (open.status === 'failed' && !open.open_seed) {
     open = await updatePackOpen(open.id, {
       status: 'paid',
-      payment_signature: input.paymentSignature,
       error_message: null,
     })
-  } catch (e) {
-    const again = await getPackOpenByPaymentSignature(input.paymentSignature)
-    if (again?.status === 'completed' && again.open_seed) return rowToResult(again)
-    throw e
   }
 
   const config = await getPackVaultConfig()
@@ -288,10 +296,23 @@ export async function confirmAndOpenPack(input: {
   let algo = resolvePackOpenAlgo()
 
   let seed: string
-  if (isPackVrfEnabled()) {
+  if (open.open_seed && open.open_commit_hash) {
+    seed = open.open_seed
+    algo = open.open_algo || algo
+  } else if (isPackVrfEnabled()) {
     open = await updatePackOpen(open.id, { status: 'rolling', open_algo: algo })
     const vrfPhase = vrfPhaseTimer()
-    const vrf = await runPackOpenVrf(open.id)
+    let vrf
+    try {
+      vrf = await withPackSolanaRpcRetry(() => runPackOpenVrf(open.id))
+    } catch (e) {
+      if (isTransientSolanaRpcError(e)) {
+        throw new PackOpenRetryableError(
+          'Temporary RPC error during VRF — try again in a moment (your payment is safe)'
+        )
+      }
+      throw e
+    }
     logVrfPhase('pack', 'open.vrf', vrfPhase.elapsed(), {
       openId: open.id,
       ok: vrf.ok,
@@ -321,13 +342,32 @@ export async function confirmAndOpenPack(input: {
     seed = generatePackOpenSeed()
   }
 
-  const commit = hashPackOpenCommit(seed)
-  open = await updatePackOpen(open.id, {
-    status: 'rolling',
-    open_algo: algo,
-    open_seed: seed,
-    open_commit_hash: commit,
-  })
+  const commit = open.open_commit_hash ?? hashPackOpenCommit(seed)
+  if (!open.open_seed || !open.open_commit_hash) {
+    open = await updatePackOpen(open.id, {
+      status: 'rolling',
+      open_algo: algo,
+      open_seed: seed,
+      open_commit_hash: commit,
+    })
+  }
+
+  if (open.category && open.prize_label) {
+    const payoutResult = await payoutCommittedPackOpen({
+      open,
+      buyerWallet: input.buyerWallet,
+    })
+    logVrfPhase('pack', 'open.total', openWall.elapsed(), {
+      openId: open.id,
+      category: open.category,
+      vrf: isPackVrfEnabled(),
+      resumed: true,
+    })
+    return {
+      ...payoutResult,
+      jackpotPoolSol: Number(openProduct.jackpot_pool_sol ?? 0),
+    }
+  }
 
   const ticketSolForJackpot =
     paymentCurrency === 'OWL'
@@ -379,28 +419,10 @@ export async function confirmAndOpenPack(input: {
       nft_pool_snapshot: null,
     })
 
-    open = await updatePackOpen(open.id, { status: 'paying_out' })
-
-    const paid = await payoutSolFromPacksVault(
-      input.buyerWallet,
-      solToLamports(jackpotAmount)
-    )
-    if (!paid.ok || !paid.signature) {
-      await updatePackOpen(open.id, {
-        status: 'refund_needed',
-        error_message: paid.error || 'Jackpot SOL payout failed',
-      })
-      throw new Error(paid.error || 'Jackpot payout failed')
-    }
-
-    open = await updatePackOpen(open.id, {
-      status: 'completed',
-      payout_signature: paid.signature,
-      completed_at: new Date().toISOString(),
-      error_message: null,
+    const jackpotPayout = await payoutCommittedPackOpen({
+      open,
+      buyerWallet: input.buyerWallet,
     })
-
-    await ensureProductShelfAfterOpen(openProduct.id)
 
     logVrfPhase('pack', 'open.total', openWall.elapsed(), {
       openId: open.id,
@@ -408,7 +430,10 @@ export async function confirmAndOpenPack(input: {
       vrf: isPackVrfEnabled(),
     })
 
-    return rowToResult(open, { jackpotPoolSol: jackpotResolution.poolAfterSol })
+    return {
+      ...jackpotPayout,
+      jackpotPoolSol: jackpotResolution.poolAfterSol,
+    }
   }
 
   const categoryWeights = resolvePackCategoryWeightsBps(openProduct.slug)
@@ -422,7 +447,6 @@ export async function confirmAndOpenPack(input: {
   let nftMint: string | null = null
   let nftName: string | null = null
   let nftImageUrl: string | null = null
-  let nftPrizeStandard: PackInventoryPrizeStandard | null = null
   let nftPoolSnapshot: PackNftPoolSnapshotRow[] | null = null
 
   if (category === 'owl') {
@@ -505,7 +529,6 @@ export async function confirmAndOpenPack(input: {
       nftMint = reserved2.mint_address
       nftName = reserved2.name
       nftImageUrl = reserved2.image_url
-      nftPrizeStandard = reserved2.prize_standard ?? 'spl'
       fairValueSol = Number(reserved2.fair_value_sol)
       prizeLabel = reserved2.name || `NFT ${reserved2.mint_address.slice(0, 8)}…`
     } else {
@@ -513,7 +536,6 @@ export async function confirmAndOpenPack(input: {
       nftMint = reserved.mint_address
       nftName = reserved.name
       nftImageUrl = reserved.image_url
-      nftPrizeStandard = reserved.prize_standard ?? 'spl'
       fairValueSol = Number(reserved.fair_value_sol)
       prizeLabel = reserved.name || `NFT ${reserved.mint_address.slice(0, 8)}…`
     }
@@ -535,57 +557,10 @@ export async function confirmAndOpenPack(input: {
     nft_pool_snapshot: nftPoolSnapshot,
   })
 
-  open = await updatePackOpen(open.id, { status: 'paying_out' })
-
-  let payoutSignature: string | null = null
-  try {
-    if (category === 'owl' && owlAmount != null) {
-      const paid = await payoutOwlFromPacksVault(input.buyerWallet, owlAmount)
-      if (!paid.ok || !paid.signature) {
-        throw new Error(paid.error || 'OWL payout failed')
-      }
-      payoutSignature = paid.signature
-    } else if (category === 'sol' && solAmount != null) {
-      const paid = await payoutSolFromPacksVault(input.buyerWallet, solToLamports(solAmount))
-      if (!paid.ok || !paid.signature) {
-        throw new Error(paid.error || 'SOL payout failed')
-      }
-      payoutSignature = paid.signature
-    } else if (category === 'nft' && nftMint && nftInventoryId) {
-      const paid = await payoutNftFromPacksVault(nftMint, input.buyerWallet, nftPrizeStandard)
-      if (!paid.ok || !paid.signature) {
-        await releaseNftReservation(nftInventoryId)
-        throw new Error(paid.error || 'NFT payout failed')
-      }
-      payoutSignature = paid.signature
-      await markNftPaid(nftInventoryId, open.id, paid.signature)
-    } else {
-      throw new Error('Invalid prize state for payout')
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    if (nftInventoryId) {
-      try {
-        await releaseNftReservation(nftInventoryId)
-      } catch {
-        // ignore
-      }
-    }
-    await updatePackOpen(open.id, {
-      status: 'refund_needed',
-      error_message: msg,
-    })
-    throw e
-  }
-
-  open = await updatePackOpen(open.id, {
-    status: 'completed',
-    payout_signature: payoutSignature,
-    completed_at: new Date().toISOString(),
-    error_message: null,
+  const payoutResult = await payoutCommittedPackOpen({
+    open,
+    buyerWallet: input.buyerWallet,
   })
-
-  await ensureProductShelfAfterOpen(openProduct.id)
 
   logVrfPhase('pack', 'open.total', openWall.elapsed(), {
     openId: open.id,
@@ -593,9 +568,11 @@ export async function confirmAndOpenPack(input: {
     vrf: isPackVrfEnabled(),
   })
 
-  return rowToResult(open, {
-    nftName,
-    nftImageUrl,
+  return {
+    ...payoutResult,
+    nftName: payoutResult.nftName ?? nftName,
+    nftImageUrl: payoutResult.nftImageUrl ?? nftImageUrl,
     jackpotPoolSol: jackpotResolution.poolAfterSol,
-  })
+  }
 }
+

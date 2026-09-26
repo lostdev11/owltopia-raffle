@@ -24,6 +24,8 @@ import {
   getMint,
 } from '@solana/spl-token'
 import { getSolanaConnection, getSolanaReadConnection } from '@/lib/solana/connection'
+import { withPackSolanaRpcRetry } from '@/lib/packs/rpc-retry'
+import { waitForPackPayoutConfirmation } from '@/lib/packs/payout-verify'
 import { getTokenInfo } from '@/lib/tokens'
 import {
   payoutCompressedFromKeypair,
@@ -31,6 +33,52 @@ import {
 } from '@/lib/solana/payout-nft-from-keypair'
 import { trySendSplNftViaTokenMetadataFromEscrow } from '@/lib/solana/token-metadata-prize-payout'
 import type { PackInventoryPrizeStandard } from '@/lib/packs/types'
+
+export type PackVaultPayoutResult =
+  | { ok: true; signature: string }
+  | { ok: false; error: string; signature?: string; confirmUncertain?: boolean }
+
+async function sendSignedPackVaultTransaction(
+  connection: Connection,
+  tx: Transaction,
+  keypair: Keypair
+): Promise<PackVaultPayoutResult> {
+  const { blockhash, lastValidBlockHeight } = await withPackSolanaRpcRetry(() =>
+    connection.getLatestBlockhash('confirmed')
+  )
+  tx.recentBlockhash = blockhash
+  tx.feePayer = keypair.publicKey
+  tx.sign(keypair)
+
+  let signature: string
+  try {
+    signature = await withPackSolanaRpcRetry(() =>
+      connection.sendRawTransaction(tx.serialize(), {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      })
+    )
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+
+  const confirmed = await waitForPackPayoutConfirmation(signature)
+  if (confirmed) return { ok: true, signature }
+
+  try {
+    const landed = await waitForPackPayoutConfirmation(signature, 8_000)
+    if (landed) return { ok: true, signature }
+  } catch {
+    // ignore
+  }
+
+  return {
+    ok: false,
+    signature,
+    confirmUncertain: true,
+    error: 'Payout transaction sent but confirmation timed out (check on-chain before refunding)',
+  }
+}
 
 function parseSolanaSecretKeyFromEnv(raw: string | undefined): Keypair | null {
   const trimmed = raw?.trim()
@@ -104,7 +152,7 @@ async function resolveTokenProgramForMint(
 export async function payoutSolFromPacksVault(
   recipientWallet: string,
   lamports: bigint
-): Promise<{ ok: boolean; signature?: string; error?: string }> {
+): Promise<PackVaultPayoutResult> {
   if (lamports <= 0n) return { ok: false, error: 'Payout amount must be positive.' }
   const keypair = getPacksVaultKeypair()
   if (!keypair) return { ok: false, error: 'Packs vault not configured (PACKS_VAULT_SECRET_KEY)' }
@@ -114,7 +162,9 @@ export async function payoutSolFromPacksVault(
   if (lamports > BigInt(Number.MAX_SAFE_INTEGER)) {
     return { ok: false, error: 'Amount too large for SOL transfer encoding.' }
   }
-  const balance = await connection.getBalance(keypair.publicKey, 'confirmed')
+  const balance = await withPackSolanaRpcRetry(() =>
+    connection.getBalance(keypair.publicKey, 'confirmed')
+  )
   const needed = lamports + 5000n
   if (BigInt(balance) < needed) {
     return { ok: false, error: 'Packs vault SOL balance too low for payout (+ fee).' }
@@ -127,26 +177,13 @@ export async function payoutSolFromPacksVault(
       lamports: Number(lamports),
     })
   )
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
-  tx.recentBlockhash = blockhash
-  tx.feePayer = keypair.publicKey
-  tx.sign(keypair)
-  try {
-    const signature = await connection.sendRawTransaction(tx.serialize(), {
-      skipPreflight: false,
-      preflightCommitment: 'confirmed',
-    })
-    await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
-    return { ok: true, signature }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
+  return sendSignedPackVaultTransaction(connection, tx, keypair)
 }
 
 export async function payoutOwlFromPacksVault(
   recipientWallet: string,
   owlAmount: number
-): Promise<{ ok: boolean; signature?: string; error?: string }> {
+): Promise<PackVaultPayoutResult> {
   if (!(owlAmount > 0)) return { ok: false, error: 'OWL amount must be positive.' }
   const keypair = getPacksVaultKeypair()
   if (!keypair) return { ok: false, error: 'Packs vault not configured (PACKS_VAULT_SECRET_KEY)' }
@@ -199,20 +236,7 @@ export async function payoutOwlFromPacksVault(
     createTransferInstruction(sourceAta, destAta, keypair.publicKey, raw, [], tokenProgram)
   )
 
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
-  tx.recentBlockhash = blockhash
-  tx.feePayer = keypair.publicKey
-  tx.sign(keypair)
-  try {
-    const signature = await connection.sendRawTransaction(tx.serialize(), {
-      skipPreflight: false,
-      preflightCommitment: 'confirmed',
-    })
-    await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
-    return { ok: true, signature }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
+  return sendSignedPackVaultTransaction(connection, tx, keypair)
 }
 
 function isVaultSplMissingNftError(error: string | undefined): boolean {
@@ -292,20 +316,7 @@ async function payoutSplNftFromPacksVault(
     createTransferInstruction(sourceAta, destAta, keypair.publicKey, 1n, [], tokenProgram)
   )
 
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
-  tx.recentBlockhash = blockhash
-  tx.feePayer = keypair.publicKey
-  tx.sign(keypair)
-  try {
-    const signature = await connection.sendRawTransaction(tx.serialize(), {
-      skipPreflight: false,
-      preflightCommitment: 'confirmed',
-    })
-    await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
-    return { ok: true, signature }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
+  return sendSignedPackVaultTransaction(connection, tx, keypair)
 }
 
 /** Transfer an NFT prize from the packs vault to the winner (SPL, Core, or compressed). */

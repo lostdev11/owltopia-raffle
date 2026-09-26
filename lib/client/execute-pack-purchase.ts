@@ -90,35 +90,46 @@ async function confirmPackOpen(input: {
   wallet: string
   paymentSignature: string
 }): Promise<{ ok: true; result: PackOpenClientResult } | { ok: false; error: string }> {
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), PACK_OPEN_CLIENT_TIMEOUT_MS)
-  try {
-    const openRes = await fetch('/api/packs/open', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        openId: input.openId,
-        wallet: input.wallet,
-        paymentSignature: input.paymentSignature,
-      }),
-      signal: controller.signal,
-    })
-    const openData = await openRes.json().catch(() => ({}))
-    if (!openRes.ok) {
-      return { ok: false, error: openData.error || 'Pack open failed after payment' }
+  const maxAttempts = 4
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), PACK_OPEN_CLIENT_TIMEOUT_MS)
+    try {
+      const openRes = await fetch('/api/packs/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          openId: input.openId,
+          wallet: input.wallet,
+          paymentSignature: input.paymentSignature,
+        }),
+        signal: controller.signal,
+      })
+      const openData = await openRes.json().catch(() => ({}))
+      if (openRes.status === 503 && openData.retryable && attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 800 * (attempt + 1) + Math.random() * 400))
+        continue
+      }
+      if (!openRes.ok) {
+        return { ok: false, error: openData.error || 'Pack open failed after payment' }
+      }
+      return { ok: true, result: openData.result as PackOpenClientResult }
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        return { ok: false, error: PACK_OPEN_CLIENT_TIMEOUT_MESSAGE }
+      }
+      if (attempt >= maxAttempts - 1) {
+        return {
+          ok: false,
+          error: e instanceof Error ? e.message : 'Pack open failed after payment',
+        }
+      }
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)))
+    } finally {
+      clearTimeout(timeoutId)
     }
-    return { ok: true, result: openData.result as PackOpenClientResult }
-  } catch (e) {
-    if (e instanceof Error && e.name === 'AbortError') {
-      return { ok: false, error: PACK_OPEN_CLIENT_TIMEOUT_MESSAGE }
-    }
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : 'Pack open failed after payment',
-    }
-  } finally {
-    clearTimeout(timeoutId)
   }
+  return { ok: false, error: 'Pack open failed after payment' }
 }
 
 async function readBalanceLamports(

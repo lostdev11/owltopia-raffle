@@ -11,12 +11,19 @@ import { getPacksVaultPublicKey } from '@/lib/packs/vault'
 import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 import { getTokenInfo, isOwlEnabled } from '@/lib/tokens'
 import { owlUiToRawBigint } from '@/lib/council/owl-amount-format'
+import { isTransientSolanaRpcError } from '@/lib/solana/rpc-retry'
+import { isSolanaRpcRateLimitError } from '@/lib/solana-rpc-rate-limit'
+import { withPackSolanaRpcRetry } from '@/lib/packs/rpc-retry'
 
 const SOL_TOLERANCE = 0.000_01 // ~10k lamports
 
 export type PackPaymentVerifyResult =
   | { ok: true; lamports: number; buyer: string; currency: PackPaymentCurrency }
-  | { ok: false; error: string }
+  | { ok: false; error: string; retryable?: boolean }
+
+function isRetryablePaymentFetchError(error: unknown): boolean {
+  return isTransientSolanaRpcError(error) || isSolanaRpcRateLimitError(error)
+}
 
 type TokenBalanceRow = {
   mint: string
@@ -69,15 +76,33 @@ export async function verifyPackPayment(input: {
   const connection = input.connection ?? getSolanaReadConnection()
   let tx
   try {
-    tx = await connection.getTransaction(input.signature, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
-    })
+    tx = await withPackSolanaRpcRetry(() =>
+      connection.getTransaction(input.signature, {
+        commitment: 'confirmed',
+        maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
+      })
+    )
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : 'Failed to fetch transaction' }
+    const retryable = isRetryablePaymentFetchError(e)
+    return {
+      ok: false,
+      retryable,
+      error: retryable
+        ? 'Temporary RPC error while verifying payment — try again in a moment'
+        : e instanceof Error
+          ? e.message
+          : 'Failed to fetch transaction',
+    }
   }
 
-  if (!tx?.meta || tx.meta.err) {
+  if (!tx?.meta) {
+    return {
+      ok: false,
+      retryable: true,
+      error: 'Payment transaction not indexed yet — try again in a moment',
+    }
+  }
+  if (tx.meta.err) {
     return { ok: false, error: 'Transaction not found or failed on-chain' }
   }
 
@@ -159,15 +184,33 @@ export async function verifyPackOwlPayment(input: {
   const connection = input.connection ?? getSolanaReadConnection()
   let tx
   try {
-    tx = await connection.getTransaction(input.signature, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
-    })
+    tx = await withPackSolanaRpcRetry(() =>
+      connection.getTransaction(input.signature, {
+        commitment: 'confirmed',
+        maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
+      })
+    )
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : 'Failed to fetch transaction' }
+    const retryable = isRetryablePaymentFetchError(e)
+    return {
+      ok: false,
+      retryable,
+      error: retryable
+        ? 'Temporary RPC error while verifying payment — try again in a moment'
+        : e instanceof Error
+          ? e.message
+          : 'Failed to fetch transaction',
+    }
   }
 
-  if (!tx?.meta || tx.meta.err) {
+  if (!tx?.meta) {
+    return {
+      ok: false,
+      retryable: true,
+      error: 'Payment transaction not indexed yet — try again in a moment',
+    }
+  }
+  if (tx.meta.err) {
     return { ok: false, error: 'Transaction not found or failed on-chain' }
   }
 

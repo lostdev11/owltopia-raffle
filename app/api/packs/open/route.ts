@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { PublicKey } from '@solana/web3.js'
 import { assertPacksAccess } from '@/lib/packs/assert-access'
 import { confirmAndOpenPack } from '@/lib/packs/open-engine'
+import { isPackOpenRetryableError } from '@/lib/packs/pack-open-errors'
 import { packRevealMessage } from '@/lib/packs/reveal-message'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
@@ -58,6 +59,10 @@ export async function POST(request: NextRequest) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Pack open failed'
     console.error('[packs] open', e)
-    return NextResponse.json({ error: msg }, { status: 400 })
+    const retryable = isPackOpenRetryableError(e)
+    return NextResponse.json(
+      { error: msg, retryable },
+      { status: retryable ? 503 : 400 }
+    )
   }
 }
