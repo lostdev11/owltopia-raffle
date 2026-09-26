@@ -9,7 +9,9 @@ import { cn } from '@/lib/utils'
 
 export type PackLedgerRow = {
   id: string
-  completedAt: string
+  status: string
+  completedAt: string | null
+  createdAt: string
   productName: string
   productSlug: string
   category: string
@@ -17,11 +19,28 @@ export type PackLedgerRow = {
   paymentSignature: string | null
   payoutSignature: string | null
   isJackpotWin: boolean
+  errorMessage: string | null
 }
 
 const PAGE_SIZE = 15
 
-function formatWhen(iso: string): string {
+function ledgerStatusLabel(status: string): { label: string; className: string } {
+  switch (status) {
+    case 'completed':
+      return { label: 'Completed', className: 'text-[#00FF9C]/90 bg-[#00FF9C]/10 ring-[#00FF9C]/25' }
+    case 'refund_needed':
+      return { label: 'Refund / support', className: 'text-amber-200 bg-amber-500/15 ring-amber-400/30' }
+    case 'failed':
+      return { label: 'Failed', className: 'text-red-300 bg-red-500/10 ring-red-400/25' }
+    case 'pending_payment':
+      return { label: 'Awaiting payment', className: 'text-white/70 bg-white/5 ring-white/15' }
+    default:
+      return { label: 'Resolving…', className: 'text-sky-200 bg-sky-500/10 ring-sky-400/25' }
+  }
+}
+
+function formatWhen(iso: string | null, fallback: string): string {
+  if (!iso) return fallback
   try {
     return new Date(iso).toLocaleString(undefined, {
       month: 'short',
@@ -226,10 +245,27 @@ export function PackLedgerPanel({ wallet, refreshKey = 0 }: Props) {
                 {rows.map((row) => {
                   const txSig = row.payoutSignature || row.paymentSignature
                   const txUrl = solscanTx(txSig)
+                  const statusUi = ledgerStatusLabel(row.status)
+                  const when = formatWhen(
+                    row.completedAt ?? row.createdAt,
+                    row.status === 'pending_payment' ? 'Started' : 'In progress'
+                  )
                   return (
                     <li key={row.id} className="flex flex-col gap-2 py-3.5 sm:flex-row sm:items-center">
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs text-white/45">{formatWhen(row.completedAt)}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-xs text-white/45">{when}</p>
+                          {row.status !== 'completed' ? (
+                            <span
+                              className={cn(
+                                'inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1',
+                                statusUi.className
+                              )}
+                            >
+                              {statusUi.label}
+                            </span>
+                          ) : null}
+                        </div>
                         <p className="mt-0.5 text-sm text-white/70">
                           {row.productName}
                           <span className="mx-2 text-white/25">·</span>
@@ -244,14 +280,21 @@ export function PackLedgerPanel({ wallet, refreshKey = 0 }: Props) {
                             row.prizeLabel
                           )}
                         </p>
+                        {row.errorMessage && row.status === 'refund_needed' ? (
+                          <p className="mt-1 text-xs leading-relaxed text-amber-100/70">
+                            {row.errorMessage}
+                          </p>
+                        ) : null}
                       </div>
                       <div className="flex shrink-0 flex-wrap items-center gap-3">
-                        <Link
-                          href={`/packs/verify/${row.id}`}
-                          className="inline-flex min-h-[44px] items-center text-xs font-semibold uppercase tracking-[0.16em] text-[#00FF9C] hover:text-[#7DFFB8]"
-                        >
-                          Verify
-                        </Link>
+                        {row.status === 'completed' ? (
+                          <Link
+                            href={`/packs/verify/${row.id}`}
+                            className="inline-flex min-h-[44px] items-center text-xs font-semibold uppercase tracking-[0.16em] text-[#00FF9C] hover:text-[#7DFFB8]"
+                          >
+                            Verify
+                          </Link>
+                        ) : null}
                         {txUrl ? (
                           <a
                             href={txUrl}

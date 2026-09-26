@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 import {
-  countCompletedPackOpensForWallet,
-  listCompletedPackOpensForWallet,
+  countPackOpensForWalletLedger,
+  listPackOpensForWalletLedger,
 } from '@/lib/packs/db'
 
 export const dynamic = 'force-dynamic'
@@ -24,7 +24,7 @@ function requireConnectedMatchesSession(
   return null
 }
 
-/** GET /api/packs/ledger — completed opens for the signed-in wallet only. */
+/** GET /api/packs/ledger — pack opens for the signed-in wallet (includes pending / refund_needed). */
 export async function GET(request: NextRequest) {
   try {
     const session = await requireSession(request)
@@ -53,8 +53,8 @@ export async function GET(request: NextRequest) {
     const offset = Number.isFinite(offsetRaw) ? offsetRaw : 0
 
     const [total, opens] = await Promise.all([
-      countCompletedPackOpensForWallet(session.wallet),
-      listCompletedPackOpensForWallet({
+      countPackOpensForWalletLedger(session.wallet),
+      listPackOpensForWalletLedger({
         wallet: session.wallet,
         limit,
         offset,

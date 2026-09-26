@@ -26,9 +26,20 @@ export function isTransientSolanaRpcError(error: unknown): boolean {
   )
 }
 
+function retryDelayMs(
+  attempt: number,
+  baseDelayMs: number,
+  options?: { maxDelayMs?: number; jitter?: boolean }
+): number {
+  const maxDelayMs = Math.max(baseDelayMs, options?.maxDelayMs ?? 15_000)
+  const exp = baseDelayMs * 2 ** attempt
+  const jitter = options?.jitter ? Math.random() * baseDelayMs : 0
+  return Math.min(maxDelayMs, Math.floor(exp + jitter))
+}
+
 export async function withSolanaRpcRetry<T>(
   fn: () => Promise<T>,
-  options?: { retries?: number; baseDelayMs?: number }
+  options?: { retries?: number; baseDelayMs?: number; maxDelayMs?: number; jitter?: boolean }
 ): Promise<T> {
   const retries = Math.max(1, options?.retries ?? 3)
   const baseDelayMs = Math.max(100, options?.baseDelayMs ?? 1000)
@@ -42,7 +53,9 @@ export async function withSolanaRpcRetry<T>(
       if (!isTransientSolanaRpcError(error) || attempt >= retries - 1) {
         throw error
       }
-      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)))
+      await new Promise((resolve) =>
+        setTimeout(resolve, retryDelayMs(attempt, baseDelayMs, options))
+      )
     }
   }
 

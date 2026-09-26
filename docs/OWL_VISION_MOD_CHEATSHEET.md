@@ -30,7 +30,17 @@ Wallet: connect the vanity wallet Devdad added for you, then **Sign in** (SIWS) 
 
 ---
 
-## 4. Announcements & Discord comms
+## 4. Ops Log (manual money moves)
+
+1. Owl Vision → **Ops Log** (or `/admin/ops-log`).
+2. **Add entry** when dev dad (or you) sends a manual refund, prize payout, top-up, or when logging a mis-send / stuck buyer / fee refund.
+3. Paste **tx signature** and **wallet** — Solscan links appear in the table.
+4. Update **status** inline (`pending` → `done`, or `needs_decision` if you need a full admin).
+5. **Export CSV** for handoffs or audits. You cannot delete rows — full admins only.
+
+---
+
+## 5. Announcements & Discord comms
 
 - **Announcements** — site banners and “new” badges.
 - **Discord broadcast** — templates and scheduled messages.
@@ -39,7 +49,7 @@ Wallet: connect the vanity wallet Devdad added for you, then **Sign in** (SIWS) 
 
 ---
 
-## 5. Monitoring (read-only)
+## 6. Monitoring (read-only)
 
 - **Action inbox** — triage queue; items marked **escalate** need a full admin.
 - **Creator Radar** / **Hot communities** — context for support.
@@ -48,7 +58,7 @@ Wallet: connect the vanity wallet Devdad added for you, then **Sign in** (SIWS) 
 
 ---
 
-## 6. Per-raffle (from Manage raffles → open listing)
+## 7. Per-raffle (from Manage raffles → open listing)
 
 You **can**:
 
@@ -67,7 +77,7 @@ You **cannot** (403 / hidden UI — ping Devdad):
 
 ---
 
-## 7. Refunds, cancellations, winners
+## 8. Refunds, cancellations, winners
 
 **Do not process.** Create a dev task with:
 
@@ -80,7 +90,7 @@ Ping Devdad or another full admin.
 
 ---
 
-## 8. Nesting / staking issues
+## 9. Nesting / staking issues
 
 Junior admins do **not** have Owl Nesting admin (heal / force unstake). Collect wallet + what they tried → dev task → escalate.
 
@@ -93,6 +103,7 @@ Junior admins do **not** have Owl Nesting admin (heal / force unstake). Collect 
 | Stuck ticket / re-verify | ✅ Yes |
 | Verify by tx signature | ✅ Yes |
 | Dev tasks | ✅ Yes |
+| Ops Log (log manual payouts / incidents) | ✅ Yes |
 | Council activation | ✅ Yes |
 | Announcements / Discord | ✅ Yes |
 | Partner applications (review status) | ✅ Yes |
