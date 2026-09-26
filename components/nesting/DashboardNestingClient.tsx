@@ -3479,17 +3479,57 @@ export function DashboardNestingClient() {
         skipPreparing: true,
         onPhase: setClaimAllTxPhase,
         async execute() {
+          await loadPositions({ heal: false, silent: true })
+
+          const previewResult = await fetchNestingJson<{
+            ready?: boolean
+            error?: string
+            fee_units?: number
+            total_owl?: number
+            reusable_platform_fee_signature?: string | null
+          }>('/api/me/staking/claim-all/preview', {
+            method: 'GET',
+            credentials: 'include',
+            timeoutMs: NESTING_CLAIM_ALL_FETCH_TIMEOUT_MS,
+            headers: {
+              'X-Connected-Wallet': publicKey.toBase58(),
+            },
+          })
+          const preview = previewResult.json ?? {}
+          if (!previewResult.ok || !preview.ready) {
+            const err =
+              typeof preview.error === 'string'
+                ? preview.error
+                : previewResult.clientTimeout
+                  ? nestingFetchTimeoutMessage('claim')
+                  : 'Claim all is not available right now.'
+            setActionError(err)
+            throw new Error('claim-all')
+          }
+
+          const feeUnits = Math.max(
+            1,
+            Math.floor(
+              Number.isFinite(Number(preview.fee_units)) ? Number(preview.fee_units) : claimPlans.length
+            )
+          )
+
           let platformFeeSig: string | null = null
           if (platformFeeActive) {
-            const reusedFee = readPendingClaimPlatformFee(claimPlans.length)
+            const serverReuse =
+              typeof preview.reusable_platform_fee_signature === 'string'
+                ? preview.reusable_platform_fee_signature.trim()
+                : ''
+            const reusedFee = serverReuse || readPendingClaimPlatformFee(feeUnits)
             if (reusedFee) {
               platformFeeSig = reusedFee
+              savePendingClaimPlatformFee(reusedFee, feeUnits)
               setClaimAllTxPhase('submitting')
             } else {
               setClaimAllTxPhase('awaiting_wallet_signature')
-              platformFeeSig = await sendStakingPlatformFee(claimPlans.length)
+              platformFeeSig = await sendStakingPlatformFee(feeUnits)
               // Keep fee for retry if OWL payout fails after the wallet approval.
-              savePendingClaimPlatformFee(platformFeeSig, claimPlans.length)
+              savePendingClaimPlatformFee(platformFeeSig, feeUnits)
               // Fee is signed/confirmed; the wallet is done. Reflect server-side work so
               // the user does not think another wallet approval is pending and re-pay the fee.
               setClaimAllTxPhase('submitting')
@@ -3526,9 +3566,7 @@ export function DashboardNestingClient() {
               (result.clientTimeout
                 ? nestingFetchTimeoutMessage('claim')
                 : nestingFetchNetworkErrorMessage('claim')) +
-                (platformFeeSig
-                  ? ` ${claimRetryWithoutRepayMessage(claimPlans.length)}`
-                  : '')
+                (platformFeeSig ? ` ${claimRetryWithoutRepayMessage(feeUnits)}` : '')
             )
             throw new Error('claim-all')
           }
@@ -3601,9 +3639,7 @@ export function DashboardNestingClient() {
               setActionError(err)
             } else {
               setActionError(
-                platformFeeSig
-                  ? `${err} ${claimRetryWithoutRepayMessage(claimPlans.length)}`
-                  : err
+                platformFeeSig ? `${err} ${claimRetryWithoutRepayMessage(feeUnits)}` : err
               )
             }
             throw new Error('claim-all')
