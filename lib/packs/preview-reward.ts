@@ -2,6 +2,7 @@ import type { PackOpenClientResult } from '@/lib/client/execute-pack-purchase'
 
 export type PackPreviewInventoryItem = {
   id: string
+  product_id?: string | null
   mint_address: string
   name: string | null
   image_url?: string | null

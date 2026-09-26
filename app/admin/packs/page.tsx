@@ -16,8 +16,8 @@ import { PacksAdminExtraDetails } from '@/components/admin/PacksAdminExtraDetail
 import { getCachedAdmin, setCachedAdmin, getCachedAdminRole } from '@/lib/admin-check-cache'
 import { packPauseReasonLabel, packRtpPercentLabel } from '@/lib/packs/admin-copy'
 import { OWL_TICKER } from '@/lib/council/owl-ticker'
-import { packNftBandLabel } from '@/lib/packs/ev-simulator'
-import { packInventoryPrizeStandardLabel } from '@/lib/packs/types'
+import { AdminPacksInventoryList } from '@/components/admin/AdminPacksInventoryList'
+import { packAdminInventoryShelfSummary } from '@/lib/packs/admin-inventory-shelf'
 import { ArrowLeft, ChevronDown, Loader2 } from 'lucide-react'
 
 type AdminPacksData = {
@@ -204,6 +204,9 @@ export default function AdminPacksPage() {
   }
 
   const pauseLabel = data ? packPauseReasonLabel(data.vault.pauseReason) : null
+  const inventoryShelfSummary = data
+    ? packAdminInventoryShelfSummary(data.inventory, data.products ?? [])
+    : null
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
@@ -337,7 +340,7 @@ export default function AdminPacksPage() {
             </div>
           </div>
 
-          <PacksOpeningPreviewPanel inventory={data.inventory} />
+          <PacksOpeningPreviewPanel inventory={data.inventory} products={data.products ?? []} />
 
           <div className="rounded-lg border p-4">
             <AdminPacksDepositsSection
@@ -357,9 +360,13 @@ export default function AdminPacksPage() {
               style={{ touchAction: 'manipulation' }}
             >
               <span className="font-medium">
-                Inventory
+                Prize NFT inventory
                 <span className="ml-2 font-normal text-muted-foreground">
-                  ({data.inventory.length})
+                  ({data.inventory.length} total
+                  {inventoryShelfSummary
+                    ? ` · $OWL ${inventoryShelfSummary.owl.available} avail · Paid ${inventoryShelfSummary.paid.available} avail`
+                    : ''}
+                  )
                 </span>
               </span>
               <ChevronDown
@@ -368,71 +375,13 @@ export default function AdminPacksPage() {
               />
             </summary>
             <div className="border-t border-border/50 px-4 pb-4 pt-2">
-              <p className="text-xs text-muted-foreground">
-                Remove only unlists the row. It does not send the NFT back from the vault.
-              </p>
-              <ul className="mt-3 divide-y text-sm">
-                {data.inventory.length === 0 && (
-                  <li className="py-3 text-muted-foreground">No items</li>
-                )}
-                {data.inventory.map((item) => {
-                  const band = packNftBandLabel(Number(item.fair_value_sol))
-                  return (
-                    <li key={item.id} className="flex items-center justify-between gap-2 py-2">
-                      <div className="flex min-w-0 items-center gap-3">
-                        {item.image_url ? (
-                          <img
-                            src={item.image_url}
-                            alt=""
-                            className="h-10 w-10 shrink-0 rounded object-cover"
-                          />
-                        ) : (
-                          <div className="h-10 w-10 shrink-0 rounded bg-muted" />
-                        )}
-                        <div className="min-w-0">
-                          <p className="truncate font-medium">{item.name || 'NFT'}</p>
-                          <p className="font-mono text-xs text-muted-foreground break-all">
-                            {item.mint_address}
-                          </p>
-                          <p className="text-muted-foreground">
-                            {item.fair_value_sol} SOL
-                            {band ? ` · ${band}` : ''} ·{' '}
-                            {packInventoryPrizeStandardLabel(item.prize_standard)} · {item.status}
-                            {item.odds_tier === 'premium_1pct' ? ' · 1% tier' : ''}
-                          </p>
-                        </div>
-                      </div>
-                      {item.status === 'available' && (
-                        <div className="flex shrink-0 flex-col items-stretch gap-1 sm:flex-row">
-                          <Button
-                            size="sm"
-                            variant={item.odds_tier === 'premium_1pct' ? 'default' : 'outline'}
-                            className="min-h-[44px] touch-manipulation"
-                            disabled={busy}
-                            onClick={() =>
-                              void setInventoryOddsTier(
-                                item.id,
-                                item.odds_tier === 'premium_1pct' ? 'standard' : 'premium_1pct'
-                              )
-                            }
-                          >
-                            {item.odds_tier === 'premium_1pct' ? '1% on' : '1% off'}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="min-h-[44px] touch-manipulation"
-                            disabled={busy}
-                            onClick={() => void removeNft(item.id)}
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
+              <AdminPacksInventoryList
+                inventory={data.inventory}
+                products={data.products ?? []}
+                busy={busy}
+                onRemove={removeNft}
+                onSetOddsTier={setInventoryOddsTier}
+              />
             </div>
           </details>
         </div>

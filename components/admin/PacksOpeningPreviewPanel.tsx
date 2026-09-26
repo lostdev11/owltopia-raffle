@@ -10,21 +10,33 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { preloadPackAnimationVideos } from '@/lib/packs/animations'
 import {
+  packAdminShelfBadgeLabel,
+  packAdminShelfSlugForInventoryRow,
+  type PackAdminProductRef,
+} from '@/lib/packs/admin-inventory-shelf'
+import {
   packOpenRewardFromInventory,
   type PackPreviewInventoryItem,
 } from '@/lib/packs/preview-reward'
 
 type PreviewMode = 'hovering' | 'opening' | 'full' | 'reveal'
 
-function inventoryOptionLabel(item: PackPreviewInventoryItem): string {
+function inventoryOptionLabel(
+  item: PackPreviewInventoryItem,
+  products: PackAdminProductRef[]
+): string {
   const name = item.name || `NFT ${item.mint_address.slice(0, 8)}…`
-  return `${name} · ${item.fair_value_sol} SOL · ${item.status}`
+  const slug = packAdminShelfSlugForInventoryRow(item, products)
+  const shelf = packAdminShelfBadgeLabel(slug)
+  return `${name} · ${shelf} · ${item.fair_value_sol} SOL · ${item.status}`
 }
 
 export function PacksOpeningPreviewPanel({
   inventory = [],
+  products = [],
 }: {
   inventory?: PackPreviewInventoryItem[]
+  products?: PackAdminProductRef[]
 }) {
   const [category, setCategory] = useState<'owl' | 'sol' | 'nft'>('nft')
   const [inventoryId, setInventoryId] = useState('')
@@ -133,7 +145,7 @@ export function PacksOpeningPreviewPanel({
               >
                 {inventory.map((item) => (
                   <option key={item.id} value={item.id}>
-                    {inventoryOptionLabel(item)}
+                    {inventoryOptionLabel(item, products)}
                   </option>
                 ))}
               </select>

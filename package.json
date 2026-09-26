@@ -123,6 +123,7 @@
     "test:pack-jackpot-accounting": "npx --yes tsx scripts/test-pack-jackpot-accounting.ts",
     "test:packs-deposit-batch": "npx --yes tsx scripts/test-packs-deposit-batch.ts",
     "test:packs-inventory-eligibility": "npx --yes tsx scripts/test-packs-inventory-eligibility.ts",
+    "test:packs-admin-inventory-shelf": "npx --yes tsx scripts/test-packs-admin-inventory-shelf.ts",
     "test:pack-purchase-errors": "npx --yes tsx scripts/test-pack-purchase-errors.ts",
     "test:pack-owl-checkout": "npx --yes tsx scripts/test-pack-owl-checkout.ts",
     "test:pack-reveal-ledger": "npx --yes tsx scripts/test-pack-reveal-ledger.ts",
