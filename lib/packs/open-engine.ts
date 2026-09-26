@@ -2,6 +2,7 @@ import {
   PACK_PRICE_OWL,
   PACK_PRICE_SOL,
   PACK_OPEN_ALGO_V1,
+  PACK_OPEN_ALGO_V2_VRF,
   type PackPaymentCurrency,
 } from '@/lib/packs/config'
 import {
@@ -298,13 +299,19 @@ export async function confirmAndOpenPack(input: {
   let seed: string
   if (open.open_seed && open.open_commit_hash) {
     seed = open.open_seed
-    algo = open.open_algo || algo
+    if (
+      open.open_algo === PACK_OPEN_ALGO_V1 ||
+      open.open_algo === PACK_OPEN_ALGO_V2_VRF
+    ) {
+      algo = open.open_algo
+    }
   } else if (isPackVrfEnabled()) {
-    open = await updatePackOpen(open.id, { status: 'rolling', open_algo: algo })
+    const openIdForVrf = open.id
+    open = await updatePackOpen(openIdForVrf, { status: 'rolling', open_algo: algo })
     const vrfPhase = vrfPhaseTimer()
     let vrf
     try {
-      vrf = await withPackSolanaRpcRetry(() => runPackOpenVrf(open.id))
+      vrf = await withPackSolanaRpcRetry(() => runPackOpenVrf(openIdForVrf))
     } catch (e) {
       if (isTransientSolanaRpcError(e)) {
         throw new PackOpenRetryableError(

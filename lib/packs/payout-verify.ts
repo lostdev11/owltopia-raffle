@@ -162,7 +162,7 @@ export async function waitForPackPayoutConfirmation(
   timeoutMs = 45_000
 ): Promise<boolean> {
   const started = Date.now()
-  while Date.now() - started < timeoutMs) {
+  while (Date.now() - started < timeoutMs) {
     try {
       if (await signatureSucceededOnChain(signature)) return true
     } catch {
