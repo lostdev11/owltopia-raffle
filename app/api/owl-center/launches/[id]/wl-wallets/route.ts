@@ -154,11 +154,26 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     createdByWallet: editor.wallet,
   })
 
+  let guard_sync: Awaited<ReturnType<typeof import('@/lib/owl-center/sync-public-simple-guards').syncPublicSimpleCandyGuards>> | null =
+    null
+  if (launch.mint_mode === 'public_simple' && result.upserted > 0) {
+    const fresh = await getOwlCenterLaunchByIdAdmin(id)
+    if (fresh) {
+      try {
+        const { syncPublicSimpleCandyGuards } = await import('@/lib/owl-center/sync-public-simple-guards')
+        guard_sync = await syncPublicSimpleCandyGuards(fresh)
+      } catch (e) {
+        console.error('wl-wallets guard sync', e)
+      }
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     phase_key: phaseResolved,
     upserted: result.upserted,
     failed: result.failed,
+    guard_sync,
   })
 }
 

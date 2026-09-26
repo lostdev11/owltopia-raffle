@@ -1,3 +1,4 @@
+import bs58 from 'bs58'
 import { dateTime, lamports, none, publicKey, some, sol } from '@metaplex-foundation/umi'
 import type { DefaultGuardSetArgs } from '@metaplex-foundation/mpl-core-candy-machine'
 
@@ -69,6 +70,50 @@ function tokenBurnGuard(
   })
 }
 
+function allowListGuard(merkleRootBase58: string | null | undefined): DefaultGuardSetArgs['allowList'] {
+  const root = merkleRootBase58?.trim()
+  if (!root) return none()
+  try {
+    return some({ merkleRoot: bs58.decode(root) })
+  } catch {
+    return none()
+  }
+}
+
+function assetGateGuard(collection: string | null | undefined): DefaultGuardSetArgs['assetGate'] {
+  const col = collection?.trim()
+  if (!col) return none()
+  return some({ requiredCollection: publicKey(col) })
+}
+
+function assetMintLimitGuard(
+  cfg: { id: number; limit: number; collection: string } | null | undefined
+): DefaultGuardSetArgs['assetMintLimit'] {
+  if (!cfg?.collection?.trim()) return none()
+  return some({
+    id: cfg.id,
+    limit: cfg.limit,
+    requiredCollection: publicKey(cfg.collection.trim()),
+  })
+}
+
+function nftGateGuard(collection: string | null | undefined): DefaultGuardSetArgs['nftGate'] {
+  const col = collection?.trim()
+  if (!col) return none()
+  return some({ requiredCollection: publicKey(col) })
+}
+
+function nftMintLimitGuard(
+  cfg: { id: number; limit: number; collection: string } | null | undefined
+): DefaultGuardSetArgs['nftMintLimit'] {
+  if (!cfg?.collection?.trim()) return none()
+  return some({
+    id: cfg.id,
+    limit: cfg.limit,
+    requiredCollection: publicKey(cfg.collection.trim()),
+  })
+}
+
 function botTaxOnly() {
   return {
     botTax: some({ lamports: sol(0.001), lastInstruction: false }),
@@ -118,6 +163,11 @@ export function publicSimpleCandyGuardUmiGroupsFromPlan(
       solPayment: solPaymentGuard(group.solLamports, plan.destination),
       mintLimit: mintLimitGuard(group.mintLimitId, group.walletMintLimit),
       tokenBurn: tokenBurnGuard(group.tokenBurn),
+      allowList: allowListGuard(group.allowListMerkleRoot),
+      assetGate: assetGateGuard(group.assetGateCollection),
+      assetMintLimit: assetMintLimitGuard(group.assetMintLimit),
+      nftGate: nftGateGuard(group.nftGateCollection),
+      nftMintLimit: nftMintLimitGuard(group.nftMintLimit),
     },
   }))
 }
@@ -197,6 +247,29 @@ export function publicSimpleSugarGuardsConfigFromPlan(plan: PublicSimpleGuardPla
       guards.tokenBurn = {
         mint: group.tokenBurn.mint,
         amount: group.tokenBurn.amount,
+      }
+    }
+    if (group.allowListMerkleRoot) {
+      guards.allowList = { merkleRoot: group.allowListMerkleRoot }
+    }
+    if (group.assetGateCollection) {
+      guards.assetGate = { requiredCollection: group.assetGateCollection }
+    }
+    if (group.assetMintLimit) {
+      guards.assetMintLimit = {
+        id: group.assetMintLimit.id,
+        limit: group.assetMintLimit.limit,
+        requiredCollection: group.assetMintLimit.collection,
+      }
+    }
+    if (group.nftGateCollection) {
+      guards.nftGate = { requiredCollection: group.nftGateCollection }
+    }
+    if (group.nftMintLimit) {
+      guards.nftMintLimit = {
+        id: group.nftMintLimit.id,
+        limit: group.nftMintLimit.limit,
+        requiredCollection: group.nftMintLimit.collection,
       }
     }
     groups[group.label] = { guards }

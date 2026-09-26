@@ -239,12 +239,14 @@ export type Gen2AllowListRoutePlan =
 
 async function fetchGen2WlProofResponse(
   wallet: PublicKey,
-  phase: string
+  phase: string,
+  partnerWl?: { slug: string; phaseKey: string }
 ): Promise<{ ok: true; body: WlProofResponse } | { ok: false; error: string }> {
   try {
-    const res = await fetch(
-      `/api/owl-center/gen2/wl-proof?wallet=${encodeURIComponent(String(wallet))}&phase=${encodeURIComponent(phase)}`
-    )
+    const url = partnerWl
+      ? `/api/owl-center/collections/${encodeURIComponent(partnerWl.slug)}/wl-proof?wallet=${encodeURIComponent(String(wallet))}&phase_key=${encodeURIComponent(partnerWl.phaseKey)}`
+      : `/api/owl-center/gen2/wl-proof?wallet=${encodeURIComponent(String(wallet))}&phase=${encodeURIComponent(phase)}`
+    const res = await fetch(url)
     const body = (await res.json()) as WlProofResponse
     if (!res.ok) {
       return { ok: false, error: body.error || 'Allowlist proof lookup failed' }
@@ -285,9 +287,10 @@ export async function resolveGen2AllowListRoutePlan(
     merkleRoot: Uint8Array
     /** Mint phase or TEAM_BACKSTOP for the temporary team guard allowList. */
     phase: Gen2MintablePhase | 'TEAM_BACKSTOP'
+    partnerWl?: { slug: string; phaseKey: string }
   }
 ): Promise<{ ok: true; plan: Gen2AllowListRoutePlan } | { ok: false; error: string }> {
-  const { candyMachine, candyGuard, merkleRoot, phase } = args
+  const { candyMachine, candyGuard, merkleRoot, phase, partnerWl } = args
   const user = umi.identity.publicKey
 
   const [existing, proofRes] = await Promise.all([
@@ -295,7 +298,7 @@ export async function resolveGen2AllowListRoutePlan(
       () => safeFetchAllowListProofFromSeeds(umi, { merkleRoot, user, candyGuard, candyMachine }),
       MINT_SOLANA_RPC_RETRY
     ),
-    fetchGen2WlProofResponse(user, phase),
+    fetchGen2WlProofResponse(user, phase, partnerWl),
   ])
 
   if (existing) return { ok: true, plan: { includeRoute: false } }

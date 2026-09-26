@@ -37,6 +37,8 @@ export type VerifyGen2MintTxResult =
 // (cheaper / more permissive) phase once multiple phases are live concurrently.
 const CANDY_GUARD_PROGRAM_ID = 'Guard1JwRhJkVH6XZhzoYxeBVQe872VH6QggF4BWmS9g'
 const MINT_V2_DISCRIMINATOR = [120, 121, 23, 146, 173, 110, 199, 205] as const
+const CORE_CANDY_GUARD_PROGRAM_ID = 'CMAGAKJ67e9hRZgfC5SFTbZH8MgEmtqazKXjmkaJjWTJ'
+const MINT_V1_DISCRIMINATOR = [145, 98, 192, 118, 184, 147, 118, 104] as const
 
 /** `mintV2` group field is the LAST field: `Some` = 0x01 + u32le(len) + utf8. */
 function expectedGroupTail(label: string): Uint8Array {
@@ -70,31 +72,60 @@ function dataEndsWith(data: Uint8Array, tail: Uint8Array): boolean {
  */
 function mintTxMatchesGuardGroup(
   parsed: { transaction: { message: { instructions?: unknown[] } } },
-  expectedLabel: string
+  expectedLabel: string,
+  mintStandard: 'token_metadata' | 'core' = 'token_metadata'
 ): boolean {
   const tail = expectedGroupTail(expectedLabel)
   const instructions = parsed.transaction.message.instructions ?? []
-  let mintV2Count = 0
+  let mintCount = 0
   let matched = 0
+  const programId = mintStandard === 'core' ? CORE_CANDY_GUARD_PROGRAM_ID : CANDY_GUARD_PROGRAM_ID
+  const discriminator = mintStandard === 'core' ? MINT_V1_DISCRIMINATOR : MINT_V2_DISCRIMINATOR
   for (const ixRaw of instructions) {
     const ix = ixRaw as { programId?: { toBase58?: () => string }; data?: unknown }
     const pid = ix.programId?.toBase58?.()
-    if (pid !== CANDY_GUARD_PROGRAM_ID || typeof ix.data !== 'string') continue
+    if (pid !== programId || typeof ix.data !== 'string') continue
     let bytes: Uint8Array
     try {
       bytes = bs58.decode(ix.data)
     } catch {
       continue
     }
-    if (!dataStartsWith(bytes, MINT_V2_DISCRIMINATOR)) continue
-    mintV2Count++
+    if (!dataStartsWith(bytes, discriminator)) continue
+    mintCount++
     if (dataEndsWith(bytes, tail)) matched++
   }
-  if (mintV2Count > 0 && matched === 0) return false
-  if (mintV2Count === 0) {
-    console.warn('[verify-gen2-mint-tx] no decodable mintV2 instruction found for guard-group binding')
+  if (mintCount > 0 && matched === 0) return false
+  if (mintCount === 0) {
+    console.warn('[verify-gen2-mint-tx] no decodable mint instruction found for guard-group binding')
   }
   return true
+}
+
+/** Detect guard group label from a confirmed partner public_simple mint tx. */
+export function detectPublicSimpleMintGuardGroupLabel(
+  parsed: { transaction: { message: { instructions?: unknown[] } } },
+  candidateLabels: readonly string[],
+  mintStandard: 'token_metadata' | 'core'
+): string | null {
+  const instructions = parsed.transaction.message.instructions ?? []
+  const programId = mintStandard === 'core' ? CORE_CANDY_GUARD_PROGRAM_ID : CANDY_GUARD_PROGRAM_ID
+  const discriminator = mintStandard === 'core' ? MINT_V1_DISCRIMINATOR : MINT_V2_DISCRIMINATOR
+  for (const ixRaw of instructions) {
+    const ix = ixRaw as { programId?: { toBase58?: () => string }; data?: unknown }
+    if (ix.programId?.toBase58?.() !== programId || typeof ix.data !== 'string') continue
+    let bytes: Uint8Array
+    try {
+      bytes = bs58.decode(ix.data)
+    } catch {
+      continue
+    }
+    if (!dataStartsWith(bytes, discriminator)) continue
+    for (const label of candidateLabels) {
+      if (dataEndsWith(bytes, expectedGroupTail(label))) return label
+    }
+  }
+  return null
 }
 
 /**
@@ -256,7 +287,8 @@ export async function verifyGen2MintTransaction(params: {
   }
 
   const expectedGroup = params.expectedGuardGroupLabel?.trim()
-  if (expectedGroup && !mintTxMatchesGuardGroup(parsed, expectedGroup)) {
+  const mintStd = params.mintStandard === 'core' ? 'core' : 'token_metadata'
+  if (expectedGroup && !mintTxMatchesGuardGroup(parsed, expectedGroup, mintStd)) {
     return { ok: false, reason: 'wrong_guard_group' }
   }
 

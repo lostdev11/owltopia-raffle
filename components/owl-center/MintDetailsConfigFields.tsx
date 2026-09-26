@@ -457,9 +457,9 @@ export function MintDetailsConfigFields({
       {values.allowlist_phases.length > 0 || values.wl_enabled ? (
         <div className="grid gap-4 border border-[#1A222B] bg-[#0F1419]/60 p-4">
           <p className="text-xs leading-relaxed text-[#9BA8B4]">
-            Add up to {PARTNER_ALLOWLIST_MAX_PHASES} sequential lists before public. Each phase needs a start time;
-            the next phase (or Public start) ends the previous window. After saving, paste wallets per phase in
-            Whitelist · Wallets below.
+            Add up to {PARTNER_ALLOWLIST_MAX_PHASES} allowlist phases before public. Each phase needs a start time and
+            an on-chain gate (WL wallets, holder collection, or Free Mint Token). Use end time or open-ended +
+            concurrent to overlap with public. Paste wallets per phase in Whitelist · Wallets after saving.
           </p>
           {values.allowlist_phases.map((phase, idx) => (
             <div key={`${phase.key}-${idx}`} className="grid gap-3 border border-[#1A222B] bg-[#0A0E12]/80 p-3 sm:grid-cols-2">
@@ -593,6 +593,84 @@ export function MintDetailsConfigFields({
                   className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8]"
                 />
               </label>
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                Phase ends (optional)
+                <input
+                  type="datetime-local"
+                  value={phase.end ?? ''}
+                  disabled={Boolean(phase.open_ended)}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = { ...phase, end: e.target.value, open_ended: false }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  className="min-h-[44px] touch-manipulation border border-[#1A222B] bg-[#0F1419] px-3 py-2 text-sm text-[#F4FBF8] disabled:opacity-50"
+                />
+              </label>
+              <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                <input
+                  type="checkbox"
+                  checked={Boolean(phase.concurrent_with_public)}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = {
+                      ...phase,
+                      concurrent_with_public: e.target.checked,
+                      open_ended: e.target.checked ? true : phase.open_ended,
+                    }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  className="h-4 w-4 accent-[#00FF9C]"
+                />
+                Concurrent with public
+              </label>
+              <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                <input
+                  type="checkbox"
+                  checked={Boolean(phase.open_ended)}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = {
+                      ...phase,
+                      open_ended: e.target.checked,
+                      end: e.target.checked ? '' : phase.end,
+                      concurrent_with_public: e.target.checked ? true : phase.concurrent_with_public,
+                    }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  className="h-4 w-4 accent-[#00FF9C]"
+                />
+                Open until sold out
+              </label>
+              <label className="grid gap-1 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
+                Holder collection (Core / TM gate · optional)
+                <input
+                  value={phase.holder_collection_mint ?? ''}
+                  onChange={(e) => {
+                    const next = [...values.allowlist_phases]
+                    next[idx] = { ...phase, holder_collection_mint: e.target.value }
+                    onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                  }}
+                  placeholder="Collection mint — e.g. Owltopia collection"
+                  spellCheck={false}
+                  className="border border-[#1A222B] bg-[#0F1419] px-3 py-2 font-mono text-sm text-[#F4FBF8]"
+                />
+              </label>
+              {(phase.holder_collection_mint ?? '').trim().length >= 32 ? (
+                <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-[#5C6773] sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(phase.holder_one_per_asset)}
+                    onChange={(e) => {
+                      const next = [...values.allowlist_phases]
+                      next[idx] = { ...phase, holder_one_per_asset: e.target.checked }
+                      onChange({ ...values, allowlist_phases: next, wl_enabled: true })
+                    }}
+                    className="h-4 w-4 accent-[#00FF9C]"
+                  />
+                  One mint per held NFT (assetMintLimit / nftMintLimit)
+                </label>
+              ) : null}
               <div className="sm:col-span-2">
                 <button
                   type="button"

@@ -187,6 +187,8 @@ export type SimpleMintEligibilityResponse = {
   /** When minting in an allowlist window — phase key/label for UI. */
   active_allowlist_key: string | null
   active_allowlist_label: string | null
+  /** Candy Guard group label for the wallet's next mint (`wl` / `pub` / …). */
+  guard_group_label?: string | null
   /** Owltopia platform fee per mint (USD notional; collected as SOL on-chain). */
   platform_mint_fee_usdc: number
   /** Live lamports quote for platform fee (SOL/USD). */

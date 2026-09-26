@@ -18,15 +18,16 @@ import { resolvePartnerMintUnitPrice, publicSimpleSolMintLamports } from '@/lib/
 import { resolvePartnerPhaseWalletMintLimit, partnerPhaseHasRedeemTokenBurn, partnerPhaseRedeemTokenAmount, partnerPhaseSoftRemaining } from '@/lib/owl-center/partner-allowlist-phases'
 import {
   formatAllowlistOpensReason,
-  getLaunchActiveAllowlistPhase,
   isLaunchWaitingForWhitelist,
-  isLaunchWhitelistWindowOpen,
 } from '@/lib/owl-center/launch-wl-window'
+import { resolvePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
 import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/lib/owl-center/mint-policy'
 import { publicSimpleMintClosedInfo, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import { isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
+import { resolvePartnerMintGroupForWallet } from '@/lib/owl-center/partner-mint-group'
 import { publicSimpleMintGuardGroupLabel } from '@/lib/owl-center/public-simple-guard-plan'
+import { isScheduledPublicMintOpen } from '@/lib/owl-center/partner-phase-window'
 import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
 import type { OwlCenterLaunchPublic, SimpleMintEligibilityResponse } from '@/lib/owl-center/types'
 import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
@@ -169,8 +170,13 @@ export async function buildSimpleMintEligibility(
     onChainRemaining != null ? Math.min(dbRemaining, onChainRemaining) : dbRemaining
   const onChainSoldOut = onChainRemaining === 0 && dbRemaining > 0
   const wallet = walletRaw?.trim() ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
-  const allowlistOpen = isLaunchWhitelistWindowOpen(launch)
-  const activeAllowlistPhase = allowlistOpen ? getLaunchActiveAllowlistPhase(launch) : null
+  const groupPick = await resolvePartnerMintGroupForWallet(launch, wallet)
+  const allowlistOpen = groupPick.from_allowlist
+  const activeAllowlistPhase =
+    allowlistOpen && groupPick.phase_key
+      ? resolvePartnerAllowlistPhases(launch).find((p) => p.key === groupPick.phase_key) ?? null
+      : null
+  const publicMintOpen = isScheduledPublicMintOpen(launch)
   const dbWalletMinted = wallet
     ? await walletPublicPhaseMintCount(launch.id, wallet, mint_network)
     : 0
@@ -192,10 +198,18 @@ export async function buildSimpleMintEligibility(
   // During allowlist, per-wallet progress is WL used_mints (below); public uses public-phase count.
   const walletRemainingPublic = Math.max(0, effectiveWalletLimit - wallet_minted)
   const scheduleClosed = publicSimpleMintClosedInfo(launch)
-  const mint_window_open = allowlistOpen || scheduleClosed == null
+  const mint_window_open = allowlistOpen || publicMintOpen || scheduleClosed == null
 
   const prices_lamports = await getLaunchPriceLamportsQuotes(launch)
-  const unitPrice = resolvePartnerMintUnitPrice(launch)
+  const unitPrice = groupPick.from_allowlist
+    ? {
+        price_usdc: groupPick.price_usdc,
+        from_allowlist: true,
+        allowlist_key: groupPick.phase_key,
+        allowlist_label: groupPick.phase_label,
+        price_sol: groupPick.price_sol,
+      }
+    : resolvePartnerMintUnitPrice(launch)
   const price_usdc = unitPrice.price_usdc
   let unit_lamports_estimate: string | null = prices_lamports.public
   if (unitPrice.from_allowlist) {
@@ -271,9 +285,9 @@ export async function buildSimpleMintEligibility(
     reason = `Mint opens during PUBLIC phase (current: ${launch.active_phase})`
   } else if (isLaunchWaitingForWhitelist(launch)) {
     reason = formatAllowlistOpensReason(launch)
-  } else if (!isLaunchWhitelistWindowOpen(launch) && scheduleClosed) {
+  } else if (!allowlistOpen && !publicMintOpen && scheduleClosed) {
     reason = scheduleClosed.reason
-  } else if (!isLaunchWhitelistWindowOpen(launch) && !isPhaseOpenBySchedule(launch, 'PUBLIC')) {
+  } else if (!allowlistOpen && !publicMintOpen && !isPhaseOpenBySchedule(launch, 'PUBLIC')) {
     // No early allowlist window — honor scheduled PUBLIC open (#110).
     reason = launchScheduledPublicReason(launch) ?? 'Public mint is not open yet'
   } else if (!wallet) {
@@ -399,8 +413,9 @@ export async function buildSimpleMintEligibility(
     sol_usd_price: null,
     price_usdc,
     price_sol: unitPrice.price_sol,
-    active_allowlist_key: unitPrice.allowlist_key,
-    active_allowlist_label: unitPrice.allowlist_label,
+    active_allowlist_key: groupPick.phase_key ?? unitPrice.allowlist_key,
+    active_allowlist_label: groupPick.phase_label ?? unitPrice.allowlist_label,
+    guard_group_label: groupPick.guard_group_label,
     platform_mint_fee_usdc: owlCenterPlatformMintFeeUsd(),
     platform_mint_fee_lamports_estimate,
     platform_mint_fee_label: formatOwlCenterPlatformMintFeeSolLabel(

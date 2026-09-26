@@ -6,10 +6,20 @@
 import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { OWL_CENTER_MAX_WALLET_MINT_LIMIT } from '@/lib/owl-center/launch-limits'
 import {
+  formatPartnerPhaseGateSyncError,
+  resolvePartnerPhaseOnChainGate,
+} from '@/lib/owl-center/partner-phase-gates'
+import { resolvePartnerAllowlistPhaseEndDateIso } from '@/lib/owl-center/partner-phase-window'
+import {
+  listPartnerPhaseMerkleWallets,
+  partnerPhaseMerkleRootBase58,
+} from '@/lib/owl-center/partner-wl-merkle'
+import {
   resolvePartnerAllowlistPhases,
   resolvePartnerPhaseWalletMintLimit,
   partnerPhasePriceSol,
   partnerPhaseHasRedeemTokenBurn,
+  partnerPhaseHasHolderGate,
   partnerPhaseRedeemTokenAmount,
 } from '@/lib/owl-center/partner-allowlist-phases'
 import { publicSimpleSolMintPrice } from '@/lib/owl-center/partner-mint-phase-schedule'
@@ -66,6 +76,14 @@ export type PublicSimpleGuardGroupPlan = {
   walletMintLimit: number
   /** Free Mint Token burn — SPL mint + raw amount (omit/null = no tokenBurn). */
   tokenBurn?: { mint: string; amount: number } | null
+  /** Base58 merkle root when allowList gate is set. */
+  allowListMerkleRoot?: string | null
+  /** MPL Core asset holder gate. */
+  assetGateCollection?: string | null
+  assetMintLimit?: { id: number; limit: number; collection: string } | null
+  /** Token Metadata holder gate. */
+  nftGateCollection?: string | null
+  nftMintLimit?: { id: number; limit: number; collection: string } | null
 }
 
 export type PublicSimpleGuardPlan = {
@@ -134,6 +152,19 @@ export function publicSimpleMintGuardGroupLabel(
   return PUBLIC_SIMPLE_PUBLIC_GROUP_LABEL
 }
 
+/** Map allowlist phase key → candy guard group label (stable for a launch config). */
+export function publicSimpleGuardGroupLabelForLaunch(
+  launch: Pick<OwlCenterLaunchPublic, 'partner_allowlist_phases' | 'creator_wl_enabled' | 'wl_supply'>,
+  phaseKey: string
+): string {
+  const allowlists = resolvePartnerAllowlistPhases(launch)
+  const keys = [...allowlists.map((p) => p.key), 'public']
+  const labels = uniquePublicSimpleGuardGroupLabels(keys)
+  const idx = allowlists.findIndex((p) => p.key === phaseKey)
+  if (idx >= 0) return labels[idx]!
+  return PUBLIC_SIMPLE_PUBLIC_GROUP_LABEL
+}
+
 type QuoteUsdc = (priceUsdc: number) => Promise<bigint | null>
 
 async function resolvePhaseLamports(opts: {
@@ -186,7 +217,6 @@ export async function buildPublicSimpleGuardPlan(
 
     for (let i = 0; i < allowlists.length; i++) {
       const phase = allowlists[i]!
-      const next = allowlists[i + 1]
       const priced = await resolvePhaseLamports({
         priceUsdc: phase.price_usdc,
         priceSol: partnerPhasePriceSol(phase),
@@ -201,11 +231,17 @@ export async function buildPublicSimpleGuardPlan(
               amount: partnerPhaseRedeemTokenAmount(phase),
             }
           : null
+      const endDateIso = resolvePartnerAllowlistPhaseEndDateIso(
+        phase,
+        i,
+        allowlists,
+        publicStart
+      )
       groups.push({
         key: phase.key,
         label: labels[i]!,
         startDateIso: parkedStart(phase.starts_at),
-        endDateIso: next?.starts_at ?? publicStart,
+        endDateIso,
         solLamports: priced.lamports,
         mintLimitId: publicSimpleAllowlistMintLimitId(i),
         walletMintLimit: resolvePartnerPhaseWalletMintLimit(phase, walletMintLimit),
@@ -268,4 +304,94 @@ export async function buildPublicSimpleGuardPlan(
       groups: [],
     },
   }
+}
+
+type GuardPlanLaunch = PublicSimpleGuardLaunch &
+  Pick<OwlCenterLaunchPublic, 'id' | 'mint_standard' | 'slug'>
+
+function applyGateToGroupPlan(
+  group: PublicSimpleGuardGroupPlan,
+  gate: ReturnType<typeof resolvePartnerPhaseOnChainGate>,
+  mintStandard: 'core' | 'token_metadata'
+): PublicSimpleGuardGroupPlan {
+  if (!gate) return group
+  if (gate.kind === 'allowlist_merkle') {
+    return { ...group, allowListMerkleRoot: gate.merkleRootBase58 }
+  }
+  if (gate.kind === 'holder') {
+    if (mintStandard === 'core') {
+      if (gate.onePerAsset) {
+        return {
+          ...group,
+          assetMintLimit: {
+            id: gate.mintLimitId ?? group.mintLimitId,
+            limit: 1,
+            collection: gate.collectionMint,
+          },
+        }
+      }
+      return { ...group, assetGateCollection: gate.collectionMint }
+    }
+    if (gate.onePerAsset) {
+      return {
+        ...group,
+        nftMintLimit: {
+          id: gate.mintLimitId ?? group.mintLimitId,
+          limit: 1,
+          collection: gate.collectionMint,
+        },
+      }
+    }
+    return { ...group, nftGateCollection: gate.collectionMint }
+  }
+  return group
+}
+
+/**
+ * Build guard plan with on-chain gates (merkle / holder / token burn).
+ * Refuses ungated allowlist groups — sync and go-live must not write open WL windows.
+ */
+export async function buildPublicSimpleGuardPlanForLaunch(
+  launch: GuardPlanLaunch,
+  opts?: { quoteUsdc?: QuoteUsdc }
+): Promise<PublicSimpleGuardPlanResult> {
+  const base = await buildPublicSimpleGuardPlan(launch, opts)
+  if (!base.ok) return base
+  if (base.plan.groups.length === 0) return base
+
+  const mintStandard = launch.mint_standard === 'core' ? 'core' : 'token_metadata'
+  const allowlists = resolvePartnerAllowlistPhases(launch)
+  const enriched: PublicSimpleGuardGroupPlan[] = []
+
+  for (let i = 0; i < base.plan.groups.length; i++) {
+    const group = base.plan.groups[i]!
+    if (group.key === 'public') {
+      enriched.push(group)
+      continue
+    }
+    const phase = allowlists.find((p) => p.key === group.key)
+    if (!phase) {
+      enriched.push(group)
+      continue
+    }
+    const needsMerkle =
+      !partnerPhaseHasRedeemTokenBurn(phase) && !partnerPhaseHasHolderGate(phase)
+    const wallets =
+      needsMerkle && launch.id ? await listPartnerPhaseMerkleWallets(launch.id, phase.key) : []
+    let merkleRoot: string | null = null
+    if (wallets.length > 0) {
+      merkleRoot = partnerPhaseMerkleRootBase58(wallets, mintStandard)
+    }
+    const gate = resolvePartnerPhaseOnChainGate(phase, {
+      merkleRootBase58: merkleRoot,
+      merkleWalletCount: wallets.length,
+      phaseIndex: i,
+    })
+    if (!gate && !group.tokenBurn) {
+      return { ok: false, error: formatPartnerPhaseGateSyncError(phase.label) }
+    }
+    enriched.push(applyGateToGroupPlan(group, gate, mintStandard))
+  }
+
+  return { ok: true, plan: { ...base.plan, groups: enriched } }
 }
