@@ -1,11 +1,16 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
 import type { AdminOpsLogAsset, AdminOpsLogStatus, AdminOpsLogType } from '@/lib/admin-ops-log/constants'
+import { totalsForOpsLogEntry } from '@/lib/admin-ops-log/totals'
 import type {
   AdminOpsLogRow,
   CreateAdminOpsLogParams,
   ListAdminOpsLogParams,
   UpdateAdminOpsLogParams,
 } from '@/lib/admin-ops-log/types'
+import {
+  listAdminOpsLogPaymentsForEntries,
+  mirrorLegacyEntryFieldsToPayment,
+} from '@/lib/db/admin-ops-log-payments'
 
 export {
   ADMIN_OPS_LOG_ASSETS,
@@ -87,6 +92,28 @@ export async function listAdminOpsLog(
   const { data, error, count } = await query
   if (error) throw new Error(error.message)
   const rows = (data ?? []).map((r) => mapRow(r as Record<string, unknown>))
+  try {
+    const payments = await listAdminOpsLogPaymentsForEntries(rows.map((r) => r.id))
+    const byEntry = new Map<string, typeof payments>()
+    for (const p of payments) {
+      const list = byEntry.get(p.entry_id) ?? []
+      list.push(p)
+      byEntry.set(p.entry_id, list)
+    }
+    for (const row of rows) {
+      const entryPayments = byEntry.get(row.id) ?? []
+      row.payments_count = entryPayments.length
+      row.payment_totals = totalsForOpsLogEntry(
+        entryPayments.map((p) => ({ amount: p.amount, asset: p.asset })),
+        { amount: row.amount, asset: row.asset }
+      )
+    }
+  } catch (e) {
+    console.error('[admin-ops-log] payment totals:', e)
+    for (const row of rows) {
+      row.payment_totals = totalsForOpsLogEntry([], { amount: row.amount, asset: row.asset })
+    }
+  }
   return { rows, total: count ?? rows.length }
 }
 
@@ -121,7 +148,21 @@ export async function createAdminOpsLog(params: CreateAdminOpsLogParams): Promis
     console.error('[admin-ops-log] create:', error.message)
     return null
   }
-  return mapRow(data as Record<string, unknown>)
+  const row = mapRow(data as Record<string, unknown>)
+  await mirrorLegacyEntryFieldsToPayment({
+    entryId: row.id,
+    amount: row.amount,
+    asset: row.asset,
+    fromWallet: row.from_wallet,
+    toWallet: row.wallet,
+    txSignature: row.tx_signature,
+    relatedPackOpenId: params.relatedPackOpenId ?? null,
+    createdByWallet: params.createdByWallet,
+    createdAt: row.created_at,
+  })
+  row.payment_totals = totalsForOpsLogEntry([], { amount: row.amount, asset: row.asset })
+  row.payments_count = row.amount != null || row.tx_signature ? 1 : 0
+  return row
 }
 
 export async function updateAdminOpsLog(

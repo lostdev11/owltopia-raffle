@@ -261,6 +261,8 @@ export function AdminPackOpensClient() {
     params.set('prefill_wallet', row.buyer_wallet)
     params.set('prefill_related', row.id)
     params.set('prefill_title', `Pack open ${row.id.slice(0, 8)}…`)
+    params.set('prefill_payment_to_wallet', row.buyer_wallet)
+    params.set('prefill_payment_pack_open_id', row.id)
     return `/admin/ops-log?${params.toString()}`
   }
 

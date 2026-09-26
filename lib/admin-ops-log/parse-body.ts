@@ -65,6 +65,10 @@ export function parseCreateAdminOpsLogBody(
       fromWallet: optionalText(body.from_wallet) ?? optionalText(body.fromWallet) ?? undefined,
       txSignature: optionalText(body.tx_signature) ?? optionalText(body.txSignature) ?? undefined,
       related: optionalText(body.related) ?? undefined,
+      relatedPackOpenId:
+        optionalText(body.related_pack_open_id) ??
+        optionalText(body.relatedPackOpenId) ??
+        undefined,
       status: status ?? undefined,
       notes: optionalText(body.notes) ?? undefined,
       createdByWallet: actorWallet,
