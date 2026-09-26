@@ -277,7 +277,10 @@ export type OwlClaimNftNestLockRead = {
   ownerThawedEligible: boolean
 }
 
-function readLockEligibilityFromAsset(asset: unknown, ownerWallet: string): OwlClaimNftNestLockRead {
+export function readOwlClaimLockEligibilityFromCoreAsset(
+  asset: unknown,
+  ownerWallet: string
+): OwlClaimNftNestLockRead {
   const delegate = getNestingNftFreezeDelegateAddress()
   const locked = isMplCoreNestingLockHeld({
     asset,
@@ -307,10 +310,47 @@ export async function readOwlClaimNftNestLockEligibility(params: {
     const endpoint = resolveServerSolanaRpcUrl()
     const umi: any = (createUmi as any)(endpoint as any)
     const asset = await fetchCoreAssetOnly(umi, assetId)
-    return readLockEligibilityFromAsset(asset, ownerWallet)
+    return readOwlClaimLockEligibilityFromCoreAsset(asset, ownerWallet)
   } catch {
     return null
   }
+}
+
+const MPL_CORE_LOCK_BATCH_FETCH_CONCURRENCY = 32
+
+/**
+ * Batched MPL Core lock reads for Claim-all preview (fewer sequential round-trips than per-nest fetch).
+ */
+export async function readOwlClaimMplCoreLockEligibilityBatch(
+  items: Array<{ assetId: string; ownerWallet: string }>
+): Promise<Map<string, OwlClaimNftNestLockRead | null>> {
+  const out = new Map<string, OwlClaimNftNestLockRead | null>()
+  if (items.length === 0) return out
+
+  const endpoint = resolveServerSolanaRpcUrl()
+  const umi: any = (createUmi as any)(endpoint as any)
+
+  for (let i = 0; i < items.length; i += MPL_CORE_LOCK_BATCH_FETCH_CONCURRENCY) {
+    const slice = items.slice(i, i + MPL_CORE_LOCK_BATCH_FETCH_CONCURRENCY)
+    await Promise.all(
+      slice.map(async (item) => {
+        const assetId = item.assetId.trim()
+        const ownerWallet = item.ownerWallet.trim()
+        if (!assetId || !ownerWallet) {
+          out.set(item.assetId, null)
+          return
+        }
+        try {
+          const asset = await fetchCoreAssetOnly(umi, assetId)
+          out.set(assetId, readOwlClaimLockEligibilityFromCoreAsset(asset, ownerWallet))
+        } catch {
+          out.set(assetId, null)
+        }
+      })
+    )
+  }
+
+  return out
 }
 
 export const NEST_LOCK_READ_MAX_ATTEMPTS = 4

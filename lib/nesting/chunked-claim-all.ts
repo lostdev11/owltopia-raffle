@@ -3,21 +3,24 @@ import { executeBatchOwlClaims, type BatchOwlClaimResult } from '@/lib/nesting/b
 import { isBatchClaimLedgerSyncError } from '@/lib/nesting/batch-claim-errors'
 import type { PositionClaimPlan } from '@/lib/nesting/claim-plan'
 import { shouldStopClaimAllBatchesForDeadline } from '@/lib/nesting/claim-all-deadline'
+import { splitClaimAllPlansIntoPayableBatches } from '@/lib/nesting/claim-all-batch-planning'
 import { getClaimAllBatchSize } from '@/lib/nesting/policy'
 import { isStakingUserError, StakingUserError } from '@/lib/nesting/errors'
+import { meetsMinOwlClaimThreshold } from '@/lib/staking/rewards'
+
+export type ClaimAllSkippedBelowMinimum = {
+  position_id: string
+  pending_owl: number
+}
 
 export type ChunkedBatchOwlClaimResult = BatchOwlClaimResult & {
   batch_count: number
   transaction_signatures: string[]
+  skipped_below_minimum: ClaimAllSkippedBelowMinimum[]
 }
 
-function chunkPlans(plans: PositionClaimPlan[], size: number): PositionClaimPlan[][] {
-  if (size <= 0 || plans.length <= size) return [plans]
-  const chunks: PositionClaimPlan[][] = []
-  for (let i = 0; i < plans.length; i += size) {
-    chunks.push(plans.slice(i, i + size))
-  }
-  return chunks
+function sumPayout(plans: PositionClaimPlan[]): number {
+  return plans.reduce((sum, p) => sum + p.payoutAmount, 0)
 }
 
 function shouldRetryFailedClaimBatch(e: unknown): boolean {
@@ -74,9 +77,32 @@ export async function executeChunkedBatchOwlClaims(params: {
   refreshBatchPlans?: (plans: PositionClaimPlan[]) => Promise<PositionClaimPlan[]>
   /** Called after each successful batch with that batch's nest ids (fee linking). */
   onBatchCompleted?: (positionIds: string[]) => Promise<void>
+  /** Fee linkage for dust nests skipped because the batch would be under 1 OWL. */
+  onSkippedBelowMinimum?: (positionIds: string[]) => Promise<void>
 }): Promise<ChunkedBatchOwlClaimResult> {
   const batchSize = getClaimAllBatchSize()
-  const chunks = chunkPlans(params.plans, batchSize)
+  const split = splitClaimAllPlansIntoPayableBatches(params.plans, batchSize)
+  const chunks = split.payableChunks
+  const skippedBelowMinimum: ClaimAllSkippedBelowMinimum[] = split.skippedBelowMinimum.map((p) => ({
+    position_id: p.positionId,
+    pending_owl: p.payoutAmount,
+  }))
+
+  if (skippedBelowMinimum.length > 0 && params.onSkippedBelowMinimum) {
+    await params.onSkippedBelowMinimum(split.skippedBelowMinimum.map((p) => p.positionId))
+  }
+
+  if (chunks.length === 0) {
+    return {
+      total_claimed: 0,
+      claims: [],
+      transaction_signature: null,
+      execution_path: 'database_only',
+      batch_count: 0,
+      transaction_signatures: [],
+      skipped_below_minimum: skippedBelowMinimum,
+    }
+  }
 
   if (chunks.length === 1) {
     if (params.onBeforeBatch) {
@@ -86,7 +112,7 @@ export async function executeChunkedBatchOwlClaims(params: {
     if (params.refreshBatchPlans) {
       singlePlans = await params.refreshBatchPlans(singlePlans)
     }
-    if (singlePlans.length === 0) {
+    if (singlePlans.length === 0 || !meetsMinOwlClaimThreshold(sumPayout(singlePlans))) {
       return {
         total_claimed: 0,
         claims: [],
@@ -94,6 +120,7 @@ export async function executeChunkedBatchOwlClaims(params: {
         execution_path: 'database_only',
         batch_count: 0,
         transaction_signatures: [],
+        skipped_below_minimum: skippedBelowMinimum,
       }
     }
     const single = await executeBatchOwlClaims({
@@ -106,6 +133,7 @@ export async function executeChunkedBatchOwlClaims(params: {
       ...single,
       batch_count: 1,
       transaction_signatures: sig ? [sig] : [],
+      skipped_below_minimum: skippedBelowMinimum,
     }
   }
 
@@ -143,6 +171,16 @@ export async function executeChunkedBatchOwlClaims(params: {
         continue
       }
       chunk = refreshed
+    }
+
+    if (!meetsMinOwlClaimThreshold(sumPayout(chunk))) {
+      skippedBelowMinimum.push(
+        ...chunk.map((p) => ({ position_id: p.positionId, pending_owl: p.payoutAmount }))
+      )
+      if (params.onSkippedBelowMinimum) {
+        await params.onSkippedBelowMinimum(chunk.map((p) => p.positionId))
+      }
+      continue
     }
 
     let result: BatchOwlClaimResult | null = null
@@ -197,5 +235,6 @@ export async function executeChunkedBatchOwlClaims(params: {
     execution_path: executionPath,
     batch_count: chunks.length,
     transaction_signatures: transactionSignatures,
+    skipped_below_minimum: skippedBelowMinimum,
   }
 }

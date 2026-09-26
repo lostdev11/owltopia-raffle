@@ -30,6 +30,9 @@ import {
   resolveClaimAllInvocationStartedAtMs,
   shouldSkipClaimAllJobCronTickForInvocationDeadline,
 } from '../lib/nesting/claim-all-job-scheduling'
+import { splitClaimAllPlansIntoPayableBatches } from '../lib/nesting/claim-all-batch-planning'
+import { meetsMinOwlClaimThreshold } from '../lib/staking/rewards'
+import { NESTING_CLAIM_ALL_FETCH_TIMEOUT_MS } from '../lib/nesting/fetch-json'
 
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret-32chars-min!!'
 
@@ -246,6 +249,32 @@ process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret-
   const view = claimAllJobToPublicView(row)
   assert.equal(view.claim_all_complete, false)
   assert.equal(view.pending_nest_count, 2)
+}
+
+// Dust tail under 1 OWL must not fail Claim all after main batches pay out.
+{
+  const mk = (id: string, payoutAmount: number) => ({
+    positionId: id,
+    payoutAmount,
+    newClaimedTotal: payoutAmount,
+    claimableNow: payoutAmount,
+    expectedClaimedRewards: 0,
+  })
+  const plans = [...Array(25).keys()].map((i) => mk(`big-${i}`, 2))
+  plans.push(...[...Array(10).keys()].map((i) => mk(`dust-${i}`, 0.05)))
+  const split = splitClaimAllPlansIntoPayableBatches(plans, 25)
+  assert.equal(split.payableChunks.length, 1)
+  assert.equal(split.skippedBelowMinimum.length, 10)
+  assert.ok(meetsMinOwlClaimThreshold(split.payableChunks[0]!.reduce((s, p) => s + p.payoutAmount, 0)))
+}
+
+// Browser preview budget: defer on-chain lock verify so 250+ nests stay under ~115s client timeout.
+{
+  assert.equal(NESTING_CLAIM_ALL_FETCH_TIMEOUT_MS, 115_000)
+  assert.ok(
+    NESTING_CLAIM_ALL_FETCH_TIMEOUT_MS < CLAIM_ALL_ROUTE_MAX_DURATION_SEC * 1000,
+    'preview uses a shorter client timeout than server maxDuration'
+  )
 }
 
 console.log('test-claim-all-deadline-resume: ok')

@@ -110,6 +110,7 @@ export type ClaimAllJobTickResult = ClaimAllJobPublicView & {
   skipped_lock_count?: number
   skipped_owl?: number
   skipped_locks?: Array<{ position_id: string; asset_id: string | null; reason: string }>
+  skipped_below_minimum?: Array<{ position_id: string; pending_owl: number }>
 }
 
 export async function runClaimAllJobTick(params: {
@@ -246,6 +247,13 @@ export async function runClaimAllJobTick(params: {
               batchesThisTick += 1
             }
           : undefined,
+        onSkippedBelowMinimum: linkFeeOnBatch
+          ? async (positionIds) => {
+              if (positionIds.length > 0) {
+                await appendStakingPlatformFeePositionIds(feeSignature, positionIds)
+              }
+            }
+          : undefined,
       })
       tickTotal = result.total_claimed
       tickClaims.push(...result.claims)
@@ -253,11 +261,14 @@ export async function runClaimAllJobTick(params: {
       executionPath = result.execution_path
       batchesThisTick = result.batch_count
 
+      const claimedIds = new Set(result.claims.map((c) => c.position_id))
+      const skippedMinIds = new Set(result.skipped_below_minimum.map((s) => s.position_id))
       const completedIds = [
         ...new Set([...job.completed_position_ids, ...result.claims.map((c) => c.position_id)]),
       ]
-      const doneSet = new Set(completedIds)
-      const stillPending = job.pending_position_ids.filter((id) => !doneSet.has(id))
+      const stillPending = job.pending_position_ids.filter(
+        (id) => !claimedIds.has(id) && !skippedMinIds.has(id)
+      )
 
       await updateClaimAllJobProgress(jobId, {
         pending_position_ids: stillPending,
@@ -287,6 +298,7 @@ export async function runClaimAllJobTick(params: {
           asset_id: s.assetId,
           reason: s.message,
         })),
+        skipped_below_minimum: result.skipped_below_minimum,
       }
     } catch (e) {
       if (isStakingUserError(e) && e.extra?.code === 'claim_all_partial_batch') {

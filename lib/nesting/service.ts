@@ -521,6 +521,8 @@ export type PreparedClaimAllExecution = {
   claimableTotal: number
   skippedOwlPreview: number
   feeUnits: number
+  /** Preview returned before on-chain lock verification (POST / job re-checks). */
+  lockVerifyDeferred?: boolean
 }
 
 /**
@@ -534,6 +536,8 @@ export async function prepareClaimAllExecution(
     /** Skip on-chain lock reads when preview eligibility token is still valid. */
     skipLockVerify?: boolean
     eligiblePositionIds?: string[]
+    /** GET preview: DB totals only; locks verified on POST / background job. */
+    deferLockVerify?: boolean
   }
 ): Promise<PreparedClaimAllExecution> {
   assertNestingClaimsAllowed()
@@ -578,7 +582,10 @@ export async function prepareClaimAllExecution(
   let claimPlans: PositionClaimPlan[]
   let skippedLocks: PreparedClaimAllExecution['skippedLocks']
 
-  if (options?.skipLockVerify && options.eligiblePositionIds?.length) {
+  if (options?.deferLockVerify) {
+    claimPlans = plans
+    skippedLocks = []
+  } else if (options?.skipLockVerify && options.eligiblePositionIds?.length) {
     const eligibleIds = new Set(options.eligiblePositionIds.map((id) => id.trim()))
     claimPlans = plans.filter((p) => eligibleIds.has(p.positionId))
     skippedLocks = plans
@@ -643,6 +650,7 @@ export async function prepareClaimAllExecution(
     claimableTotal,
     skippedOwlPreview,
     feeUnits: claimPlans.length,
+    lockVerifyDeferred: options?.deferLockVerify === true,
   }
 }
 
@@ -745,5 +753,6 @@ export async function executeClaimAll(params: {
     pending_nest_count: tick.pending_nest_count,
     batches_completed: tick.batches_completed,
     batch_count_estimate: tick.batch_count_estimate,
+    skipped_below_minimum: tick.skipped_below_minimum ?? [],
   }
 }
