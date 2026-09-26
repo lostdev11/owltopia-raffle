@@ -61,6 +61,9 @@ export type AdminPackProductShelf = {
   slug: string
   name: string
   availableNfts: number
+  shelfPaused?: boolean
+  shelfPauseReason?: string | null
+  minNftCount?: number
 }
 
 type DraftRow = {
