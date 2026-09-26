@@ -127,6 +127,7 @@ export async function transferMplCoreToEscrow({
       builder,
       connection,
       sendTransaction,
+      deferPresimulateToWallet: true,
     })
   }
 

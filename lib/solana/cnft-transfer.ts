@@ -120,6 +120,7 @@ export async function transferCompressedNftToEscrow({
       builder,
       connection,
       sendTransaction,
+      deferPresimulateToWallet: true,
     })
   }
 

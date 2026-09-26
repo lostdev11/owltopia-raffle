@@ -9,6 +9,7 @@ import {
 } from '@/lib/solana/phantom-sign-and-send-transaction'
 import { assertTransactionSimulatesClean } from '@/lib/solana/phantom-presimulate'
 import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
+import { refreshLegacyTransactionRecentBlockhash } from '@/lib/solana/wallet-tx-expiry'
 import {
   OWL_SEND_CONFIRM_TIMEOUT_HINT,
   OWL_SEND_CONFIRM_TIMEOUT_MS,
@@ -80,6 +81,9 @@ export async function sendOwlSendSignedBatchGroup(params: {
       : null
 
   if (phantom?.signAndSendAllTransactions) {
+    for (const row of built) {
+      await refreshLegacyTransactionRecentBlockhash(connection, row.tx, 'confirmed')
+    }
     const { signatures: raw } = await phantom.signAndSendAllTransactions(
       built.map((b) => b.tx),
       { skipPreflight: true, preflightCommitment: 'processed', maxRetries: 3 }
@@ -89,6 +93,9 @@ export async function sendOwlSendSignedBatchGroup(params: {
     const signAll = (walletAdapter as SignAllAdapter | null)?.signAllTransactions
     if (!signAll) {
       throw new Error('This wallet cannot approve all batches in one sheet. Retry to send them one by one.')
+    }
+    for (const row of built) {
+      await refreshLegacyTransactionRecentBlockhash(connection, row.tx, 'confirmed')
     }
     const signed = await signAll(built.map((b) => b.tx))
     for (const tx of signed) {

@@ -4,6 +4,7 @@ import type { TransactionBuilder, Umi } from '@metaplex-foundation/umi'
 import { toWeb3JsTransaction } from '@metaplex-foundation/umi-web3js-adapters'
 import type { Connection, SendOptions, TransactionSignature } from '@solana/web3.js'
 import type { Transaction, VersionedTransaction } from '@solana/web3.js'
+import { confirmSignatureSuccessOnChain } from '@/lib/solana/confirm-signature-success'
 import { assertTransactionSimulatesClean } from '@/lib/solana/phantom-presimulate'
 
 export type WalletSendTransactionFn = (
@@ -29,15 +30,23 @@ export async function sendUmiBuilderViaWalletSignAndSend(params: {
   builder: TransactionBuilder
   connection: Connection
   sendTransaction: WalletSendTransactionFn
+  /**
+   * When true, skip site presim — Phantom `signAndSendTransaction` presimulates anyway.
+   * Blockhash is still refreshed immediately before the wallet prompt.
+   */
+  deferPresimulateToWallet?: boolean
 }): Promise<string> {
-  const built = await params.builder.buildWithLatestBlockhash(params.umi)
-  const web3Tx = toWeb3JsTransaction(built)
+  if (!params.deferPresimulateToWallet) {
+    const builtForSim = await params.builder.buildWithLatestBlockhash(params.umi)
+    const web3ForSim = toWeb3JsTransaction(builtForSim)
+    await assertTransactionSimulatesClean(params.connection, web3ForSim, {
+      failMessagePrefix: 'Escrow deposit would fail on-chain before wallet approval.',
+    })
+  }
 
-  // Phantom guidance: simulate with sigVerify:false before the wallet prompt so failed txs
-  // do not surface as "dApp could be malicious" simulation warnings.
-  await assertTransactionSimulatesClean(params.connection, web3Tx, {
-    failMessagePrefix: 'Escrow deposit would fail on-chain before wallet approval.',
-  })
+  const { blockhash } = await params.connection.getLatestBlockhash('confirmed')
+  const built = await params.builder.setBlockhash(blockhash).build(params.umi)
+  const web3Tx = toWeb3JsTransaction(built)
 
   const signature = await params.sendTransaction(web3Tx, params.connection, {
     skipPreflight: false,
@@ -45,15 +54,7 @@ export async function sendUmiBuilderViaWalletSignAndSend(params: {
     maxRetries: 3,
   })
 
-  const latest = await params.connection.getLatestBlockhash('confirmed')
-  await params.connection.confirmTransaction(
-    {
-      signature,
-      blockhash: latest.blockhash,
-      lastValidBlockHeight: latest.lastValidBlockHeight,
-    },
-    'confirmed'
-  )
+  await confirmSignatureSuccessOnChain(params.connection, signature)
 
   return signature
 }

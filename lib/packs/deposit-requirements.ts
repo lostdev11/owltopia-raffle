@@ -75,17 +75,33 @@ export function packDepositDisabledReason(input: {
   return unmet.label
 }
 
+const PACK_DEPOSIT_TX_EXPIRY_COPY =
+  'The wallet transaction expired before it was approved. Refresh the page, confirm Phantom is on the same network as this site, and approve quickly. If it keeps failing, try Solflare or switch Wi‑Fi/mobile data.'
+
+/** True when the raw error is a blockhash / wallet-expiry failure (not generic "blockhash" noise). */
+export function isPackDepositTxExpiryError(message: string): boolean {
+  const m = message.toLowerCase()
+  if (m.includes('expired before it was approved') || m.includes('wallet transaction expired')) {
+    return true
+  }
+  return (
+    m.includes('block height exceeded') ||
+    m.includes('blockhash not found') ||
+    m.includes('blockhash expired') ||
+    m.includes('transaction expired') ||
+    m.includes('signature has expired')
+  )
+}
+
 /** Map wallet / RPC errors to actionable copy for pack inventory deposit. */
 export function formatPackDepositError(message: string): string {
-  const m = message.toLowerCase()
-  if (
-    m.includes('expired') ||
-    m.includes('blockhash') ||
-    m.includes('signature has expired')
-  ) {
-    return (
-      'The wallet transaction expired before it was approved. Refresh the page, confirm Phantom is on the same network as this site, and approve quickly. If it keeps failing, try Solflare or switch Wi‑Fi/mobile data.'
-    )
+  const trimmed = message.trim()
+  const m = trimmed.toLowerCase()
+  if (isPackDepositTxExpiryError(trimmed)) {
+    if (trimmed.length > 0 && trimmed !== PACK_DEPOSIT_TX_EXPIRY_COPY) {
+      return `${PACK_DEPOSIT_TX_EXPIRY_COPY} (${trimmed})`
+    }
+    return PACK_DEPOSIT_TX_EXPIRY_COPY
   }
   if (
     m.includes('matching collection') ||
