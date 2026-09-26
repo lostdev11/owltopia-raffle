@@ -1,4 +1,8 @@
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import {
+  CLAIM_ALL_JOB_LOCK_STALE_MS,
+  isClaimAllJobEligibleForCronQueue,
+} from '@/lib/nesting/claim-all-job-scheduling'
 
 export type StakingClaimAllJobStatus = 'processing' | 'completed' | 'failed'
 
@@ -23,6 +27,7 @@ export type StakingClaimAllJobRow = {
   created_at: string
   updated_at: string
   completed_at: string | null
+  invocation_started_at_ms: number | null
 }
 
 function mapRow(data: Record<string, unknown>): StakingClaimAllJobRow {
@@ -55,6 +60,10 @@ function mapRow(data: Record<string, unknown>): StakingClaimAllJobRow {
     created_at: String(data.created_at),
     updated_at: String(data.updated_at),
     completed_at: typeof data.completed_at === 'string' ? data.completed_at : null,
+    invocation_started_at_ms:
+      data.invocation_started_at_ms != null && data.invocation_started_at_ms !== ''
+        ? Number(data.invocation_started_at_ms)
+        : null,
   }
 }
 
@@ -111,12 +120,21 @@ export async function insertClaimAllJob(row: {
 export async function tryLockClaimAllJob(
   jobId: string,
   owner: string,
-  staleSeconds = 180
+  staleSeconds = Math.ceil(CLAIM_ALL_JOB_LOCK_STALE_MS / 1000)
 ): Promise<boolean> {
   const { data, error } = await getSupabaseAdmin().rpc('staking_claim_all_job_try_lock', {
     p_job_id: jobId,
     p_owner: owner,
     p_stale_seconds: staleSeconds,
+  })
+  if (error) throw new Error(error.message)
+  return data === true
+}
+
+export async function heartbeatClaimAllJobLock(jobId: string, owner: string): Promise<boolean> {
+  const { data, error } = await getSupabaseAdmin().rpc('staking_claim_all_job_heartbeat_lock', {
+    p_job_id: jobId,
+    p_owner: owner,
   })
   if (error) throw new Error(error.message)
   return data === true
@@ -142,6 +160,7 @@ export async function updateClaimAllJobProgress(
     last_error?: string | null
     status?: StakingClaimAllJobStatus
     completed_at?: string | null
+    invocation_started_at_ms?: number | null
   }
 ): Promise<void> {
   const { error } = await getSupabaseAdmin()
@@ -163,15 +182,9 @@ export async function listClaimAllJobsDueForCron(limit: number): Promise<Staking
 
   const rows = (data ?? []).map((d) => mapRow(d as Record<string, unknown>))
   const due: StakingClaimAllJobRow[] = []
-  const staleMs = 180_000
   const now = Date.now()
   for (const row of rows) {
-    if (row.pending_position_ids.length === 0) continue
-    if (row.attempt_count >= row.max_attempts) continue
-    if (row.locked_at) {
-      const lockedAt = new Date(row.locked_at).getTime()
-      if (Number.isFinite(lockedAt) && now - lockedAt < staleMs) continue
-    }
+    if (!isClaimAllJobEligibleForCronQueue(row, now, CLAIM_ALL_JOB_LOCK_STALE_MS)) continue
     due.push(row)
     if (due.length >= cap) break
   }

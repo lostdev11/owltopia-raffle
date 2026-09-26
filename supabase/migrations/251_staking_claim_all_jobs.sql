@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS public.staking_claim_all_jobs (
   last_error TEXT,
   lock_owner TEXT,
   locked_at TIMESTAMPTZ,
+  invocation_started_at_ms BIGINT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   completed_at TIMESTAMPTZ
@@ -44,7 +45,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.staking_claim_all_jobs TO service
 CREATE OR REPLACE FUNCTION public.staking_claim_all_job_try_lock(
   p_job_id UUID,
   p_owner TEXT,
-  p_stale_seconds INT DEFAULT 180
+  p_stale_seconds INT DEFAULT 330
 )
 RETURNS BOOLEAN
 LANGUAGE plpgsql
@@ -68,7 +69,7 @@ BEGIN
     AND attempt_count < max_attempts
     AND (
       locked_at IS NULL
-      OR locked_at < now() - make_interval(secs => GREATEST(30, COALESCE(p_stale_seconds, 180)))
+      OR locked_at < now() - make_interval(secs => GREATEST(30, COALESCE(p_stale_seconds, 330)))
     );
 
   GET DIAGNOSTICS v_updated = ROW_COUNT;
@@ -98,3 +99,33 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.staking_claim_all_job_try_lock(UUID, TEXT, INT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.staking_claim_all_job_release_lock(UUID, TEXT) TO service_role;
+
+CREATE OR REPLACE FUNCTION public.staking_claim_all_job_heartbeat_lock(
+  p_job_id UUID,
+  p_owner TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_updated INT;
+BEGIN
+  IF p_job_id IS NULL OR btrim(COALESCE(p_owner, '')) = '' THEN
+    RETURN FALSE;
+  END IF;
+
+  UPDATE public.staking_claim_all_jobs
+  SET locked_at = now(),
+      updated_at = now()
+  WHERE id = p_job_id
+    AND status = 'processing'
+    AND lock_owner = btrim(p_owner);
+
+  GET DIAGNOSTICS v_updated = ROW_COUNT;
+  RETURN v_updated = 1;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.staking_claim_all_job_heartbeat_lock(UUID, TEXT) TO service_role;

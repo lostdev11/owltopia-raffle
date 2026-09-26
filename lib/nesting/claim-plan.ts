@@ -12,6 +12,8 @@ export type PositionClaimPlan = {
   payoutAmount: number
   newClaimedTotal: number
   claimableNow: number
+  /** DB `claimed_rewards` read when the plan was built (optimistic ledger check). */
+  expectedClaimedRewards: number
 }
 
 export function isOwlRewardPosition(
@@ -133,6 +135,7 @@ export function buildFullPositionClaimPlan(
     payoutAmount: claimableNow,
     newClaimedTotal: accruedNow,
     claimableNow,
+    expectedClaimedRewards: oldClaimed,
   }
 }
 

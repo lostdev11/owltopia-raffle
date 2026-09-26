@@ -3,6 +3,7 @@ import { getStakingPoolById } from '@/lib/db/staking-pools'
 import {
   getActiveClaimAllJobForWallet,
   getClaimAllJobById,
+  heartbeatClaimAllJobLock,
   insertClaimAllJob,
   listClaimAllJobsDueForCron,
   releaseClaimAllJobLock,
@@ -10,7 +11,10 @@ import {
   updateClaimAllJobProgress,
   type StakingClaimAllJobRow,
 } from '@/lib/db/staking-claim-all-jobs'
+import { getStakingPositionsByIds } from '@/lib/db/staking-positions'
 import { claimAllExecutionDeadlineMs } from '@/lib/nesting/claim-all-deadline'
+import { resolveClaimAllInvocationStartedAtMs } from '@/lib/nesting/claim-all-job-scheduling'
+import { buildOwlClaimPlansForPositions } from '@/lib/nesting/claim-plan'
 import { verifyClaimAllEligibilityToken } from '@/lib/nesting/claim-all-eligibility'
 import { executeChunkedBatchOwlClaims } from '@/lib/nesting/chunked-claim-all'
 import { isStakingUserError, StakingUserError } from '@/lib/nesting/errors'
@@ -51,10 +55,18 @@ function estimateBatchCount(nestCount: number): number {
   return Math.max(1, Math.ceil(nestCount / size))
 }
 
-export async function scheduleClaimAllJobContinuation(jobId: string): Promise<void> {
+export async function scheduleClaimAllJobContinuation(
+  jobId: string,
+  invocationStartedAtMs?: number
+): Promise<void> {
   const { after } = await import('next/server')
   after(async () => {
-    await runClaimAllJobTick({ jobId, lockOwner: 'after' }).catch((e) => {
+    let startedAtMs = invocationStartedAtMs
+    if (startedAtMs == null || !Number.isFinite(startedAtMs)) {
+      const job = await getClaimAllJobById(jobId)
+      startedAtMs = job?.invocation_started_at_ms ?? undefined
+    }
+    await runClaimAllJobTick({ jobId, lockOwner: 'after', startedAtMs }).catch((e) => {
       console.warn('[claim-all-job] after() tick failed', jobId, e instanceof Error ? e.message : e)
     })
   })
@@ -72,7 +84,11 @@ export async function processClaimAllJobsCron(limit = 5): Promise<{
   const errors: string[] = []
   for (const job of jobs) {
     try {
-      const result = await runClaimAllJobTick({ jobId: job.id, lockOwner: 'cron' })
+      const result = await runClaimAllJobTick({
+        jobId: job.id,
+        lockOwner: 'cron',
+        startedAtMs: job.invocation_started_at_ms ?? undefined,
+      })
       ticked += 1
       if (result.claim_all_complete) completed += 1
     } catch (e) {
@@ -133,6 +149,12 @@ export async function runClaimAllJobTick(params: {
       }
     }
 
+    const invocationStartedAtMs = resolveClaimAllInvocationStartedAtMs(job, params.startedAtMs)
+    if (job.invocation_started_at_ms == null || job.invocation_started_at_ms !== invocationStartedAtMs) {
+      await updateClaimAllJobProgress(jobId, { invocation_started_at_ms: invocationStartedAtMs })
+      job = { ...job, invocation_started_at_ms: invocationStartedAtMs }
+    }
+
     const nextAttempt = job.attempt_count + 1
     if (nextAttempt > job.max_attempts) {
       await updateClaimAllJobProgress(jobId, {
@@ -191,7 +213,7 @@ export async function runClaimAllJobTick(params: {
 
     const feeSignature = job.platform_fee_signature.trim()
     const linkFeeOnBatch = feeSignature && feeSignature !== 'no_platform_fee'
-    const deadlineMs = claimAllExecutionDeadlineMs(params.startedAtMs ?? Date.now())
+    const deadlineMs = claimAllExecutionDeadlineMs(invocationStartedAtMs)
     const tickClaims: ClaimAllJobTickResult['claims'] = []
     let tickTotal = 0
     let tickSigs: string[] = []
@@ -204,6 +226,20 @@ export async function runClaimAllJobTick(params: {
         pool,
         plans: claimPlans,
         deadlineMs,
+        onBeforeBatch: async () => {
+          const ok = await heartbeatClaimAllJobLock(jobId, lockOwner)
+          if (!ok) {
+            throw new StakingUserError('Claim-all job lock was lost. Wait for the server to resume.', 409, {
+              code: 'claim_all_lock_lost',
+            })
+          }
+        },
+        refreshBatchPlans: async (batchPlans) => {
+          const rows = await getStakingPositionsByIds(batchPlans.map((p) => p.positionId))
+          const fresh = buildOwlClaimPlansForPositions(rows, Date.now(), { forClaimAll: true })
+          const byId = new Map(fresh.map((p) => [p.positionId, p]))
+          return batchPlans.map((p) => byId.get(p.positionId)).filter((p): p is NonNullable<typeof p> => Boolean(p))
+        },
         onBatchCompleted: linkFeeOnBatch
           ? async (positionIds) => {
               await appendStakingPlatformFeePositionIds(feeSignature, positionIds)
@@ -236,7 +272,7 @@ export async function runClaimAllJobTick(params: {
       job = (await getClaimAllJobById(jobId))!
       const view = claimAllJobToPublicView(job)
       if (!view.claim_all_complete) {
-        await scheduleClaimAllJobContinuation(jobId)
+        await scheduleClaimAllJobContinuation(jobId, invocationStartedAtMs)
       }
       return {
         ...view,
@@ -282,7 +318,7 @@ export async function runClaimAllJobTick(params: {
           last_error: null,
         })
 
-        await scheduleClaimAllJobContinuation(jobId)
+        await scheduleClaimAllJobContinuation(jobId, invocationStartedAtMs)
         job = (await getClaimAllJobById(jobId))!
         return {
           ...claimAllJobToPublicView(job),
@@ -310,7 +346,7 @@ export async function runClaimAllJobTick(params: {
           completed_at: new Date().toISOString(),
         })
       } else {
-        await scheduleClaimAllJobContinuation(jobId)
+        await scheduleClaimAllJobContinuation(jobId, invocationStartedAtMs)
       }
       throw e
     }

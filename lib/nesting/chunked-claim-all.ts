@@ -68,6 +68,10 @@ export async function executeChunkedBatchOwlClaims(params: {
   plans: PositionClaimPlan[]
   /** When set, stop before the next batch if the route is near maxDuration. */
   deadlineMs?: number
+  /** Called before each batch (lock heartbeat). Throw to abort without sending OWL. */
+  onBeforeBatch?: () => Promise<void>
+  /** Re-read pending amounts from DB so stale plans cannot double-pay. */
+  refreshBatchPlans?: (plans: PositionClaimPlan[]) => Promise<PositionClaimPlan[]>
   /** Called after each successful batch with that batch's nest ids (fee linking). */
   onBatchCompleted?: (positionIds: string[]) => Promise<void>
 }): Promise<ChunkedBatchOwlClaimResult> {
@@ -75,10 +79,27 @@ export async function executeChunkedBatchOwlClaims(params: {
   const chunks = chunkPlans(params.plans, batchSize)
 
   if (chunks.length === 1) {
+    if (params.onBeforeBatch) {
+      await params.onBeforeBatch()
+    }
+    let singlePlans = chunks[0]!
+    if (params.refreshBatchPlans) {
+      singlePlans = await params.refreshBatchPlans(singlePlans)
+    }
+    if (singlePlans.length === 0) {
+      return {
+        total_claimed: 0,
+        claims: [],
+        transaction_signature: null,
+        execution_path: 'database_only',
+        batch_count: 0,
+        transaction_signatures: [],
+      }
+    }
     const single = await executeBatchOwlClaims({
       wallet: params.wallet,
       pool: params.pool,
-      plans: chunks[0]!,
+      plans: singlePlans,
     })
     const sig = single.transaction_signature?.trim() || null
     return {
@@ -111,7 +132,19 @@ export async function executeChunkedBatchOwlClaims(params: {
       )
     }
 
-    const chunk = chunks[i]!
+    if (params.onBeforeBatch) {
+      await params.onBeforeBatch()
+    }
+
+    let chunk = chunks[i]!
+    if (params.refreshBatchPlans) {
+      const refreshed = await params.refreshBatchPlans(chunk)
+      if (refreshed.length === 0) {
+        continue
+      }
+      chunk = refreshed
+    }
+
     let result: BatchOwlClaimResult | null = null
     let lastError: unknown
     // One retry per batch absorbs transient RPC / blockhash failures without stranding remaining nests.

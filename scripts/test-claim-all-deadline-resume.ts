@@ -14,7 +14,7 @@ import {
   verifyClaimAllEligibilityToken,
   CLAIM_ALL_ELIGIBILITY_TTL_MS,
 } from '../lib/nesting/claim-all-eligibility'
-import { buildOwlClaimPlansForPositions } from '../lib/nesting/claim-plan'
+import { buildOwlClaimPlansForPositions, buildFullPositionClaimPlan } from '../lib/nesting/claim-plan'
 import type { StakingPositionRow } from '../lib/db/staking-positions'
 import {
   CLAIM_FEE_RECOVERY_MAX_PAGES,
@@ -23,6 +23,13 @@ import {
 import { shouldShowClaimAllClosePageMessage } from '../lib/nesting/claim-all-ui-copy'
 import { claimAllJobToPublicView } from '../lib/nesting/claim-all-job-runner'
 import type { StakingClaimAllJobRow } from '../lib/db/staking-claim-all-jobs'
+import {
+  CLAIM_ALL_JOB_LOCK_STALE_MS,
+  isClaimAllJobEligibleForCronQueue,
+  isClaimAllJobLockHeldByAnotherWorker,
+  resolveClaimAllInvocationStartedAtMs,
+  shouldSkipClaimAllJobCronTickForInvocationDeadline,
+} from '../lib/nesting/claim-all-job-scheduling'
 
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret-32chars-min!!'
 
@@ -131,6 +138,86 @@ process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret-
   )
 }
 
+// Invocation deadline is pinned on the job and reused by after()/cron (not reset each tick).
+{
+  const pinned = 9_000_000
+  const job = { invocation_started_at_ms: pinned }
+  assert.equal(resolveClaimAllInvocationStartedAtMs(job, Date.now()), pinned)
+  assert.equal(resolveClaimAllInvocationStartedAtMs({ invocation_started_at_ms: null }, pinned), pinned)
+  const deadline = claimAllExecutionDeadlineMs(pinned)
+  assert.equal(
+    shouldSkipClaimAllJobCronTickForInvocationDeadline(
+      { invocation_started_at_ms: pinned },
+      deadline - CLAIM_ALL_DEADLINE_BUFFER_MS + 1
+    ),
+    true
+  )
+  assert.equal(
+    shouldSkipClaimAllJobCronTickForInvocationDeadline(
+      { invocation_started_at_ms: pinned },
+      deadline - CLAIM_ALL_DEADLINE_BUFFER_MS - 1
+    ),
+    false
+  )
+}
+
+// Live lock (~285s tick) must not be stealable at 180s; 330s stale window blocks cron.
+{
+  const now = Date.UTC(2026, 8, 26, 12, 0, 0)
+  const lockedAt = new Date(now - 200_000).toISOString()
+  assert.equal(
+    isClaimAllJobLockHeldByAnotherWorker({ locked_at: lockedAt, lock_owner: 'worker-a' }, 'worker-b', now, 180_000),
+    false
+  )
+  assert.equal(
+    isClaimAllJobLockHeldByAnotherWorker({ locked_at: lockedAt, lock_owner: 'worker-a' }, 'worker-b', now, CLAIM_ALL_JOB_LOCK_STALE_MS),
+    true
+  )
+  assert.ok(CLAIM_ALL_JOB_LOCK_STALE_MS >= 330_000)
+}
+
+// Cron skips jobs under invocation deadline margin and while lock is fresh.
+{
+  const now = Date.now()
+  const invocation = now - (CLAIM_ALL_ROUTE_MAX_DURATION_SEC - 10) * 1000
+  const nearDeadlineJob = {
+    invocation_started_at_ms: invocation,
+    pending_position_ids: ['a'],
+    attempt_count: 0,
+    max_attempts: 48,
+    locked_at: null,
+    lock_owner: null,
+  }
+  assert.equal(isClaimAllJobEligibleForCronQueue(nearDeadlineJob, now), false)
+}
+
+// Re-read from DB: nest already claimed by another worker yields no batch plan (no double pay).
+{
+  const AS_OF_MS = Date.UTC(2026, 4, 19, 12, 0, 0)
+  const stakedAt = new Date(AS_OF_MS - 30 * 86_400_000).toISOString()
+  const row: StakingPositionRow = {
+    id: 'nest-1',
+    wallet_address: 'Wallet1111111111111111111111111111111111',
+    pool_id: 'pool-1',
+    asset_identifier: 'mint-1',
+    amount: 100,
+    reward_rate_snapshot: 1,
+    reward_rate_unit_snapshot: 'daily',
+    reward_token_snapshot: 'OWL',
+    staked_at: stakedAt,
+    unlock_at: null,
+    unstaked_at: null,
+    claimed_rewards: 0,
+    status: 'active',
+    created_at: stakedAt,
+    updated_at: stakedAt,
+  }
+  const plan = buildFullPositionClaimPlan(row, AS_OF_MS, { forClaimAll: true })
+  assert.ok(plan && plan.payoutAmount > 0)
+  row.claimed_rewards = plan!.newClaimedTotal
+  assert.equal(buildFullPositionClaimPlan(row, AS_OF_MS, { forClaimAll: true }), null)
+}
+
 // Cron/admin job view exposes pending work for server-side resume (no browser required).
 {
   const row = {
@@ -154,6 +241,7 @@ process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret-
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     completed_at: null,
+    invocation_started_at_ms: null,
   } satisfies StakingClaimAllJobRow
   const view = claimAllJobToPublicView(row)
   assert.equal(view.claim_all_complete, false)
