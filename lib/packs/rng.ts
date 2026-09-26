@@ -11,6 +11,7 @@ import {
   PACKS_PRODUCT_SLUG_MAIN,
   packNftMinFairSolForProductSlug,
   resolvePackCashLadders,
+  resolvePackCategoryWeightsBps,
   type PackCashLadders,
 } from '@/lib/packs/product-pools'
 import type { WeightedTierPick } from '@/lib/packs/types'
@@ -55,9 +56,17 @@ export function pickJackpotWin(seed: string, oddsBps: number): boolean {
   return hashMod(seed, 'jackpot', 10_000) < oddsBps
 }
 
-export function pickCategory(seed: string): PackRegularCategory {
-  const entries: PackRegularCategory[] = ['owl', 'sol', 'nft']
-  const weights = entries.map((c) => PACK_CATEGORY_WEIGHTS_BPS[c])
+export function pickCategory(
+  seed: string,
+  categoryWeights: Record<PackRegularCategory, number> = PACK_CATEGORY_WEIGHTS_BPS
+): PackRegularCategory {
+  const entries = (['owl', 'sol', 'nft'] as PackRegularCategory[]).filter(
+    (c) => categoryWeights[c] > 0
+  )
+  if (entries.length === 0) {
+    throw new Error('category weights must include at least one positive category')
+  }
+  const weights = entries.map((c) => categoryWeights[c])
   const idx = pickWeightedIndex(seed, 'category', weights)
   return entries[idx]!
 }
@@ -184,7 +193,8 @@ export function recomputeOpenFromSeed(
   owlSolPrice?: number | null,
   productSlug?: string
 ): { category: PackRegularCategory; pick: WeightedTierPick } {
-  const category = pickCategory(seed)
+  const categoryWeights = resolvePackCategoryWeightsBps(productSlug)
+  const category = pickCategory(seed, categoryWeights)
   if (category === 'nft') {
     const minFair = packNftMinFairSolForProductSlug(productSlug)
     return {

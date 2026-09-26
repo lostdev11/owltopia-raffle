@@ -29,10 +29,12 @@ import {
 } from '../lib/packs/config'
 import {
   isPackNftFairValueForProduct,
+  PACK_CATEGORY_WEIGHTS_BPS_OWL_SHELF,
   PACKS_PRODUCT_SLUG_MAIN,
   PACKS_PRODUCT_SLUG_OWL,
   packNftMinFairSolForProductSlug,
   resolvePackCashLadders,
+  resolvePackCategoryWeightsBps,
 } from '../lib/packs/product-pools'
 import { isPackNftFairValueSol } from '../lib/packs/config'
 
@@ -60,18 +62,31 @@ assert.equal(PACK_CATEGORY_WEIGHTS_BPS.nft, 4000)
 const mainLadders = resolvePackCashLadders(PACKS_PRODUCT_SLUG_MAIN)
 const owlLadders = resolvePackCashLadders(PACKS_PRODUCT_SLUG_OWL)
 assert.ok(mainLadders.owlTiers.some((t) => t.amount === 10))
-assert.ok(owlLadders.owlTiers.some((t) => t.amount === 2))
-assert.equal(
-  mainLadders.owlTiers.reduce((s, t) => s + t.weight, 0),
-  owlLadders.owlTiers.reduce((s, t) => s + t.weight, 0)
-)
+assert.ok(owlLadders.owlTiers.every((t) => [10, 20, 30, 40, 50].includes(t.amount)))
+assert.equal(owlLadders.solTiers.length, 0)
+
+const owlWeights = resolvePackCategoryWeightsBps(PACKS_PRODUCT_SLUG_OWL)
+assert.equal(owlWeights.owl, 7000)
+assert.equal(owlWeights.sol, 0)
+assert.equal(owlWeights.nft, 3000)
+assert.deepEqual(PACK_CATEGORY_WEIGHTS_BPS_OWL_SHELF, owlWeights)
 
 const oddsMain = computePackOddsPercentages({ productSlug: PACKS_PRODUCT_SLUG_MAIN })
 const oddsOwlShelf = computePackOddsPercentages({ productSlug: PACKS_PRODUCT_SLUG_OWL })
 assert.equal(oddsMain.categories.find((c) => c.category === 'owl')?.percent, 30)
-assert.equal(oddsOwlShelf.categories.find((c) => c.category === 'owl')?.percent, 30)
-assert.equal(oddsOwlShelf.categories.find((c) => c.category === 'nft')?.percent, 40)
-assert.notEqual(oddsMain.owlTiers[0]?.amount, oddsOwlShelf.owlTiers[0]?.amount)
+assert.equal(oddsOwlShelf.categories.find((c) => c.category === 'owl')?.percent, 70)
+assert.equal(oddsOwlShelf.categories.find((c) => c.category === 'sol')?.percent, 0)
+assert.equal(oddsOwlShelf.categories.find((c) => c.category === 'nft')?.percent, 30)
+
+let owlShelfCats = { owl: 0, sol: 0, nft: 0 }
+for (let i = 0; i < 5000; i++) {
+  const s = generatePackOpenSeed()
+  const c = pickCategory(s, owlWeights)
+  owlShelfCats[c]++
+}
+assert.ok(owlShelfCats.owl > 3000 && owlShelfCats.owl < 3800, `owl cat ~70% got ${owlShelfCats.owl}`)
+assert.equal(owlShelfCats.sol, 0)
+assert.ok(owlShelfCats.nft > 1200 && owlShelfCats.nft < 1800, `nft cat ~30% got ${owlShelfCats.nft}`)
 
 assert.ok(PACK_OWL_TIERS.every((t) => t.amount >= 10 && t.amount <= 50))
 assert.ok(PACK_OWL_TIERS.some((t) => t.amount === 10))

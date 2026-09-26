@@ -688,11 +688,17 @@ export function PacksClient({
               </p>
               <div className="mt-3">
                 <RarityRow label="$OWL" pct={bpsToPercent(weights.owl)} tone="text-emerald-200" />
-                <RarityRow label="SOL" pct={bpsToPercent(weights.sol)} tone="text-sky-200" />
+                {weights.sol > 0 ? (
+                  <RarityRow label="SOL" pct={bpsToPercent(weights.sol)} tone="text-sky-200" />
+                ) : null}
                 <RarityRow label="NFT" pct={bpsToPercent(weights.nft)} tone="text-amber-200" />
               </div>
               <p className="mt-3 text-xs leading-relaxed text-white/45">
-                Every open wins · same category odds % on every shelf ·{' '}
+                Every open wins ·{' '}
+                {paymentCurrency === 'OWL'
+                  ? '70% $OWL / 30% NFT on this shelf'
+                  : '30/30/40 on 0.1 SOL shelf'}{' '}
+                ·{' '}
                 {paymentCurrency === 'OWL' ? '$OWL shelf' : '0.1 SOL shelf'} · prize NFTs ready:{' '}
                 {paymentCurrency === 'OWL'
                   ? (config?.vault.availableNftsOwlShelf ?? 0)
@@ -779,8 +785,11 @@ export function PacksClient({
             <span className="text-[#00FF9C]">
               {paymentCurrency === 'OWL' ? '$OWL pack shelf' : '0.1 SOL pack shelf'}
             </span>
-            . Same category hit rates (30/30/40) on both paths — prize stock and cash tiers differ
-            by shelf. Typical prize ≈{' '}
+            .{' '}
+            {paymentCurrency === 'OWL'
+              ? '70% $OWL (10–50 ladder) / 30% NFT — no SOL cash on this shelf.'
+              : '30% $OWL / 30% SOL / 40% NFT on the main shelf.'}{' '}
+            Typical prize ≈{' '}
             {activeEv?.targetEvSol ?? config?.ev.targetEvSol ?? 0.08} SOL per open (includes{' '}
             {config?.jackpot?.contributionSol ?? 0.02} SOL jackpot slice).
             {config ? ` Prize NFTs ready: ${config.vault.availableNfts}.` : null}
@@ -818,25 +827,27 @@ export function PacksClient({
                 ))}
               </ul>
             </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00FF9C]/85">
-                SOL ({bpsToPercent(weights.sol)})
-              </p>
-              <ul className="mt-2 space-y-1 text-sm text-[#A9CBB9]">
-                {(activeOdds?.solTiers ?? config?.odds.solTiers ?? []).map((t) => (
-                  <li key={t.amountSol} className="flex justify-between gap-2">
-                    <span>{t.amountSol} SOL</span>
-                    <span className="tabular-nums text-[#00FF9C]/80">
-                      {t.percentOverall != null
-                        ? `${t.percentOverall}%`
-                        : t.percentOfCategory != null
-                          ? `${t.percentOfCategory}% of SOL`
-                          : `w${t.weight}`}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {weights.sol > 0 ? (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00FF9C]/85">
+                  SOL ({bpsToPercent(weights.sol)})
+                </p>
+                <ul className="mt-2 space-y-1 text-sm text-[#A9CBB9]">
+                  {(activeOdds?.solTiers ?? config?.odds.solTiers ?? []).map((t) => (
+                    <li key={t.amountSol} className="flex justify-between gap-2">
+                      <span>{t.amountSol} SOL</span>
+                      <span className="tabular-nums text-[#00FF9C]/80">
+                        {t.percentOverall != null
+                          ? `${t.percentOverall}%`
+                          : t.percentOfCategory != null
+                            ? `${t.percentOfCategory}% of SOL`
+                            : `w${t.weight}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <div className="sm:col-span-2 lg:col-span-4">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-200/90">
                 1% chase NFTs

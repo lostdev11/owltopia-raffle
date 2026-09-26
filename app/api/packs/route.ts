@@ -202,7 +202,7 @@ export async function GET() {
           solTiers: oddsPctOwl.solTiers,
           premiumNft: oddsPctOwl.premiumNft,
           nftInventory: oddsPctOwl.nftInventory.slice(0, 40),
-          shelfLabel: '$OWL pack shelf (same hit %, cheaper stock)',
+          shelfLabel: '$OWL pack shelf (70% OWL / 30% NFT, no SOL cash)',
         },
       },
       fairness: {
