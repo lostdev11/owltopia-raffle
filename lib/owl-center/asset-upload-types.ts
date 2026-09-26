@@ -23,6 +23,8 @@ export type AssetUploadProgress = {
   staged_zip_bytes?: number
   /** Sum of uncompressed files to upload (set after validation). */
   total_upload_bytes?: number
+  /** Phase B on-chain CM deploy checkpoint (jsonb passthrough). */
+  onchain_deploy?: unknown
 }
 
 export type OwlCenterAssetUploadJob = {
@@ -65,5 +67,16 @@ export function parseUploadProgress(raw: unknown): AssetUploadProgress {
     typeof o.staged_zip_bytes === 'number' && o.staged_zip_bytes > 0 ? o.staged_zip_bytes : undefined
   const total_upload_bytes =
     typeof o.total_upload_bytes === 'number' && o.total_upload_bytes > 0 ? o.total_upload_bytes : undefined
-  return { file_list, uploaded, cursor, manifest_base_url, staged_zip_bytes, total_upload_bytes }
+  const progress: AssetUploadProgress = {
+    file_list,
+    uploaded,
+    cursor,
+    manifest_base_url,
+    staged_zip_bytes,
+    total_upload_bytes,
+  }
+  if (o.onchain_deploy !== undefined && o.onchain_deploy !== null) {
+    progress.onchain_deploy = o.onchain_deploy
+  }
+  return progress
 }

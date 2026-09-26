@@ -2,6 +2,23 @@
  * Pure helpers for Phase B CM deploy panel messaging (unit-testable).
  */
 
+import { isBlockhashOrTxExpiryError } from '@/lib/solana/tx-expiry-patterns'
+
+export function isDeployExpiryErrorMessage(error: string | null | undefined): boolean {
+  if (!error?.trim()) return false
+  return isBlockhashOrTxExpiryError(error)
+}
+
+export function deployPanelHasRecoverableIds(status: DeployProgressSnapshot | null | undefined): boolean {
+  if (!status || status.fully_deployed) return false
+  return Boolean(
+    status.candy_machine_id ||
+      status.collection_mint ||
+      status.in_progress_candy_machine_id ||
+      status.in_progress_collection_mint
+  )
+}
+
 export type DeployProgressSnapshot = {
   fully_deployed?: boolean
   candy_machine_id?: string | null

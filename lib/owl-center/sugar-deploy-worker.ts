@@ -1,7 +1,10 @@
 import 'server-only'
 
 import {
+  getAssetUploadJobById,
   getLatestAssetUploadJobForLaunch,
+  releaseDeployLock,
+  tryAcquireDeployLock,
   updateAssetUploadJob,
 } from '@/lib/db/owl-center-asset-upload-job'
 import { ensureMarketplaceRow, syncLaunchMarketplaceFieldsFromRow, upsertMarketplaceReadinessForLaunch } from '@/lib/db/owl-center-marketplace'
@@ -16,6 +19,15 @@ import {
   configLinesFullyLoaded,
   type OnchainDeployState,
 } from '@/lib/owl-center/onchain-deploy-state'
+import {
+  appendDeployHistory,
+  deployHistoryEntry,
+  mergeOnchainDeployPatch,
+  onchainDeployHasSavedIds,
+} from '@/lib/owl-center/onchain-deploy-checkpoint'
+import { isBlockhashOrTxExpiryError } from '@/lib/solana/tx-expiry-patterns'
+import { fetchCandyMachine } from '@/lib/solana/core-candy-machine'
+import { publicKey } from '@metaplex-foundation/umi'
 import {
   deployPublicSimpleCandyMachineOnchain,
   isOwlCenterOnchainCmDeployEnabled,
@@ -67,25 +79,42 @@ export type SugarDeployWorkerResult =
       candy_guard_id?: string
     }
 
-function emptyDeployPatch(
-  patch: Partial<OnchainDeployState> & Pick<OnchainDeployState, 'status'>
-): OnchainDeployState {
-  return {
-    status: patch.status,
-    candy_machine_id: patch.candy_machine_id ?? null,
-    collection_mint: patch.collection_mint ?? null,
-    candy_guard_id: patch.candy_guard_id ?? null,
-    onchain_update_authority: patch.onchain_update_authority ?? null,
-    platform_update_delegate: patch.platform_update_delegate ?? null,
-    config_lines_loaded: patch.config_lines_loaded ?? null,
-    config_lines_total: patch.config_lines_total ?? null,
-    error: patch.error ?? null,
-    completed_at: patch.completed_at ?? null,
-  }
-}
+const CONFIG_LINE_CHECKPOINT_EVERY_CHUNKS = 5
 
 function withDeployState(progress: AssetUploadProgress, patch: OnchainDeployState): AssetUploadProgress {
   return { ...progress, onchain_deploy: patch } as AssetUploadProgress
+}
+
+async function readJobUploadProgress(jobId: string): Promise<AssetUploadProgress> {
+  const fresh = await getAssetUploadJobById(jobId)
+  return fresh?.upload_progress ?? { file_list: [], uploaded: {}, cursor: 0 }
+}
+
+async function persistDeployCheckpoint(
+  jobId: string,
+  patch: Partial<OnchainDeployState> & Pick<OnchainDeployState, 'status'>,
+  historyLabels?: Array<{ label: string; address?: string | null; signature?: string | null }>
+): Promise<OnchainDeployState> {
+  const progress = await readJobUploadProgress(jobId)
+  const existing = parseOnchainDeployState(progress)
+  const historyAppend = historyLabels?.length
+    ? appendDeployHistory(existing?.history, historyLabels.map((h) => deployHistoryEntry(h)))
+    : undefined
+  const merged = mergeOnchainDeployPatch(existing, {
+    ...patch,
+    ...(historyAppend?.length ? { history: historyAppend } : {}),
+  })
+  await updateAssetUploadJob(jobId, {
+    upload_progress: withDeployState(progress, merged),
+  })
+  return merged
+}
+
+function buildDeployPatch(
+  progress: AssetUploadProgress,
+  patch: Partial<OnchainDeployState> & Pick<OnchainDeployState, 'status'>
+): OnchainDeployState {
+  return mergeOnchainDeployPatch(parseOnchainDeployState(progress), patch)
 }
 
 export async function getSugarDeployStatusForLaunch(launchId: string) {
@@ -208,19 +237,14 @@ async function completeCoreDeployAfterLines(params: {
 
   if (!isOwlCenterCreatorUaHandoffEnabled()) {
     const completedAt = new Date().toISOString()
-    await updateAssetUploadJob(jobId, {
-      upload_progress: withDeployState(
-        progress,
-        emptyDeployPatch({
-          status: 'completed',
-          candy_machine_id: candyMachineId,
-          collection_mint: collectionMint,
-          candy_guard_id: candyGuardId,
-          config_lines_loaded: configLinesLoaded,
-          config_lines_total: configLinesTotal,
-          completed_at: completedAt,
-        })
-      ),
+    await persistDeployCheckpoint(jobId, {
+      status: 'completed',
+      candy_machine_id: candyMachineId,
+      collection_mint: collectionMint,
+      candy_guard_id: candyGuardId,
+      config_lines_loaded: configLinesLoaded,
+      config_lines_total: configLinesTotal,
+      completed_at: completedAt,
     })
     const go_live = await persistDeployIds(launchId, jobId, candyMachineId, collectionMint, candyGuardId)
     return {
@@ -236,20 +260,15 @@ async function completeCoreDeployAfterLines(params: {
 
   const creatorWallet = launch.creator_wallet?.trim()
   if (!creatorWallet) {
-    await updateAssetUploadJob(jobId, {
-      upload_progress: withDeployState(
-        progress,
-        emptyDeployPatch({
-          status: 'cm_ready',
-          candy_machine_id: candyMachineId,
-          collection_mint: collectionMint,
-          candy_guard_id: candyGuardId,
-          config_lines_loaded: configLinesLoaded,
-          config_lines_total: configLinesTotal,
-          error: 'creator_wallet is required to finish Core update-authority handoff.',
-          completed_at: new Date().toISOString(),
-        })
-      ),
+    await persistDeployCheckpoint(jobId, {
+      status: 'cm_ready',
+      candy_machine_id: candyMachineId,
+      collection_mint: collectionMint,
+      candy_guard_id: candyGuardId,
+      config_lines_loaded: configLinesLoaded,
+      config_lines_total: configLinesTotal,
+      error: 'creator_wallet is required to finish Core update-authority handoff.',
+      completed_at: new Date().toISOString(),
     })
     return {
       ok: false,
@@ -263,18 +282,13 @@ async function completeCoreDeployAfterLines(params: {
     }
   }
 
-  await updateAssetUploadJob(jobId, {
-    upload_progress: withDeployState(
-      progress,
-      emptyDeployPatch({
-        status: 'cm_ready',
-        candy_machine_id: candyMachineId,
-        collection_mint: collectionMint,
-        candy_guard_id: candyGuardId,
-        config_lines_loaded: configLinesLoaded,
-        config_lines_total: configLinesTotal,
-      })
-    ),
+  await persistDeployCheckpoint(jobId, {
+    status: 'cm_ready',
+    candy_machine_id: candyMachineId,
+    collection_mint: collectionMint,
+    candy_guard_id: candyGuardId,
+    config_lines_loaded: configLinesLoaded,
+    config_lines_total: configLinesTotal,
   })
 
   const network = resolveLaunchMintNetwork(launch)
@@ -287,20 +301,15 @@ async function completeCoreDeployAfterLines(params: {
   })
 
   if (!handoff.ok) {
-    await updateAssetUploadJob(jobId, {
-      upload_progress: withDeployState(
-        progress,
-        emptyDeployPatch({
-          status: 'cm_ready',
-          candy_machine_id: candyMachineId,
-          collection_mint: collectionMint,
-          candy_guard_id: candyGuardId,
-          config_lines_loaded: configLinesLoaded,
-          config_lines_total: configLinesTotal,
-          error: handoff.error,
-          completed_at: new Date().toISOString(),
-        })
-      ),
+    await persistDeployCheckpoint(jobId, {
+      status: 'cm_ready',
+      candy_machine_id: candyMachineId,
+      collection_mint: collectionMint,
+      candy_guard_id: candyGuardId,
+      config_lines_loaded: configLinesLoaded,
+      config_lines_total: configLinesTotal,
+      error: handoff.error,
+      completed_at: new Date().toISOString(),
     })
     return { ok: false, error: handoff.error, code: 'ua_handoff_pending' }
   }
@@ -311,21 +320,16 @@ async function completeCoreDeployAfterLines(params: {
   })
 
   const completedAt = new Date().toISOString()
-  await updateAssetUploadJob(jobId, {
-    upload_progress: withDeployState(
-      progress,
-      emptyDeployPatch({
-        status: 'completed',
-        candy_machine_id: candyMachineId,
-        collection_mint: collectionMint,
-        candy_guard_id: candyGuardId,
-        onchain_update_authority: handoff.onchainUpdateAuthority ?? null,
-        platform_update_delegate: handoff.platformUpdateDelegate ?? null,
-        config_lines_loaded: configLinesLoaded,
-        config_lines_total: configLinesTotal,
-        completed_at: completedAt,
-      })
-    ),
+  await persistDeployCheckpoint(jobId, {
+    status: 'completed',
+    candy_machine_id: candyMachineId,
+    collection_mint: collectionMint,
+    candy_guard_id: candyGuardId,
+    onchain_update_authority: handoff.onchainUpdateAuthority ?? null,
+    platform_update_delegate: handoff.platformUpdateDelegate ?? null,
+    config_lines_loaded: configLinesLoaded,
+    config_lines_total: configLinesTotal,
+    completed_at: completedAt,
   })
 
   const go_live = await persistDeployIds(launchId, jobId, candyMachineId, collectionMint, candyGuardId)
@@ -337,6 +341,19 @@ async function completeCoreDeployAfterLines(params: {
     go_live,
     config_lines_loaded: configLinesLoaded,
     config_lines_total: configLinesTotal,
+  }
+}
+
+async function fetchOnChainItemsLoaded(
+  network: 'mainnet' | 'devnet',
+  candyMachineId: string
+): Promise<number | null> {
+  try {
+    const umi = createIrysDeployerCoreUmi(network)
+    const cm = await fetchCandyMachine(umi, publicKey(candyMachineId))
+    return Number(cm.itemsLoaded)
+  } catch {
+    return null
   }
 }
 
@@ -352,48 +369,70 @@ async function runCoreResumableDeploy(
   }
 
   const network = resolveLaunchMintNetwork(launch)
-  let candyMachineId = existing?.candy_machine_id
-  let collectionMint = existing?.collection_mint
-  let candyGuardId = existing?.candy_guard_id
-  let loadedSoFar = existing?.config_lines_loaded ?? 0
+  const checkpoint =
+    parseOnchainDeployState(await readJobUploadProgress(job.id)) ?? existing
+
+  let candyMachineId = checkpoint?.candy_machine_id
+  let collectionMint = checkpoint?.collection_mint
+  let candyGuardId = checkpoint?.candy_guard_id
+  let loadedSoFar = checkpoint?.config_lines_loaded ?? 0
 
   const shouldResumeLoad =
-    existing &&
-    (existing.status === 'loading_items' ||
-      (existing.status === 'failed' &&
-        existing.config_lines_total != null &&
-        (existing.config_lines_loaded ?? 0) < existing.config_lines_total)) &&
+    checkpoint &&
+    (checkpoint.status === 'loading_items' ||
+      (checkpoint.status === 'failed' &&
+        checkpoint.config_lines_total != null &&
+        (checkpoint.config_lines_loaded ?? 0) < checkpoint.config_lines_total)) &&
     candyMachineId &&
     collectionMint &&
     candyGuardId &&
     isValidSolanaPubkey(candyMachineId) &&
     isValidSolanaPubkey(collectionMint)
 
+  const resumeCollectionOnly =
+    !shouldResumeLoad &&
+    Boolean(checkpoint?.collection_mint && isValidSolanaPubkey(checkpoint.collection_mint)) &&
+    !checkpoint?.candy_machine_id
+
+  const startingFreshCreate = !shouldResumeLoad && !resumeCollectionOnly
+
+  if (startingFreshCreate && onchainDeployHasSavedIds(checkpoint)) {
+    return {
+      ok: false,
+      error:
+        'Deploy checkpoint already has on-chain IDs — use Continue loading items instead of creating a new Candy Machine.',
+      code: 'deploy_in_progress',
+      candy_machine_id: checkpoint?.candy_machine_id ?? undefined,
+      collection_mint: checkpoint?.collection_mint ?? undefined,
+      candy_guard_id: checkpoint?.candy_guard_id ?? undefined,
+    }
+  }
+
   if (!shouldResumeLoad) {
-    await updateAssetUploadJob(job.id, {
-      upload_progress: withDeployState(
-        job.upload_progress,
-        emptyDeployPatch({ status: 'running' })
-      ),
-    })
+    await persistDeployCheckpoint(job.id, { status: 'running', error: null })
 
     const created = await createPublicSimpleCoreCandyMachineShell({
       launch,
       configLines: pkg.configLines,
       collectionMetadataUri: pkg.collectionMetadataUri,
       collectionName: launch.name,
+      existingCollectionMint: resumeCollectionOnly ? checkpoint!.collection_mint! : undefined,
+      onCollectionCreated: async (mint) => {
+        collectionMint = mint
+        await persistDeployCheckpoint(
+          job.id,
+          { status: 'running', collection_mint: mint },
+          [{ label: 'create_core_collection', address: mint }]
+        )
+      },
     })
 
     if (!created.ok) {
-      await updateAssetUploadJob(job.id, {
-        upload_progress: withDeployState(
-          job.upload_progress,
-          emptyDeployPatch({
-            status: 'failed',
-            error: created.error,
-            completed_at: new Date().toISOString(),
-          })
-        ),
+      await persistDeployCheckpoint(job.id, {
+        status: 'failed',
+        collection_mint: collectionMint ?? checkpoint?.collection_mint ?? null,
+        error: created.error,
+        completed_at: new Date().toISOString(),
       })
       return { ok: false, error: created.error, code: 'deploy_failed' }
     }
@@ -403,36 +442,35 @@ async function runCoreResumableDeploy(
     candyGuardId = created.candyGuardId
     loadedSoFar = 0
 
-    await updateAssetUploadJob(job.id, {
-      upload_progress: withDeployState(
-        job.upload_progress,
-        emptyDeployPatch({
-          status: 'loading_items',
-          candy_machine_id: candyMachineId,
-          collection_mint: collectionMint,
-          candy_guard_id: candyGuardId,
-          config_lines_loaded: 0,
-          config_lines_total: created.configLinesTotal,
-        })
-      ),
-    })
+    await persistDeployCheckpoint(
+      job.id,
+      {
+        status: 'loading_items',
+        candy_machine_id: candyMachineId,
+        collection_mint: collectionMint,
+        candy_guard_id: candyGuardId,
+        config_lines_loaded: 0,
+        config_lines_total: created.configLinesTotal,
+        error: null,
+      },
+      [
+        { label: 'create_core_candy_machine', address: candyMachineId },
+        { label: 'create_core_candy_guard', address: candyGuardId },
+      ]
+    )
   } else {
-    await updateAssetUploadJob(job.id, {
-      upload_progress: withDeployState(
-        job.upload_progress,
-        emptyDeployPatch({
-          status: 'loading_items',
-          candy_machine_id: candyMachineId!,
-          collection_mint: collectionMint!,
-          candy_guard_id: candyGuardId!,
-          config_lines_loaded: loadedSoFar,
-          config_lines_total: pkg.configLines.length,
-          error: null,
-        })
-      ),
+    await persistDeployCheckpoint(job.id, {
+      status: 'loading_items',
+      candy_machine_id: candyMachineId!,
+      collection_mint: collectionMint!,
+      candy_guard_id: candyGuardId!,
+      config_lines_loaded: loadedSoFar,
+      config_lines_total: pkg.configLines.length,
+      error: null,
     })
   }
 
+  let chunksSinceCheckpoint = 0
   const load = await loadCoreCandyMachineConfigLines({
     network,
     candyMachineId: candyMachineId!,
@@ -440,23 +478,33 @@ async function runCoreResumableDeploy(
     candyGuardId: candyGuardId!,
     configLines: pkg.configLines,
     startIndex: loadedSoFar,
+    onProgress: async (loaded) => {
+      chunksSinceCheckpoint += 1
+      if (chunksSinceCheckpoint < CONFIG_LINE_CHECKPOINT_EVERY_CHUNKS) return
+      chunksSinceCheckpoint = 0
+      await persistDeployCheckpoint(job.id, {
+        status: 'loading_items',
+        candy_machine_id: candyMachineId!,
+        collection_mint: collectionMint!,
+        candy_guard_id: candyGuardId!,
+        config_lines_loaded: loaded,
+        config_lines_total: pkg.configLines.length,
+      })
+    },
   })
 
   if (!load.ok) {
-    await updateAssetUploadJob(job.id, {
-      upload_progress: withDeployState(
-        job.upload_progress,
-        emptyDeployPatch({
-          status: 'failed',
-          candy_machine_id: candyMachineId!,
-          collection_mint: collectionMint!,
-          candy_guard_id: candyGuardId!,
-          config_lines_loaded: loadedSoFar,
-          config_lines_total: pkg.configLines.length,
-          error: load.error,
-          completed_at: new Date().toISOString(),
-        })
-      ),
+    const onChainLoaded =
+      (await fetchOnChainItemsLoaded(network, candyMachineId!)) ?? loadedSoFar
+    await persistDeployCheckpoint(job.id, {
+      status: isBlockhashOrTxExpiryError(load.error) ? 'loading_items' : 'failed',
+      candy_machine_id: candyMachineId!,
+      collection_mint: collectionMint!,
+      candy_guard_id: candyGuardId!,
+      config_lines_loaded: onChainLoaded,
+      config_lines_total: pkg.configLines.length,
+      error: load.error,
+      completed_at: isBlockhashOrTxExpiryError(load.error) ? null : new Date().toISOString(),
     })
     return {
       ok: false,
@@ -466,24 +514,19 @@ async function runCoreResumableDeploy(
       collection_mint: collectionMint!,
       candy_guard_id: candyGuardId!,
       continue_loading: true,
-      config_lines_loaded: loadedSoFar,
+      config_lines_loaded: onChainLoaded,
       config_lines_total: pkg.configLines.length,
     }
   }
 
   if (!load.complete) {
-    await updateAssetUploadJob(job.id, {
-      upload_progress: withDeployState(
-        job.upload_progress,
-        emptyDeployPatch({
-          status: 'loading_items',
-          candy_machine_id: load.candyMachineId,
-          collection_mint: load.collectionMint,
-          candy_guard_id: load.candyGuardId,
-          config_lines_loaded: load.configLinesLoaded,
-          config_lines_total: load.configLinesTotal,
-        })
-      ),
+    await persistDeployCheckpoint(job.id, {
+      status: 'loading_items',
+      candy_machine_id: load.candyMachineId,
+      collection_mint: load.collectionMint,
+      candy_guard_id: load.candyGuardId,
+      config_lines_loaded: load.configLinesLoaded,
+      config_lines_total: load.configLinesTotal,
     })
     return {
       ok: true,
@@ -496,17 +539,120 @@ async function runCoreResumableDeploy(
     }
   }
 
+  const progress = await readJobUploadProgress(job.id)
   return completeCoreDeployAfterLines({
     launchId,
     jobId: job.id,
     launch,
-    progress: job.upload_progress,
+    progress,
     candyMachineId: load.candyMachineId,
     collectionMint: load.collectionMint,
     candyGuardId: load.candyGuardId,
     configLinesLoaded: load.configLinesLoaded,
     configLinesTotal: load.configLinesTotal,
   })
+}
+
+async function runCoreSugarDeployLocked(
+  launchId: string,
+  launch: NonNullable<Awaited<ReturnType<typeof getOwlCenterLaunchByIdAdmin>>>,
+  job: NonNullable<Awaited<ReturnType<typeof getLatestAssetUploadJobForLaunch>>>,
+  existing: OnchainDeployState | null
+): Promise<SugarDeployWorkerResult> {
+  const resumeLoad =
+    existing &&
+    (existing.status === 'loading_items' ||
+      (existing.status === 'failed' &&
+        existing.config_lines_total != null &&
+        (existing.config_lines_loaded ?? 0) < existing.config_lines_total)) &&
+    existing.candy_machine_id &&
+    existing.collection_mint
+
+  const resumeHandoff =
+    !resumeLoad &&
+    (existing?.status === 'cm_ready' || existing?.status === 'failed' || existing?.status === 'ua_handed_off') &&
+    existing.candy_machine_id &&
+    existing.collection_mint &&
+    isValidSolanaPubkey(existing.candy_machine_id) &&
+    isValidSolanaPubkey(existing.collection_mint) &&
+    configLinesFullyLoaded(existing) &&
+    isOwlCenterCreatorUaHandoffEnabled()
+
+  if (resumeHandoff) {
+    const creatorWallet = launch.creator_wallet?.trim()
+    if (!creatorWallet) {
+      return { ok: false, error: 'creator_wallet is required to finish Core update-authority handoff.', code: 'missing_creator' }
+    }
+
+    await persistDeployCheckpoint(job.id, {
+      status: 'cm_ready',
+      candy_machine_id: existing.candy_machine_id,
+      collection_mint: existing.collection_mint,
+      candy_guard_id: existing.candy_guard_id ?? null,
+      onchain_update_authority: existing.onchain_update_authority ?? null,
+      platform_update_delegate: existing.platform_update_delegate ?? null,
+      config_lines_loaded: existing.config_lines_loaded,
+      config_lines_total: existing.config_lines_total,
+      error: null,
+    })
+
+    const network = resolveLaunchMintNetwork(launch)
+    const umi = createIrysDeployerCoreUmi(network)
+    const handoff = await handOffCoreCollectionUpdateAuthority({
+      umi,
+      collectionAddress: existing.collection_mint!,
+      creatorWallet,
+    })
+    if (!handoff.ok) {
+      await persistDeployCheckpoint(job.id, {
+        status: 'failed',
+        candy_machine_id: existing.candy_machine_id,
+        collection_mint: existing.collection_mint,
+        candy_guard_id: existing.candy_guard_id ?? null,
+        onchain_update_authority: existing.onchain_update_authority ?? null,
+        platform_update_delegate: existing.platform_update_delegate ?? null,
+        config_lines_loaded: existing.config_lines_loaded,
+        config_lines_total: existing.config_lines_total,
+        error: handoff.error,
+        completed_at: new Date().toISOString(),
+      })
+      return { ok: false, error: handoff.error, code: 'ua_handoff_failed' }
+    }
+
+    await updateOwlCenterLaunchByIdAdmin(launchId, {
+      onchain_update_authority: handoff.updateAuthority,
+      platform_update_delegate: handoff.platformDelegate,
+    })
+
+    await persistDeployCheckpoint(job.id, {
+      status: 'completed',
+      candy_machine_id: existing.candy_machine_id,
+      collection_mint: existing.collection_mint,
+      candy_guard_id: existing.candy_guard_id ?? null,
+      onchain_update_authority: handoff.updateAuthority,
+      platform_update_delegate: handoff.platformDelegate,
+      config_lines_loaded: existing.config_lines_loaded,
+      config_lines_total: existing.config_lines_total,
+      completed_at: new Date().toISOString(),
+    })
+
+    const go_live = await persistDeployIds(
+      launchId,
+      job.id,
+      existing.candy_machine_id!,
+      existing.collection_mint!,
+      existing.candy_guard_id
+    )
+    return {
+      ok: true,
+      candy_machine_id: existing.candy_machine_id!,
+      collection_mint: existing.collection_mint!,
+      candy_guard_id: existing.candy_guard_id ?? '',
+      go_live,
+    }
+  }
+
+  return runCoreResumableDeploy(launchId, launch, job, existing)
 }
 
 export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<SugarDeployWorkerResult> {
@@ -560,33 +706,30 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
     // - no CM ids yet → clear and allow a fresh create
     // - CM ids present → normalize to loading_items so resume works
     if (existing.candy_machine_id && existing.collection_mint) {
-      await updateAssetUploadJob(job.id, {
-        upload_progress: withDeployState(
-          job.upload_progress,
-          emptyDeployPatch({
-            status: 'loading_items',
-            candy_machine_id: existing.candy_machine_id,
-            collection_mint: existing.collection_mint,
-            candy_guard_id: existing.candy_guard_id,
-            config_lines_loaded: existing.config_lines_loaded ?? 0,
-            config_lines_total: existing.config_lines_total,
-            error: null,
-          })
-        ),
+      await persistDeployCheckpoint(job.id, {
+        status: 'loading_items',
+        candy_machine_id: existing.candy_machine_id,
+        collection_mint: existing.collection_mint,
+        candy_guard_id: existing.candy_guard_id,
+        config_lines_loaded: existing.config_lines_loaded ?? 0,
+        config_lines_total: existing.config_lines_total,
+        error: null,
       })
-      // re-read path via recursive-ish continue: mutate local existing
       existing.status = 'loading_items'
       existing.error = null
+    } else if (existing.collection_mint && isValidSolanaPubkey(existing.collection_mint)) {
+      await persistDeployCheckpoint(job.id, {
+        status: 'running',
+        collection_mint: existing.collection_mint,
+        error: null,
+      })
+      existing.status = 'running'
+      existing.error = null
     } else {
-      await updateAssetUploadJob(job.id, {
-        upload_progress: withDeployState(
-          job.upload_progress,
-          emptyDeployPatch({
-            status: 'failed',
-            error: 'Previous deploy request timed out before Candy Machine was created. Retry deploy.',
-            completed_at: new Date().toISOString(),
-          })
-        ),
+      await persistDeployCheckpoint(job.id, {
+        status: 'failed',
+        error: 'Previous deploy request timed out before Candy Machine was created. Retry deploy.',
+        completed_at: new Date().toISOString(),
       })
       existing.status = 'failed'
       existing.error = 'Previous deploy request timed out before Candy Machine was created. Retry deploy.'
@@ -595,116 +738,20 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
 
   // Core: resumable create → load items → handoff
   if (launch.mint_standard === 'core') {
-    const resumeLoad =
-      existing &&
-      (existing.status === 'loading_items' ||
-        (existing.status === 'failed' &&
-          existing.config_lines_total != null &&
-          (existing.config_lines_loaded ?? 0) < existing.config_lines_total)) &&
-      existing.candy_machine_id &&
-      existing.collection_mint
-
-    const resumeHandoff =
-      !resumeLoad &&
-      (existing?.status === 'cm_ready' || existing?.status === 'failed' || existing?.status === 'ua_handed_off') &&
-      existing.candy_machine_id &&
-      existing.collection_mint &&
-      isValidSolanaPubkey(existing.candy_machine_id) &&
-      isValidSolanaPubkey(existing.collection_mint) &&
-      configLinesFullyLoaded(existing) &&
-      isOwlCenterCreatorUaHandoffEnabled()
-
-    if (resumeHandoff) {
-      const creatorWallet = launch.creator_wallet?.trim()
-      if (!creatorWallet) {
-        return { ok: false, error: 'creator_wallet is required to finish Core update-authority handoff.', code: 'missing_creator' }
-      }
-
-      await updateAssetUploadJob(job.id, {
-        upload_progress: withDeployState(
-          job.upload_progress,
-          emptyDeployPatch({
-            status: 'cm_ready',
-            candy_machine_id: existing.candy_machine_id,
-            collection_mint: existing.collection_mint,
-            candy_guard_id: existing.candy_guard_id ?? null,
-            onchain_update_authority: existing.onchain_update_authority ?? null,
-            platform_update_delegate: existing.platform_update_delegate ?? null,
-            config_lines_loaded: existing.config_lines_loaded,
-            config_lines_total: existing.config_lines_total,
-            error: null,
-          })
-        ),
-      })
-
-      const network = resolveLaunchMintNetwork(launch)
-      const umi = createIrysDeployerCoreUmi(network)
-      const handoff = await handOffCoreCollectionUpdateAuthority({
-        umi,
-        collectionAddress: existing.collection_mint!,
-        creatorWallet,
-      })
-      if (!handoff.ok) {
-        await updateAssetUploadJob(job.id, {
-          upload_progress: withDeployState(
-            job.upload_progress,
-            emptyDeployPatch({
-              status: 'failed',
-              candy_machine_id: existing.candy_machine_id,
-              collection_mint: existing.collection_mint,
-              candy_guard_id: existing.candy_guard_id ?? null,
-              onchain_update_authority: existing.onchain_update_authority ?? null,
-              platform_update_delegate: existing.platform_update_delegate ?? null,
-              config_lines_loaded: existing.config_lines_loaded,
-              config_lines_total: existing.config_lines_total,
-              error: handoff.error,
-              completed_at: new Date().toISOString(),
-            })
-          ),
-        })
-        return { ok: false, error: handoff.error, code: 'ua_handoff_failed' }
-      }
-
-      await updateOwlCenterLaunchByIdAdmin(launchId, {
-        onchain_update_authority: handoff.updateAuthority,
-        platform_update_delegate: handoff.platformDelegate,
-      })
-
-      const completedAt = new Date().toISOString()
-      await updateAssetUploadJob(job.id, {
-        upload_progress: withDeployState(
-          job.upload_progress,
-          emptyDeployPatch({
-            status: 'completed',
-            candy_machine_id: existing.candy_machine_id,
-            collection_mint: existing.collection_mint,
-            candy_guard_id: existing.candy_guard_id ?? null,
-            onchain_update_authority: handoff.updateAuthority,
-            platform_update_delegate: handoff.platformDelegate,
-            config_lines_loaded: existing.config_lines_loaded,
-            config_lines_total: existing.config_lines_total,
-            completed_at: completedAt,
-          })
-        ),
-      })
-
-      const go_live = await persistDeployIds(
-        launchId,
-        job.id,
-        existing.candy_machine_id!,
-        existing.collection_mint!,
-        existing.candy_guard_id
-      )
+    const acquired = await tryAcquireDeployLock(job.id)
+    if (!acquired) {
       return {
-        ok: true,
-        candy_machine_id: existing.candy_machine_id!,
-        collection_mint: existing.collection_mint!,
-        candy_guard_id: existing.candy_guard_id ?? '',
-        go_live,
+        ok: false,
+        error: 'Another deploy request is in progress for this launch. Wait for it to finish or refresh status.',
+        code: 'deploy_in_progress',
       }
     }
 
-    return runCoreResumableDeploy(launchId, launch, job, existing)
+    try {
+      return await runCoreSugarDeployLocked(launchId, launch, job, existing)
+    } finally {
+      await releaseDeployLock(job.id)
+    }
   }
 
   // Token Metadata — one-shot; large supplies use Sugar CLI.
@@ -723,7 +770,7 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
   await updateAssetUploadJob(job.id, {
     upload_progress: withDeployState(
       job.upload_progress,
-      emptyDeployPatch({ status: 'running' })
+      buildDeployPatch(job.upload_progress, { status: 'running' })
     ),
   })
 
@@ -739,7 +786,7 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
     await updateAssetUploadJob(job.id, {
       upload_progress: withDeployState(
         job.upload_progress,
-        emptyDeployPatch({
+        buildDeployPatch(job.upload_progress, {
           status: partial?.phase === 'cm_ready' ? 'cm_ready' : 'failed',
           candy_machine_id: partial?.candyMachineId ?? existing?.candy_machine_id ?? null,
           collection_mint: partial?.collectionMint ?? existing?.collection_mint ?? null,
@@ -767,7 +814,7 @@ export async function runOnchainSugarDeployForLaunch(launchId: string): Promise<
   await updateAssetUploadJob(job.id, {
     upload_progress: withDeployState(
       job.upload_progress,
-      emptyDeployPatch({
+      buildDeployPatch(job.upload_progress, {
         status: 'completed',
         candy_machine_id: result.candyMachineId,
         collection_mint: result.collectionMint,
@@ -851,17 +898,50 @@ export async function registerManualSugarDeployIds(
 
   const job = await getLatestAssetUploadJobForLaunch(launchId)
   if (job) {
-    await updateAssetUploadJob(job.id, {
-      upload_progress: withDeployState(
-        job.upload_progress,
-        emptyDeployPatch({
-          status: 'completed',
-          candy_machine_id: cm,
-          collection_mint: col,
-          candy_guard_id: candyGuardId?.trim() || null,
-          completed_at: new Date().toISOString(),
-        })
-      ),
+    if (launch.mint_standard === 'core') {
+      try {
+        const network = resolveLaunchMintNetwork(launch)
+        const umi = createIrysDeployerCoreUmi(network)
+        const onChain = await fetchCandyMachine(umi, publicKey(cm))
+        const itemsLoaded = Number(onChain.itemsLoaded)
+        const itemsAvailable = Number(
+          (onChain as { data?: { itemsAvailable?: number | bigint } }).data?.itemsAvailable ??
+            itemsLoaded
+        )
+        const pkg =
+          job.status === 'completed' ? buildSugarDeployPackageFromJob(job, launch) : null
+        const total = pkg?.configLines.length ?? itemsAvailable
+        if (itemsLoaded < total) {
+          await persistDeployCheckpoint(job.id, {
+            status: 'loading_items',
+            candy_machine_id: cm,
+            collection_mint: col,
+            candy_guard_id: candyGuardId?.trim() || null,
+            config_lines_loaded: itemsLoaded,
+            config_lines_total: total,
+            error: null,
+          })
+          return {
+            ok: true,
+            candy_machine_id: cm,
+            collection_mint: col,
+            candy_guard_id: candyGuardId?.trim() ?? '',
+            continue_loading: true,
+            config_lines_loaded: itemsLoaded,
+            config_lines_total: total,
+          }
+        }
+      } catch {
+        /* fall through to completed when CM fetch fails */
+      }
+    }
+
+    await persistDeployCheckpoint(job.id, {
+      status: 'completed',
+      candy_machine_id: cm,
+      collection_mint: col,
+      candy_guard_id: candyGuardId?.trim() || null,
+      completed_at: new Date().toISOString(),
     })
     go_live = await persistDeployIds(launchId, job.id, cm, col, candyGuardId)
   } else {

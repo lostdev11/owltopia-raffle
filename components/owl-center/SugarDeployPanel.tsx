@@ -7,9 +7,11 @@ import { CommandCard } from '@/components/owl-center/CommandCard'
 import { DeployButton } from '@/components/owl-center/DeployButton'
 import {
   configLineProgressPercent,
+  deployPanelHasRecoverableIds,
   deployPhaseLabel,
   formatConfigLineProgress,
   formatDeploySuccessMessage,
+  isDeployExpiryErrorMessage,
   isDeployWorkInProgress,
   isLikelyDeployTransportError,
 } from '@/lib/owl-center/deploy-panel-status'
@@ -67,6 +69,7 @@ type DeployActionResult = {
 
 const POLL_MS = 2_500
 const WATCH_AFTER_TRANSPORT_MS = 8 * 60_000
+const EXPIRY_AUTO_CONTINUE_BASE_MS = 3_000
 
 export function SugarDeployPanel({
   launchId,
@@ -194,7 +197,13 @@ export function SugarDeployPanel({
     const j = (await res.json()) as {
       ok?: boolean
       error?: string
+      code?: string
       result?: DeployActionResult
+    }
+    if (res.status === 409 || j.code === 'deploy_in_progress') {
+      const err = new Error(j.error || 'deploy_in_progress') as Error & { code?: string }
+      err.code = 'deploy_in_progress'
+      throw err
     }
     if (!res.ok || !j.ok || !j.result) {
       throw new Error(j.error || 'deploy_failed')
@@ -236,8 +245,8 @@ export function SugarDeployPanel({
     setErr(null)
     setMsg('Starting on-chain deploy… transactions will appear here as they confirm.')
     autoContinueRef.current = true
+    let rounds = 0
     try {
-      let rounds = 0
       while (autoContinueRef.current && rounds < 80) {
         rounds += 1
         setMsg(`Deploy round ${rounds} — submitting Solana transactions…`)
@@ -245,6 +254,12 @@ export function SugarDeployPanel({
         try {
           result = await postDeployOnchain()
         } catch (e) {
+          if (e instanceof Error && (e as Error & { code?: string }).code === 'deploy_in_progress') {
+            setMsg(null)
+            setErr(null)
+            await watchUntilSettled()
+            continue
+          }
           if (isLikelyDeployTransportError(e)) {
             const watched = await watchUntilSettled()
             if (watched?.fully_deployed) {
@@ -268,6 +283,15 @@ export function SugarDeployPanel({
             throw new Error(
               'Lost connection while deploy was running. Refresh this page — if progress shows loaded items, click Continue loading items.'
             )
+          }
+          const message = e instanceof Error ? e.message : 'deploy_failed'
+          if (isDeployExpiryErrorMessage(message) && deployPanelHasRecoverableIds(statusRef.current)) {
+            setErr(null)
+            const backoff = EXPIRY_AUTO_CONTINUE_BASE_MS + Math.min(rounds, 6) * 1500
+            setMsg(`Transaction expired — resuming from on-chain progress in ${Math.round(backoff / 1000)}s…`)
+            await new Promise((r) => window.setTimeout(r, backoff))
+            await load({ quiet: true })
+            continue
           }
           throw e
         }
@@ -297,6 +321,7 @@ export function SugarDeployPanel({
         break
       }
     } catch (e) {
+      setMsg(null)
       setErr(e instanceof Error ? e.message : 'deploy_failed')
       await load({ quiet: true })
     } finally {
@@ -411,6 +436,14 @@ export function SugarDeployPanel({
   const tmCap = status?.tm_server_deploy_max_supply ?? 250
   const phase = deployPhaseLabel(status?.deploy_state?.status)
   const active = busy || watching || isDeployWorkInProgress(status)
+  const hasRecoverableIds = deployPanelHasRecoverableIds(status)
+  const partialCoreLoad =
+    isCore &&
+    hasRecoverableIds &&
+    !deployed &&
+    typeof loaded === 'number' &&
+    typeof total === 'number' &&
+    loaded < total
 
   return (
     <CommandCard label="phase_b.sys · DEPLOY CM + GUARD">
@@ -552,7 +585,7 @@ export function SugarDeployPanel({
       ) : null}
 
       <div className="flex flex-wrap gap-3">
-        {status?.can_deploy ? (
+        {status?.can_deploy && !hasRecoverableIds ? (
           <DeployButton type="button" className="min-h-[44px] touch-manipulation" disabled={busy || watching} onClick={() => void deployOnchain()}>
             {busy || watching ? (
               <>
@@ -651,6 +684,12 @@ export function SugarDeployPanel({
           </>
         ) : null}
 
+        {partialCoreLoad ? (
+          <p className="rounded border border-[#FFD769]/30 bg-[#FFD769]/10 px-3 py-2 text-xs text-[#FFD769]">
+            Do not use <strong className="font-normal">Save IDs</strong> while config lines are still loading — it marks the
+            deploy complete and skips resume. Use <strong className="font-normal">Continue loading items</strong> instead.
+          </p>
+        ) : null}
         <p className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">Or paste base58 IDs manually</p>
         <label className="grid gap-1 text-sm text-[#C5D0D8]">
           Candy Machine ID

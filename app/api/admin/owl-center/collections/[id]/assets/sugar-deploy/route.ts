@@ -116,7 +116,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
   const result = await runOnchainSugarDeployForLaunch(id)
   if (!result.ok) {
-    const status = result.code === 'not_found' ? 404 : 400
+    const status =
+      result.code === 'not_found' ? 404 : result.code === 'deploy_in_progress' ? 409 : 400
     return NextResponse.json(
       {
         ok: false,
