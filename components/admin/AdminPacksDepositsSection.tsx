@@ -7,11 +7,10 @@ import {
   type AdminPackProductShelf,
   type AdminPacksInventoryItem,
 } from '@/components/admin/AdminPacksInventoryForm'
+import { AdminPacksInventoryList } from '@/components/admin/AdminPacksInventoryList'
 import { AdminPacksVaultFundingForm } from '@/components/admin/AdminPacksVaultFundingForm'
-import {
-  PACKS_PRODUCT_SLUG_MAIN,
-  PACKS_PRODUCT_SLUG_OWL,
-} from '@/lib/packs/product-pools'
+import { packAdminShelfBadgeLabel } from '@/lib/packs/admin-inventory-shelf'
+import { PACKS_PRODUCT_SLUG_MAIN, PACKS_PRODUCT_SLUG_OWL } from '@/lib/packs/product-pools'
 import { formatJackpotPoolSol } from '@/lib/packs/jackpot'
 import { OWL_TICKER } from '@/lib/council/owl-ticker'
 
@@ -20,7 +19,7 @@ export type AdminPackProductShelfWithJackpot = AdminPackProductShelf & {
 }
 
 function shelfShortLabel(slug: string): string {
-  return slug === PACKS_PRODUCT_SLUG_OWL ? '$OWL pack shelf' : '0.1 SOL pack shelf'
+  return packAdminShelfBadgeLabel(slug)
 }
 
 export function AdminPacksDepositsSection({
@@ -132,6 +131,22 @@ export function AdminPacksDepositsSection({
         hideShelfSelector
         onRegistered={onRefresh}
       />
+
+      <details className="group rounded-md border">
+        <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-sm font-medium touch-manipulation [&::-webkit-details-marker]:hidden">
+          NFTs already on {shelfLabel}
+          <span className="font-normal text-muted-foreground">({shelfNfts} available)</span>
+        </summary>
+        <div className="border-t px-3 pb-3 pt-1">
+          <AdminPacksInventoryList
+            key={activeProductId}
+            inventory={inventory}
+            products={products}
+            readOnly
+            lockShelfFilter={activeSlug === PACKS_PRODUCT_SLUG_OWL ? 'owl' : 'paid'}
+          />
+        </div>
+      </details>
     </div>
   )
 }

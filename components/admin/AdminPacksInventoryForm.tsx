@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { packRtpPercentLabel } from '@/lib/packs/admin-copy'
+import { packAdminShelfBadgeLabel } from '@/lib/packs/admin-inventory-shelf'
 import {
   PACKS_PRODUCT_SLUG_MAIN,
   PACKS_PRODUCT_SLUG_OWL,
@@ -475,10 +476,8 @@ export function AdminPacksInventoryForm({
           >
             {products.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.slug === PACKS_PRODUCT_SLUG_OWL
-                  ? '$OWL pack shelf'
-                  : '0.1 SOL pack shelf'}{' '}
-                — {p.name} ({p.availableNfts} NFT{p.availableNfts === 1 ? '' : 's'})
+                {packAdminShelfBadgeLabel(p.slug)} — {p.name} ({p.availableNfts} NFT
+                {p.availableNfts === 1 ? '' : 's'})
               </option>
             ))}
           </select>
@@ -564,7 +563,14 @@ export function AdminPacksInventoryForm({
                     </div>
                   )}
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{row.nft.name || 'NFT'}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-medium">{row.nft.name || 'NFT'}</p>
+                      {embedded ? (
+                        <span className="inline-flex shrink-0 rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold text-violet-100">
+                          → {packAdminShelfBadgeLabel(depositProductSlug)}
+                        </span>
+                      ) : null}
+                    </div>
                     <p className="font-mono text-xs text-muted-foreground">{shortenMint(row.nft.mint)}</p>
                     <p className="text-xs text-muted-foreground">
                       {packInventoryPrizeStandardLabel(packsPrizeStandardForNft(row.nft))}
