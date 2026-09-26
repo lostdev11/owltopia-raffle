@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useWallet } from '@solana/wallet-adapter-react'
@@ -24,8 +24,25 @@ import {
   type AdminOpsLogStatus,
   type AdminOpsLogType,
 } from '@/lib/db/admin-ops-log'
+import { formatPaymentTotalsByAsset } from '@/lib/admin-ops-log/totals'
+import type { AdminOpsLogPaymentRow } from '@/lib/admin-ops-log/payment-types'
 import { solscanAccountUrl, solscanTransactionUrl } from '@/lib/solana/solscan'
-import { ArrowLeft, ClipboardList, Download, ExternalLink, Loader2, Plus, Trash2 } from 'lucide-react'
+import {
+  AdminOpsLogPaymentsSection,
+  applyPackOpensPaymentPrefill,
+  emptyOpsLogPaymentForm,
+} from '@/components/admin/AdminOpsLogPaymentsSection'
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  Download,
+  ExternalLink,
+  Loader2,
+  Plus,
+  Trash2,
+} from 'lucide-react'
 
 const TYPE_LABELS: Record<AdminOpsLogType, string> = {
   refund: 'Refund',
@@ -164,6 +181,14 @@ export function AdminOpsLogClient() {
   const [statusSavingId, setStatusSavingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null)
+  const [paymentsByEntry, setPaymentsByEntry] = useState<Record<string, AdminOpsLogPaymentRow[]>>({})
+  const [paymentsLoadingId, setPaymentsLoadingId] = useState<string | null>(null)
+  const [editEntryId, setEditEntryId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState(emptyForm)
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+  const [createPaymentPrefill, setCreatePaymentPrefill] = useState(emptyOpsLogPaymentForm)
 
   useEffect(() => {
     const t = setTimeout(() => setSearchDebounced(search.trim()), 300)
@@ -174,7 +199,9 @@ export function AdminOpsLogClient() {
     const pw = searchParams.get('prefill_wallet')?.trim()
     const pr = searchParams.get('prefill_related')?.trim()
     const pt = searchParams.get('prefill_title')?.trim()
-    if (!pw && !pr && !pt) return
+    const ptw = searchParams.get('prefill_payment_to_wallet')?.trim()
+    const ppo = searchParams.get('prefill_payment_pack_open_id')?.trim()
+    if (!pw && !pr && !pt && !ptw && !ppo) return
     setShowForm(true)
     setForm((f) => ({
       ...f,
@@ -183,6 +210,9 @@ export function AdminOpsLogClient() {
       title: pt ?? f.title,
       type: 'incident',
     }))
+    setCreatePaymentPrefill((f) =>
+      applyPackOpensPaymentPrefill(f, ptw ?? null, ppo ?? null)
+    )
   }, [searchParams])
 
   useEffect(() => {
@@ -293,6 +323,8 @@ export function AdminOpsLogClient() {
         }
         body.amount = n
       }
+      const packOpenId = createPaymentPrefill.related_pack_open_id.trim()
+      if (packOpenId) body.related_pack_open_id = packOpenId
       const res = await fetch('/api/admin/ops-log', {
         method: 'POST',
         credentials: 'include',
@@ -305,6 +337,7 @@ export function AdminOpsLogClient() {
         return
       }
       setForm(emptyForm)
+      setCreatePaymentPrefill(emptyOpsLogPaymentForm)
       setShowForm(false)
       setOffset(0)
       await fetchList()
@@ -351,6 +384,109 @@ export function AdminOpsLogClient() {
     } finally {
       setDeletingId(null)
     }
+  }
+
+  async function loadPaymentsForEntry(entryId: string) {
+    setPaymentsLoadingId(entryId)
+    try {
+      const res = await fetch(`/api/admin/ops-log/${encodeURIComponent(entryId)}/payments`, {
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && Array.isArray(data.payments)) {
+        setPaymentsByEntry((prev) => ({
+          ...prev,
+          [entryId]: data.payments as AdminOpsLogPaymentRow[],
+        }))
+      }
+    } finally {
+      setPaymentsLoadingId(null)
+    }
+  }
+
+  function toggleExpanded(entry: AdminOpsLogRow) {
+    if (expandedEntryId === entry.id) {
+      setExpandedEntryId(null)
+      setEditEntryId(null)
+      return
+    }
+    setExpandedEntryId(entry.id)
+    setEditEntryId(null)
+    setEditForm({
+      occurred_at: '',
+      type: entry.type,
+      title: entry.title,
+      who: entry.who ?? '',
+      wallet: entry.wallet ?? '',
+      amount: entry.amount != null ? String(entry.amount) : '',
+      asset: entry.asset ?? '',
+      from_wallet: entry.from_wallet ?? '',
+      tx_signature: entry.tx_signature ?? '',
+      related: entry.related ?? '',
+      status: entry.status,
+      notes: entry.notes ?? '',
+    })
+    if (!paymentsByEntry[entry.id]) void loadPaymentsForEntry(entry.id)
+  }
+
+  async function handleEditEntrySave(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editEntryId) return
+    setEditError(null)
+    setEditSaving(true)
+    try {
+      const body: Record<string, unknown> = {
+        type: editForm.type,
+        title: editForm.title.trim(),
+        status: editForm.status,
+        who: editForm.who.trim() || null,
+        wallet: editForm.wallet.trim() || null,
+        from_wallet: editForm.from_wallet.trim() || null,
+        tx_signature: editForm.tx_signature.trim() || null,
+        related: editForm.related.trim() || null,
+        notes: editForm.notes.trim() || null,
+        asset: editForm.asset || null,
+      }
+      const occurred = localDatetimeToIso(editForm.occurred_at)
+      if (occurred) body.occurred_at = occurred
+      if (editForm.amount.trim()) {
+        const n = Number(editForm.amount)
+        if (!Number.isFinite(n)) {
+          setEditError('Invalid amount')
+          return
+        }
+        body.amount = n
+      } else {
+        body.amount = null
+      }
+      const res = await fetch(`/api/admin/ops-log/${encodeURIComponent(editEntryId)}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setEditError(typeof data.error === 'string' ? data.error : 'Update failed')
+        return
+      }
+      if (data.entry) {
+        setEntries((prev) =>
+          prev.map((row) => (row.id === editEntryId ? (data.entry as AdminOpsLogRow) : row))
+        )
+      }
+      setEditEntryId(null)
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  function entryTotalsLabel(row: AdminOpsLogRow): string {
+    if (row.payment_totals && Object.keys(row.payment_totals).length > 0) {
+      return formatPaymentTotalsByAsset(row.payment_totals)
+    }
+    if (row.amount != null) return `${row.amount} ${row.asset ?? ''}`.trim()
+    return '—'
   }
 
   async function handleExportCsv() {
@@ -623,7 +759,38 @@ export function AdminOpsLogClient() {
                     onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
                   />
                 </div>
+                {(createPaymentPrefill.to_wallet || createPaymentPrefill.related_pack_open_id) && (
+                  <>
+                    <div>
+                      <Label htmlFor="ops-form-pay-to">First payment — to wallet</Label>
+                      <Input
+                        id="ops-form-pay-to"
+                        value={createPaymentPrefill.to_wallet}
+                        onChange={(e) =>
+                          setCreatePaymentPrefill((f) => ({ ...f, to_wallet: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="ops-form-pay-pack">First payment — pack open id</Label>
+                      <Input
+                        id="ops-form-pay-pack"
+                        value={createPaymentPrefill.related_pack_open_id}
+                        onChange={(e) =>
+                          setCreatePaymentPrefill((f) => ({
+                            ...f,
+                            related_pack_open_id: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  </>
+                )}
               </div>
+              <p className="text-xs text-muted-foreground">
+                Amount / asset / tx above are saved on the entry and mirrored as the first payment line when
+                provided. Add more payments after saving from the entry detail view.
+              </p>
               <Button type="submit" disabled={creating} className="touch-manipulation min-h-[44px]">
                 {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Save entry
@@ -640,10 +807,10 @@ export function AdminOpsLogClient() {
                   <th className="p-2 font-medium">When</th>
                   <th className="p-2 font-medium">Type</th>
                   <th className="p-2 font-medium">Title</th>
-                  <th className="p-2 font-medium">Amount</th>
+                  <th className="p-2 font-medium">Totals</th>
                   <th className="p-2 font-medium">Wallet / tx</th>
                   <th className="p-2 font-medium">Status</th>
-                  <th className="p-2 font-medium w-[72px]" />
+                  <th className="p-2 font-medium w-[88px]" />
                 </tr>
               </thead>
               <tbody>
@@ -661,7 +828,8 @@ export function AdminOpsLogClient() {
                   </tr>
                 ) : (
                   entries.map((row) => (
-                    <tr key={row.id} className="border-t align-top">
+                    <Fragment key={row.id}>
+                    <tr className="border-t align-top">
                       <td className="p-2 whitespace-nowrap">{formatWhen(row.occurred_at)}</td>
                       <td className="p-2 whitespace-nowrap">{TYPE_LABELS[row.type]}</td>
                       <td className="p-2 max-w-[200px]">
@@ -673,15 +841,7 @@ export function AdminOpsLogClient() {
                           </div>
                         ) : null}
                       </td>
-                      <td className="p-2 whitespace-nowrap">
-                        {row.amount != null ? (
-                          <>
-                            {row.amount} {row.asset ?? ''}
-                          </>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
+                      <td className="p-2 whitespace-nowrap text-xs">{entryTotalsLabel(row)}</td>
                       <td className="p-2 space-y-1">
                         {row.wallet ? (
                           <a
@@ -723,25 +883,154 @@ export function AdminOpsLogClient() {
                         </select>
                       </td>
                       <td className="p-2">
-                        {isFullAdmin ? (
+                        <div className="flex items-center gap-0.5">
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon"
                             className="h-9 w-9"
-                            disabled={deletingId === row.id}
-                            onClick={() => void handleDelete(row.id)}
-                            title="Delete (full admin)"
+                            onClick={() => toggleExpanded(row)}
+                            title={expandedEntryId === row.id ? 'Collapse' : 'View / edit / payments'}
                           >
-                            {deletingId === row.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
+                            {expandedEntryId === row.id ? (
+                              <ChevronUp className="h-4 w-4" />
                             ) : (
-                              <Trash2 className="h-4 w-4 text-destructive" />
+                              <ChevronDown className="h-4 w-4" />
                             )}
                           </Button>
-                        ) : null}
+                          {isFullAdmin ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-9 w-9"
+                              disabled={deletingId === row.id}
+                              onClick={() => void handleDelete(row.id)}
+                              title="Delete (full admin)"
+                            >
+                              {deletingId === row.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              )}
+                            </Button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
+                    {expandedEntryId === row.id ? (
+                      <tr className="border-t bg-muted/10">
+                        <td colSpan={7} className="p-3 space-y-3">
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={editEntryId === row.id ? 'secondary' : 'outline'}
+                              onClick={() =>
+                                setEditEntryId((id) => (id === row.id ? null : row.id))
+                              }
+                            >
+                              {editEntryId === row.id ? 'Hide entry edit' : 'Edit entry'}
+                            </Button>
+                          </div>
+                          {editEntryId === row.id ? (
+                            <form
+                              onSubmit={(e) => void handleEditEntrySave(e)}
+                              className="rounded-lg border bg-background p-3 space-y-3"
+                            >
+                              {editError ? <p className="text-sm text-destructive">{editError}</p> : null}
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <div>
+                                  <Label>Title</Label>
+                                  <Input
+                                    required
+                                    value={editForm.title}
+                                    onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
+                                  />
+                                </div>
+                                <div>
+                                  <Label>Type</Label>
+                                  <select
+                                    className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                    value={editForm.type}
+                                    onChange={(e) =>
+                                      setEditForm((f) => ({
+                                        ...f,
+                                        type: e.target.value as AdminOpsLogType,
+                                      }))
+                                    }
+                                  >
+                                    {ADMIN_OPS_LOG_TYPES.map((t) => (
+                                      <option key={t} value={t}>
+                                        {TYPE_LABELS[t]}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div>
+                                  <Label>Amount (legacy field)</Label>
+                                  <Input
+                                    inputMode="decimal"
+                                    value={editForm.amount}
+                                    onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))}
+                                  />
+                                </div>
+                                <div>
+                                  <Label>Asset</Label>
+                                  <select
+                                    className="mt-1 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                    value={editForm.asset}
+                                    onChange={(e) =>
+                                      setEditForm((f) => ({
+                                        ...f,
+                                        asset: e.target.value as AdminOpsLogAsset | '',
+                                      }))
+                                    }
+                                  >
+                                    <option value="">—</option>
+                                    {ADMIN_OPS_LOG_ASSETS.map((a) => (
+                                      <option key={a} value={a}>
+                                        {a}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div className="md:col-span-2">
+                                  <Label>Notes</Label>
+                                  <Input
+                                    value={editForm.notes}
+                                    onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))}
+                                  />
+                                </div>
+                              </div>
+                              <Button type="submit" disabled={editSaving} size="sm">
+                                {editSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                Save entry
+                              </Button>
+                            </form>
+                          ) : null}
+                          <AdminOpsLogPaymentsSection
+                            entry={row}
+                            payments={paymentsByEntry[row.id] ?? []}
+                            loading={paymentsLoadingId === row.id}
+                            onPaymentsChange={(payments) => {
+                              setPaymentsByEntry((prev) => ({ ...prev, [row.id]: payments }))
+                              setEntries((prev) =>
+                                prev.map((e) =>
+                                  e.id === row.id ? { ...e, payments_count: payments.length } : e
+                                )
+                              )
+                            }}
+                            onTotalsChange={(totals) => {
+                              setEntries((prev) =>
+                                prev.map((e) => (e.id === row.id ? { ...e, payment_totals: totals } : e))
+                              )
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    ) : null}
+                    </Fragment>
                   ))
                 )}
               </tbody>

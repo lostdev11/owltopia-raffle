@@ -1,5 +1,7 @@
 import type { AdminOpsLogAsset, AdminOpsLogStatus, AdminOpsLogType } from '@/lib/admin-ops-log/constants'
 
+export type AdminOpsLogPaymentTotals = Partial<Record<AdminOpsLogAsset, number>>
+
 export type AdminOpsLogRow = {
   id: string
   occurred_at: string
@@ -18,6 +20,9 @@ export type AdminOpsLogRow = {
   created_at: string
   updated_at: string
   updated_by_wallet: string | null
+  /** Aggregated from admin_ops_log_payments when present; else legacy amount/asset. */
+  payment_totals?: AdminOpsLogPaymentTotals
+  payments_count?: number
 }
 
 export type ListAdminOpsLogParams = {
@@ -39,6 +44,8 @@ export type CreateAdminOpsLogParams = {
   fromWallet?: string | null
   txSignature?: string | null
   related?: string | null
+  /** First payment row: pack open id (e.g. from Pack opens prefill). */
+  relatedPackOpenId?: string | null
   status?: AdminOpsLogStatus
   notes?: string | null
   createdByWallet: string
