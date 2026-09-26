@@ -49,6 +49,9 @@ export function buildOwlClaimPlansForPositions(
     const plan = buildFullPositionClaimPlan(row, asOfMs, options)
     if (plan) plans.push(plan)
   }
+  if (options?.forClaimAll && plans.length > 1) {
+    plans.sort((a, b) => b.payoutAmount - a.payoutAmount)
+  }
   return plans
 }
 

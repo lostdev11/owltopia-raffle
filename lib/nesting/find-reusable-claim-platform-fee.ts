@@ -10,8 +10,10 @@ import { verifyStakingPlatformFeeTransaction } from '@/lib/nesting/verify-stakin
 import { getNestingReadConnection } from '@/lib/solana/nesting/client'
 import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
 
-/** Bounded recovery scan — same order as candy-machine mint recovery, not a wallet portfolio sweep. */
-export const CLAIM_FEE_RECOVERY_MAX_SIGNATURES = 20
+/** Page size for `getSignaturesForAddress` while scanning the 48h fee window. */
+export const CLAIM_FEE_RECOVERY_PAGE_SIZE = 50
+/** Safety cap on pages scanned (wallet poisoning dust can push the fee deep). */
+export const CLAIM_FEE_RECOVERY_MAX_PAGES = 40
 export const CLAIM_FEE_RECOVERY_MAX_AGE_MS = 48 * 60 * 60 * 1000
 
 /**
@@ -56,45 +58,59 @@ export async function findReusableClaimPlatformFeeSignature(params: {
   }
 
   const conn = getNestingReadConnection()
-  let sigInfos: Awaited<ReturnType<typeof conn.getSignaturesForAddress>>
-  try {
-    sigInfos = await conn.getSignaturesForAddress(owner, {
-      limit: CLAIM_FEE_RECOVERY_MAX_SIGNATURES,
-    })
-  } catch (e) {
-    console.warn(
-      '[findReusableClaimPlatformFee] getSignaturesForAddress failed',
-      e instanceof Error ? e.message : e
-    )
-    return null
-  }
-
   const cutoffSec = Math.floor((nowMs - CLAIM_FEE_RECOVERY_MAX_AGE_MS) / 1000)
 
-  for (const info of sigInfos) {
-    if (info.err) continue
-    const blockTime = info.blockTime ?? null
-    if (blockTime != null && blockTime < cutoffSec) continue
-
-    const signature = info.signature?.trim()
-    if (!signature) continue
-
-    const existing = await getStakingPlatformFeePaymentBySignature(signature)
-    if (existing) {
-      // Already fully linked, or wrong action — skip. Spare capacity was handled above.
-      continue
+  let before: string | undefined
+  for (let page = 0; page < CLAIM_FEE_RECOVERY_MAX_PAGES; page++) {
+    let sigInfos: Awaited<ReturnType<typeof conn.getSignaturesForAddress>>
+    try {
+      sigInfos = await conn.getSignaturesForAddress(owner, {
+        limit: CLAIM_FEE_RECOVERY_PAGE_SIZE,
+        before,
+      })
+    } catch (e) {
+      console.warn(
+        '[findReusableClaimPlatformFee] getSignaturesForAddress failed',
+        e instanceof Error ? e.message : e
+      )
+      return null
     }
 
-    const verified = await verifyStakingPlatformFeeTransaction({
-      signature,
-      fromWallet: wallet,
-      treasuryWallet: treasury,
-      minUnits,
-    })
-    if (!verified.ok) continue
-    if (verified.units < minUnits) continue
+    if (sigInfos.length === 0) break
 
-    return signature
+    let reachedCutoff = false
+    for (const info of sigInfos) {
+      if (info.err) continue
+      const blockTime = info.blockTime ?? null
+      if (blockTime != null && blockTime < cutoffSec) {
+        reachedCutoff = true
+        continue
+      }
+
+      const signature = info.signature?.trim()
+      if (!signature) continue
+
+      const existing = await getStakingPlatformFeePaymentBySignature(signature)
+      if (existing) {
+        continue
+      }
+
+      const verified = await verifyStakingPlatformFeeTransaction({
+        signature,
+        fromWallet: wallet,
+        treasuryWallet: treasury,
+        minUnits,
+      })
+      if (!verified.ok) continue
+      if (verified.units < minUnits) continue
+
+      return signature
+    }
+
+    if (reachedCutoff) break
+    if (sigInfos.length < CLAIM_FEE_RECOVERY_PAGE_SIZE) break
+    before = sigInfos[sigInfos.length - 1]?.signature
+    if (!before) break
   }
 
   return null

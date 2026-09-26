@@ -3487,6 +3487,7 @@ export function DashboardNestingClient() {
             fee_units?: number
             total_owl?: number
             reusable_platform_fee_signature?: string | null
+            claim_all_eligibility_token?: string | null
           }>('/api/me/staking/claim-all/preview', {
             method: 'GET',
             credentials: 'include',
@@ -3514,6 +3515,11 @@ export function DashboardNestingClient() {
             )
           )
 
+          const claimAllEligibilityToken =
+            typeof preview.claim_all_eligibility_token === 'string'
+              ? preview.claim_all_eligibility_token.trim()
+              : ''
+
           let platformFeeSig: string | null = null
           if (platformFeeActive) {
             const serverReuse =
@@ -3535,13 +3541,17 @@ export function DashboardNestingClient() {
               setClaimAllTxPhase('submitting')
             }
           }
-          const result = await fetchNestingJson<{
+          type ClaimAllPostJson = {
             error?: string
+            code?: string
             ledger_sync_failed?: boolean
             total_claimed?: number
             claim_count?: number
+            batches_completed?: number
+            batch_count?: number
             skipped_lock_count?: number
             skipped_owl?: number
+            claim_all_complete?: boolean
             claims?: Array<{
               position_id: string
               claimed?: number
@@ -3549,31 +3559,85 @@ export function DashboardNestingClient() {
             }>
             execution?: { path?: 'onchain_transfer' | 'database_only' }
             transaction_signature?: string | null
-          }>('/api/me/staking/claim-all', {
-            method: 'POST',
-            credentials: 'include',
-            timeoutMs: NESTING_CLAIM_ALL_FETCH_TIMEOUT_MS,
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Connected-Wallet': publicKey.toBase58(),
-            },
-            body: JSON.stringify(
-              platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}
-            ),
-          })
-          if (result.status === 0 && !result.ok) {
-            setActionError(
-              (result.clientTimeout
-                ? nestingFetchTimeoutMessage('claim')
-                : nestingFetchNetworkErrorMessage('claim')) +
-                (platformFeeSig ? ` ${claimRetryWithoutRepayMessage(feeUnits)}` : '')
-            )
-            throw new Error('claim-all')
           }
-          const json = result.json ?? {}
 
-          if (!result.ok && json.ledger_sync_failed && json.transaction_signature?.trim()) {
-            const pending: PendingClaimLedgerSync = {
+          const maxClaimAllResumeAttempts = 48
+          let resumeAttempt = 0
+          let runningTotalClaimed = 0
+          const runningClaims: NonNullable<ClaimAllPostJson['claims']> = []
+          let lastTxSig: string | null = null
+          let executionPath: 'onchain_transfer' | 'database_only' = 'database_only'
+          let skippedLockCount = 0
+          let skippedOwl = 0
+
+          const postClaimAllOnce = () =>
+            fetchNestingJson<ClaimAllPostJson>('/api/me/staking/claim-all', {
+              method: 'POST',
+              credentials: 'include',
+              timeoutMs: NESTING_CLAIM_ALL_FETCH_TIMEOUT_MS,
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Connected-Wallet': publicKey.toBase58(),
+              },
+              body: JSON.stringify({
+                ...(platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}),
+                ...(claimAllEligibilityToken
+                  ? { claim_all_eligibility: claimAllEligibilityToken }
+                  : {}),
+              }),
+            })
+
+          let result = await postClaimAllOnce()
+
+          while (resumeAttempt < maxClaimAllResumeAttempts) {
+            resumeAttempt += 1
+
+            if (result.status === 0 && !result.ok) {
+              if (platformFeeSig && resumeAttempt < maxClaimAllResumeAttempts) {
+                setClaimAllTxPhase('submitting')
+                await loadPositions({ heal: false, silent: true })
+                result = await postClaimAllOnce()
+                continue
+              }
+              setActionError(
+                (result.clientTimeout
+                  ? nestingFetchTimeoutMessage('claim')
+                  : nestingFetchNetworkErrorMessage('claim')) +
+                  (platformFeeSig ? ` ${claimRetryWithoutRepayMessage(feeUnits)}` : '')
+              )
+              throw new Error('claim-all')
+            }
+
+            const json = result.json ?? {}
+
+            if (!result.ok && json.code === 'claim_all_partial_batch') {
+              const batchClaimed =
+                typeof json.total_claimed === 'number' && Number.isFinite(json.total_claimed)
+                  ? json.total_claimed
+                  : 0
+              runningTotalClaimed = batchClaimed
+              if (json.claims?.length) {
+                runningClaims.length = 0
+                runningClaims.push(...json.claims)
+              }
+              const batchesDone =
+                typeof json.batches_completed === 'number' ? json.batches_completed : 0
+              const batchTotal =
+                typeof json.batch_count === 'number' ? json.batch_count : batchesDone + 1
+              setClaimAllTxPhase('submitting')
+              setSuccessNotice({
+                placement: 'modal',
+                title: 'Claim all in progress',
+                message: `Sent ${runningTotalClaimed.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL so far (${batchesDone} of ${batchTotal} batches). Continuing automatically…`,
+                hint: 'Keep this page open — your platform fee covers all nests.',
+              })
+              await loadPositions({ heal: false, silent: true })
+              result = await postClaimAllOnce()
+              continue
+            }
+
+            if (!result.ok && json.ledger_sync_failed && json.transaction_signature?.trim()) {
+              const pending: PendingClaimLedgerSync = {
               transaction_signature: json.transaction_signature.trim(),
               total_claimed:
                 typeof json.total_claimed === 'number' && Number.isFinite(json.total_claimed)
@@ -3625,40 +3689,73 @@ export function DashboardNestingClient() {
             setActionError(
               'OWL was sent to your wallet, but nest totals are still syncing. Refresh the page in a few seconds — do not claim again yet.'
             )
-            throw new Error('claim-all')
+              throw new Error('claim-all')
+            }
+
+            if (!result.ok) {
+              const err = typeof json.error === 'string' ? json.error : 'Claim all failed'
+              const feeRejected =
+                err.toLowerCase().includes('platform fee') ||
+                err.toLowerCase().includes('fee payment') ||
+                err.toLowerCase().includes('fee transaction')
+              if (feeRejected) {
+                clearPendingClaimPlatformFee()
+                setActionError(err)
+              } else {
+                setActionError(
+                  platformFeeSig ? `${err} ${claimRetryWithoutRepayMessage(feeUnits)}` : err
+                )
+              }
+              throw new Error('claim-all')
+            }
+
+            if (typeof window !== 'undefined') {
+              sessionStorage.removeItem(PENDING_CLAIM_LEDGER_STORAGE_KEY)
+            }
+            clearPendingClaimPlatformFee()
+
+            const finalTotal =
+              (typeof json.total_claimed === 'number' && Number.isFinite(json.total_claimed)
+                ? json.total_claimed
+                : 0) + runningTotalClaimed
+            const mergedClaims = [
+              ...runningClaims,
+              ...(json.claims?.length ? json.claims : []),
+            ]
+            lastTxSig =
+              typeof json.transaction_signature === 'string' ? json.transaction_signature.trim() : null
+            executionPath =
+              json.execution?.path === 'onchain_transfer' ? 'onchain_transfer' : executionPath
+            skippedLockCount =
+              typeof json.skipped_lock_count === 'number' ? json.skipped_lock_count : skippedLockCount
+            skippedOwl = typeof json.skipped_owl === 'number' ? json.skipped_owl : skippedOwl
+
+            const rows = (mergedClaims.length ? mergedClaims : claimPlans).map((c) => ({
+              position_id: 'positionId' in c ? c.positionId : c.position_id,
+              claimed_rewards_total:
+                'newClaimedTotal' in c
+                  ? c.newClaimedTotal
+                  : Number((c as { claimed_rewards_total?: number }).claimed_rewards_total),
+            }))
+            ledgerClaims.push(
+              ...rows.filter((r) => r.position_id && Number.isFinite(r.claimed_rewards_total))
+            )
+            return {
+              ...json,
+              total_claimed: finalTotal,
+              claim_count: mergedClaims.length || json.claim_count,
+              claims: mergedClaims.length ? mergedClaims : json.claims,
+              transaction_signature: lastTxSig,
+              execution: { path: executionPath },
+              skipped_lock_count: skippedLockCount,
+              skipped_owl: skippedOwl,
+            }
           }
 
-          if (!result.ok) {
-            const err = typeof json.error === 'string' ? json.error : 'Claim all failed'
-            const feeRejected =
-              err.toLowerCase().includes('platform fee') ||
-              err.toLowerCase().includes('fee payment') ||
-              err.toLowerCase().includes('fee transaction')
-            if (feeRejected) {
-              clearPendingClaimPlatformFee()
-              setActionError(err)
-            } else {
-              setActionError(
-                platformFeeSig ? `${err} ${claimRetryWithoutRepayMessage(feeUnits)}` : err
-              )
-            }
-            throw new Error('claim-all')
-          }
-          if (typeof window !== 'undefined') {
-            sessionStorage.removeItem(PENDING_CLAIM_LEDGER_STORAGE_KEY)
-          }
-          clearPendingClaimPlatformFee()
-          const rows = (json.claims?.length ? json.claims : claimPlans).map((c) => ({
-            position_id: 'positionId' in c ? c.positionId : c.position_id,
-            claimed_rewards_total:
-              'newClaimedTotal' in c
-                ? c.newClaimedTotal
-                : Number((c as { claimed_rewards_total?: number }).claimed_rewards_total),
-          }))
-          ledgerClaims.push(
-            ...rows.filter((r) => r.position_id && Number.isFinite(r.claimed_rewards_total))
+          setActionError(
+            'Claim all stopped after many resume attempts. Refresh your nest — OWL may still be arriving; your platform fee can be reused.'
           )
-          return json
+          throw new Error('claim-all')
         },
         afterSuccess: async () => {
           if (ledgerClaims.length > 0) {

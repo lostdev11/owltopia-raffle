@@ -22,15 +22,17 @@ export type StakingPlatformFeeLinkParams = {
   action: StakingPlatformFeeAction
   feeSignature: unknown
   positionIds: string[]
+  /** When set, on-chain verify uses this instead of `positionIds.length` (Claim all reserve). */
+  minUnits?: number
 }
 
 function parseFeeSignature(raw: unknown): string {
   return typeof raw === 'string' ? raw.trim() : ''
 }
 
-function validatePositionIds(positionIds: string[]): string[] {
+function validatePositionIds(positionIds: string[], options?: { allowEmpty?: boolean }): string[] {
   const ids = [...new Set(positionIds.map((id) => id.trim()).filter(Boolean))]
-  if (ids.length === 0) {
+  if (ids.length === 0 && !options?.allowEmpty) {
     throw new StakingUserError('Internal error: nest id missing for platform fee.', 500)
   }
   for (const id of ids) {
@@ -39,6 +41,18 @@ function validatePositionIds(positionIds: string[]): string[] {
     }
   }
   return ids
+}
+
+function feeMinUnits(parsed: {
+  positionIds: string[]
+  minUnits?: number
+}): number {
+  const fromIds = parsed.positionIds.length
+  const minUnits =
+    typeof parsed.minUnits === 'number' && Number.isFinite(parsed.minUnits)
+      ? Math.floor(parsed.minUnits)
+      : fromIds
+  return Math.max(fromIds, minUnits)
 }
 
 function isPlatformFeeActionEnabled(action: StakingPlatformFeeAction): boolean {
@@ -51,14 +65,23 @@ function feeLabelForAction(action: StakingPlatformFeeAction): string {
   return formatStakingPlatformFeePerNestLabel()
 }
 
-function parseStakingPlatformFeeLinkParams(params: StakingPlatformFeeLinkParams) {
+function parseStakingPlatformFeeLinkParams(
+  params: StakingPlatformFeeLinkParams,
+  options?: { allowEmptyPositionIds?: boolean }
+) {
   if (!isPlatformFeeActionEnabled(params.action)) {
     return null
   }
 
   const wallet = params.wallet.trim()
   const feeSignature = parseFeeSignature(params.feeSignature)
-  const positionIds = validatePositionIds(params.positionIds)
+  const positionIds = validatePositionIds(params.positionIds, {
+    allowEmpty: options?.allowEmptyPositionIds,
+  })
+  const minUnits = feeMinUnits({ positionIds, minUnits: params.minUnits })
+  if (minUnits < 1) {
+    throw new StakingUserError('Internal error: platform fee unit count missing.', 500)
+  }
   const feeLabel = feeLabelForAction(params.action)
 
   if (!feeSignature) {
@@ -79,6 +102,7 @@ function parseStakingPlatformFeeLinkParams(params: StakingPlatformFeeLinkParams)
     wallet,
     feeSignature,
     positionIds,
+    minUnits,
     treasury,
     action: params.action,
     unitLamports: getStakingPlatformFeeUnitLamportsForAction(params.action),
@@ -117,10 +141,12 @@ export async function resolveStakingPlatformFeeSignature(
 export async function validateStakingPlatformFeeLinked(
   params: StakingPlatformFeeLinkParams
 ): Promise<void> {
-  const parsed = parseStakingPlatformFeeLinkParams(params)
+  const parsed = parseStakingPlatformFeeLinkParams(params, {
+    allowEmptyPositionIds: params.positionIds.length === 0 && (params.minUnits ?? 0) > 0,
+  })
   if (!parsed) return
 
-  const { wallet, feeSignature, positionIds, treasury, action, unitLamports } = parsed
+  const { wallet, feeSignature, positionIds, minUnits, treasury, action, unitLamports } = parsed
 
   const existing = await getStakingPlatformFeePaymentBySignature(feeSignature)
   if (existing) {
@@ -151,19 +177,76 @@ export async function validateStakingPlatformFeeLinked(
     signature: feeSignature,
     fromWallet: wallet,
     treasuryWallet: treasury,
-    minUnits: positionIds.length,
+    minUnits,
     unitLamports,
   })
   if (!verified.ok) {
     throw new StakingUserError(verified.error, 400)
   }
 
-  if (verified.units < positionIds.length) {
+  if (verified.units < minUnits) {
     throw new StakingUserError(
-      `Platform fee covers ${verified.units} nest(s) but this action needs ${positionIds.length}.`,
+      `Platform fee covers ${verified.units} nest(s) but this action needs ${minUnits}.`,
       400
     )
   }
+}
+
+/**
+ * After on-chain validation, record the fee payment with no nests linked yet.
+ * Claim all appends nest ids per batch as OWL is sent.
+ */
+export async function reserveStakingPlatformFeeLinked(
+  params: StakingPlatformFeeLinkParams
+): Promise<void> {
+  const parsed = parseStakingPlatformFeeLinkParams(params, { allowEmptyPositionIds: true })
+  if (!parsed) return
+
+  const { wallet, feeSignature, minUnits, treasury, action, unitLamports } = parsed
+
+  const existing = await getStakingPlatformFeePaymentBySignature(feeSignature)
+  if (existing) {
+    if (existing.wallet_address !== wallet) {
+      throw new StakingUserError('That platform fee transaction belongs to a different wallet.', 400)
+    }
+    if (existing.action !== action) {
+      throw new StakingUserError('That platform fee transaction was used for a different nest action.', 400)
+    }
+    if (existing.units < minUnits) {
+      throw new StakingUserError(
+        `This fee payment covers ${existing.units} nest(s) but Claim all needs ${minUnits}.`,
+        400
+      )
+    }
+    return
+  }
+
+  const verified = await verifyStakingPlatformFeeTransaction({
+    signature: feeSignature,
+    fromWallet: wallet,
+    treasuryWallet: treasury,
+    minUnits,
+    unitLamports,
+  })
+  if (!verified.ok) {
+    throw new StakingUserError(verified.error, 400)
+  }
+
+  if (verified.units < minUnits) {
+    throw new StakingUserError(
+      `Platform fee covers ${verified.units} nest(s) but this action needs ${minUnits}.`,
+      400
+    )
+  }
+
+  await insertStakingPlatformFeePayment({
+    tx_signature: feeSignature,
+    wallet_address: wallet,
+    action,
+    units: verified.units,
+    lamports: verified.lamports,
+    position_ids: [],
+  })
 }
 
 /**
@@ -173,7 +256,7 @@ export async function commitStakingPlatformFeeLinked(params: StakingPlatformFeeL
   const parsed = parseStakingPlatformFeeLinkParams(params)
   if (!parsed) return
 
-  const { wallet, feeSignature, positionIds, treasury, action, unitLamports } = parsed
+  const { wallet, feeSignature, positionIds, minUnits, treasury, action, unitLamports } = parsed
 
   const existing = await getStakingPlatformFeePaymentBySignature(feeSignature)
   if (existing) {
@@ -185,7 +268,7 @@ export async function commitStakingPlatformFeeLinked(params: StakingPlatformFeeL
     signature: feeSignature,
     fromWallet: wallet,
     treasuryWallet: treasury,
-    minUnits: positionIds.length,
+    minUnits: Math.max(minUnits, positionIds.length),
     unitLamports,
   })
   if (!verified.ok) {

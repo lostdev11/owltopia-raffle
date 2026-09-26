@@ -82,6 +82,7 @@ export async function listStakingPositionsByWallet(wallet: string): Promise<Stak
       .from('staking_positions')
       .select('*')
       .eq('wallet_address', walletAddress)
+      .order('amount', { ascending: false })
       .order('staked_at', { ascending: false })
       .range(offset, offset + pageSize - 1)
     if (error) throw new Error(error.message)

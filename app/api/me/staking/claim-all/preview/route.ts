@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireSession } from '@/lib/auth-server'
 import { findReusableClaimPlatformFeeSignature } from '@/lib/nesting/find-reusable-claim-platform-fee'
 import { isStakingUserError } from '@/lib/nesting/errors'
+import { issueClaimAllEligibilityToken } from '@/lib/nesting/claim-all-eligibility'
 import { prepareClaimAllExecution } from '@/lib/nesting/service'
 import { isStakingPlatformFeeEnabled } from '@/lib/nesting/staking-platform-fee'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
+export const maxDuration = 300
 
 const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 
@@ -39,6 +40,12 @@ export async function GET(request: NextRequest) {
       })
     }
 
+    const claimAllEligibilityToken = issueClaimAllEligibilityToken({
+      wallet: session.wallet,
+      eligiblePositionIds: prepared.claimPlans.map((p) => p.positionId),
+      feeUnits: prepared.feeUnits,
+    })
+
     return NextResponse.json({
       ready: true,
       fee_units: prepared.feeUnits,
@@ -48,6 +55,7 @@ export async function GET(request: NextRequest) {
       skipped_lock_count: prepared.skippedLocks.length,
       skipped_owl: prepared.skippedOwlPreview,
       reusable_platform_fee_signature: reusablePlatformFeeSignature,
+      claim_all_eligibility_token: claimAllEligibilityToken,
     })
   } catch (e) {
     if (isStakingUserError(e)) {

@@ -12,7 +12,11 @@ import {
   readNestLockEligibilityForPoolWithRetry,
   assertWalletNftFrozenForPool,
   poolConfiguredNftLockStandard,
+  resolveEffectiveNftLockStandard,
 } from '@/lib/nesting/nft-lock-service'
+import { readSplTokenNestAccountStatesBatch } from '@/lib/solana/spl-token-nest-lock'
+import { Connection, PublicKey } from '@solana/web3.js'
+import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 
 /** NFT perches that use MPL Core FreezeDelegate (holder wallet, non-transferable while nested). */
 export function poolUsesOnChainNftFreezeLock(
@@ -182,17 +186,13 @@ export function assertPoolConfiguredForOnChainNftFreeze(pool: StakingPoolRow): v
   }
 }
 
-const CLAIM_ALL_LOCK_VERIFY_CONCURRENCY_DEFAULT = 3
-const CLAIM_ALL_LOCK_CHUNK_DELAY_MS_DEFAULT = 200
+const CLAIM_ALL_LOCK_ACCOUNT_CHUNK = 100
+const CLAIM_ALL_LOCK_VERIFY_CONCURRENCY_DEFAULT = 8
 
 function claimAllLockVerifyConcurrency(nestCount: number): number {
-  if (nestCount <= 10) return CLAIM_ALL_LOCK_VERIFY_CONCURRENCY_DEFAULT
+  if (nestCount <= 10) return 3
   if (nestCount <= 30) return 6
-  return 8
-}
-
-function claimAllLockChunkDelayMs(nestCount: number): number {
-  return nestCount > 30 ? 100 : CLAIM_ALL_LOCK_CHUNK_DELAY_MS_DEFAULT
+  return CLAIM_ALL_LOCK_VERIFY_CONCURRENCY_DEFAULT
 }
 
 function sleepMs(ms: number): Promise<void> {
@@ -281,24 +281,155 @@ async function verifyClaimAllNestLockOutcome(
   }
 }
 
+async function accountExistsByAssetId(assetIds: string[]): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>()
+  if (assetIds.length === 0) return out
+  const connection = new Connection(resolveServerSolanaRpcUrl(), { commitment: 'confirmed' })
+  const entries: Array<{ assetId: string; pk: PublicKey }> = []
+  for (const raw of assetIds) {
+    const assetId = raw.trim()
+    if (!assetId) continue
+    try {
+      entries.push({ assetId, pk: new PublicKey(assetId) })
+    } catch {
+      out.set(assetId, false)
+    }
+  }
+  for (let i = 0; i < entries.length; i += CLAIM_ALL_LOCK_ACCOUNT_CHUNK) {
+    const chunk = entries.slice(i, i + CLAIM_ALL_LOCK_ACCOUNT_CHUNK)
+    try {
+      const infos = await connection.getMultipleAccountsInfo(chunk.map((e) => e.pk))
+      chunk.forEach((entry, idx) => {
+        out.set(entry.assetId, Boolean(infos[idx]))
+      })
+    } catch {
+      for (const entry of chunk) {
+        out.set(entry.assetId, true)
+      }
+    }
+  }
+  return out
+}
+
+async function verifySplClaimAllNestLockOutcomesBatch(
+  rows: StakingPositionRow[],
+  poolById: Map<string, StakingPoolRow>
+): Promise<ClaimAllLockOutcome[]> {
+  if (rows.length === 0) return []
+  const byWallet = new Map<string, StakingPositionRow[]>()
+  for (const row of rows) {
+    const w = row.wallet_address.trim()
+    if (!w) continue
+    const list = byWallet.get(w) ?? []
+    list.push(row)
+    byWallet.set(w, list)
+  }
+
+  const outcomes: ClaimAllLockOutcome[] = []
+  for (const [ownerWallet, walletRows] of byWallet) {
+    const mints = walletRows
+      .map((r) => r.asset_identifier?.trim())
+      .filter((m): m is string => Boolean(m))
+    const states = await readSplTokenNestAccountStatesBatch({ mints, ownerWallet })
+    for (const row of walletRows) {
+      const mint = row.asset_identifier?.trim() ?? ''
+      const state = mint ? states.get(mint) : undefined
+      if (!state) {
+        outcomes.push({
+          row,
+          kind: 'transient',
+          skip: {
+            positionId: row.id,
+            assetId: mint || null,
+            message: 'Unable to verify nest lock on-chain right now.',
+            status: 503,
+            code: 'nest_lock_read_failed',
+          },
+        })
+        continue
+      }
+      if (state.heldByNestingLock) {
+        outcomes.push({ row, kind: 'eligible' })
+        continue
+      }
+      outcomes.push({
+        row,
+        kind: 'skip',
+        skip: {
+          positionId: row.id,
+          assetId: mint || null,
+          message:
+            'This nest is not locked on-chain, so it cannot earn or claim until the nest lock is restored. Finish opening the nest in your wallet, or contact support.',
+          status: 400,
+          code: 'nest_lock_ineligible',
+        },
+      })
+    }
+  }
+  return outcomes
+}
+
 async function verifyClaimAllNestLocksInChunks(
   rows: StakingPositionRow[],
   poolById: Map<string, StakingPoolRow>,
-  options?: { concurrency?: number; chunkDelayMs?: number }
+  options?: { concurrency?: number }
 ): Promise<ClaimAllLockOutcome[]> {
   if (rows.length === 0) return []
-  const concurrency = options?.concurrency ?? claimAllLockVerifyConcurrency(rows.length)
-  const chunkDelayMs = options?.chunkDelayMs ?? claimAllLockChunkDelayMs(rows.length)
-  const outcomes: ClaimAllLockOutcome[] = []
 
-  for (let i = 0; i < rows.length; i += concurrency) {
-    if (i > 0) await sleepMs(chunkDelayMs)
-    const chunk = rows.slice(i, i + concurrency)
-    const chunkOutcomes = await Promise.all(
-      chunk.map((row) => verifyClaimAllNestLockOutcome(row, poolById))
-    )
-    outcomes.push(...chunkOutcomes)
+  const splRows: StakingPositionRow[] = []
+  const otherRows: StakingPositionRow[] = []
+  for (const row of rows) {
+    const pool = poolById.get(row.pool_id)
+    if (!pool) {
+      otherRows.push(row)
+      continue
+    }
+    const resolved = await resolveEffectiveNftLockStandard(pool, row.asset_identifier ?? '')
+    if (resolved === 'spl_token_account_freeze') {
+      splRows.push(row)
+    } else {
+      otherRows.push(row)
+    }
   }
+
+  const outcomes: ClaimAllLockOutcome[] = []
+  if (splRows.length > 0) {
+    outcomes.push(...(await verifySplClaimAllNestLockOutcomesBatch(splRows, poolById)))
+  }
+
+  if (otherRows.length > 0) {
+    const assetIds = otherRows
+      .map((r) => r.asset_identifier?.trim())
+      .filter((id): id is string => Boolean(id))
+    const exists = await accountExistsByAssetId(assetIds)
+    const concurrency = options?.concurrency ?? claimAllLockVerifyConcurrency(otherRows.length)
+    for (let i = 0; i < otherRows.length; i += concurrency) {
+      if (i > 0) await sleepMs(80)
+      const chunk = otherRows.slice(i, i + concurrency)
+      const chunkOutcomes = await Promise.all(
+        chunk.map(async (row) => {
+          const assetId = row.asset_identifier?.trim() ?? ''
+          if (assetId && exists.get(assetId) === false) {
+            return {
+              row,
+              kind: 'skip' as const,
+              skip: {
+                positionId: row.id,
+                assetId,
+                message:
+                  'This nest is not locked on-chain, so it cannot earn or claim until the nest lock is restored. Finish opening the nest in your wallet, or contact support.',
+                status: 400,
+                code: 'nest_lock_ineligible',
+              },
+            }
+          }
+          return verifyClaimAllNestLockOutcome(row, poolById)
+        })
+      )
+      outcomes.push(...chunkOutcomes)
+    }
+  }
+
   return outcomes
 }
 
@@ -333,7 +464,6 @@ export async function partitionClaimAllNestsByLockEligibility(
     await sleepMs(600)
     const retryOutcomes = await verifyClaimAllNestLocksInChunks(transientRows, poolById, {
       concurrency: Math.min(3, claimAllLockVerifyConcurrency(transientRows.length)),
-      chunkDelayMs: 250,
     })
     const byId = new Map(outcomes.map((o) => [o.row.id, o]))
     for (const o of retryOutcomes) {
