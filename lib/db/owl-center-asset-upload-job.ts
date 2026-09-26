@@ -175,3 +175,50 @@ export async function listAssetUploadJobsForWorker(limit = 3): Promise<OwlCenter
   if (error || !data) return []
   return (data as Record<string, unknown>[]).map(mapJobRow)
 }
+
+export const OWL_CENTER_DEPLOY_LOCK_LEASE_MS = 6 * 60 * 1000
+
+/** Take a short deploy lease on the upload job (conditional update). */
+export async function tryAcquireDeployLock(
+  jobId: string,
+  leaseMs = OWL_CENTER_DEPLOY_LOCK_LEASE_MS
+): Promise<boolean> {
+  const db = getSupabaseAdmin()
+  const until = new Date(Date.now() + Math.max(60_000, leaseMs)).toISOString()
+  const now = new Date().toISOString()
+  const patch = { deploy_lock_until: until, updated_at: now }
+
+  const { data: freeRow, error: freeErr } = await db
+    .from('owl_center_asset_upload_jobs')
+    .update(patch)
+    .eq('id', jobId)
+    .is('deploy_lock_until', null)
+    .select('id')
+    .maybeSingle()
+  if (freeErr) {
+    console.error('tryAcquireDeployLock', freeErr)
+    return false
+  }
+  if (freeRow?.id) return true
+
+  const { data: staleRow, error: staleErr } = await db
+    .from('owl_center_asset_upload_jobs')
+    .update(patch)
+    .eq('id', jobId)
+    .lt('deploy_lock_until', now)
+    .select('id')
+    .maybeSingle()
+  if (staleErr) {
+    console.error('tryAcquireDeployLock stale', staleErr)
+    return false
+  }
+  return Boolean(staleRow?.id)
+}
+
+export async function releaseDeployLock(jobId: string): Promise<void> {
+  const db = getSupabaseAdmin()
+  await db
+    .from('owl_center_asset_upload_jobs')
+    .update({ deploy_lock_until: null, updated_at: new Date().toISOString() })
+    .eq('id', jobId)
+}
