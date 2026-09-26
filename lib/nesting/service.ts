@@ -20,6 +20,7 @@ import {
 import {
   buildFullPositionClaimPlan,
   buildOwlClaimAllPreview,
+  type PositionClaimPlan,
   isOwlRewardPosition,
   minOwlClaimPayoutRejectedMessage,
   minOwlClaimThresholdMessage,
@@ -508,11 +509,24 @@ export async function executeClaim(params: {
   return result
 }
 
-/** Claim pending OWL from every active nest in one request (one on-chain transfer when configured). */
-export async function executeClaimAll(params: {
-  wallet: string
-  platform_fee_signature?: unknown
-}) {
+export type PreparedClaimAllExecution = {
+  pool: StakingPoolRow
+  /** All claimable OWL nests in the DB preview (before lock skips). */
+  previewPlans: ReturnType<typeof buildOwlClaimAllPreview>['plans']
+  /** Nests that will receive OWL in this Claim all (lock-eligible subset). */
+  claimPlans: PositionClaimPlan[]
+  skippedLocks: Awaited<ReturnType<typeof partitionClaimAllNestsByLockEligibility>>['skipped']
+  claimableTotal: number
+  skippedOwlPreview: number
+  feeUnits: number
+}
+
+/**
+ * Server-side Claim all plan: fresh DB rows, on-chain lock partition, and fee unit count.
+ * Used by POST claim-all and GET claim-all/preview so the wallet is not charged before we
+ * know OWL can be sent.
+ */
+export async function prepareClaimAllExecution(wallet: string): Promise<PreparedClaimAllExecution> {
   assertNestingClaimsAllowed()
 
   if (isNestingClaimAllDisabled()) {
@@ -522,17 +536,13 @@ export async function executeClaimAll(params: {
     )
   }
 
-  const rows = await listStakingPositionsByWallet(params.wallet)
+  const rows = await listStakingPositionsByWallet(wallet)
   const asOfMs = Date.now()
   const { plans, ready: claimAllReady } = buildOwlClaimAllPreview(rows, asOfMs)
   const owlRows = rows.filter((r) => r.status === 'active' && isOwlRewardPosition(r))
 
   if (plans.length === 0 || !claimAllReady) {
-    throw new StakingUserError(
-      noClaimableRewardsMessage(),
-      400,
-      { claimable_count: 0 }
-    )
+    throw new StakingUserError(noClaimableRewardsMessage(), 400, { claimable_count: 0 })
   }
 
   const pool = await getStakingPoolById(owlRows[0]!.pool_id)
@@ -594,6 +604,29 @@ export async function executeClaimAll(params: {
     )
   }
 
+  const skippedOwlPreview = plans
+    .filter((p) => !eligibleIds.has(p.positionId))
+    .reduce((sum, p) => sum + p.payoutAmount, 0)
+
+  return {
+    pool,
+    previewPlans: plans,
+    claimPlans,
+    skippedLocks,
+    claimableTotal,
+    skippedOwlPreview,
+    feeUnits: claimPlans.length,
+  }
+}
+
+/** Claim pending OWL from every active nest in one request (one on-chain transfer when configured). */
+export async function executeClaimAll(params: {
+  wallet: string
+  platform_fee_signature?: unknown
+}) {
+  const prepared = await prepareClaimAllExecution(params.wallet)
+  const { pool, claimPlans, skippedLocks, skippedOwlPreview } = prepared
+
   const feeParams = await resolveStakingPlatformFeeSignature({
     wallet: params.wallet,
     action: 'claim' as const,
@@ -625,9 +658,7 @@ export async function executeClaimAll(params: {
       plans: claimPlans,
     })
 
-    const skippedOwl = plans
-      .filter((p) => !eligibleIds.has(p.positionId))
-      .reduce((sum, p) => sum + p.payoutAmount, 0)
+    const skippedOwl = skippedOwlPreview
 
     await commitStakingPlatformFeeLinked(feeParams)
     return {
