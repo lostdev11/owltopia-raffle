@@ -41,6 +41,7 @@ async function persistBatchClaimLedger(params: {
           position_id: plan.positionId,
           amount: plan.payoutAmount,
           new_claimed_total: plan.newClaimedTotal,
+          expected_claimed_rewards: plan.expectedClaimedRewards,
         })),
         note: params.note,
         transaction_signature: params.txSig,

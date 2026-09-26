@@ -270,6 +270,14 @@ export function DashboardNestingClient() {
    * only the server confirm remains, so the progress card can say "safe to close". */
   const [stakeCloseSafe, setStakeCloseSafe] = useState(false)
   const [claimAllTxPhase, setClaimAllTxPhase] = useState<NestingTxPhase>('idle')
+  const [claimAllServerJob, setClaimAllServerJob] = useState<{
+    job_id: string
+    pending_nest_count: number
+    total_claimed: number
+    batches_completed: number
+    batch_count_estimate: number | null
+    status: string
+  } | null>(null)
   /** Multi NFT confirm: show which coin the wallet is locking so the flow does not look frozen. */
   const [nftStakeBatchHint, setNftStakeBatchHint] = useState<string | null>(null)
   const [posPhases, setPosPhases] = useState<Record<string, { claim: NestingTxPhase; unstake: NestingTxPhase }>>({})
@@ -790,7 +798,12 @@ export function DashboardNestingClient() {
     return formatStakingPlatformFeePerNestLabel()
   }, [platformFeeActive])
 
-  const claimAllBusy = claimAllTxPhase !== 'idle'
+  const claimAllServerContinues = Boolean(
+    claimAllServerJob &&
+      claimAllServerJob.status === 'processing' &&
+      claimAllServerJob.pending_nest_count > 0
+  )
+  const claimAllBusy = claimAllTxPhase !== 'idle' || claimAllServerContinues
 
   /** Deploy kill switch only — admin “pause holder actions” still allows claims. */
   const nestingClaimsBlocked = nestingPausedByDeployEnv
@@ -807,6 +820,64 @@ export function DashboardNestingClient() {
     if (stakeTxPhase !== 'idle') return 'Finish the nest you are opening above, then try again.'
     return null
   }, [claimAllButtonDisabled, claimAllReady, claimAllBusy, nestingClaimsBlocked, stakeTxPhase])
+
+  useEffect(() => {
+    if (!connected || !publicKey) {
+      setClaimAllServerJob(null)
+      return
+    }
+    let cancelled = false
+    const pollClaimAllJob = async () => {
+      const res = await fetchNestingJson<{
+        job?: {
+          job_id: string
+          status: string
+          pending_nest_count: number
+          total_claimed: number
+          batches_completed: number
+          batch_count_estimate: number | null
+          claim_all_complete?: boolean
+        } | null
+      }>('/api/me/staking/claim-all/job', {
+        method: 'GET',
+        credentials: 'include',
+        timeoutMs: NESTING_CLAIM_FETCH_TIMEOUT_MS,
+        headers: { 'X-Connected-Wallet': publicKey.toBase58() },
+      })
+      if (cancelled || !res.json) return
+      const job = res.json.job
+      if (!job || job.status === 'failed') {
+        setClaimAllServerJob(null)
+        if (claimAllTxPhase === 'submitting' && !job) {
+          setClaimAllTxPhase('idle')
+        }
+        return
+      }
+      if (job.status === 'processing' && job.pending_nest_count > 0) {
+        setClaimAllServerJob({
+          job_id: job.job_id,
+          status: job.status,
+          pending_nest_count: job.pending_nest_count,
+          total_claimed: job.total_claimed,
+          batches_completed: job.batches_completed,
+          batch_count_estimate: job.batch_count_estimate,
+        })
+        setClaimAllTxPhase('submitting')
+        return
+      }
+      if (job.claim_all_complete || job.pending_nest_count === 0) {
+        setClaimAllServerJob(null)
+        setClaimAllTxPhase('idle')
+        void loadPositions({ heal: true, silent: true })
+      }
+    }
+    void pollClaimAllJob()
+    const intervalId = window.setInterval(() => void pollClaimAllJob(), 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [connected, publicKey, walletAddr])
 
   /** Match staked mints to the user’s last wallet NFT scan (image + name hints). */
   const nestingWalletMintHints = useMemo(() => {
@@ -3487,6 +3558,7 @@ export function DashboardNestingClient() {
             fee_units?: number
             total_owl?: number
             reusable_platform_fee_signature?: string | null
+            claim_all_eligibility_token?: string | null
           }>('/api/me/staking/claim-all/preview', {
             method: 'GET',
             credentials: 'include',
@@ -3514,6 +3586,11 @@ export function DashboardNestingClient() {
             )
           )
 
+          const claimAllEligibilityToken =
+            typeof preview.claim_all_eligibility_token === 'string'
+              ? preview.claim_all_eligibility_token.trim()
+              : ''
+
           let platformFeeSig: string | null = null
           if (platformFeeActive) {
             const serverReuse =
@@ -3535,13 +3612,17 @@ export function DashboardNestingClient() {
               setClaimAllTxPhase('submitting')
             }
           }
-          const result = await fetchNestingJson<{
+          type ClaimAllPostJson = {
             error?: string
+            code?: string
             ledger_sync_failed?: boolean
             total_claimed?: number
             claim_count?: number
+            batches_completed?: number
+            batch_count?: number
             skipped_lock_count?: number
             skipped_owl?: number
+            claim_all_complete?: boolean
             claims?: Array<{
               position_id: string
               claimed?: number
@@ -3549,6 +3630,14 @@ export function DashboardNestingClient() {
             }>
             execution?: { path?: 'onchain_transfer' | 'database_only' }
             transaction_signature?: string | null
+          }
+
+          const result = await fetchNestingJson<ClaimAllPostJson & {
+            job_id?: string | null
+            server_continues_in_background?: boolean
+            pending_nest_count?: number
+            batches_completed?: number
+            batch_count_estimate?: number | null
           }>('/api/me/staking/claim-all', {
             method: 'POST',
             credentials: 'include',
@@ -3557,10 +3646,14 @@ export function DashboardNestingClient() {
               'Content-Type': 'application/json',
               'X-Connected-Wallet': publicKey.toBase58(),
             },
-            body: JSON.stringify(
-              platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}
-            ),
+            body: JSON.stringify({
+              ...(platformFeeSig ? { platform_fee_signature: platformFeeSig } : {}),
+              ...(claimAllEligibilityToken
+                ? { claim_all_eligibility: claimAllEligibilityToken }
+                : {}),
+            }),
           })
+
           if (result.status === 0 && !result.ok) {
             setActionError(
               (result.clientTimeout
@@ -3570,6 +3663,7 @@ export function DashboardNestingClient() {
             )
             throw new Error('claim-all')
           }
+
           const json = result.json ?? {}
 
           if (!result.ok && json.ledger_sync_failed && json.transaction_signature?.trim()) {
@@ -3644,10 +3738,26 @@ export function DashboardNestingClient() {
             }
             throw new Error('claim-all')
           }
-          if (typeof window !== 'undefined') {
+
+          const serverContinues = Boolean(json.server_continues_in_background && json.job_id)
+          if (serverContinues) {
+            setClaimAllServerJob({
+              job_id: String(json.job_id),
+              status: 'processing',
+              pending_nest_count: Number(json.pending_nest_count ?? 0),
+              total_claimed: Number(json.total_claimed ?? 0),
+              batches_completed: Number(json.batches_completed ?? 0),
+              batch_count_estimate:
+                typeof json.batch_count_estimate === 'number' ? json.batch_count_estimate : null,
+            })
+            setClaimAllTxPhase('submitting')
+          } else if (typeof window !== 'undefined') {
             sessionStorage.removeItem(PENDING_CLAIM_LEDGER_STORAGE_KEY)
+            clearPendingClaimPlatformFee()
+            setClaimAllServerJob(null)
+            setClaimAllTxPhase('idle')
           }
-          clearPendingClaimPlatformFee()
+
           const rows = (json.claims?.length ? json.claims : claimPlans).map((c) => ({
             position_id: 'positionId' in c ? c.positionId : c.position_id,
             claimed_rewards_total:
@@ -3658,7 +3768,10 @@ export function DashboardNestingClient() {
           ledgerClaims.push(
             ...rows.filter((r) => r.position_id && Number.isFinite(r.claimed_rewards_total))
           )
-          return json
+          return {
+            ...json,
+            claim_all_in_background: serverContinues,
+          }
         },
         afterSuccess: async () => {
           if (ledgerClaims.length > 0) {
@@ -3691,6 +3804,17 @@ export function DashboardNestingClient() {
         skippedLocks > 0
           ? ` ${skippedOwlLabel} OWL still pending on ${skippedLocks} nest${skippedLocks === 1 ? '' : 's'} that need Finish opening (lock not on-chain yet) — claim those after the lock is restored.`
           : ''
+      const inBackground =
+        (claimJson as { claim_all_in_background?: boolean }).claim_all_in_background === true
+      if (inBackground) {
+        setSuccessNotice({
+          placement: 'modal',
+          title: 'Claim all in progress',
+          message: `${totalLabel} OWL sent so far — remaining nests finish on the server (about once a minute).`,
+          hint: 'You can close this page — your claims will keep sending to your wallet.',
+        })
+        return
+      }
       setSuccessNotice({
         placement: 'modal',
         title: skippedLocks > 0 ? 'Partial claim successful' : 'Claim successful',
@@ -5050,6 +5174,12 @@ export function DashboardNestingClient() {
           disabled={claimAllButtonDisabled}
           disabledReason={claimAllDisabledReason}
           phase={claimAllTxPhase}
+          serverContinuesInBackground={Boolean(claimAllServerJob && claimAllServerContinues)}
+          backgroundProgressLabel={
+            claimAllServerJob
+              ? `${claimAllServerJob.total_claimed.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL sent · ${claimAllServerJob.pending_nest_count} nest${claimAllServerJob.pending_nest_count === 1 ? '' : 's'} left`
+              : null
+          }
           onClaimAll={() => void handleClaimAll()}
         />
         {openPositions.length === 0 ? (

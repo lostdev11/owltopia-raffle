@@ -12,6 +12,8 @@ export type PositionClaimPlan = {
   payoutAmount: number
   newClaimedTotal: number
   claimableNow: number
+  /** DB `claimed_rewards` read when the plan was built (optimistic ledger check). */
+  expectedClaimedRewards: number
 }
 
 export function isOwlRewardPosition(
@@ -48,6 +50,9 @@ export function buildOwlClaimPlansForPositions(
     if (!activeOwlNestHasMint(row)) continue
     const plan = buildFullPositionClaimPlan(row, asOfMs, options)
     if (plan) plans.push(plan)
+  }
+  if (options?.forClaimAll && plans.length > 1) {
+    plans.sort((a, b) => b.payoutAmount - a.payoutAmount)
   }
   return plans
 }
@@ -130,6 +135,7 @@ export function buildFullPositionClaimPlan(
     payoutAmount: claimableNow,
     newClaimedTotal: accruedNow,
     claimableNow,
+    expectedClaimedRewards: oldClaimed,
   }
 }
 

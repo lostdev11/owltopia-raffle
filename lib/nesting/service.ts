@@ -26,7 +26,7 @@ import {
   minOwlClaimThresholdMessage,
   noClaimableRewardsMessage,
 } from '@/lib/nesting/claim-plan'
-import { executeChunkedBatchOwlClaims } from '@/lib/nesting/chunked-claim-all'
+import { ensureClaimAllJob, runClaimAllJobTick } from '@/lib/nesting/claim-all-job-runner'
 import { StakingUserError } from '@/lib/nesting/errors'
 import { resolveMutationAdapter } from '@/lib/nesting/resolve-adapter'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
@@ -59,9 +59,11 @@ import { assertNftEligibleForPoolStake } from '@/lib/nesting/nft-lock-service'
 import {
   commitStakingPlatformFeeLinked,
   requireStakingPlatformFeeLinked,
+  reserveStakingPlatformFeeLinked,
   resolveStakingPlatformFeeSignature,
   validateStakingPlatformFeeLinked,
 } from '@/lib/nesting/link-staking-platform-fee'
+import { verifyClaimAllEligibilityToken } from '@/lib/nesting/claim-all-eligibility'
 import { isEarlyUnstakeFeeEnabled } from '@/lib/nesting/staking-platform-fee'
 
 export async function executeStake(params: {
@@ -526,7 +528,14 @@ export type PreparedClaimAllExecution = {
  * Used by POST claim-all and GET claim-all/preview so the wallet is not charged before we
  * know OWL can be sent.
  */
-export async function prepareClaimAllExecution(wallet: string): Promise<PreparedClaimAllExecution> {
+export async function prepareClaimAllExecution(
+  wallet: string,
+  options?: {
+    /** Skip on-chain lock reads when preview eligibility token is still valid. */
+    skipLockVerify?: boolean
+    eligiblePositionIds?: string[]
+  }
+): Promise<PreparedClaimAllExecution> {
   assertNestingClaimsAllowed()
 
   if (isNestingClaimAllDisabled()) {
@@ -566,10 +575,27 @@ export async function prepareClaimAllExecution(wallet: string): Promise<Prepared
     }
   }
 
-  const lockPartition = await partitionClaimAllNestsByLockEligibility(rowsToVerify, poolById)
-  const eligibleIds = new Set(lockPartition.eligible.map((r) => r.id))
-  const claimPlans = plans.filter((p) => eligibleIds.has(p.positionId))
-  const skippedLocks = lockPartition.skipped
+  let claimPlans: PositionClaimPlan[]
+  let skippedLocks: PreparedClaimAllExecution['skippedLocks']
+
+  if (options?.skipLockVerify && options.eligiblePositionIds?.length) {
+    const eligibleIds = new Set(options.eligiblePositionIds.map((id) => id.trim()))
+    claimPlans = plans.filter((p) => eligibleIds.has(p.positionId))
+    skippedLocks = plans
+      .filter((p) => !eligibleIds.has(p.positionId))
+      .map((p) => ({
+        positionId: p.positionId,
+        assetId: null,
+        message: 'Skipped in preview (lock or eligibility)',
+        status: 400,
+        code: 'claim_all_preview_skip',
+      }))
+  } else {
+    const lockPartition = await partitionClaimAllNestsByLockEligibility(rowsToVerify, poolById)
+    const eligibleIds = new Set(lockPartition.eligible.map((r) => r.id))
+    claimPlans = plans.filter((p) => eligibleIds.has(p.positionId))
+    skippedLocks = lockPartition.skipped
+  }
 
   if (claimPlans.length === 0) {
     const sample = skippedLocks[0]?.message?.trim()
@@ -604,8 +630,9 @@ export async function prepareClaimAllExecution(wallet: string): Promise<Prepared
     )
   }
 
+  const eligibleIdSet = new Set(claimPlans.map((p) => p.positionId))
   const skippedOwlPreview = plans
-    .filter((p) => !eligibleIds.has(p.positionId))
+    .filter((p) => !eligibleIdSet.has(p.positionId))
     .reduce((sum, p) => sum + p.payoutAmount, 0)
 
   return {
@@ -623,17 +650,38 @@ export async function prepareClaimAllExecution(wallet: string): Promise<Prepared
 export async function executeClaimAll(params: {
   wallet: string
   platform_fee_signature?: unknown
+  claim_all_eligibility?: unknown
+  startedAtMs?: number
 }) {
-  const prepared = await prepareClaimAllExecution(params.wallet)
+  const eligibility = verifyClaimAllEligibilityToken(params.claim_all_eligibility, params.wallet)
+  const prepared = await prepareClaimAllExecution(params.wallet, {
+    skipLockVerify: Boolean(eligibility),
+    eligiblePositionIds: eligibility?.p,
+  })
   const { pool, claimPlans, skippedLocks, skippedOwlPreview } = prepared
+
+  const feeUnitCount = Math.max(
+    claimPlans.length,
+    eligibility?.feeUnits ?? 0
+  )
 
   const feeParams = await resolveStakingPlatformFeeSignature({
     wallet: params.wallet,
     action: 'claim' as const,
     feeSignature: params.platform_fee_signature,
     positionIds: claimPlans.map((p) => p.positionId),
+    minUnits: feeUnitCount,
   })
-  await validateStakingPlatformFeeLinked(feeParams)
+  await validateStakingPlatformFeeLinked({
+    ...feeParams,
+    positionIds: [],
+    minUnits: feeUnitCount,
+  })
+  await reserveStakingPlatformFeeLinked({
+    ...feeParams,
+    positionIds: [],
+    minUnits: feeUnitCount,
+  })
 
   const rewardToken = (pool.reward_token ?? '').trim().toUpperCase()
   if (rewardToken === 'OWL' && !isNestingDbOnlyOwlClaimsAllowed()) {
@@ -651,40 +699,51 @@ export async function executeClaimAll(params: {
     }
   }
 
-  try {
-    const result = await executeChunkedBatchOwlClaims({
-      wallet: params.wallet,
-      pool,
-      plans: claimPlans,
-    })
+  const feeSignature =
+    typeof feeParams.feeSignature === 'string' ? feeParams.feeSignature.trim() : ''
+  const jobFeeSignature = feeSignature || 'no_platform_fee'
 
-    const skippedOwl = skippedOwlPreview
+  const job = await ensureClaimAllJob({
+    wallet: params.wallet,
+    platform_fee_signature: jobFeeSignature,
+    pool_id: pool.id,
+    pending_position_ids: claimPlans.map((p) => p.positionId),
+    fee_units: feeUnitCount,
+    claim_all_eligibility_token:
+      typeof params.claim_all_eligibility === 'string'
+        ? params.claim_all_eligibility.trim()
+        : null,
+  })
 
-    await commitStakingPlatformFeeLinked(feeParams)
-    return {
-      ...result,
-      skipped_lock_count: skippedLocks.length,
-      skipped_owl: skippedOwl,
-      skipped_locks: skippedLocks.map((s) => ({
+  const tick = await runClaimAllJobTick({
+    jobId: job.id,
+    lockOwner: 'client',
+    startedAtMs: params.startedAtMs ?? Date.now(),
+  })
+
+  const skippedOwl = skippedOwlPreview
+
+  return {
+    total_claimed: tick.total_claimed,
+    claims: tick.claims,
+    transaction_signature: tick.transaction_signature,
+    transaction_signatures: tick.transaction_signatures,
+    execution_path: tick.execution_path,
+    batch_count: tick.batch_count_estimate ?? 1,
+    skipped_lock_count: tick.skipped_lock_count ?? skippedLocks.length,
+    skipped_owl: tick.skipped_owl ?? skippedOwl,
+    skipped_locks:
+      tick.skipped_locks ??
+      skippedLocks.map((s) => ({
         position_id: s.positionId,
         asset_id: s.assetId,
         reason: s.message,
       })),
-    }
-  } catch (e) {
-    // Partial Claim-all already sent OWL for some batches: still record the fee for completed
-    // nests so a retry can append remaining ids to the same payment instead of charging again.
-    if (e instanceof StakingUserError && e.extra?.code === 'claim_all_partial_batch') {
-      const completed = Array.isArray(e.extra.completed_position_ids)
-        ? e.extra.completed_position_ids.filter((id): id is string => typeof id === 'string')
-        : []
-      if (completed.length > 0) {
-        await commitStakingPlatformFeeLinked({
-          ...feeParams,
-          positionIds: completed,
-        }).catch(() => {})
-      }
-    }
-    throw e
+    claim_all_complete: tick.claim_all_complete,
+    job_id: job.id,
+    job_status: tick.status,
+    pending_nest_count: tick.pending_nest_count,
+    batches_completed: tick.batches_completed,
+    batch_count_estimate: tick.batch_count_estimate,
   }
 }

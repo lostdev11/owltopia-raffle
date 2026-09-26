@@ -2,6 +2,7 @@ import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { executeBatchOwlClaims, type BatchOwlClaimResult } from '@/lib/nesting/batch-claim'
 import { isBatchClaimLedgerSyncError } from '@/lib/nesting/batch-claim-errors'
 import type { PositionClaimPlan } from '@/lib/nesting/claim-plan'
+import { shouldStopClaimAllBatchesForDeadline } from '@/lib/nesting/claim-all-deadline'
 import { getClaimAllBatchSize } from '@/lib/nesting/policy'
 import { isStakingUserError, StakingUserError } from '@/lib/nesting/errors'
 
@@ -39,19 +40,66 @@ function shouldRetryFailedClaimBatch(e: unknown): boolean {
  * Runs Claim all in server-side batches so large wallets stay within RPC/time limits.
  * Platform fee should be validated before and committed only after every batch succeeds.
  */
+function throwClaimAllPartialBatch(params: {
+  batchesCompleted: number
+  batchCount: number
+  totalClaimed: number
+  transactionSignatures: string[]
+  claims: BatchOwlClaimResult['claims']
+}): never {
+  throw new StakingUserError(
+    `OWL was sent for ${params.batchesCompleted} of ${params.batchCount} batches (${params.totalClaimed.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL total). Refresh your wallet and dashboard — Claim all again only for remaining nests; your prior platform fee can be reused if the app still has it. Contact support if any nests still show claimable OWL after a successful payout.`,
+    503,
+    {
+      code: 'claim_all_partial_batch',
+      batches_completed: params.batchesCompleted,
+      batch_count: params.batchCount,
+      total_claimed: params.totalClaimed,
+      transaction_signatures: params.transactionSignatures,
+      completed_position_ids: params.claims.map((c) => c.position_id),
+      claims: params.claims,
+    }
+  )
+}
+
 export async function executeChunkedBatchOwlClaims(params: {
   wallet: string
   pool: StakingPoolRow
   plans: PositionClaimPlan[]
+  /** When set, stop before the next batch if the route is near maxDuration. */
+  deadlineMs?: number
+  /** Called before each batch (lock heartbeat). Throw to abort without sending OWL. */
+  onBeforeBatch?: () => Promise<void>
+  /** Re-read pending amounts from DB so stale plans cannot double-pay. */
+  refreshBatchPlans?: (plans: PositionClaimPlan[]) => Promise<PositionClaimPlan[]>
+  /** Called after each successful batch with that batch's nest ids (fee linking). */
+  onBatchCompleted?: (positionIds: string[]) => Promise<void>
 }): Promise<ChunkedBatchOwlClaimResult> {
   const batchSize = getClaimAllBatchSize()
   const chunks = chunkPlans(params.plans, batchSize)
 
   if (chunks.length === 1) {
+    if (params.onBeforeBatch) {
+      await params.onBeforeBatch()
+    }
+    let singlePlans = chunks[0]!
+    if (params.refreshBatchPlans) {
+      singlePlans = await params.refreshBatchPlans(singlePlans)
+    }
+    if (singlePlans.length === 0) {
+      return {
+        total_claimed: 0,
+        claims: [],
+        transaction_signature: null,
+        execution_path: 'database_only',
+        batch_count: 0,
+        transaction_signatures: [],
+      }
+    }
     const single = await executeBatchOwlClaims({
       wallet: params.wallet,
       pool: params.pool,
-      plans: chunks[0]!,
+      plans: singlePlans,
     })
     const sig = single.transaction_signature?.trim() || null
     return {
@@ -67,7 +115,36 @@ export async function executeChunkedBatchOwlClaims(params: {
   let executionPath: BatchOwlClaimResult['execution_path'] = 'database_only'
 
   for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i]!
+    if (shouldStopClaimAllBatchesForDeadline(params.deadlineMs)) {
+      if (totalClaimed > 0) {
+        throwClaimAllPartialBatch({
+          batchesCompleted: i,
+          batchCount: chunks.length,
+          totalClaimed,
+          transactionSignatures,
+          claims,
+        })
+      }
+      throw new StakingUserError(
+        'Claim all ran out of time before sending OWL. Wait a moment and tap Claim all again — your platform fee can be reused.',
+        503,
+        { code: 'claim_all_deadline_exhausted' }
+      )
+    }
+
+    if (params.onBeforeBatch) {
+      await params.onBeforeBatch()
+    }
+
+    let chunk = chunks[i]!
+    if (params.refreshBatchPlans) {
+      const refreshed = await params.refreshBatchPlans(chunk)
+      if (refreshed.length === 0) {
+        continue
+      }
+      chunk = refreshed
+    }
+
     let result: BatchOwlClaimResult | null = null
     let lastError: unknown
     // One retry per batch absorbs transient RPC / blockhash failures without stranding remaining nests.
@@ -91,19 +168,13 @@ export async function executeChunkedBatchOwlClaims(params: {
     }
     if (!result) {
       if (totalClaimed > 0) {
-        throw new StakingUserError(
-          `OWL was sent for ${i} of ${chunks.length} batches (${totalClaimed.toLocaleString(undefined, { maximumFractionDigits: 6 })} OWL total). Refresh your wallet and dashboard — Claim all again only for remaining nests; your prior platform fee can be reused if the app still has it. Contact support if any nests still show claimable OWL after a successful payout.`,
-          503,
-          {
-            code: 'claim_all_partial_batch',
-            batches_completed: i,
-            batch_count: chunks.length,
-            total_claimed: totalClaimed,
-            transaction_signatures: transactionSignatures,
-            completed_position_ids: claims.map((c) => c.position_id),
-            claims,
-          }
-        )
+        throwClaimAllPartialBatch({
+          batchesCompleted: i,
+          batchCount: chunks.length,
+          totalClaimed,
+          transactionSignatures,
+          claims,
+        })
       }
       throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'Claim batch failed'))
     }
@@ -114,6 +185,9 @@ export async function executeChunkedBatchOwlClaims(params: {
     }
     const sig = result.transaction_signature?.trim()
     if (sig) transactionSignatures.push(sig)
+    if (params.onBatchCompleted) {
+      await params.onBatchCompleted(chunk.map((p) => p.positionId))
+    }
   }
 
   return {

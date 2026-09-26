@@ -82,6 +82,7 @@ export async function listStakingPositionsByWallet(wallet: string): Promise<Stak
       .from('staking_positions')
       .select('*')
       .eq('wallet_address', walletAddress)
+      .order('amount', { ascending: false })
       .order('staked_at', { ascending: false })
       .range(offset, offset + pageSize - 1)
     if (error) throw new Error(error.message)
@@ -93,6 +94,16 @@ export async function listStakingPositionsByWallet(wallet: string): Promise<Stak
 }
 
 /** Server-only lookup by id (no wallet filter). */
+export async function getStakingPositionsByIds(positionIds: string[]): Promise<StakingPositionRow[]> {
+  const ids = [...new Set(positionIds.map((id) => id.trim()).filter(Boolean))]
+  if (ids.length === 0) return []
+
+  const db = getSupabaseAdmin()
+  const { data, error } = await db.from('staking_positions').select('*').in('id', ids)
+  if (error) throw new Error(error.message)
+  return (data ?? []) as StakingPositionRow[]
+}
+
 export async function getStakingPositionById(positionId: string): Promise<StakingPositionRow | null> {
   const db = getSupabaseAdmin()
   const { data, error } = await db.from('staking_positions').select('*').eq('id', positionId).maybeSingle()
@@ -295,6 +306,8 @@ export type BatchRewardClaimItem = {
   position_id: string
   amount: number
   new_claimed_total: number
+  /** When set, the RPC rejects the update unless `claimed_rewards` still matches. */
+  expected_claimed_rewards?: number
 }
 
 export async function recordBatchRewardClaims(params: {
@@ -315,11 +328,17 @@ export async function recordBatchRewardClaims(params: {
 
   const { data, error } = await db.rpc('staking_record_batch_reward_claim', {
     p_wallet: params.wallet.trim(),
-    p_items: params.items.map((item) => ({
-      position_id: item.position_id,
-      amount: item.amount,
-      new_claimed_total: item.new_claimed_total,
-    })),
+    p_items: params.items.map((item) => {
+      const row: Record<string, unknown> = {
+        position_id: item.position_id,
+        amount: item.amount,
+        new_claimed_total: item.new_claimed_total,
+      }
+      if (item.expected_claimed_rewards != null && Number.isFinite(item.expected_claimed_rewards)) {
+        row.expected_claimed_rewards = item.expected_claimed_rewards
+      }
+      return row
+    }),
     p_note: params.note ?? null,
     p_transaction_signature: txSig,
     p_execution_path: executionPath,
@@ -344,6 +363,9 @@ function mapStakingRewardClaimRpcError(msg: string | undefined): Error {
   }
   if (text.includes('position_not_found')) {
     return new Error('Position not found')
+  }
+  if (text.includes('claimed_rewards_mismatch')) {
+    return new Error('Nest reward ledger changed before this batch could be recorded.')
   }
   return new Error(text || 'Failed to record reward claim')
 }

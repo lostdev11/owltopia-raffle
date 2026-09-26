@@ -8,6 +8,10 @@ import {
   nestingTxPhaseLabel,
   type NestingTxPhase,
 } from '@/lib/nesting/tx-states'
+import {
+  CLAIM_ALL_CLOSE_PAGE_MESSAGE,
+  shouldShowClaimAllClosePageMessage,
+} from '@/lib/nesting/claim-all-ui-copy'
 import { MIN_OWL_CLAIMABLE_TO_CLAIM } from '@/lib/staking/rewards'
 import { cn } from '@/lib/utils'
 
@@ -22,6 +26,9 @@ type Props = {
   disabled: boolean
   disabledReason: string | null
   phase: NestingTxPhase
+  /** Fee confirmed and a server Claim-all job is running — safe to close the tab. */
+  serverContinuesInBackground?: boolean
+  backgroundProgressLabel?: string | null
   onClaimAll: () => void
   id?: string
   className?: string
@@ -36,6 +43,8 @@ export function NestingClaimAllPanel({
   disabled,
   disabledReason,
   phase,
+  serverContinuesInBackground = false,
+  backgroundProgressLabel = null,
   onClaimAll,
   id = 'nesting-claim-all-banner',
   className,
@@ -117,6 +126,20 @@ export function NestingClaimAllPanel({
           {phase === 'awaiting_wallet_signature' && canClaim ? (
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
               +{totalOwlLabel} OWL will be sent to this wallet immediately after the fee confirms.
+            </p>
+          ) : null}
+          {shouldShowClaimAllClosePageMessage({
+            phase,
+            hasActiveBackgroundJob: serverContinuesInBackground,
+          }) ? (
+            <p className="text-xs text-muted-foreground text-center leading-relaxed">
+              {CLAIM_ALL_CLOSE_PAGE_MESSAGE}
+              {backgroundProgressLabel ? (
+                <>
+                  <br />
+                  <span className="text-foreground/90">{backgroundProgressLabel}</span>
+                </>
+              ) : null}
             </p>
           ) : null}
         </div>

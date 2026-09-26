@@ -8,6 +8,7 @@ import {
   getAssociatedTokenAddress,
 } from '@solana/spl-token'
 import { PublicKey, Transaction } from '@solana/web3.js'
+import bs58 from 'bs58'
 import type { StakingPoolRow } from '@/lib/db/staking-pools'
 import { getNestingOwlRewardTreasuryKeypair } from '@/lib/nesting/reward-treasury-keypair'
 import { getNestingConnection, getNestingReadConnection } from '@/lib/solana/nesting/client'
@@ -38,6 +39,8 @@ export async function tryTransferOwlRewardClaim(params: {
   pool: StakingPoolRow
   recipientWallet: string
   claimAmountUi: number
+  /** Persist the signed tx signature before broadcasting (transfer guard). */
+  onSignatureReady?: (signature: string) => Promise<void>
 }): Promise<OwlRewardClaimTransferOutcome> {
   if ((params.pool.reward_token ?? '').trim().toUpperCase() !== 'OWL') {
     return { kind: 'skipped', reason: 'not_owl_token_rewards' }
@@ -158,12 +161,20 @@ export async function tryTransferOwlRewardClaim(params: {
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
       const tx = buildTransferTx()
       tx.recentBlockhash = blockhash
-      const signature = await connection.sendTransaction(tx, [treasury], {
+      tx.sign(treasury)
+      const sigBytes = tx.signature
+      if (!sigBytes) {
+        throw new Error('OWL reward transfer signature missing after sign')
+      }
+      const signature = bs58.encode(sigBytes)
+      if (params.onSignatureReady) {
+        await params.onSignatureReady(signature)
+      }
+      await connection.sendRawTransaction(tx.serialize(), {
         skipPreflight: false,
         preflightCommitment: 'processed',
         maxRetries: 3,
       })
-      // Processed is enough for treasury→user SPL payouts; avoids an extra confirmed round-trip.
       await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'processed')
       return { kind: 'sent', signature }
     } catch (e) {

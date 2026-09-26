@@ -77,6 +77,7 @@
     "test:force-cancel-eligibility": "npx --yes tsx scripts/test-force-cancel-eligibility.ts",
     "test:milestone-settle-availability": "npx --yes tsx scripts/test-milestone-settle-availability.ts",
     "test:claim-all-combined": "npx --yes tsx scripts/test-claim-all-combined-threshold.ts",
+    "test:claim-all-deadline-resume": "npx --yes tsx scripts/test-claim-all-deadline-resume.ts",
     "test:siws-ledger-message": "npx --yes tsx scripts/test-siws-ledger-message-size.ts",
     "test:solana-tx-version-readiness": "npx --yes tsx scripts/test-solana-tx-version-readiness.ts",
     "test:solana-v1-devnet-read": "npx --yes tsx scripts/test-solana-v1-devnet-read.ts",

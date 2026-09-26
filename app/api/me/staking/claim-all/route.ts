@@ -6,7 +6,7 @@ import { isStakingUserError } from '@/lib/nesting/errors'
 import { safeErrorMessage } from '@/lib/safe-error'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
+export const maxDuration = 300
 
 const CONNECTED_WALLET_HEADER = 'x-connected-wallet'
 
@@ -29,9 +29,12 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json().catch(() => null)
 
+    const startedAtMs = Date.now()
     const result = await executeClaimAll({
       wallet: session.wallet,
       platform_fee_signature: body?.platform_fee_signature,
+      claim_all_eligibility: body?.claim_all_eligibility,
+      startedAtMs,
     })
 
     const txSig =
@@ -41,6 +44,8 @@ export async function POST(request: NextRequest) {
       : txSig
         ? [txSig]
         : []
+
+    const claimAllComplete = result.claim_all_complete !== false
 
     return NextResponse.json({
       total_claimed: result.total_claimed,
@@ -56,6 +61,13 @@ export async function POST(request: NextRequest) {
       execution: {
         path: result.execution_path,
       },
+      claim_all_complete: claimAllComplete,
+      job_id: result.job_id ?? null,
+      job_status: result.job_status ?? null,
+      pending_nest_count: result.pending_nest_count ?? 0,
+      batches_completed: result.batches_completed ?? 0,
+      batch_count_estimate: result.batch_count_estimate ?? null,
+      server_continues_in_background: Boolean(result.job_id && !claimAllComplete),
     })
   } catch (e) {
     if (isStakingUserError(e)) {
