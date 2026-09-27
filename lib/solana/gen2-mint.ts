@@ -39,6 +39,7 @@ import {
 } from '@/lib/solana/recover-candy-machine-mint'
 import { walletSupportsFeePayerFirstMintBatch } from '@/lib/solana/phantom-sign-and-send-transaction'
 import { assertTransactionSimulatesClean } from '@/lib/solana/phantom-presimulate'
+import { splitAllowlistRouteFromWalletSigned } from '@/lib/solana/allowlist-route-sign-all'
 import type { MintSessionDeadline } from '@/lib/owl-center/mint-time-budget'
 import {
   createMintSessionDeadline,
@@ -736,8 +737,10 @@ export async function mintGen2FromCandyMachine(params: MintGen2Params): Promise<
           })),
         ])
 
-        const routeSigned = routeBuilt ? walletSigned[0]! : null
-        const mintWalletSigned = routeBuilt ? walletSigned.slice(1) : walletSigned
+        const { routeSigned, mintWalletSigned } = splitAllowlistRouteFromWalletSigned(
+          walletSigned,
+          Boolean(routeBuilt)
+        )
 
         // 2) Mint keypairs sign after the wallet (required account signer for each mint).
         const fullySigned: Transaction[] = []
