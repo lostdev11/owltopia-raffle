@@ -4,7 +4,7 @@ import {
   type MintConfirmBatchPayload,
 } from '@/lib/owl-center/mint-session'
 import { mintConfirmBackgroundBudgetMs, raceMintSessionBudget, createMintSessionDeadline } from '@/lib/owl-center/mint-time-budget'
-import type { MintGen2Result } from '@/lib/solana/gen2-mint'
+import type { OwlCenterMintResult } from '@/lib/owl-center/mint-result'
 
 export type MintConfirmFailure = {
   /** Raw error message from the confirm route / recorder. */
@@ -34,7 +34,7 @@ export function isHardMintConfirmFailure(message: string): boolean {
 }
 
 export type OptimisticMintFinalizeArgs = {
-  minted: MintGen2Result
+  minted: OwlCenterMintResult
   requestedQuantity: number
   confirmBatch: (payload: MintConfirmBatchPayload) => Promise<void>
   onSuccess: (args: {

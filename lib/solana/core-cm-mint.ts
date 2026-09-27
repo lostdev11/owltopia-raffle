@@ -1,6 +1,7 @@
 /**
  * Partner/admin public_simple mint via Metaplex Core Candy Machine `mintV1`.
- * Same wallet UX patterns as Gen2 TM mint (fee-payer-first batch for popular wallets, platform fee) without phased guards.
+ * Same wallet UX patterns as the shared Token Metadata CM mint (fee-payer-first batch,
+ * platform fee, allowlist route-first) without Gen2-only phased guards.
  */
 import type { WalletAdapter } from '@solana/wallet-adapter-base'
 import { Connection } from '@solana/web3.js'
@@ -65,8 +66,11 @@ import { createOwlCenterCoreUmi } from '@/lib/solana/umi-core'
 import { invalidLaunchMintIdReason, validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
 import { walletSupportsFeePayerFirstMintBatch } from '@/lib/solana/phantom-sign-and-send-transaction'
 import { assertTransactionSimulatesClean } from '@/lib/solana/phantom-presimulate'
+import { splitAllowlistRouteFromWalletSigned } from '@/lib/solana/allowlist-route-sign-all'
+import { owlCenterMintPriorityFeeMicroLamports } from '@/lib/solana/owl-center-mint-priority-fee'
+import type { OwlCenterMintResult } from '@/lib/owl-center/mint-result'
 
-/** mintV1 with Candy Guard comfortably fits in 800k CU (same ceiling as Gen2 mintV2). */
+/** mintV1 with Candy Guard comfortably fits in 800k CU (same ceiling as TM mintV2). */
 const MINT_COMPUTE_UNIT_LIMIT = 800_000
 
 function mergeCoreGuardSets(defaults: DefaultGuardSet, group: DefaultGuardSet | null): DefaultGuardSet {
@@ -103,13 +107,6 @@ function coreGuardMintArgs(guards: DefaultGuardSet): {
   }
 }
 
-function mintPriorityFeeMicroLamports(): number {
-  const raw = process.env.NEXT_PUBLIC_GEN2_MINT_PRIORITY_FEE_MICROLAMPORTS?.trim()
-  if (!raw) return 400_000
-  const n = Number(raw)
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 250_000
-}
-
 export type MintCoreCmParams = {
   walletAdapter: WalletAdapter
   candyMachineId: string
@@ -137,15 +134,7 @@ export type MintCoreCmParams = {
   partnerAllowList?: { slug: string; phaseKey: string } | null
 }
 
-export type MintCoreCmResult =
-  | { ok: true; txSignatures: string[]; mintedNftMints: string[] }
-  | {
-      ok: false
-      error: string
-      txSignatures?: string[]
-      mintedNftMints?: string[]
-      plannedMintB58s?: string[]
-    }
+export type MintCoreCmResult = OwlCenterMintResult
 
 function resolveIds(params: MintCoreCmParams): { cmId: string; colMint: string; network: OwlMintNetwork } | { error: string } {
   const network =
@@ -194,7 +183,7 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
     const umi = createOwlCenterCoreUmi(walletAdapter, rpcUrl)
     const candyMachine = publicKey(cmId)
     const collection = publicKey(colMint)
-    const priorityFee = mintPriorityFeeMicroLamports()
+    const priorityFee = owlCenterMintPriorityFeeMicroLamports()
 
     const [cmAccount, feeQuote] = await withMintSessionBudget(
       sessionDeadline,
@@ -243,7 +232,9 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
       ? coreGuardMintArgs(mergedGuards)
       : { mintArgs: undefined, mintPriceLamports: 0n }
 
-    let allowListProofTx: Transaction | null = null
+    // Allowlist proof must be its own tx (merkle proof size) and land BEFORE mintV1.
+    // Pre-simulating mint without the proof PDA surfaces MissingAllowedListProof.
+    let allowListRouteBuilder: TransactionBuilder | null = null
     if (
       mergedGuards &&
       isSome(mergedGuards.allowList) &&
@@ -268,20 +259,23 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
         if (!proofRes.ok) return { ok: false, error: proofRes.error }
         const validated = validatePartnerAllowListProofBody(proofRes.body, merkleRoot)
         if (!validated.ok) return { ok: false, error: validated.error }
-        const blockhash = await umi.rpc.getLatestBlockhash({ commitment: 'confirmed' })
-        allowListProofTx = route(umi, {
-          candyMachine,
-          candyGuard: candyGuardAccount.publicKey,
-          guard: 'allowList',
-          group: groupLabel,
-          routeArgs: {
-            path: 'proof',
-            merkleRoot,
-            merkleProof: validated.merkleProof,
-          },
-        })
-          .setBlockhash(blockhash)
-          .build(umi)
+        let routeBuilder = transactionBuilder().add(setComputeUnitLimit(umi, { units: 200_000 }))
+        if (priorityFee > 0) {
+          routeBuilder = routeBuilder.add(setComputeUnitPrice(umi, { microLamports: priorityFee }))
+        }
+        allowListRouteBuilder = routeBuilder.add(
+          route(umi, {
+            candyMachine,
+            candyGuard: candyGuardAccount.publicKey,
+            guard: 'allowList',
+            group: groupLabel,
+            routeArgs: {
+              path: 'proof',
+              merkleRoot,
+              merkleProof: validated.merkleProof,
+            },
+          })
+        )
       }
     }
 
@@ -363,114 +357,206 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
     const connection = new Connection(rpcUrl, { commitment: 'confirmed' })
 
     if (useFeePayerFirstMintBatch) {
-      const blockhash = await withSolanaRpcRetry(
-        () => umi.rpc.getLatestBlockhash({ commitment: 'confirmed' }),
-        MINT_SOLANA_SEND_RETRY
-      )
-      const feePayer = walletAdapter.publicKey
-      if (!feePayer) {
-        resumeMintSessionDeadline(sessionDeadline)
-        return { ok: false, error: 'Wallet not connected' }
-      }
-
-      const builtMints: Transaction[] = []
-      if (allowListProofTx) {
-        builtMints.push(allowListProofTx)
-      }
-      for (let i = 0; i < quantity; i++) {
-        const res = buildSingle(assets[i]!)
-        if (!res.ok) {
+      try {
+        const blockhash = await withSolanaRpcRetry(
+          () => umi.rpc.getLatestBlockhash({ commitment: 'confirmed' }),
+          MINT_SOLANA_SEND_RETRY
+        )
+        const feePayer = walletAdapter.publicKey
+        if (!feePayer) {
           resumeMintSessionDeadline(sessionDeadline)
-          return { ok: false, error: res.error, plannedMintB58s: plannedB58s }
+          return { ok: false, error: 'Wallet not connected' }
         }
-        builtMints.push(res.builder.setBlockhash(blockhash).build(umi))
-      }
 
-      for (const built of builtMints) {
-        await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(built), {
-          failMessagePrefix: 'Mint would fail on-chain before wallet approval.',
-          rejectCandyGuardBotTax: true,
-        })
-      }
+        // Allowlist proof stays its own tx (size limit) but shares the same wallet sheet as mints.
+        let routeBuilt: Transaction | null = null
+        if (allowListRouteBuilder) {
+          routeBuilt = allowListRouteBuilder.setBlockhash(blockhash).build(umi)
+        }
 
-      const walletSigned = await signAllTransactions(
-        builtMints.map((transaction) => ({
-          transaction,
-          signers: [umi.identity],
-        }))
-      )
-
-      const fullySigned: Transaction[] = []
-      for (let i = 0; i < quantity; i++) {
-        fullySigned.push(await assets[i]!.signTransaction(walletSigned[i]!))
-      }
-
-      resumeMintSessionDeadline(sessionDeadline)
-
-      const confirmedSigs: string[] = []
-      const confirmedMints: string[] = []
-      let firstSendError: unknown = null
-
-      for (let i = 0; i < quantity; i++) {
-        try {
-          const sigBytes = await withSolanaRpcRetry(
-            () => umi.rpc.sendTransaction(fullySigned[i]!, { skipPreflight: false }),
-            MINT_SOLANA_SEND_RETRY
-          )
-          const sig = typeof sigBytes === 'string' ? sigBytes : bs58.encode(sigBytes)
-          const confirmMs = Math.max(
-            MINT_SEND_MIN_MS,
-            mintSessionRemainingMs(sessionDeadline) - MINT_RECOVERY_RESERVE_MS
-          )
-          const confirmed = await pollTransactionSignatureStatus(rpcUrl, sig, {
-            maxWaitMs: confirmMs,
-            intervalMs: 400,
-            minCommitment: 'confirmed',
-          })
-          if (confirmed) {
-            confirmedSigs.push(sig)
-            confirmedMints.push(plannedB58s[i]!)
+        const builtMints: Transaction[] = []
+        for (let i = 0; i < quantity; i++) {
+          const res = buildSingle(assets[i]!)
+          if (!res.ok) {
+            resumeMintSessionDeadline(sessionDeadline)
+            return { ok: false, error: res.error, plannedMintB58s: plannedB58s }
           }
-        } catch (e) {
-          firstSendError = firstSendError ?? e
-          const sig = extractTxSignatureFromUnknownError(e)
-          if (sig) {
+          builtMints.push(res.builder.setBlockhash(blockhash).build(umi))
+        }
+
+        // Pre-sim before the wallet sheet so doomed txs do not look "malicious".
+        // When an allowlist route is required, mintV1 sims wait until that proof PDA lands
+        // (see post-route pre-sim below) — otherwise they fail with MissingAllowedListProof.
+        if (routeBuilt) {
+          await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(routeBuilt), {
+            failMessagePrefix: 'Allowlist setup would fail on-chain before wallet approval.',
+            rejectCandyGuardBotTax: true,
+          })
+        } else {
+          for (const built of builtMints) {
+            await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(built), {
+              failMessagePrefix: 'Mint would fail on-chain before wallet approval.',
+              rejectCandyGuardBotTax: true,
+            })
+          }
+        }
+
+        // 1) Wallet signs fee payer only — one prompt for allowlist route (if any) + all mints.
+        const walletSigned = await signAllTransactions([
+          ...(routeBuilt
+            ? [{ transaction: routeBuilt, signers: [umi.identity] }]
+            : []),
+          ...builtMints.map((transaction) => ({
+            transaction,
+            signers: [umi.identity],
+          })),
+        ])
+
+        const { routeSigned, mintWalletSigned } = splitAllowlistRouteFromWalletSigned(
+          walletSigned,
+          Boolean(routeBuilt)
+        )
+
+        // 2) Asset keypairs sign after the wallet (required account signer for each mint).
+        const fullySigned: Transaction[] = []
+        for (let i = 0; i < quantity; i++) {
+          fullySigned.push(await assets[i]!.signTransaction(mintWalletSigned[i]!))
+        }
+
+        resumeMintSessionDeadline(sessionDeadline)
+
+        let firstSendError: unknown = null
+        const sendOne = async (
+          tx: Transaction
+        ): Promise<{ sig: string | null; confirmed: boolean }> => {
+          let sig: string | null = null
+          try {
+            const sigBytes = await withSolanaRpcRetry(
+              () => umi.rpc.sendTransaction(tx, { skipPreflight: false }),
+              MINT_SOLANA_SEND_RETRY
+            )
+            sig = typeof sigBytes === 'string' ? sigBytes : bs58.encode(sigBytes)
+            const confirmMs = Math.max(
+              MINT_SEND_MIN_MS,
+              mintSessionRemainingMs(sessionDeadline) - MINT_RECOVERY_RESERVE_MS
+            )
             const confirmed = await pollTransactionSignatureStatus(rpcUrl, sig, {
+              maxWaitMs: confirmMs,
+              intervalMs: 400,
+              minCommitment: 'confirmed',
+            })
+            return { sig, confirmed }
+          } catch (e) {
+            firstSendError = firstSendError ?? e
+            return { sig: sig ?? extractTxSignatureFromUnknownError(e), confirmed: false }
+          }
+        }
+
+        // Proof PDA must land before mintV1; send route first when present.
+        if (routeSigned) {
+          const routeResult = await sendOne(routeSigned)
+          if (!routeResult.confirmed) {
+            return {
+              ok: false,
+              error:
+                'Allowlist setup didn’t confirm — tap Mint again to finish (your spots are still reserved).',
+              plannedMintB58s: plannedB58s,
+            }
+          }
+          // Now that the proof PDA exists, catch doomed mints before we burn fees sending them.
+          for (const tx of fullySigned) {
+            await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(tx), {
+              failMessagePrefix: 'Mint would fail on-chain after allowlist setup.',
+              rejectCandyGuardBotTax: true,
+            })
+          }
+        }
+
+        const confirmedSigs: string[] = []
+        const confirmedMints: string[] = []
+
+        for (let i = 0; i < quantity; i++) {
+          const result = await sendOne(fullySigned[i]!)
+          if (result.confirmed && result.sig) {
+            confirmedSigs.push(result.sig)
+            confirmedMints.push(plannedB58s[i]!)
+          } else if (result.sig) {
+            const confirmed = await pollTransactionSignatureStatus(rpcUrl, result.sig, {
               maxWaitMs: 4000,
               intervalMs: 400,
               minCommitment: 'confirmed',
             })
             if (confirmed) {
-              confirmedSigs.push(sig)
+              confirmedSigs.push(result.sig)
               confirmedMints.push(plannedB58s[i]!)
             }
           }
         }
-      }
 
-      if (confirmedSigs.length === quantity) {
-        return { ok: true, txSignatures: confirmedSigs, mintedNftMints: confirmedMints }
-      }
-      if (confirmedSigs.length > 0) {
+        if (confirmedSigs.length === quantity) {
+          return { ok: true, txSignatures: confirmedSigs, mintedNftMints: confirmedMints }
+        }
+        if (confirmedSigs.length > 0) {
+          return {
+            ok: false,
+            error: `Minted ${confirmedSigs.length}/${quantity} — tap “My NFT minted” if the rest appear in your wallet.`,
+            txSignatures: confirmedSigs,
+            mintedNftMints: confirmedMints,
+            plannedMintB58s: plannedB58s,
+          }
+        }
         return {
           ok: false,
-          error: `Minted ${confirmedSigs.length}/${quantity} — tap “My NFT minted” if the rest appear in your wallet.`,
-          txSignatures: confirmedSigs,
-          mintedNftMints: confirmedMints,
+          error: friendlySolanaRpcErrorMessage(firstSendError) || 'Mint failed',
           plannedMintB58s: plannedB58s,
         }
-      }
-      return {
-        ok: false,
-        error: friendlySolanaRpcErrorMessage(firstSendError) || 'Mint failed',
-        plannedMintB58s: plannedB58s,
+      } catch (e) {
+        resumeMintSessionDeadline(sessionDeadline)
+        const msg = e instanceof Error ? e.message : String(e)
+        const low = msg.toLowerCase()
+        if (low.includes('user rejected') || low.includes('cancel')) {
+          return { ok: false, error: 'Mint transaction rejected in wallet' }
+        }
+        return {
+          ok: false,
+          error: friendlySolanaRpcErrorMessage(e) || msg,
+          plannedMintB58s: plannedB58s,
+        }
       }
     }
 
     // Other wallets: Umi identity is the wallet — mintV1 includes the asset signer on the builder.
+    // Allowlist route (if any) must land first so mint sims/sends see the proof PDA.
     resumeMintSessionDeadline(sessionDeadline)
     const confirmedSigs: string[] = []
     const confirmedMints: string[] = []
+
+    if (allowListRouteBuilder) {
+      try {
+        const routeBlockhash = await withSolanaRpcRetry(
+          () => umi.rpc.getLatestBlockhash({ commitment: 'confirmed' }),
+          MINT_SOLANA_SEND_RETRY
+        )
+        const routeBuilt = allowListRouteBuilder.setBlockhash(routeBlockhash).build(umi)
+        await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(routeBuilt), {
+          failMessagePrefix: 'Allowlist setup would fail on-chain before wallet approval.',
+          rejectCandyGuardBotTax: true,
+        })
+        await withSolanaRpcRetry(
+          () => allowListRouteBuilder!.sendAndConfirm(umi, { confirm: { commitment: 'confirmed' } }),
+          MINT_SOLANA_SEND_RETRY
+        )
+      } catch (e) {
+        return {
+          ok: false,
+          error:
+            friendlySolanaRpcErrorMessage(e) ||
+            (e instanceof Error ? e.message : String(e)) ||
+            'Allowlist setup didn’t confirm — tap Mint again to finish.',
+          plannedMintB58s: plannedB58s,
+        }
+      }
+    }
 
     for (let i = 0; i < quantity; i++) {
       const res = buildSingle(assets[i]!)
@@ -490,7 +576,9 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
         )
         const built = res.builder.setBlockhash(blockhash).build(umi)
         await assertTransactionSimulatesClean(connection, toWeb3JsTransaction(built), {
-          failMessagePrefix: 'Mint would fail on-chain before wallet approval.',
+          failMessagePrefix: allowListRouteBuilder
+            ? 'Mint would fail on-chain after allowlist setup.'
+            : 'Mint would fail on-chain before wallet approval.',
           rejectCandyGuardBotTax: true,
         })
         const result = await withSolanaRpcRetry(

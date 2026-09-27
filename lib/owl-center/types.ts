@@ -23,7 +23,11 @@ export type OwlCenterStatus =
   | 'SOLD_OUT'
   | 'TRADING_ACTIVE'
 
-/** gen2_full = Owltopia Gen2 phased mint; public_simple = PUBLIC-only partner/demo collections. */
+/**
+ * Launch mint mode:
+ * - `gen2_full` — Owltopia Gen2 collection only (phased AIRDROP/PRESALE/WL/PUBLIC)
+ * - `public_simple` — partner / other Owl Center launches (not Gen2)
+ */
 export type OwlCenterMintMode = 'gen2_full' | 'public_simple'
 
 /** standard = final art at mint; reveal_day = placeholder mint until scheduled bulk reveal. */

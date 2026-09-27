@@ -38,7 +38,10 @@ import {
   resolveLaunchMintNetwork,
 } from '@/lib/solana/launch-cm'
 import { attemptOwlCenterMintRecovery, isLikelyWalletMintDisconnectError } from '@/lib/owl-center/mint-recovery-client'
-import { mintGen2FromCandyMachine, warmGen2MintPrep } from '@/lib/solana/gen2-mint'
+import {
+  mintTokenMetadataFromCandyMachine,
+  warmTokenMetadataMintPrep,
+} from '@/lib/solana/token-metadata-cm-mint'
 import { mintCoreFromCandyMachine } from '@/lib/solana/core-cm-mint'
 import type { RecoveredCandyMachineMint } from '@/lib/solana/recover-candy-machine-mint'
 import { preloadConfetti } from '@/lib/confetti'
@@ -120,7 +123,7 @@ export function CollectionMintPanel({
 
   useEffect(() => {
     if (!connected || !adapter?.publicKey || !elig?.is_eligible || !cmConfigured) return
-    void warmGen2MintPrep({
+    void warmTokenMetadataMintPrep({
       walletAdapter: adapter,
       candyMachineId,
       collectionMint: getLaunchCollectionMint(launch, mintNetwork)?.trim() ?? '',
@@ -157,7 +160,7 @@ export function CollectionMintPanel({
 
       setStep('recording_mint')
       setMintProgress({ current: 0, total: 1, phase: 'record' })
-      // Bound confirm + always terminal step — never hang on "Saving your mint…" (Gen2 parity).
+      // Bound confirm + always terminal step — never hang on "Saving your mint…" (TM mint session parity).
       const result = await runRecoveredMintConfirm({
         sigs,
         mintPks,
@@ -304,7 +307,7 @@ export function CollectionMintPanel({
                 setMintProgress({ current: 0, total, phase: 'chain' })
               },
             })
-          : mintGen2FromCandyMachine({
+          : mintTokenMetadataFromCandyMachine({
               walletAdapter: adapter,
               candyMachineId: getLaunchCandyMachineId(launch, mintNetwork),
               collectionMint: getLaunchCollectionMint(launch, mintNetwork),
@@ -555,7 +558,7 @@ export function CollectionMintPanel({
               onClick={() => {
                 preloadConfetti()
                 if (connected && adapter?.publicKey && elig?.is_eligible && cmConfigured) {
-                  void warmGen2MintPrep({
+                  void warmTokenMetadataMintPrep({
                     walletAdapter: adapter,
                     candyMachineId,
                     collectionMint: getLaunchCollectionMint(launch, mintNetwork)?.trim() ?? '',
