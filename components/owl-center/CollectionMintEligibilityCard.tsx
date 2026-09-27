@@ -28,9 +28,19 @@ export function CollectionMintEligibilityCard({
   error: string | null
   onRefresh: () => void
 }) {
-  const phaseLabel = elig?.active_allowlist_label
+  const phaseChecks = elig?.allowlist_phase_checks ?? []
+  const onListPhases = phaseChecks.filter((c) => c.on_list === true)
+  const checkedPhases = phaseChecks.filter((c) => c.on_list != null)
+  const phaseLabel =
+    elig?.active_allowlist_label ??
+    (onListPhases.length === 1
+      ? onListPhases[0]!.label
+      : checkedPhases.length === 1
+        ? checkedPhases[0]!.label
+        : null)
   const onList = elig?.on_allowlist
   const spots = elig?.allowlist_spots_remaining
+  const showCheckmark = onList === true || (elig?.is_eligible === true && connected)
 
   let statusTone: 'ok' | 'warn' | 'muted' = 'muted'
   let statusTitle = 'Eligibility'
@@ -56,17 +66,37 @@ export function CollectionMintEligibilityCard({
         elig.reason ??
         `You can mint up to ${elig.max_mintable} from this wallet` +
           (spots != null ? ` (${spots} allowlist spot${spots === 1 ? '' : 's'} left)` : '')
-    } else if (onList === false && phaseLabel) {
+    } else if (onList === true) {
+      // On the list but phase not open yet (or already minted / sold out).
+      statusTone = 'ok'
+      const listLabel =
+        phaseLabel ??
+        (onListPhases.length > 1
+          ? onListPhases.map((p) => p.label).join(' · ')
+          : onListPhases[0]?.label ?? 'Allowlist')
+      statusTitle = `On list · ${listLabel}`
+      statusBody = elig.reason ?? `Wallet is on ${listLabel} — mint when the phase opens`
+    } else if (onList === false && (phaseLabel || onListPhases.length === 0)) {
+      const missLabel = phaseLabel ?? elig.active_allowlist_label ?? 'Allowlist'
       statusTone = 'warn'
-      statusTitle = `Not on ${phaseLabel}`
+      statusTitle = `Not on ${missLabel}`
       statusBody =
-        elig.reason ?? `This wallet is not on the ${phaseLabel} list. Wait for the next phase or public.`
+        elig.reason ?? `This wallet is not on the ${missLabel} list. Wait for the next phase or public.`
     } else {
       statusTone = 'warn'
       statusTitle = phaseLabel ? `${phaseLabel} · not eligible` : 'Not eligible yet'
       statusBody = elig.reason ?? 'Not eligible to mint right now'
     }
   }
+
+  const onListDetail =
+    onList === true
+      ? onListPhases.length > 1
+        ? ` · on list (${onListPhases.map((p) => p.label).join(', ')})`
+        : ' · on list'
+      : onList === false
+        ? ' · not on list'
+        : ''
 
   return (
     <CommandCard label="ELIGIBILITY // CHECK">
@@ -75,13 +105,22 @@ export function CollectionMintEligibilityCard({
           <div className="min-w-0">
             <p
               className={cn(
-                'font-mono text-[11px] font-bold uppercase tracking-widest',
+                'flex flex-wrap items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-widest',
                 statusTone === 'ok' && 'text-[#00FF9C]',
                 statusTone === 'warn' && 'text-[#FFD769]',
                 statusTone === 'muted' && 'text-[#9BA8B4]'
               )}
             >
-              {statusTitle}
+              {showCheckmark ? (
+                <span
+                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center border border-[#00FF9C]/50 bg-[#00FF9C]/12 text-sm text-[#00FF9C]"
+                  title="Wallet is on this phase list"
+                  aria-label="On list"
+                >
+                  ✓
+                </span>
+              ) : null}
+              <span>{statusTitle}</span>
             </p>
             <p className="mt-1 text-sm leading-relaxed text-[#C5D0D8]">{statusBody}</p>
             {connected && wallet ? (
@@ -92,7 +131,7 @@ export function CollectionMintEligibilityCard({
                       phaseLabel ? phaseLabel : 'public'
                     } this phase`
                   : ''}
-                {onList === true ? ' · on list' : onList === false ? ' · not on list' : ''}
+                {onListDetail}
               </p>
             ) : null}
           </div>

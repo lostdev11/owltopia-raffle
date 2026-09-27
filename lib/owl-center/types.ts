@@ -173,6 +173,19 @@ export type OwlCenterLaunchPublic = {
   platform_fee_rebate_wallet: string | null
 }
 
+/** Per-phase soft-allowlist membership for the connected wallet (buyer checkmarks). */
+export type SimpleMintAllowlistPhaseCheck = {
+  key: string
+  label: string
+  /**
+   * Soft WL membership for this phase.
+   * null when the phase uses Free Mint Token / holder gate (no wallet paste list).
+   */
+  on_list: boolean | null
+  allowed_mints: number | null
+  used_mints: number | null
+}
+
 export type SimpleMintEligibilityResponse = {
   active_phase: OwlCenterPhase
   status: OwlCenterStatus
@@ -217,10 +230,16 @@ export type SimpleMintEligibilityResponse = {
   /**
    * Allowlist membership for the live phase (null when no allowlist window / no wallet).
    * Used by the mint eligibility card so buyers see “on list” vs “not on list” clearly.
+   * Also set when the allowlist phase is still upcoming and the wallet is on that list.
    */
   on_allowlist: boolean | null
   /** Spots left for this wallet on the live allowlist phase (null when N/A). */
   allowlist_spots_remaining: number | null
+  /**
+   * Soft-allowlist membership per configured phase — powers phase-row checkmarks
+   * even before a phase opens (buyers can confirm “wallet in phase”).
+   */
+  allowlist_phase_checks: SimpleMintAllowlistPhaseCheck[]
 }
 
 export type CollectionMintStateResponse = {

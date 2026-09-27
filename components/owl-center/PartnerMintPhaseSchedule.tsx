@@ -14,7 +14,7 @@ import {
 } from '@/lib/owl-center/partner-mint-phase-schedule'
 import { formatMintDate, formatPhaseStartShort } from '@/lib/owl-center/phase-schedule'
 import type { MintTimeZoneMode } from '@/lib/owl-center/mint-time-preference'
-import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
+import type { OwlCenterLaunchPublic, SimpleMintAllowlistPhaseCheck } from '@/lib/owl-center/types'
 import { cn } from '@/lib/utils'
 
 function statusLabel(row: PartnerMintPhaseScheduleRow): string | null {
@@ -54,10 +54,13 @@ function windowLine(row: PartnerMintPhaseScheduleRow, mode: MintTimeZoneMode): s
 export function PartnerMintPhaseSchedule({
   launch,
   liveUnitLamports,
+  phaseChecks = [],
 }: {
   launch: OwlCenterLaunchPublic
   /** Lamports quote for the currently active phase (from eligibility). */
   liveUnitLamports?: string | null
+  /** Soft-allowlist membership per phase — shows ✓ when wallet is on that list. */
+  phaseChecks?: SimpleMintAllowlistPhaseCheck[]
 }) {
   const [nowMs, setNowMs] = useState<number | null>(null)
   const timeMode = useMintTimeZoneMode()
@@ -71,6 +74,11 @@ export function PartnerMintPhaseSchedule({
     () => buildPartnerMintPhaseSchedule(launch, nowMs ?? Date.now()),
     [launch, nowMs]
   )
+  const checkByKey = useMemo(() => {
+    const m = new Map<string, SimpleMintAllowlistPhaseCheck>()
+    for (const c of phaseChecks) m.set(c.key, c)
+    return m
+  }, [phaseChecks])
 
   if (rows.length === 0) return null
 
@@ -85,19 +93,34 @@ export function PartnerMintPhaseSchedule({
       <ul className="space-y-3">
         {rows.map((row) => {
           const tag = statusLabel(row)
+          const membership = row.kind === 'allowlist' ? checkByKey.get(row.key) : undefined
+          const onList = membership?.on_list === true
           return (
             <li
               key={row.key}
               className={cn(
                 'border px-3 py-3 font-mono text-xs',
                 row.is_active && 'border-[#00FF9C] bg-[#00FF9C]/12 ring-1 ring-[#00FF9C]/45',
-                !row.is_active && row.status === 'upcoming' && 'border-[#1A222B] bg-[#0B0F14]',
-                !row.is_active && row.status === 'ended' && 'border-[#1A222B]/80 bg-[#0B0F14] opacity-70'
+                !row.is_active && onList && 'border-[#00FF9C]/30 border-dashed bg-[#00FF9C]/5',
+                !row.is_active && !onList && row.status === 'upcoming' && 'border-[#1A222B] bg-[#0B0F14]',
+                !row.is_active && !onList && row.status === 'ended' && 'border-[#1A222B]/80 bg-[#0B0F14] opacity-70'
               )}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-bold uppercase tracking-widest text-[#C5D0D8]">
+                  {onList ? (
+                    <span
+                      className="mr-1.5 inline-block text-[#00FF9C]"
+                      title="Your wallet is on this phase list"
+                      aria-label="On list"
+                    >
+                      ✓
+                    </span>
+                  ) : null}
                   {row.label}
+                  {onList && !row.is_active ? (
+                    <span className="ml-2 text-[#00FF9C]">· On list</span>
+                  ) : null}
                   {tag ? (
                     <span className={cn('ml-2', row.is_active ? 'text-[#00FF9C]' : 'text-[#5C6773]')}>
                       · {tag}
@@ -121,6 +144,9 @@ export function PartnerMintPhaseSchedule({
               <p className="mt-1 text-[10px] leading-relaxed text-[#5C6773]">
                 {windowLine(row, timeMode)}
                 {row.supply > 0 ? ` · cap ${row.supply.toLocaleString()}` : null}
+                {onList && membership?.allowed_mints != null
+                  ? ` · your wallet: ${membership.used_mints ?? 0}/${membership.allowed_mints}`
+                  : null}
               </p>
             </li>
           )

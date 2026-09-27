@@ -7,6 +7,7 @@ import type { DefaultGuardSet } from '@metaplex-foundation/mpl-core-candy-machin
 import { getOwlCenterLaunchBySlug } from '@/lib/db/owl-center-launch'
 import {
   getLaunchWlWallet,
+  listLaunchWlWalletsForWallet,
   sumLaunchWlPhaseUsedMints,
   sumLaunchWlWalletUsedMints,
 } from '@/lib/db/owl-center-launch-wl-wallets'
@@ -15,12 +16,19 @@ import { getOptionalLamportsQuoteForUsdc } from '@/lib/gen2-presale/pricing'
 import { getLaunchPriceLamportsQuotes } from '@/lib/owl-center/launch-price-quotes'
 import { launchScheduledPublicReason } from '@/lib/owl-center/launch-mint-open'
 import { resolvePartnerMintUnitPrice, publicSimpleSolMintLamports } from '@/lib/owl-center/partner-mint-phase-schedule'
-import { resolvePartnerPhaseWalletMintLimit, partnerPhaseHasRedeemTokenBurn, partnerPhaseRedeemTokenAmount, partnerPhaseSoftRemaining } from '@/lib/owl-center/partner-allowlist-phases'
+import { buildAllowlistPhaseChecks } from '@/lib/owl-center/allowlist-phase-checks'
+import {
+  partnerPhaseHasRedeemTokenBurn,
+  partnerPhaseRedeemTokenAmount,
+  partnerPhaseSoftRemaining,
+  resolveEffectivePartnerAllowlistPhases,
+  resolvePartnerAllowlistPhases,
+  resolvePartnerPhaseWalletMintLimit,
+} from '@/lib/owl-center/partner-allowlist-phases'
 import {
   formatAllowlistOpensReason,
   isLaunchWaitingForWhitelist,
 } from '@/lib/owl-center/launch-wl-window'
-import { resolvePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
 import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/lib/owl-center/mint-policy'
 import { publicSimpleMintClosedInfo, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import { isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
@@ -29,7 +37,7 @@ import { resolvePartnerMintGroupForWallet } from '@/lib/owl-center/partner-mint-
 import { publicSimpleMintGuardGroupLabel } from '@/lib/owl-center/public-simple-guard-plan'
 import { isScheduledPublicMintOpen } from '@/lib/owl-center/partner-phase-window'
 import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
-import type { OwlCenterLaunchPublic, SimpleMintEligibilityResponse } from '@/lib/owl-center/types'
+import type { OwlCenterLaunchPublic, SimpleMintAllowlistPhaseCheck, SimpleMintEligibilityResponse } from '@/lib/owl-center/types'
 import { fetchCandyMachineOnChainSupply } from '@/lib/solana/candy-machine-supply'
 import {
   fetchCandyMachine,
@@ -240,6 +248,24 @@ export async function buildSimpleMintEligibility(
   let on_allowlist: boolean | null = null
   let allowlist_spots_remaining: number | null = null
 
+  const configuredAllowlistPhases = resolveEffectivePartnerAllowlistPhases(launch)
+  let allowlist_phase_checks: SimpleMintAllowlistPhaseCheck[] = []
+  if (wallet && configuredAllowlistPhases.length > 0) {
+    const wlRows = await listLaunchWlWalletsForWallet(launch.id, wallet)
+    const byKey = new Map(wlRows.map((r) => [r.phase_key, r]))
+    allowlist_phase_checks = buildAllowlistPhaseChecks(configuredAllowlistPhases, byKey)
+    // Surface membership for the live phase, or the soonest upcoming phase the wallet is on
+    // (so buyers see ✓ / "on list" before the window opens).
+    if (allowlistOpen && activeAllowlistPhase) {
+      const live = allowlist_phase_checks.find((c) => c.key === activeAllowlistPhase.key)
+      if (live && live.on_list != null) on_allowlist = live.on_list
+    } else if (isLaunchWaitingForWhitelist(launch)) {
+      const onUpcoming = allowlist_phase_checks.find((c) => c.on_list === true)
+      if (onUpcoming) on_allowlist = true
+      else if (allowlist_phase_checks.some((c) => c.on_list === false)) on_allowlist = false
+    }
+  }
+
   if (wallet) {
     try {
       const conn = new Connection(getLaunchSolanaRpcUrl(mint_network), 'confirmed')
@@ -430,5 +456,6 @@ export async function buildSimpleMintEligibility(
     phase_starts_at: scheduleClosed?.opensAt ?? null,
     on_allowlist,
     allowlist_spots_remaining,
+    allowlist_phase_checks,
   }
 }

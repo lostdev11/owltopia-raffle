@@ -258,6 +258,7 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
           <PartnerMintPhaseSchedule
             launch={launch}
             liveUnitLamports={elig?.unit_lamports_estimate}
+            phaseChecks={elig?.allowlist_phase_checks}
           />
           <CollectionMintEligibilityCard
             connected={connected}
