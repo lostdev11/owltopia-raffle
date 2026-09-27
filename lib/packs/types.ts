@@ -88,6 +88,8 @@ export type PackInventoryRow = {
   reserved_open_id: string | null
   paid_open_id: string | null
   payout_signature: string | null
+  /** NFT payout failures after reservation; quarantine at >= 2. */
+  payout_fail_count?: number
   created_at: string
   updated_at: string
 }
@@ -129,6 +131,7 @@ export type PackOpenRow = {
   jackpot_amount_sol: number | null
   error_message: string | null
   created_at: string
+  updated_at?: string
   completed_at: string | null
   open_vrf_provider?: string | null
   open_vrf_status?: PackOpenVrfStatus | null

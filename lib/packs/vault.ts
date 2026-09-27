@@ -17,16 +17,23 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
-  createAssociatedTokenAccountInstruction,
+  createAssociatedTokenAccountIdempotentInstruction,
   createTransferInstruction,
-  getAccount,
   getAssociatedTokenAddress,
-  getMint,
 } from '@solana/spl-token'
 import { getSolanaConnection, getSolanaReadConnection } from '@/lib/solana/connection'
 import { withPackSolanaRpcRetry } from '@/lib/packs/rpc-retry'
 import { waitForPackPayoutConfirmation } from '@/lib/packs/payout-verify'
 import { getTokenInfo } from '@/lib/tokens'
+import {
+  isPackOwlMintAddress,
+  PACK_OWL_DECIMALS,
+  PACK_OWL_TOKEN_PROGRAM,
+} from '@/lib/packs/owl-pack-mint'
+import {
+  isSplTokenAccountMissingError,
+  readTokenAccountOrThrow,
+} from '@/lib/packs/spl-account-read'
 import {
   payoutCompressedFromKeypair,
   payoutMplCoreFromKeypair,
@@ -38,12 +45,18 @@ export type PackVaultPayoutResult =
   | { ok: true; signature: string }
   | { ok: false; error: string; signature?: string; confirmUncertain?: boolean }
 
+export type PackVaultSendHooks = {
+  /** Called immediately after sendRawTransaction succeeds (before confirmation polling). */
+  onSent?: (signature: string) => void | Promise<void>
+}
+
 async function sendSignedPackVaultTransaction(
   connection: Connection,
   tx: Transaction,
-  keypair: Keypair
+  keypair: Keypair,
+  hooks?: PackVaultSendHooks
 ): Promise<PackVaultPayoutResult> {
-  const { blockhash, lastValidBlockHeight } = await withPackSolanaRpcRetry(() =>
+  const { blockhash } = await withPackSolanaRpcRetry(() =>
     connection.getLatestBlockhash('confirmed')
   )
   tx.recentBlockhash = blockhash
@@ -60,6 +73,12 @@ async function sendSignedPackVaultTransaction(
     )
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+
+  try {
+    await hooks?.onSent?.(signature)
+  } catch (e) {
+    console.error('[packs/vault] onSent hook failed', e)
   }
 
   const confirmed = await waitForPackPayoutConfirmation(signature)
@@ -129,18 +148,26 @@ async function resolveTokenProgramForMint(
   mint: PublicKey,
   owner: PublicKey
 ): Promise<typeof TOKEN_PROGRAM_ID | typeof TOKEN_2022_PROGRAM_ID | null> {
+  if (isPackOwlMintAddress(mint.toBase58())) {
+    return PACK_OWL_TOKEN_PROGRAM
+  }
+
   for (const program of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
     try {
       const ata = await getAssociatedTokenAddress(mint, owner, false, program, ASSOCIATED_TOKEN_PROGRAM_ID)
-      await getAccount(connection, ata, 'confirmed', program)
+      await readTokenAccountOrThrow(connection, ata, program)
       return program
-    } catch {
-      // try next
+    } catch (e) {
+      if (isSplTokenAccountMissingError(e)) {
+        continue
+      }
+      throw e
     }
   }
-  // Mint exists? Prefer classic SPL if mint account owned by Token program
   try {
-    const info = await connection.getAccountInfo(mint, 'confirmed')
+    const info = await withPackSolanaRpcRetry(() =>
+      connection.getAccountInfo(mint, 'confirmed')
+    )
     if (info?.owner.equals(TOKEN_2022_PROGRAM_ID)) return TOKEN_2022_PROGRAM_ID
     if (info?.owner.equals(TOKEN_PROGRAM_ID)) return TOKEN_PROGRAM_ID
   } catch {
@@ -149,9 +176,15 @@ async function resolveTokenProgramForMint(
   return TOKEN_PROGRAM_ID
 }
 
+function owlRawAmount(owlAmount: number, mintB58: string): bigint {
+  const decimals = isPackOwlMintAddress(mintB58) ? PACK_OWL_DECIMALS : getTokenInfo('OWL').decimals
+  return BigInt(Math.round(owlAmount * 10 ** decimals))
+}
+
 export async function payoutSolFromPacksVault(
   recipientWallet: string,
-  lamports: bigint
+  lamports: bigint,
+  hooks?: PackVaultSendHooks
 ): Promise<PackVaultPayoutResult> {
   if (lamports <= 0n) return { ok: false, error: 'Payout amount must be positive.' }
   const keypair = getPacksVaultKeypair()
@@ -177,12 +210,13 @@ export async function payoutSolFromPacksVault(
       lamports: Number(lamports),
     })
   )
-  return sendSignedPackVaultTransaction(connection, tx, keypair)
+  return sendSignedPackVaultTransaction(connection, tx, keypair, hooks)
 }
 
 export async function payoutOwlFromPacksVault(
   recipientWallet: string,
-  owlAmount: number
+  owlAmount: number,
+  hooks?: PackVaultSendHooks
 ): Promise<PackVaultPayoutResult> {
   if (!(owlAmount > 0)) return { ok: false, error: 'OWL amount must be positive.' }
   const keypair = getPacksVaultKeypair()
@@ -198,8 +232,7 @@ export async function payoutOwlFromPacksVault(
   const tokenProgram = await resolveTokenProgramForMint(readConn, mint, keypair.publicKey)
   if (!tokenProgram) return { ok: false, error: 'Could not resolve OWL token program' }
 
-  const mintInfo = await getMint(readConn, mint, 'confirmed', tokenProgram)
-  const raw = BigInt(Math.round(owlAmount * 10 ** mintInfo.decimals))
+  const raw = owlRawAmount(owlAmount, mint.toBase58())
   if (raw <= 0n) return { ok: false, error: 'OWL raw amount is zero' }
 
   const sourceAta = await getAssociatedTokenAddress(
@@ -218,25 +251,21 @@ export async function payoutOwlFromPacksVault(
   )
 
   const tx = new Transaction()
-  try {
-    await getAccount(readConn, destAta, 'confirmed', tokenProgram)
-  } catch {
-    tx.add(
-      createAssociatedTokenAccountInstruction(
-        keypair.publicKey,
-        destAta,
-        recipient,
-        mint,
-        tokenProgram,
-        ASSOCIATED_TOKEN_PROGRAM_ID
-      )
+  tx.add(
+    createAssociatedTokenAccountIdempotentInstruction(
+      keypair.publicKey,
+      destAta,
+      recipient,
+      mint,
+      tokenProgram,
+      ASSOCIATED_TOKEN_PROGRAM_ID
     )
-  }
+  )
   tx.add(
     createTransferInstruction(sourceAta, destAta, keypair.publicKey, raw, [], tokenProgram)
   )
 
-  return sendSignedPackVaultTransaction(connection, tx, keypair)
+  return sendSignedPackVaultTransaction(connection, tx, keypair, hooks)
 }
 
 function isVaultSplMissingNftError(error: string | undefined): boolean {
@@ -251,7 +280,8 @@ function isVaultSplMissingNftError(error: string | undefined): boolean {
 async function payoutSplNftFromPacksVault(
   keypair: Keypair,
   mintAddress: string,
-  recipientWallet: string
+  recipientWallet: string,
+  hooks?: PackVaultSendHooks
 ): Promise<{ ok: boolean; signature?: string; error?: string }> {
   const connection = getSolanaConnection()
   const readConn = getSolanaReadConnection()
@@ -276,14 +306,15 @@ async function payoutSplNftFromPacksVault(
   )
 
   try {
-    const acct = await getAccount(readConn, sourceAta, 'confirmed', tokenProgram)
+    const acct = await readTokenAccountOrThrow(readConn, sourceAta, tokenProgram)
     if (acct.amount < 1n) return { ok: false, error: 'Vault NFT balance is zero' }
-  } catch {
-    return { ok: false, error: 'Vault does not hold this NFT' }
+  } catch (e) {
+    if (isSplTokenAccountMissingError(e)) {
+      return { ok: false, error: 'Vault does not hold this NFT' }
+    }
+    throw e
   }
 
-  // pNFTs (and many freeze-authority Token Metadata NFTs) fail raw SPL Transfer;
-  // try Metaplex transferV1 first — same path as raffle prize escrow.
   if (tokenProgram.equals(TOKEN_PROGRAM_ID)) {
     const tmResult = await trySendSplNftViaTokenMetadataFromEscrow({
       connection,
@@ -298,33 +329,30 @@ async function payoutSplNftFromPacksVault(
   }
 
   const tx = new Transaction()
-  try {
-    await getAccount(readConn, destAta, 'confirmed', tokenProgram)
-  } catch {
-    tx.add(
-      createAssociatedTokenAccountInstruction(
-        keypair.publicKey,
-        destAta,
-        recipient,
-        mint,
-        tokenProgram,
-        ASSOCIATED_TOKEN_PROGRAM_ID
-      )
+  tx.add(
+    createAssociatedTokenAccountIdempotentInstruction(
+      keypair.publicKey,
+      destAta,
+      recipient,
+      mint,
+      tokenProgram,
+      ASSOCIATED_TOKEN_PROGRAM_ID
     )
-  }
+  )
   tx.add(
     createTransferInstruction(sourceAta, destAta, keypair.publicKey, 1n, [], tokenProgram)
   )
 
-  return sendSignedPackVaultTransaction(connection, tx, keypair)
+  return sendSignedPackVaultTransaction(connection, tx, keypair, hooks)
 }
 
 /** Transfer an NFT prize from the packs vault to the winner (SPL, Core, or compressed). */
 export async function payoutNftFromPacksVault(
   mintAddress: string,
   recipientWallet: string,
-  prizeStandard?: PackInventoryPrizeStandard | null
-): Promise<{ ok: boolean; signature?: string; error?: string }> {
+  prizeStandard?: PackInventoryPrizeStandard | null,
+  hooks?: PackVaultSendHooks
+): Promise<{ ok: boolean; signature?: string; error?: string; confirmUncertain?: boolean }> {
   const keypair = getPacksVaultKeypair()
   if (!keypair) return { ok: false, error: 'Packs vault not configured (PACKS_VAULT_SECRET_KEY)' }
 
@@ -335,7 +363,7 @@ export async function payoutNftFromPacksVault(
     return payoutCompressedFromKeypair(keypair, mintAddress, recipientWallet)
   }
 
-  const spl = await payoutSplNftFromPacksVault(keypair, mintAddress, recipientWallet)
+  const spl = await payoutSplNftFromPacksVault(keypair, mintAddress, recipientWallet, hooks)
   if (spl.ok) return spl
   if (!isVaultSplMissingNftError(spl.error)) return spl
 
@@ -378,10 +406,13 @@ export async function getPacksVaultOwlBalanceUi(): Promise<number | null> {
           program,
           ASSOCIATED_TOKEN_PROGRAM_ID
         )
-        const acc = await getAccount(connection, ata, 'confirmed', program)
+        const acc = await readTokenAccountOrThrow(connection, ata, program)
         return Number(acc.amount) / 10 ** owl.decimals
-      } catch {
-        // try next program or no ATA
+      } catch (e) {
+        if (isSplTokenAccountMissingError(e)) {
+          continue
+        }
+        throw e
       }
     }
     return 0

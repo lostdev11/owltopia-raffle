@@ -22,6 +22,7 @@ import type {
   PackVaultConfigRow,
 } from '@/lib/packs/types'
 import { getPacksVaultPublicKey } from '@/lib/packs/vault'
+import { PACK_NFT_PAYOUT_FAIL_QUARANTINE_THRESHOLD } from '@/lib/packs/nft-quarantine-policy'
 
 function normalizePackProduct(row: PackProductRow): PackProductRow {
   return {
@@ -470,6 +471,105 @@ export async function releaseNftReservation(inventoryId: string): Promise<void> 
   if (error) throw error
 }
 
+/** Increment fail counter; returns new count (0 if row missing). */
+export async function incrementPackInventoryPayoutFailCount(
+  inventoryId: string
+): Promise<number> {
+  const row = await getPackInventoryById(inventoryId)
+  if (!row) return 0
+  const next = Number(row.payout_fail_count ?? 0) + 1
+  const { error } = await getSupabaseAdmin()
+    .from('pack_inventory')
+    .update({ payout_fail_count: next, updated_at: new Date().toISOString() })
+    .eq('id', inventoryId)
+  if (error) throw error
+  return next
+}
+
+/** Remove a repeatedly failing NFT from the open pool (admin can re-list after fixing). */
+export async function quarantinePackInventoryNft(
+  inventoryId: string,
+  reason: string
+): Promise<void> {
+  const { error } = await getSupabaseAdmin()
+    .from('pack_inventory')
+    .update({
+      status: 'removed',
+      reserved_open_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', inventoryId)
+    .in('status', ['available', 'reserved'])
+  if (error) throw error
+  console.warn('[packs] quarantined inventory NFT', { inventoryId, reason })
+}
+
+export async function releaseOrQuarantineNftAfterPayoutFailure(input: {
+  inventoryId: string
+  reason: string
+}): Promise<'released' | 'quarantined'> {
+  const failCount = await incrementPackInventoryPayoutFailCount(input.inventoryId)
+  if (failCount >= PACK_NFT_PAYOUT_FAIL_QUARANTINE_THRESHOLD) {
+    await quarantinePackInventoryNft(
+      input.inventoryId,
+      `Payout failed ${failCount} times: ${input.reason}`
+    )
+    return 'quarantined'
+  }
+  await releaseNftReservation(input.inventoryId)
+  return 'released'
+}
+
+export async function listPackOpensForReconcile(input: {
+  statuses: string[]
+  updatedBeforeIso: string
+  limit?: number
+}): Promise<PackOpenRow[]> {
+  const limit = Math.min(Math.max(input.limit ?? 25, 1), 40)
+  const { data, error } = await getSupabaseAdmin()
+    .from('pack_opens')
+    .select('*')
+    .in('status', input.statuses)
+    .lt('updated_at', input.updatedBeforeIso)
+    .order('updated_at', { ascending: true })
+    .limit(limit)
+  if (error) throw error
+  return (data as PackOpenRow[]) ?? []
+}
+
+export async function listStalePendingPaymentPackOpens(input: {
+  createdBeforeIso: string
+  limit?: number
+}): Promise<PackOpenRow[]> {
+  const limit = Math.min(Math.max(input.limit ?? 15, 1), 30)
+  const { data, error } = await getSupabaseAdmin()
+    .from('pack_opens')
+    .select('*')
+    .eq('status', 'pending_payment')
+    .is('payment_signature', null)
+    .lt('created_at', input.createdBeforeIso)
+    .order('created_at', { ascending: true })
+    .limit(limit)
+  if (error) throw error
+  return (data as PackOpenRow[]) ?? []
+}
+
+export async function isPackPaymentSignatureClaimed(
+  signature: string,
+  exceptOpenId?: string
+): Promise<boolean> {
+  const trimmed = signature.trim()
+  if (!trimmed) return false
+  let query = getSupabaseAdmin().from('pack_opens').select('id').eq('payment_signature', trimmed)
+  if (exceptOpenId) {
+    query = query.neq('id', exceptOpenId)
+  }
+  const { data, error } = await query.limit(1)
+  if (error) throw error
+  const rows = (data as { id: string }[] | null) ?? []
+  return rows.length > 0
+}
+
 export async function createPendingPackOpen(input: {
   productId: string
   buyerWallet: string
@@ -522,7 +622,7 @@ export async function updatePackOpen(
 ): Promise<PackOpenRow> {
   const { data, error } = await getSupabaseAdmin()
     .from('pack_opens')
-    .update({ ...patch })
+    .update({ ...patch, updated_at: new Date().toISOString() })
     .eq('id', id)
     .select('*')
     .single()
