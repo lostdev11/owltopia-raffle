@@ -62,6 +62,7 @@ const base: SimpleMintEligibilityResponse = {
   phase_starts_at: null,
   on_allowlist: null,
   allowlist_spots_remaining: null,
+  allowlist_phase_checks: [],
 }
 
 console.log('Collection mint applyMinted:')

@@ -37,6 +37,7 @@ import { PhaseBadge } from '@/components/owl-center/PhaseBadge'
 import { StatPanel } from '@/components/owl-center/StatPanel'
 
 import { StatusBadge } from '@/components/owl-center/StatusBadge'
+import { isLaunchStatusBadgeRedundant } from '@/lib/owl-center/launch-mint-open'
 
 import { SupplyProgress } from '@/components/owl-center/SupplyProgress'
 

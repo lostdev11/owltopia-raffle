@@ -18,10 +18,16 @@ function allowlistNotOnListReason(phaseLabel: string): string {
   return `Not on the ${phaseLabel} list — wait for the next phase or public`
 }
 
+/** Card title when wallet is on the list but the phase has not opened yet. */
+function onListUpcomingTitle(phaseLabel: string): string {
+  return `On list · ${phaseLabel}`
+}
+
 assert.match(allowlistConnectReason('OG'), /OG is live/)
 assert.match(allowlistEligibleReason('WL', 1), /Eligible for WL · up to 1 mint$/)
 assert.match(allowlistEligibleReason('WL', 2), /up to 2 mints$/)
 assert.match(allowlistNotOnListReason('OG'), /Not on the OG list/)
+assert.equal(onListUpcomingTitle('Whitelist'), 'On list · Whitelist')
 
 function publicWalletLimitReason(limit: number): string {
   return `Wallet limit reached (${limit} from public this phase — not total NFTs in wallet)`

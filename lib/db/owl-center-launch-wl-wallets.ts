@@ -107,6 +107,27 @@ export async function getLaunchWlWallet(
   return mapRow(data as Record<string, unknown>)
 }
 
+/** Soft-allowlist rows for one wallet across all phase keys (buyer phase checkmarks). */
+export async function listLaunchWlWalletsForWallet(
+  launchId: string,
+  wallet: string
+): Promise<LaunchWlWalletRow[]> {
+  const w = normalizeSolanaWalletAddress(wallet)
+  if (!w) return []
+  const db = getSupabaseAdmin()
+  const { data, error } = await db
+    .from('owl_center_launch_wl_wallets')
+    .select('*')
+    .eq('launch_id', launchId)
+    .eq('wallet', w)
+    .limit(50)
+  if (error) {
+    console.error('listLaunchWlWalletsForWallet:', error.message)
+    return []
+  }
+  return (data ?? []).map((r) => mapRow(r as Record<string, unknown>))
+}
+
 export async function bulkUpsertLaunchWlWallets(input: {
   launchId: string
   phaseKey?: string

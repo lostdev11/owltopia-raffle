@@ -1,4 +1,5 @@
 import { resolveMintOpensAt } from '@/lib/owl-center/launch-mint-config'
+import { owlCenterPhaseLabel } from '@/lib/owl-center/phase-display'
 import { formatMintDate, formatPhaseStartShort, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
@@ -71,6 +72,22 @@ export function launchPublicPhaseBadgeLabel(
   const opens = getLaunchPublicMintOpensAt(launch)
   const short = formatPhaseStartShort(opens)
   return short ? `Public · opens ${short}` : 'Public · scheduled'
+}
+
+/**
+ * True when StatusBadge would just repeat the PhaseBadge (e.g. bordered "PUBLIC"
+ * next to filled "PUBLIC · opens …" or plain "PUBLIC").
+ */
+export function isLaunchStatusBadgeRedundant(
+  launch: Pick<OwlCenterLaunchPublic, 'status' | 'active_phase'>,
+  phaseOverrideLabel?: string | null
+): boolean {
+  const statusNorm = launch.status.replace(/_/g, ' ').trim().toUpperCase()
+  if (!statusNorm) return false
+  const phaseText = (phaseOverrideLabel?.trim() || owlCenterPhaseLabel(launch.active_phase)).toUpperCase()
+  if (phaseText === statusNorm) return true
+  const phaseHead = phaseText.split('·')[0]?.trim() ?? phaseText
+  return phaseHead === statusNorm
 }
 
 export function launchScheduledPublicReason(
