@@ -108,18 +108,14 @@ export function PartnerMintPhaseSchedule({
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-bold uppercase tracking-widest text-[#C5D0D8]">
+                  {row.label}
                   {onList ? (
                     <span
-                      className="mr-1.5 inline-block text-[#00FF9C]"
+                      className="ml-2 text-[#00FF9C]"
                       title="Your wallet is on this phase list"
-                      aria-label="On list"
                     >
-                      ✓
+                      · <span aria-hidden>✓</span> On list
                     </span>
-                  ) : null}
-                  {row.label}
-                  {onList && !row.is_active ? (
-                    <span className="ml-2 text-[#00FF9C]">· On list</span>
                   ) : null}
                   {tag ? (
                     <span className={cn('ml-2', row.is_active ? 'text-[#00FF9C]' : 'text-[#5C6773]')}>

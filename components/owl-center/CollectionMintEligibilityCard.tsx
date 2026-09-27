@@ -92,11 +92,11 @@ export function CollectionMintEligibilityCard({
   const onListDetail =
     onList === true
       ? onListPhases.length > 1
-        ? ` · on list (${onListPhases.map((p) => p.label).join(', ')})`
-        : ' · on list'
+        ? `on list (${onListPhases.map((p) => p.label).join(', ')})`
+        : 'on list'
       : onList === false
-        ? ' · not on list'
-        : ''
+        ? 'not on list'
+        : null
 
   return (
     <CommandCard label="ELIGIBILITY // CHECK">
@@ -131,7 +131,18 @@ export function CollectionMintEligibilityCard({
                       phaseLabel ? phaseLabel : 'public'
                     } this phase`
                   : ''}
-                {onListDetail}
+                {onListDetail != null ? (
+                  <>
+                    {' · '}
+                    {onList === true ? (
+                      <span className="text-[#00FF9C]">
+                        <span aria-hidden>✓</span> {onListDetail}
+                      </span>
+                    ) : (
+                      onListDetail
+                    )}
+                  </>
+                ) : null}
               </p>
             ) : null}
           </div>

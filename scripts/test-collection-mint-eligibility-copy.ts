@@ -29,6 +29,15 @@ assert.match(allowlistEligibleReason('WL', 2), /up to 2 mints$/)
 assert.match(allowlistNotOnListReason('OG'), /Not on the OG list/)
 assert.equal(onListUpcomingTitle('Whitelist'), 'On list · Whitelist')
 
+/** Footer membership chip — checkmark first so skimmers catch it. */
+function onListFooterChip(onList: boolean, multiLabel?: string): string {
+  if (!onList) return 'not on list'
+  return multiLabel ? `✓ on list (${multiLabel})` : '✓ on list'
+}
+assert.equal(onListFooterChip(true), '✓ on list')
+assert.equal(onListFooterChip(true, 'OG, WL'), '✓ on list (OG, WL)')
+assert.equal(onListFooterChip(false), 'not on list')
+
 function publicWalletLimitReason(limit: number): string {
   return `Wallet limit reached (${limit} from public this phase — not total NFTs in wallet)`
 }
