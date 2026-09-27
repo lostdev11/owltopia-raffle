@@ -10,6 +10,9 @@ import {
   formatConfigLineProgress,
   formatDeploySuccessMessage,
   isDeployWorkInProgress,
+  isDeployHttpTransportStatus,
+  isDeployLockActive,
+  isDeployRateLimitedStatus,
   isLikelyDeployTransportError,
 } from '../lib/owl-center/deploy-panel-status'
 import { owlCenterCoreDeployLoadTimeBudgetMs } from '../lib/owl-center/cm-deploy-limits'
@@ -49,10 +52,27 @@ describe('deploy panel status helpers', () => {
 
   it('classifies transport/timeout errors for watch mode', () => {
     assert.equal(isLikelyDeployTransportError(new TypeError('Failed to fetch')), true)
+    assert.equal(isLikelyDeployTransportError(new SyntaxError('Unexpected token < in JSON')), true)
     const abort = new Error('The operation was aborted')
     abort.name = 'AbortError'
     assert.equal(isLikelyDeployTransportError(abort), true)
     assert.equal(isLikelyDeployTransportError(new Error('Deployer wallet needs more SOL')), false)
+  })
+
+  it('classifies gateway and rate-limit HTTP statuses', () => {
+    assert.equal(isDeployHttpTransportStatus(502), true)
+    assert.equal(isDeployHttpTransportStatus(504), true)
+    assert.equal(isDeployHttpTransportStatus(524), true)
+    assert.equal(isDeployHttpTransportStatus(500), false)
+    assert.equal(isDeployRateLimitedStatus(429), true)
+  })
+
+  it('detects active deploy lock from lock_until', () => {
+    const future = new Date(Date.now() + 60_000).toISOString()
+    const past = new Date(Date.now() - 60_000).toISOString()
+    assert.equal(isDeployLockActive(future), true)
+    assert.equal(isDeployLockActive(past), false)
+    assert.equal(isDeployLockActive(null), false)
   })
 
   it('defaults Core load rounds to 90s for UI checkpoints', () => {

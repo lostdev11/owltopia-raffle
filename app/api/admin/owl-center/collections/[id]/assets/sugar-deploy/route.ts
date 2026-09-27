@@ -50,6 +50,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     mint_mode: status.launch.mint_mode,
     mint_standard: status.mint_standard,
     creator_wallet: status.creator_wallet,
+    deploy_locked: status.deploy_locked,
+    deploy_lock_until: status.deploy_lock_until,
     terminal_command: `npm run sugar:deploy -- collections/${sanitizeFolderHint(status.launch.name)}`,
   })
 }
@@ -59,8 +61,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   if (session instanceof NextResponse) return session
 
   const ip = getClientIp(request)
-  if (!rateLimit(`admin-owl-sugar-deploy:${ip}`, 10, 60_000).allowed) {
-    return jsonError('Too many requests', 429)
+  const rate = rateLimit(`admin-owl-sugar-deploy:${ip}`, 10, 60_000)
+  if (!rate.allowed) {
+    return NextResponse.json({ error: 'Too many requests', code: 'rate_limited' }, { status: 429 })
   }
 
   const { id } = await context.params

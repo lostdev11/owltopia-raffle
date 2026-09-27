@@ -12,6 +12,9 @@ import {
   formatConfigLineProgress,
   formatDeploySuccessMessage,
   isDeployExpiryErrorMessage,
+  isDeployHttpTransportStatus,
+  isDeployLockActive,
+  isDeployRateLimitedStatus,
   isDeployWorkInProgress,
   isLikelyDeployTransportError,
 } from '@/lib/owl-center/deploy-panel-status'
@@ -42,6 +45,8 @@ type DeployStatus = {
   mint_standard?: string | null
   creator_wallet?: string | null
   terminal_command: string
+  deploy_locked?: boolean
+  deploy_lock_until?: string | null
 }
 
 function shortPk(pk: string | null | undefined): string {
@@ -70,6 +75,8 @@ type DeployActionResult = {
 const POLL_MS = 2_500
 const WATCH_AFTER_TRANSPORT_MS = 8 * 60_000
 const EXPIRY_AUTO_CONTINUE_BASE_MS = 3_000
+const RATE_LIMIT_BACKOFF_BASE_MS = 5_000
+const DEPLOY_LOCK_POLL_MS = 2_000
 
 export function SugarDeployPanel({
   launchId,
@@ -132,7 +139,11 @@ export function SugarDeployPanel({
 
   // Poll while deploying / watching / server-side work is in progress.
   useEffect(() => {
-    const shouldPoll = busy || watching || isDeployWorkInProgress(status)
+    const shouldPoll =
+      busy ||
+      watching ||
+      isDeployWorkInProgress(status) ||
+      Boolean(status?.deploy_locked || isDeployLockActive(status?.deploy_lock_until))
     if (!shouldPoll) return
 
     let cancelled = false
@@ -187,6 +198,22 @@ export function SugarDeployPanel({
     }
   }, [busy, watching, status?.deploy_state?.status, status?.fully_deployed, load])
 
+  function throwDeployTransportError(message: string): never {
+    const err = new Error(message) as Error & { deployTransport?: boolean }
+    err.deployTransport = true
+    throw err
+  }
+
+  async function waitForDeployLockClear() {
+    setMsg('Another deploy request holds the lock — waiting for it to clear…')
+    while (autoContinueRef.current) {
+      await new Promise((r) => window.setTimeout(r, DEPLOY_LOCK_POLL_MS))
+      const next = await load({ quiet: true })
+      if (!next) continue
+      if (!next.deploy_locked && !isDeployLockActive(next.deploy_lock_until)) return
+    }
+  }
+
   async function postDeployOnchain(): Promise<DeployActionResult> {
     const res = await fetch(`/api/admin/owl-center/collections/${launchId}/assets/sugar-deploy`, {
       method: 'POST',
@@ -194,12 +221,31 @@ export function SugarDeployPanel({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'deploy_onchain' }),
     })
-    const j = (await res.json()) as {
+
+    if (isDeployRateLimitedStatus(res.status)) {
+      const err = new Error('rate_limited') as Error & { code?: string; rateLimited?: boolean }
+      err.code = 'rate_limited'
+      err.rateLimited = true
+      throw err
+    }
+
+    if (isDeployHttpTransportStatus(res.status)) {
+      throwDeployTransportError(`deploy_http_${res.status}`)
+    }
+
+    const raw = await res.text()
+    let j: {
       ok?: boolean
       error?: string
       code?: string
       result?: DeployActionResult
     }
+    try {
+      j = JSON.parse(raw) as typeof j
+    } catch {
+      throwDeployTransportError('deploy_non_json_response')
+    }
+
     if (res.status === 409 || j.code === 'deploy_in_progress') {
       const err = new Error(j.error || 'deploy_in_progress') as Error & { code?: string }
       err.code = 'deploy_in_progress'
@@ -252,12 +298,21 @@ export function SugarDeployPanel({
         setMsg(`Deploy round ${rounds} — submitting Solana transactions…`)
         let result: DeployActionResult
         try {
+          if (statusRef.current?.deploy_locked || isDeployLockActive(statusRef.current?.deploy_lock_until)) {
+            await waitForDeployLockClear()
+          }
           result = await postDeployOnchain()
         } catch (e) {
+          if (e instanceof Error && (e as Error & { rateLimited?: boolean }).rateLimited) {
+            const backoff = RATE_LIMIT_BACKOFF_BASE_MS + Math.min(rounds, 8) * 2_000
+            setMsg(`Rate limited — retrying in ${Math.round(backoff / 1000)}s…`)
+            await new Promise((r) => window.setTimeout(r, backoff))
+            continue
+          }
           if (e instanceof Error && (e as Error & { code?: string }).code === 'deploy_in_progress') {
             setMsg(null)
             setErr(null)
-            await watchUntilSettled()
+            await waitForDeployLockClear()
             continue
           }
           if (isLikelyDeployTransportError(e)) {

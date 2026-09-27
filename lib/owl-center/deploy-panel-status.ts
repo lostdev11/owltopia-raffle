@@ -106,6 +106,8 @@ export function isLikelyDeployTransportError(err: unknown): boolean {
   if (!(err instanceof Error)) return false
   const msg = err.message.toLowerCase()
   if (err.name === 'AbortError' || err.name === 'TimeoutError') return true
+  if (err.name === 'SyntaxError') return true
+  if ((err as Error & { deployTransport?: boolean }).deployTransport) return true
   return (
     msg.includes('failed to fetch') ||
     msg.includes('networkerror') ||
@@ -113,6 +115,23 @@ export function isLikelyDeployTransportError(err: unknown): boolean {
     msg.includes('load failed') ||
     msg.includes('aborted') ||
     msg.includes('timeout') ||
-    msg.includes('the operation was aborted')
+    msg.includes('the operation was aborted') ||
+    msg.includes('unexpected token') ||
+    msg.includes('is not valid json')
   )
+}
+
+/** Proxy/gateway responses where the deploy may still be running server-side. */
+export function isDeployHttpTransportStatus(status: number): boolean {
+  return status === 502 || status === 504 || status === 524
+}
+
+export function isDeployRateLimitedStatus(status: number): boolean {
+  return status === 429
+}
+
+export function isDeployLockActive(lockUntil: string | null | undefined, nowMs = Date.now()): boolean {
+  if (!lockUntil?.trim()) return false
+  const t = Date.parse(lockUntil)
+  return Number.isFinite(t) && t > nowMs
 }
