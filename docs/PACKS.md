@@ -8,7 +8,7 @@ After payment confirms, the fullscreen **pack hovering** clip starts immediately
 
 1. User pays pack price → tx confirms → fullscreen hovering clip + “Resolving…”
 2. Server assigns the prize (NFT / SOL / $OWL) — VRF reveal may take a few seconds when enabled
-3. **Open pack** unlocks
+3. **Open pack** unlocks as soon as the prize is reserved (vault payout continues in the background)
 4. User taps Open pack → **pack opening** plays once (`/Animations/Pack opening.mp4`)
 5. Clip ends on white → CSS white overlay → video removed → white fades → real prize reveal + subtle confetti
 

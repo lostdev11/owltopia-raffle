@@ -111,10 +111,10 @@ export async function waitForSwitchboardSeedSlot(params: {
 
 /** Pack opens: shorter wall-clock wait + faster polls; reveal retries cover early Secp. */
 export const PACK_SWITCHBOARD_SEED_WAIT: SwitchboardSeedSlotWaitOptions = {
-  minWaitMs: 5_000,
-  maxWaitMs: 18_000,
+  minWaitMs: 3_500,
+  maxWaitMs: 12_000,
   maturitySlots: SWITCHBOARD_SEED_SLOT_MATURITY,
-  pollIntervalMs: 400,
+  pollIntervalMs: 350,
 }
 
 /**

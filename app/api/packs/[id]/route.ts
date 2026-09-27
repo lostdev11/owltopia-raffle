@@ -103,12 +103,22 @@ export async function GET(_request: NextRequest, context: Ctx) {
       }
     }
 
+    const prizeCommitted =
+      Boolean(open.open_seed) &&
+      Boolean(open.open_commit_hash) &&
+      Boolean(open.category) &&
+      Boolean(open.prize_label) &&
+      (open.status === 'completed' ||
+        open.status === 'reserved' ||
+        open.status === 'paying_out')
+
     const revealMessage =
-      open.status === 'completed' && open.category && open.prize_label
+      prizeCommitted && open.category && open.prize_label
         ? packRevealMessage({
             category: open.category,
             prizeLabel: open.prize_label,
             isJackpotWin: open.is_jackpot_win === true,
+            payoutPending: open.status !== 'completed' || !open.payout_signature,
           })
         : null
 
@@ -119,7 +129,7 @@ export async function GET(_request: NextRequest, context: Ctx) {
       paymentSignature: open.payment_signature,
       payoutSignature: open.payout_signature,
       openAlgo: open.open_algo,
-      openSeed: open.status === 'completed' ? open.open_seed : null,
+      openSeed: prizeCommitted ? open.open_seed : null,
       openCommitHash: open.open_commit_hash,
       category: open.category,
       prizeLabel: open.prize_label,

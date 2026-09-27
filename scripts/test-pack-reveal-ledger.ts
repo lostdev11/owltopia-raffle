@@ -7,6 +7,10 @@ assert.equal(
   'You won 10 $OWL — sent to your wallet'
 )
 assert.equal(
+  packRevealMessage({ category: 'owl', prizeLabel: '10 $OWL', payoutPending: true }),
+  'You won 10 $OWL — sending to your wallet'
+)
+assert.equal(
   packRevealMessage({ category: 'sol', prizeLabel: '0.05 SOL' }),
   'You won 0.05 SOL'
 )
@@ -34,5 +38,17 @@ assert.equal(restored!.category, 'nft')
 assert.equal(restored!.openId, '00000000-0000-4000-8000-000000000001')
 
 assert.equal(packOpenVerifyJsonToClientResult({ id: 'x', status: 'paid', category: 'owl' }), null)
+
+const reservedRestored = packOpenVerifyJsonToClientResult({
+  id: '00000000-0000-4000-8000-000000000002',
+  status: 'reserved',
+  category: 'owl',
+  prizeLabel: '25 $OWL',
+  openSeed: 'seed2',
+  openCommitHash: 'hash2',
+})
+assert.ok(reservedRestored)
+assert.equal(reservedRestored!.openId, '00000000-0000-4000-8000-000000000002')
+assert.match(reservedRestored!.revealMessage, /sending to your wallet/)
 
 console.log('test-pack-reveal-ledger: ok')

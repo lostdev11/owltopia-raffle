@@ -42,7 +42,7 @@ export const PACK_OPEN_RECONCILE_PIPELINE_STATUSES = [
   'rolling',
 ] as const
 
-export const PACK_OPEN_RECONCILE_PIPELINE_MIN_AGE_MS = 3 * 60 * 1000
+export const PACK_OPEN_RECONCILE_PIPELINE_MIN_AGE_MS = 60 * 1000
 
 function cutoffIso(minAgeMs: number): string {
   return new Date(Date.now() - minAgeMs).toISOString()

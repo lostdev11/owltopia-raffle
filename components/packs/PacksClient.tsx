@@ -251,15 +251,15 @@ export function PacksClient({
   }, [dismissReveal])
 
   useEffect(() => {
-    if (phase === 'reveal' && result?.openId) {
+    if ((phase === 'reveal' || phase === 'experience') && result?.openId) {
       syncOpenQuery(result.openId)
     }
   }, [phase, result?.openId, syncOpenQuery])
 
   useEffect(() => {
     if (!openQueryId || !publicKey || !allowed) return
-    if (result?.openId === openQueryId && phase === 'reveal') return
-    if (phase === 'paying' || phase === 'experience') return
+    if (result?.openId === openQueryId && (phase === 'reveal' || phase === 'experience')) return
+    if (phase === 'paying') return
 
     let cancelled = false
     void (async () => {
@@ -274,7 +274,7 @@ export function PacksClient({
         const restored = packOpenVerifyJsonToClientResult(json)
         if (!restored || cancelled) return
         setResult(restored)
-        setPhase('reveal')
+        setPhase(json.status === 'completed' ? 'reveal' : 'experience')
         setRipping(false)
         setPaymentConfirmed(false)
       } catch {

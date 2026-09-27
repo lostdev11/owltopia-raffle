@@ -1,13 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { PublicKey } from '@solana/web3.js'
 import { assertPacksAccess } from '@/lib/packs/assert-access'
+import { getPackOpenById } from '@/lib/packs/db'
 import { confirmAndOpenPack } from '@/lib/packs/open-engine'
+import { payoutCommittedPackOpen } from '@/lib/packs/open-payout'
 import { isPackOpenRetryableError } from '@/lib/packs/pack-open-errors'
 import { packRevealMessage } from '@/lib/packs/reveal-message'
 import { getClientIp, rateLimit } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
+
+/**
+ * Finish vault payout after the HTTP response so “Open pack” unlocks as soon as
+ * the prize is reserved (VRF + roll). Failures stay in reserved/paying_out for
+ * pack-open reconcile.
+ */
+function scheduleDeferredPackPayout(openId: string, buyerWallet: string): void {
+  waitUntil(
+    (async () => {
+      try {
+        const open = await getPackOpenById(openId)
+        if (!open || open.status === 'completed' || open.status === 'refund_needed') return
+        if (!open.open_seed || !open.open_commit_hash || !open.category) return
+        await payoutCommittedPackOpen({ open, buyerWallet })
+      } catch (e) {
+        console.error('[packs] deferred payout failed', openId, e)
+      }
+    })()
+  )
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -43,7 +66,13 @@ export async function POST(request: NextRequest) {
       openId,
       buyerWallet: wallet,
       paymentSignature,
+      deferPayout: true,
     })
+
+    const payoutPending = !result.payoutSignature
+    if (payoutPending) {
+      scheduleDeferredPackPayout(result.openId, wallet)
+    }
 
     return NextResponse.json({
       success: true,
@@ -53,6 +82,7 @@ export async function POST(request: NextRequest) {
           category: result.category,
           prizeLabel: result.prizeLabel,
           isJackpotWin: result.isJackpotWin,
+          payoutPending,
         }),
       },
     })
