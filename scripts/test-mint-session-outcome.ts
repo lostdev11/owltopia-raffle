@@ -4,7 +4,7 @@
  * Run: npx --yes tsx scripts/test-mint-session-outcome.ts
  */
 import { resolveMintSessionOutcome } from '@/lib/owl-center/mint-session'
-import type { MintGen2Result } from '@/lib/solana/gen2-mint'
+import type { OwlCenterMintResult } from '@/lib/owl-center/mint-result'
 
 let failures = 0
 function check(name: string, cond: boolean) {
@@ -18,7 +18,7 @@ function check(name: string, cond: boolean) {
 console.log('mint-session resolveMintSessionOutcome:')
 
 {
-  const minted: MintGen2Result = {
+  const minted: OwlCenterMintResult = {
     ok: false,
     error: 'Minted 1/2',
     txSignatures: ['sig1'],
@@ -33,7 +33,7 @@ console.log('mint-session resolveMintSessionOutcome:')
 }
 
 {
-  const minted: MintGen2Result = {
+  const minted: OwlCenterMintResult = {
     ok: true,
     txSignatures: ['sig1', 'sig2'],
     mintedNftMints: ['a', 'b'],

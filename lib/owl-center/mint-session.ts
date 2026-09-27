@@ -1,4 +1,4 @@
-import type { MintGen2Result } from '@/lib/solana/gen2-mint'
+import type { OwlCenterMintResult } from '@/lib/owl-center/mint-result'
 
 export type MintSessionOutcome = {
   mintedCount: number
@@ -11,7 +11,7 @@ export type MintSessionOutcome = {
 }
 
 export function resolveMintSessionOutcome(
-  minted: MintGen2Result,
+  minted: OwlCenterMintResult,
   _requestedQuantity?: number
 ): MintSessionOutcome | { error: string } {
   const sigs = minted.ok ? minted.txSignatures : (minted.txSignatures ?? [])

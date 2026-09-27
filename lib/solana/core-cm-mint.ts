@@ -1,6 +1,7 @@
 /**
  * Partner/admin public_simple mint via Metaplex Core Candy Machine `mintV1`.
- * Same wallet UX patterns as Gen2 TM mint (fee-payer-first batch for popular wallets, platform fee) without phased guards.
+ * Same wallet UX patterns as the shared Token Metadata CM mint (fee-payer-first batch,
+ * platform fee, allowlist route-first) without Gen2-only phased guards.
  */
 import type { WalletAdapter } from '@solana/wallet-adapter-base'
 import { Connection } from '@solana/web3.js'
@@ -66,8 +67,10 @@ import { invalidLaunchMintIdReason, validateSolanaPubkeyInput } from '@/lib/sola
 import { walletSupportsFeePayerFirstMintBatch } from '@/lib/solana/phantom-sign-and-send-transaction'
 import { assertTransactionSimulatesClean } from '@/lib/solana/phantom-presimulate'
 import { splitAllowlistRouteFromWalletSigned } from '@/lib/solana/allowlist-route-sign-all'
+import { owlCenterMintPriorityFeeMicroLamports } from '@/lib/solana/owl-center-mint-priority-fee'
+import type { OwlCenterMintResult } from '@/lib/owl-center/mint-result'
 
-/** mintV1 with Candy Guard comfortably fits in 800k CU (same ceiling as Gen2 mintV2). */
+/** mintV1 with Candy Guard comfortably fits in 800k CU (same ceiling as TM mintV2). */
 const MINT_COMPUTE_UNIT_LIMIT = 800_000
 
 function mergeCoreGuardSets(defaults: DefaultGuardSet, group: DefaultGuardSet | null): DefaultGuardSet {
@@ -104,13 +107,6 @@ function coreGuardMintArgs(guards: DefaultGuardSet): {
   }
 }
 
-function mintPriorityFeeMicroLamports(): number {
-  const raw = process.env.NEXT_PUBLIC_GEN2_MINT_PRIORITY_FEE_MICROLAMPORTS?.trim()
-  if (!raw) return 400_000
-  const n = Number(raw)
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 250_000
-}
-
 export type MintCoreCmParams = {
   walletAdapter: WalletAdapter
   candyMachineId: string
@@ -138,15 +134,7 @@ export type MintCoreCmParams = {
   partnerAllowList?: { slug: string; phaseKey: string } | null
 }
 
-export type MintCoreCmResult =
-  | { ok: true; txSignatures: string[]; mintedNftMints: string[] }
-  | {
-      ok: false
-      error: string
-      txSignatures?: string[]
-      mintedNftMints?: string[]
-      plannedMintB58s?: string[]
-    }
+export type MintCoreCmResult = OwlCenterMintResult
 
 function resolveIds(params: MintCoreCmParams): { cmId: string; colMint: string; network: OwlMintNetwork } | { error: string } {
   const network =
@@ -195,7 +183,7 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
     const umi = createOwlCenterCoreUmi(walletAdapter, rpcUrl)
     const candyMachine = publicKey(cmId)
     const collection = publicKey(colMint)
-    const priorityFee = mintPriorityFeeMicroLamports()
+    const priorityFee = owlCenterMintPriorityFeeMicroLamports()
 
     const [cmAccount, feeQuote] = await withMintSessionBudget(
       sessionDeadline,
@@ -244,8 +232,8 @@ export async function mintCoreFromCandyMachine(params: MintCoreCmParams): Promis
       ? coreGuardMintArgs(mergedGuards)
       : { mintArgs: undefined, mintPriceLamports: 0n }
 
-    // Allowlist proof must be its own tx (merkle proof size) and land BEFORE mintV1 — same
-    // pattern as Gen2. Pre-simulating mint without the proof PDA surfaces MissingAllowedListProof.
+    // Allowlist proof must be its own tx (merkle proof size) and land BEFORE mintV1.
+    // Pre-simulating mint without the proof PDA surfaces MissingAllowedListProof.
     let allowListRouteBuilder: TransactionBuilder | null = null
     if (
       mergedGuards &&
