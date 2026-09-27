@@ -27,7 +27,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
   }
 
   const wallet = request.nextUrl.searchParams.get('wallet')
-  const eligibility = await buildSimpleMintEligibility(launch.slug, wallet)
+  const preferredPhaseKey = request.nextUrl.searchParams.get('phase')
+  const eligibility = await buildSimpleMintEligibility(launch.slug, wallet, {
+    preferredPhaseKey,
+  })
   if (!eligibility) return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
 
   return NextResponse.json({ launch, eligibility })

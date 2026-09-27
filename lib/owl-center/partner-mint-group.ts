@@ -11,10 +11,13 @@ import {
 } from '@/lib/owl-center/partner-allowlist-phases'
 import { resolveEffectivePartnerAllowlistPhases } from '@/lib/owl-center/partner-allowlist-phases'
 import {
+  PARTNER_MINT_PUBLIC_PHASE_KEY,
+  normalizePartnerMintPhasePreference,
+} from '@/lib/owl-center/partner-mint-phase-preference'
+import {
   isPartnerAllowlistPhaseWindowOpen,
   isScheduledPublicMintOpen,
   listOpenPartnerAllowlistPhases,
-  resolvePartnerAllowlistPhaseEndDateIso,
 } from '@/lib/owl-center/partner-phase-window'
 import {
   publicSimpleGuardGroupLabelForLaunch,
@@ -22,9 +25,14 @@ import {
   PUBLIC_SIMPLE_PUBLIC_GROUP_LABEL,
 } from '@/lib/owl-center/public-simple-guard-plan'
 import { publicSimpleSolMintPrice } from '@/lib/owl-center/partner-mint-phase-schedule'
-import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
+import type { OwlCenterLaunchPublic, SimpleMintSelectablePhase } from '@/lib/owl-center/types'
 import { resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { normalizeSolanaWalletAddress } from '@/lib/solana/normalize-wallet'
+
+export {
+  PARTNER_MINT_PUBLIC_PHASE_KEY,
+  normalizePartnerMintPhasePreference,
+} from '@/lib/owl-center/partner-mint-phase-preference'
 
 export type PartnerMintGroupPick = {
   phase_key: string | null
@@ -113,67 +121,158 @@ async function walletEligibleForOpenPhase(
   }
 }
 
-/**
- * Per-wallet guard group: open WL phase with allocation left, else public when public is open.
- */
-export async function resolvePartnerMintGroupForWallet(
+function allowlistPick(
   launch: PickLaunch,
-  walletRaw: string | null,
-  nowMs: number = Date.now()
-): Promise<PartnerMintGroupPick & { max_from_phase?: number; block_reason?: string | null }> {
-  const wallet = walletRaw?.trim() ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
-  const phases = resolveEffectivePartnerAllowlistPhases(launch)
-  const publicOpen = isScheduledPublicMintOpen(launch, nowMs)
+  phase: PartnerAllowlistPhase
+): PartnerMintGroupPick {
+  const price_sol = partnerPhasePriceSol(phase)
+  return {
+    phase_key: phase.key,
+    phase_label: phase.label,
+    guard_group_label: publicSimpleGuardGroupLabelForLaunch(launch, phase.key),
+    from_allowlist: true,
+    price_usdc: price_sol != null ? null : phase.price_usdc ?? launch.wl_price_usdc,
+    price_sol,
+  }
+}
 
-  const publicPick = (): PartnerMintGroupPick => ({
+function publicPick(launch: PickLaunch): PartnerMintGroupPick {
+  return {
     phase_key: null,
     phase_label: null,
     guard_group_label: PUBLIC_SIMPLE_PUBLIC_GROUP_LABEL,
     from_allowlist: false,
     price_usdc: launch.public_price_usdc,
     price_sol: publicSimpleSolMintPrice(launch),
-  })
-
-  if (!wallet) {
-    const open = listOpenPartnerAllowlistPhases(launch, nowMs)
-    const phase = open[open.length - 1]?.phase
-    if (phase) {
-      const price_sol = partnerPhasePriceSol(phase)
-      return {
-        phase_key: phase.key,
-        phase_label: phase.label,
-        guard_group_label: publicSimpleGuardGroupLabelForLaunch(launch, phase.key),
-        from_allowlist: true,
-        price_usdc: price_sol != null ? null : phase.price_usdc ?? launch.wl_price_usdc,
-        price_sol,
-      }
-    }
-    return publicPick()
   }
+}
 
+/**
+ * Live mint phases this wallet can choose between right now (open allowlist with spots left,
+ * plus public when public is open). Empty when nothing is mintable / wallet disconnected.
+ */
+export async function listPartnerMintPhaseChoicesForWallet(
+  launch: PickLaunch,
+  walletRaw: string | null,
+  nowMs: number = Date.now()
+): Promise<SimpleMintSelectablePhase[]> {
+  const wallet = walletRaw?.trim() ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
+  if (!wallet) return []
+
+  const out: SimpleMintSelectablePhase[] = []
   const openPhases = listOpenPartnerAllowlistPhases(launch, nowMs)
   for (const { phase, index } of openPhases) {
     const elig = await walletEligibleForOpenPhase(launch, wallet, phase, index, nowMs)
-    if (elig.ok && elig.remaining > 0) {
-      const price_sol = partnerPhasePriceSol(phase)
+    if (!elig.ok || elig.remaining <= 0) continue
+    out.push({
+      key: phase.key,
+      label: phase.label,
+      from_allowlist: true,
+      remaining: elig.remaining,
+      price_usdc: partnerPhasePriceSol(phase) != null ? null : phase.price_usdc ?? launch.wl_price_usdc,
+      price_sol: partnerPhasePriceSol(phase),
+    })
+  }
+
+  if (isScheduledPublicMintOpen(launch, nowMs)) {
+    out.push({
+      key: PARTNER_MINT_PUBLIC_PHASE_KEY,
+      label: 'Public',
+      from_allowlist: false,
+      remaining: null,
+      price_usdc: publicSimpleSolMintPrice(launch) != null ? null : launch.public_price_usdc,
+      price_sol: publicSimpleSolMintPrice(launch),
+    })
+  }
+
+  return out
+}
+
+/**
+ * Per-wallet guard group: open WL phase with allocation left, else public when public is open.
+ * When `preferredPhaseKey` is set (`wl`, `public`, …), evaluate that phase exactly
+ * (so buyers can pick Public while still holding WL spots).
+ */
+export async function resolvePartnerMintGroupForWallet(
+  launch: PickLaunch,
+  walletRaw: string | null,
+  nowMs: number = Date.now(),
+  opts?: { preferredPhaseKey?: string | null }
+): Promise<PartnerMintGroupPick & { max_from_phase?: number; block_reason?: string | null }> {
+  const wallet = walletRaw?.trim() ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
+  const publicOpen = isScheduledPublicMintOpen(launch, nowMs)
+  const preferred = normalizePartnerMintPhasePreference(opts?.preferredPhaseKey)
+
+  if (!wallet) {
+    if (preferred === PARTNER_MINT_PUBLIC_PHASE_KEY) {
+      return publicPick(launch)
+    }
+    const open = listOpenPartnerAllowlistPhases(launch, nowMs)
+    if (preferred) {
+      const hit = open.find(({ phase }) => phase.key === preferred)
+      if (hit) return allowlistPick(launch, hit.phase)
+    }
+    const phase = open[open.length - 1]?.phase
+    if (phase) return allowlistPick(launch, phase)
+    return publicPick(launch)
+  }
+
+  const openPhases = listOpenPartnerAllowlistPhases(launch, nowMs)
+
+  if (preferred === PARTNER_MINT_PUBLIC_PHASE_KEY) {
+    if (publicOpen) {
+      return { ...publicPick(launch), max_from_phase: undefined }
+    }
+    return {
+      ...publicPick(launch),
+      guard_group_label: publicSimpleMintGuardGroupLabel(launch, null) ?? PUBLIC_SIMPLE_PUBLIC_GROUP_LABEL,
+      block_reason: 'public_not_open',
+    }
+  }
+
+  if (preferred) {
+    const hit = openPhases.find(({ phase }) => phase.key === preferred)
+    if (hit) {
+      const elig = await walletEligibleForOpenPhase(launch, wallet, hit.phase, hit.index, nowMs)
       return {
-        phase_key: phase.key,
-        phase_label: phase.label,
-        guard_group_label: publicSimpleGuardGroupLabelForLaunch(launch, phase.key),
-        from_allowlist: true,
-        price_usdc: price_sol != null ? null : phase.price_usdc ?? launch.wl_price_usdc,
-        price_sol,
+        ...allowlistPick(launch, hit.phase),
+        max_from_phase: elig.ok ? elig.remaining : 0,
+        block_reason: elig.ok && elig.remaining > 0 ? null : elig.ok ? 'allowlist_exhausted' : elig.reason,
+      }
+    }
+    const configured = resolveEffectivePartnerAllowlistPhases(launch).find((p) => p.key === preferred)
+    return {
+      phase_key: preferred,
+      phase_label: configured?.label ?? preferred,
+      guard_group_label: publicSimpleGuardGroupLabelForLaunch(launch, preferred),
+      from_allowlist: true,
+      price_usdc: configured
+        ? partnerPhasePriceSol(configured) != null
+          ? null
+          : configured.price_usdc ?? launch.wl_price_usdc
+        : launch.wl_price_usdc,
+      price_sol: configured ? partnerPhasePriceSol(configured) : null,
+      max_from_phase: 0,
+      block_reason: 'phase_closed',
+    }
+  }
+
+  for (const { phase, index } of openPhases) {
+    const elig = await walletEligibleForOpenPhase(launch, wallet, phase, index, nowMs)
+    if (elig.ok && elig.remaining > 0) {
+      return {
+        ...allowlistPick(launch, phase),
         max_from_phase: elig.remaining,
       }
     }
   }
 
   if (publicOpen) {
-    return { ...publicPick(), max_from_phase: undefined }
+    return { ...publicPick(launch), max_from_phase: undefined }
   }
 
   return {
-    ...publicPick(),
+    ...publicPick(launch),
     from_allowlist: false,
     guard_group_label: publicSimpleMintGuardGroupLabel(launch, null) ?? PUBLIC_SIMPLE_PUBLIC_GROUP_LABEL,
     block_reason: openPhases.length > 0 ? 'not_on_allowlist' : 'public_not_open',

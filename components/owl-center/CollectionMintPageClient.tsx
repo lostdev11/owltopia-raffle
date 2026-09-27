@@ -41,10 +41,12 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
   const { sessionWallet } = useSiwsSession()
   const { publicKey, connected } = useWallet()
   const walletStr = publicKey?.toBase58() ?? null
+  const [selectedPhaseKey, setSelectedPhaseKey] = useState<string | null>(null)
   const { elig, loading: eligLoading, error: eligError, refresh: refreshElig } = useCollectionMintEligibility(
     slug,
     walletStr,
-    connected
+    connected,
+    selectedPhaseKey
   )
   const [state, setState] = useState<CollectionMintStateResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -52,6 +54,25 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
   const [myMints, setMyMints] = useState<string[]>([])
   const [myMintsLoading, setMyMintsLoading] = useState(false)
   const [phaseBadgeLabel, setPhaseBadgeLabel] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!connected) setSelectedPhaseKey(null)
+  }, [connected])
+
+  useEffect(() => {
+    if (!selectedPhaseKey) return
+    const keys = elig?.selectable_phases?.map((p) => p.key) ?? []
+    if (keys.length > 0 && !keys.includes(selectedPhaseKey)) {
+      setSelectedPhaseKey(null)
+    }
+  }, [elig?.selectable_phases, selectedPhaseKey])
+
+  const selectableKeys = elig?.selectable_phases?.map((p) => p.key) ?? []
+  const displaySelectedPhase =
+    selectedPhaseKey && selectableKeys.includes(selectedPhaseKey)
+      ? selectedPhaseKey
+      : elig?.active_allowlist_key ??
+        (selectableKeys.includes('public') ? 'public' : selectableKeys[0] ?? null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -261,6 +282,9 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
             launch={launch}
             liveUnitLamports={elig?.unit_lamports_estimate}
             phaseChecks={elig?.allowlist_phase_checks}
+            selectableKeys={selectableKeys}
+            selectedKey={displaySelectedPhase}
+            onSelectPhase={setSelectedPhaseKey}
           />
           <CollectionMintEligibilityCard
             connected={connected}
@@ -275,6 +299,8 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
             launch={launch}
             remaining={supply.remaining}
             mintControls={mint_controls}
+            selectedPhaseKey={selectedPhaseKey}
+            onSelectPhase={setSelectedPhaseKey}
             onRefresh={() => {
               void load()
               void loadMyMints()

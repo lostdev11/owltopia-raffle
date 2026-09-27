@@ -74,12 +74,17 @@ export function CollectionMintPanel({
   remaining,
   mintControls,
   onRefresh,
+  selectedPhaseKey = null,
+  onSelectPhase,
 }: {
   slug: string
   launch: OwlCenterLaunchPublic
   remaining: number
   mintControls: OwlCenterMintControls
   onRefresh: () => void
+  /** Buyer-selected phase key when multiple are live (`wl`, `public`, …). */
+  selectedPhaseKey?: string | null
+  onSelectPhase?: (key: string) => void
 }) {
   const { publicKey, connected, wallet } = useWallet()
   const walletStr = publicKey?.toBase58() ?? null
@@ -88,7 +93,7 @@ export function CollectionMintPanel({
 
   const [qtyText, setQtyText] = useState('1')
   const { elig, loading: eligLoading, error: eligError, refresh: loadElig, applyMinted } =
-    useCollectionMintEligibility(slug, walletStr, connected)
+    useCollectionMintEligibility(slug, walletStr, connected, selectedPhaseKey)
   const [step, setStep] = useState<MintUiStep>('idle')
   const [err, setErr] = useState<string | null>(null)
   const [lastSig, setLastSig] = useState<string | null>(null)
@@ -546,6 +551,43 @@ export function CollectionMintPanel({
             ) : (
               <p className="text-sm text-[#C5D0D8]">{elig?.reason ?? (elig?.is_eligible ? 'Eligible to mint' : '—')}</p>
             )}
+
+            {connected && (elig?.selectable_phases?.length ?? 0) > 1 && onSelectPhase ? (
+              <div className="space-y-2">
+                <p className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">
+                  Choose mint phase — {elig!.selectable_phases.length} are live for you right now
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {elig!.selectable_phases.map((p) => {
+                    const activeKey = selectedPhaseKey ?? elig?.active_allowlist_key ?? 'public'
+                    const active = p.key === activeKey
+                    return (
+                      <button
+                        key={p.key}
+                        type="button"
+                        onClick={() => onSelectPhase(p.key)}
+                        aria-pressed={active}
+                        className={`inline-flex min-h-[44px] touch-manipulation flex-col items-start justify-center gap-0.5 border px-3 py-1.5 text-left transition-colors ${
+                          active
+                            ? 'border-[#00FF9C]/60 bg-[#00FF9C]/10 text-[#00FF9C]'
+                            : 'border-[#1A222B] bg-[#0F1419] text-[#9BA8B4] hover:border-[#00FF9C]/35'
+                        }`}
+                      >
+                        <span className="font-mono text-xs font-bold uppercase tracking-widest">{p.label}</span>
+                        <span className="font-mono text-[10px] tracking-wide">
+                          {p.price_sol != null && p.price_sol > 0
+                            ? `${p.price_sol} SOL`
+                            : p.price_usdc != null && p.price_usdc > 0
+                              ? `$${p.price_usdc} USDC`
+                              : 'Free'}
+                          {p.remaining != null ? ` · up to ${p.remaining}` : ''}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : null}
 
             {connected && elig?.is_eligible && maxQ > 1 ? (
               <MintQuantityInput max={maxQ} value={qtyText} onChange={setQtyText} />
