@@ -7,6 +7,7 @@ import { StatusBadge } from '@/components/owl-center/StatusBadge'
 import {
   launchCollectionCtaLabel,
   launchPublicPhaseBadgeLabel,
+  isLaunchStatusBadgeRedundant,
 } from '@/lib/owl-center/launch-mint-open'
 import type { OwlCenterLaunchPublic } from '@/lib/owl-center/types'
 
@@ -24,9 +25,11 @@ export function CollectionCardBadges({
     setScheduledPublicLabel(launchPublicPhaseBadgeLabel(launch))
   }, [launch])
 
+  const hideStatus = isLaunchStatusBadgeRedundant(launch, scheduledPublicLabel)
+
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <StatusBadge status={launch.status} />
+      {hideStatus ? null : <StatusBadge status={launch.status} />}
       <PhaseBadge
         phase={launch.active_phase}
         pulse={launch.active_phase === 'PRESALE' && !presaleSoldOut}

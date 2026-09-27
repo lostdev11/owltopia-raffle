@@ -24,7 +24,7 @@ import { useOwlCenterView } from '@/components/owl-center/OwlCenterViewProvider'
 import { useSiwsSession } from '@/hooks/use-siws-session'
 import { walletsEqualSolana } from '@/lib/solana/normalize-wallet'
 import { useCollectionMintEligibility } from '@/hooks/use-collection-mint-eligibility'
-import { launchPublicPhaseBadgeLabel } from '@/lib/owl-center/launch-mint-open'
+import { launchPublicPhaseBadgeLabel, isLaunchStatusBadgeRedundant } from '@/lib/owl-center/launch-mint-open'
 import type { CollectionMintStateResponse } from '@/lib/owl-center/types'
 
 function SectionHeading({ id, title, hint }: { id: string; title: string; hint?: string }) {
@@ -146,7 +146,9 @@ export function CollectionMintPageClient({ slug, launchName }: { slug: string; l
       subtitle={launch.description ?? `Public mint on Solana (${mint_network})`}
     >
       <div className="mb-6 flex flex-wrap items-center gap-2">
-        <StatusBadge status={launch.status} />
+        {isLaunchStatusBadgeRedundant(launch, phaseBadgeLabel) ? null : (
+          <StatusBadge status={launch.status} />
+        )}
         <PhaseBadge phase={launch.active_phase} overrideLabel={phaseBadgeLabel} />
         <span className="font-mono text-[10px] uppercase tracking-widest text-[#5C6773]">{mint_network}</span>
       </div>

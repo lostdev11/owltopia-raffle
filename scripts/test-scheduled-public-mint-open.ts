@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {
   isLaunchPublicMintOpenNow,
+  isLaunchStatusBadgeRedundant,
   launchCollectionCtaLabel,
   launchPublicPhaseBadgeLabel,
   launchScheduledPublicReason,
@@ -33,6 +34,28 @@ assert.equal(isLaunchPublicMintOpenNow(scheduled), false)
 assert.match(launchCollectionCtaLabel(scheduled), /^Opens /)
 assert.match(String(launchPublicPhaseBadgeLabel(scheduled)), /opens/i)
 assert.match(String(launchScheduledPublicReason(scheduled)), /opens/i)
+
+// Hub card was showing bordered PUBLIC + filled "PUBLIC · opens …" — hide the status chip.
+assert.equal(
+  isLaunchStatusBadgeRedundant(scheduled, launchPublicPhaseBadgeLabel(scheduled)),
+  true,
+  'scheduled public should not double-print PUBLIC'
+)
+assert.equal(
+  isLaunchStatusBadgeRedundant({ status: 'PUBLIC', active_phase: 'PUBLIC' }, null),
+  true,
+  'open public status+phase both say Public'
+)
+assert.equal(
+  isLaunchStatusBadgeRedundant({ status: 'PUBLIC', active_phase: 'WHITELIST' }, null),
+  false,
+  'PUBLIC status beside WL phase stays useful'
+)
+assert.equal(
+  isLaunchStatusBadgeRedundant({ status: 'WHITELIST', active_phase: 'WHITELIST' }, null),
+  false,
+  'status WHITELIST vs phase label WL are different words — keep both'
+)
 
 const open = {
   ...scheduled,
