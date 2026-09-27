@@ -4,7 +4,16 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { SimpleMintEligibilityResponse } from '@/lib/owl-center/types'
 
-export function useCollectionMintEligibility(slug: string, wallet: string | null, connected: boolean) {
+/**
+ * @param selectedPhaseKey When multiple phases are live concurrently, the phase the user chose
+ * (`wl`, `public`, …). Eligibility is then computed for that exact phase. Omit/null for auto-pick.
+ */
+export function useCollectionMintEligibility(
+  slug: string,
+  wallet: string | null,
+  connected: boolean,
+  selectedPhaseKey?: string | null
+) {
   const [elig, setElig] = useState<SimpleMintEligibilityResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -13,7 +22,10 @@ export function useCollectionMintEligibility(slug: string, wallet: string | null
     if (!opts?.background) setLoading(true)
     setError(null)
     try {
-      const qs = wallet ? `?wallet=${encodeURIComponent(wallet)}` : ''
+      const params = new URLSearchParams()
+      if (wallet) params.set('wallet', wallet)
+      if (selectedPhaseKey) params.set('phase', selectedPhaseKey)
+      const qs = params.toString() ? `?${params.toString()}` : ''
       const res = await fetch(`/api/owl-center/collections/${encodeURIComponent(slug)}/eligibility${qs}`, {
         cache: 'no-store',
       })
@@ -25,7 +37,7 @@ export function useCollectionMintEligibility(slug: string, wallet: string | null
     } finally {
       setLoading(false)
     }
-  }, [slug, wallet])
+  }, [slug, wallet, selectedPhaseKey])
 
   useEffect(() => {
     if (!connected && !wallet) {
@@ -49,6 +61,12 @@ export function useCollectionMintEligibility(slug: string, wallet: string | null
       if (!prev) return prev
       const nextMax = Math.max(0, prev.max_mintable - debit)
       const nextMinted = prev.wallet_minted + debit
+      const nextSelectable = (prev.selectable_phases ?? []).map((p) => {
+        if (p.key === (prev.active_allowlist_key ?? 'public') && p.remaining != null) {
+          return { ...p, remaining: Math.max(0, p.remaining - debit) }
+        }
+        return p
+      }).filter((p) => p.from_allowlist === false || (p.remaining != null && p.remaining > 0))
       return {
         ...prev,
         max_mintable: nextMax,
@@ -58,6 +76,7 @@ export function useCollectionMintEligibility(slug: string, wallet: string | null
           nextMax > 0
             ? prev.reason
             : `Wallet limit reached (${prev.wallet_mint_limit} from this phase — not total NFTs in wallet)`,
+        selectable_phases: nextSelectable,
       }
     })
   }, [])

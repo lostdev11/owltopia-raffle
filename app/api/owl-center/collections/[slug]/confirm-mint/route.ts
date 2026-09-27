@@ -96,7 +96,14 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     )
   }
 
-  const groupPick = wallet ? await resolvePartnerMintGroupForWallet(launch, wallet) : null
+  const preferredPhaseKey =
+    body.allowlist_phase_key?.trim() ||
+    (body.guard_group_label?.trim() === 'pub' || body.guard_group_label?.trim() === 'public'
+      ? 'public'
+      : null)
+  const groupPick = wallet
+    ? await resolvePartnerMintGroupForWallet(launch, wallet, Date.now(), { preferredPhaseKey })
+    : null
   const expectedGuardGroup =
     body.guard_group_label?.trim() ||
     groupPick?.guard_group_label ||
@@ -133,7 +140,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
     ? body.mintedNftMints.filter((x): x is string => typeof x === 'string' && x.length > 0)
     : []
 
-  const eligibilityPre = await buildSimpleMintEligibility(launch.slug, wallet, { skipChainReconcile: true })
+  const eligibilityPre = await buildSimpleMintEligibility(launch.slug, wallet, {
+    skipChainReconcile: true,
+    preferredPhaseKey,
+  })
   if (!eligibilityPre) return NextResponse.json({ error: 'Launch not found' }, { status: 404 })
   if (eligibilityPre.active_phase !== phase) {
     return NextResponse.json({ error: 'Phase mismatch — refresh and try again' }, { status: 400 })
@@ -277,7 +287,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ sl
   }
 
   const [eligibility, launchPublic] = await Promise.all([
-    buildSimpleMintEligibility(launch.slug, wallet, { skipChainReconcile: true }),
+    buildSimpleMintEligibility(launch.slug, wallet, { skipChainReconcile: true, preferredPhaseKey }),
     getOwlCenterLaunchBySlug(launch.slug),
   ])
 

@@ -186,6 +186,20 @@ export type SimpleMintAllowlistPhaseCheck = {
   used_mints: number | null
 }
 
+/**
+ * Live mint phases the connected wallet can choose between (allowlist with spots left + public
+ * when open). Empty when fewer than two options — UI hides the picker.
+ */
+export type SimpleMintSelectablePhase = {
+  key: string
+  label: string
+  from_allowlist: boolean
+  /** Spots left in this allowlist phase; null for public (computed when selected). */
+  remaining: number | null
+  price_usdc: number | null
+  price_sol: number | null
+}
+
 export type SimpleMintEligibilityResponse = {
   active_phase: OwlCenterPhase
   status: OwlCenterStatus
@@ -240,6 +254,11 @@ export type SimpleMintEligibilityResponse = {
    * even before a phase opens (buyers can confirm “wallet in phase”).
    */
   allowlist_phase_checks: SimpleMintAllowlistPhaseCheck[]
+  /**
+   * Concurrent live phases this wallet can mint in right now (WL spots + public).
+   * Powers the phase picker when length > 1.
+   */
+  selectable_phases: SimpleMintSelectablePhase[]
 }
 
 export type CollectionMintStateResponse = {

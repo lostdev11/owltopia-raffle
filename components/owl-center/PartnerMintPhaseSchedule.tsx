@@ -55,12 +55,21 @@ export function PartnerMintPhaseSchedule({
   launch,
   liveUnitLamports,
   phaseChecks = [],
+  selectableKeys,
+  selectedKey,
+  onSelectPhase,
 }: {
   launch: OwlCenterLaunchPublic
   /** Lamports quote for the currently active phase (from eligibility). */
   liveUnitLamports?: string | null
   /** Soft-allowlist membership per phase — shows ✓ when wallet is on that list. */
   phaseChecks?: SimpleMintAllowlistPhaseCheck[]
+  /** Phase keys the connected wallet can mint in right now (`wl`, `public`, …). */
+  selectableKeys?: string[]
+  /** Currently selected mint phase key. */
+  selectedKey?: string | null
+  /** Called when the buyer taps a selectable live phase. */
+  onSelectPhase?: (key: string) => void
 }) {
   const [nowMs, setNowMs] = useState<number | null>(null)
   const timeMode = useMintTimeZoneMode()
@@ -79,6 +88,8 @@ export function PartnerMintPhaseSchedule({
     for (const c of phaseChecks) m.set(c.key, c)
     return m
   }, [phaseChecks])
+  const selectable = useMemo(() => new Set(selectableKeys ?? []), [selectableKeys])
+  const canPick = Boolean(onSelectPhase) && selectable.size > 1
 
   if (rows.length === 0) return null
 
@@ -86,7 +97,9 @@ export function PartnerMintPhaseSchedule({
     <CommandCard label="MINT // phases">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-[#5C6773]">
-          Phase schedule · limits are per phase (they stack) · WL in USDC, public in SOL or USDC
+          {canPick
+            ? 'Tap a live phase to mint in it · limits are per phase (they stack)'
+            : 'Phase schedule · limits are per phase (they stack) · WL in USDC, public in SOL or USDC'}
         </p>
         <MintTimeZoneToggle />
       </div>
@@ -95,17 +108,19 @@ export function PartnerMintPhaseSchedule({
           const tag = statusLabel(row)
           const membership = row.kind === 'allowlist' ? checkByKey.get(row.key) : undefined
           const onList = membership?.on_list === true
-          return (
-            <li
-              key={row.key}
-              className={cn(
-                'border px-3 py-3 font-mono text-xs',
-                row.is_active && 'border-[#00FF9C] bg-[#00FF9C]/12 ring-1 ring-[#00FF9C]/45',
-                !row.is_active && onList && 'border-[#00FF9C]/30 border-dashed bg-[#00FF9C]/5',
-                !row.is_active && !onList && row.status === 'upcoming' && 'border-[#1A222B] bg-[#0B0F14]',
-                !row.is_active && !onList && row.status === 'ended' && 'border-[#1A222B]/80 bg-[#0B0F14] opacity-70'
-              )}
-            >
+          const isSelectable = canPick && selectable.has(row.key)
+          const isSelected = isSelectable && selectedKey === row.key
+          const rowClass = cn(
+            'border px-3 py-3 font-mono text-xs text-left transition-colors',
+            row.is_active && 'border-[#00FF9C] bg-[#00FF9C]/12 ring-1 ring-[#00FF9C]/45',
+            !row.is_active && onList && 'border-[#00FF9C]/30 border-dashed bg-[#00FF9C]/5',
+            !row.is_active && !onList && row.status === 'upcoming' && 'border-[#1A222B] bg-[#0B0F14]',
+            !row.is_active && !onList && row.status === 'ended' && 'border-[#1A222B]/80 bg-[#0B0F14] opacity-70',
+            isSelectable && 'w-full cursor-pointer touch-manipulation hover:bg-[#00FF9C]/18',
+            isSelected && 'ring-2 ring-[#00FF9C]'
+          )
+          const body = (
+            <>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-bold uppercase tracking-widest text-[#C5D0D8]">
                   {onList ? (
@@ -125,6 +140,11 @@ export function PartnerMintPhaseSchedule({
                     <span className={cn('ml-2', row.is_active ? 'text-[#00FF9C]' : 'text-[#5C6773]')}>
                       · {tag}
                     </span>
+                  ) : null}
+                  {isSelected ? (
+                    <span className="ml-2 text-[#00FF9C]">· Selected</span>
+                  ) : isSelectable ? (
+                    <span className="ml-2 text-[#5C6773]">· Tap to select</span>
                   ) : null}
                 </span>
                 {row.wallet_mint_limit != null ? (
@@ -148,6 +168,22 @@ export function PartnerMintPhaseSchedule({
                   ? ` · your wallet: ${membership.used_mints ?? 0}/${membership.allowed_mints}`
                   : null}
               </p>
+            </>
+          )
+          return (
+            <li key={row.key}>
+              {isSelectable ? (
+                <button
+                  type="button"
+                  className={rowClass}
+                  aria-pressed={isSelected}
+                  onClick={() => onSelectPhase?.(row.key)}
+                >
+                  {body}
+                </button>
+              ) : (
+                <div className={rowClass}>{body}</div>
+              )}
             </li>
           )
         })}

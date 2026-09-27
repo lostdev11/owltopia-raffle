@@ -33,7 +33,10 @@ import { buildOwlCenterMintControls, isOwlCenterMintGloballyDisabled } from '@/l
 import { publicSimpleMintClosedInfo, isPhaseOpenBySchedule } from '@/lib/owl-center/phase-schedule'
 import { isOwlCenterPlatformMintFeeEnabled, owlCenterPlatformMintFeeUsd, formatOwlCenterPlatformMintFeeSolLabel } from '@/lib/owl-center/platform-mint-fee'
 import { getOwlCenterPlatformTreasuryWallet } from '@/lib/owl-center/platform-treasury'
-import { resolvePartnerMintGroupForWallet } from '@/lib/owl-center/partner-mint-group'
+import {
+  listPartnerMintPhaseChoicesForWallet,
+  resolvePartnerMintGroupForWallet,
+} from '@/lib/owl-center/partner-mint-group'
 import { publicSimpleMintGuardGroupLabel } from '@/lib/owl-center/public-simple-guard-plan'
 import { isScheduledPublicMintOpen } from '@/lib/owl-center/partner-phase-window'
 import { maybeReconcileLaunchMintsFromChain } from '@/lib/owl-center/reconcile-launch-mints'
@@ -152,7 +155,7 @@ async function walletPublicPhaseMintCount(
 export async function buildSimpleMintEligibility(
   slug: string,
   walletRaw: string | null,
-  opts?: { skipChainReconcile?: boolean }
+  opts?: { skipChainReconcile?: boolean; preferredPhaseKey?: string | null }
 ): Promise<SimpleMintEligibilityResponse | null> {
   let launch = await getOwlCenterLaunchBySlug(slug)
   if (!launch || launch.mint_mode !== 'public_simple') return null
@@ -178,7 +181,10 @@ export async function buildSimpleMintEligibility(
     onChainRemaining != null ? Math.min(dbRemaining, onChainRemaining) : dbRemaining
   const onChainSoldOut = onChainRemaining === 0 && dbRemaining > 0
   const wallet = walletRaw?.trim() ? normalizeSolanaWalletAddress(walletRaw.trim()) : null
-  const groupPick = await resolvePartnerMintGroupForWallet(launch, wallet)
+  const selectable_phases = await listPartnerMintPhaseChoicesForWallet(launch, wallet)
+  const groupPick = await resolvePartnerMintGroupForWallet(launch, wallet, Date.now(), {
+    preferredPhaseKey: opts?.preferredPhaseKey,
+  })
   const allowlistOpen = groupPick.from_allowlist
   const activeAllowlistPhase =
     allowlistOpen && groupPick.phase_key
@@ -457,5 +463,6 @@ export async function buildSimpleMintEligibility(
     on_allowlist,
     allowlist_spots_remaining,
     allowlist_phase_checks,
+    selectable_phases,
   }
 }
