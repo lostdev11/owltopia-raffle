@@ -3,13 +3,26 @@
  * everywhere the platform name appears (titles, metadata, footer, wallet app identity, etc.).
  */
 const raw = typeof process !== 'undefined' && process.env.NEXT_PUBLIC_PLATFORM_NAME?.trim()
-export const PLATFORM_NAME = raw || 'Owl Raffle'
+export const PLATFORM_NAME = raw || 'Owltopia'
+
+/** Public source repository (linked in footer and security disclosures). */
+export const PUBLIC_GITHUB_REPO_URL = 'https://github.com/lostdev11/owltopia-raffle'
+
+/** Official X (Twitter) profile. */
+export const OFFICIAL_X_URL = 'https://x.com/Owltopia_sol'
 
 /** Owltopia Discord invite (same link as Footer). */
 export const COMMUNITY_DISCORD_INVITE_URL = 'https://discord.gg/nRD2wyg2vq'
 
+/** Placeholder until dev dad confirms the live mailbox. */
+export const SECURITY_CONTACT_EMAIL = 'security@owltopia.xyz'
+
+/** Primary meta description for crawlers, wallets, and link previews. */
+export const SITE_META_DESCRIPTION =
+  'Owltopia is a community Solana NFT platform for transparent raffles, Owl Packs, the Owl Center launchpad, and OWL nesting (staking). Ticket payments go to published escrow addresses; you approve each transfer in your wallet.'
+
 /** Default OG/twitter alt and tagline suffix. */
-export const OG_TAGLINE = 'Trusted raffles with full transparency. Every entry verified on-chain.'
+export const OG_TAGLINE = 'Community Solana raffles, packs, launchpad, and nesting — transparent escrow flows.'
 export const OG_ALT = `${PLATFORM_NAME} - ${OG_TAGLINE}`
 
 /**

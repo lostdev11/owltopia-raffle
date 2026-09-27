@@ -10,6 +10,7 @@ import {
   DEFAULT_OG_IMAGE_TYPE,
   getSiteBaseUrl,
   getDefaultOgImageAbsoluteUrl,
+  SITE_META_DESCRIPTION,
 } from '@/lib/site-config'
 import { WalletContextProvider } from '@/components/WalletProvider'
 import { CartProvider } from '@/components/cart/CartProvider'
@@ -63,7 +64,7 @@ export const viewport = {
 
 const SITE_BASE = getSiteBaseUrl()
 const OG_IMAGE_URL = getDefaultOgImageAbsoluteUrl()
-const OG_DESCRIPTION = `Trusted raffles with full transparency. Every entry verified on-chain. ${SITE_BASE}`
+const OG_DESCRIPTION = SITE_META_DESCRIPTION
 
 // Default to production URL so link previews (OG/Twitter/Discord) work when sharing any page
 export const metadata: Metadata = {

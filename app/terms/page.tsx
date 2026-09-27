@@ -9,27 +9,29 @@ import {
   DEFAULT_OG_IMAGE_TYPE,
   getSiteBaseUrl,
   getDefaultOgImageAbsoluteUrl,
+  SITE_META_DESCRIPTION,
 } from '@/lib/site-config'
+import { StaticPublicFooter } from '@/components/static/StaticPublicFooter'
 
 const SITE_URL = getSiteBaseUrl()
 const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
 
 export const metadata: Metadata = {
   title: `Terms of Service | ${PLATFORM_NAME}`,
-  description: `Terms of Service for ${PLATFORM_NAME} platform.`,
+  description: `Terms of Service for ${PLATFORM_NAME}. ${SITE_META_DESCRIPTION}`,
   alternates: { canonical: `${SITE_URL}/terms` },
   openGraph: {
     type: 'website',
     url: `${SITE_URL}/terms`,
     siteName: PLATFORM_NAME,
     title: `Terms of Service | ${PLATFORM_NAME}`,
-    description: `Terms of Service for ${PLATFORM_NAME} platform.`,
+    description: `Terms of Service for ${PLATFORM_NAME}. ${SITE_META_DESCRIPTION}`,
     images: [{ url: OG_IMAGE, ...DEFAULT_OG_IMAGE_DIMS, alt: OG_ALT, type: DEFAULT_OG_IMAGE_TYPE }],
   },
   twitter: {
     card: 'summary_large_image',
     title: `Terms of Service | ${PLATFORM_NAME}`,
-    description: `Terms of Service for ${PLATFORM_NAME} platform.`,
+    description: `Terms of Service for ${PLATFORM_NAME}. ${SITE_META_DESCRIPTION}`,
     images: [{ url: OG_IMAGE, alt: OG_ALT, ...DEFAULT_OG_IMAGE_DIMS }],
   },
 }
@@ -276,6 +278,7 @@ export default function TermsPage() {
           </p>
         </section>
       </div>
+      <StaticPublicFooter />
     </div>
   )
 }

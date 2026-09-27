@@ -49,15 +49,13 @@ Conclusion: this is an **OKX-proprietary** flag (false positive relative to the 
 
 Code changes cannot remove OKX’s client-side block. Do this:
 
-1. On the OKX interstitial, use **Report that this site doesn’t contain threats** (false-positive report) for `https://www.owltopia.xyz`.
-2. Contact OKX Web3 / safety support with the exact origin and a short legitimacy pack:
-   - Production URL: `https://www.owltopia.xyz`
-   - Example path that was flagged (if any)
-   - Domain registration + Vercel hosting
-   - Discord / X / docs proving the project
-   - Note that major public blocklists are clean
-   - Email historically used for security reports: `safety@okx.com` (confirm current channel via [OKX Support](https://www.okx.com/help) / Web3 FAQ)
-3. Ask the reporting user to confirm **OKX Wallet** is the extension (chrome://extensions or the wallet’s own settings). If they only run Phantom, they are looking at a different warning — see [`PHANTOM_DOMAIN_REVIEW.md`](PHANTOM_DOMAIN_REVIEW.md).
+1. **Blockaid (OKX Wallet’s common vendor)** — submit a false positive:
+   - Mistake / false positive form: [https://report.blockaid.io/mistake](https://report.blockaid.io/mistake)
+   - Verified project (legitimacy pack): [https://report.blockaid.io/verifiedProject](https://report.blockaid.io/verifiedProject)
+   - Include production origin `https://www.owltopia.xyz`, public GitHub, X, Discord, and note that GoPlus / MetaMask / Phantom / ScamSniffer lists are clean.
+2. **OKX Wallet interstitial** — on the warning page, use **Report that this site doesn’t contain threats** (wording may vary by build).
+3. **OKX safety email** — `safety@okx.com` with the same legitimacy pack (confirm current channel via [OKX Support](https://www.okx.com/help) / Web3 FAQ if needed).
+4. Ask the reporting user to confirm **OKX Wallet** is the extension (chrome://extensions or the wallet’s own settings). If they only run Phantom, they are looking at a different warning — see [`PHANTOM_DOMAIN_REVIEW.md`](PHANTOM_DOMAIN_REVIEW.md).
 
 Optional hygiene (may help heuristics over time; will not instantly unblock):
 

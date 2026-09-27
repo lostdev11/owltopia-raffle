@@ -289,7 +289,10 @@ export function WalletContextProvider({ children }: WalletContextProviderProps) 
     }
   }, [])
 
-  if (!ready) {
+  // SSR and non-JS crawlers must receive real page HTML (terms, landing copy, etc.).
+  // Client-only: keep the short wallet-ready gate so extensions inject before autoConnect.
+  const isServer = typeof window === 'undefined'
+  if (!ready && !isServer) {
     return (
       <div className="min-h-screen flex flex-col bg-black" aria-busy="true" aria-label="Loading">
         <div className="flex-1 flex items-center justify-center">

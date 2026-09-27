@@ -12,6 +12,7 @@ import {
   getSiteBaseUrl,
   getDefaultOgImageAbsoluteUrl,
 } from '@/lib/site-config'
+import { StaticPublicFooter } from '@/components/static/StaticPublicFooter'
 
 const SITE_URL = getSiteBaseUrl()
 const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
@@ -259,6 +260,7 @@ export default function HowItWorksPage() {
           </p>
         </section>
       </div>
+      <StaticPublicFooter />
     </div>
   )
 }
