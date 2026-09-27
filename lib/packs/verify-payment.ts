@@ -60,6 +60,7 @@ export async function verifyPackPayment(input: {
   buyerWallet: string
   expectedSol?: number
   connection?: Connection
+  exactQuote?: boolean
 }): Promise<PackPaymentVerifyResult> {
   const vault = getPacksVaultPublicKey()
   if (!vault) {
@@ -128,17 +129,32 @@ export async function verifyPackPayment(input: {
   const buyerDecrease =
     (tx.meta.preBalances[buyerIndex]! - tx.meta.postBalances[buyerIndex]!) / LAMPORTS_PER_SOL
 
-  if (vaultIncrease + SOL_TOLERANCE < expectedSol) {
-    return {
-      ok: false,
-      error: `Vault received ${vaultIncrease.toFixed(6)} SOL; expected ${expectedSol} SOL`,
+  if (input.exactQuote) {
+    if (Math.abs(vaultIncrease - expectedSol) > SOL_TOLERANCE) {
+      return {
+        ok: false,
+        error: 'Payment does not match this open SOL checkout quote',
+      }
     }
-  }
+    if (Math.abs(buyerDecrease - expectedSol) > SOL_TOLERANCE) {
+      return {
+        ok: false,
+        error: 'Buyer SOL spend does not match this open checkout quote',
+      }
+    }
+  } else {
+    if (vaultIncrease + SOL_TOLERANCE < expectedSol) {
+      return {
+        ok: false,
+        error: `Vault received ${vaultIncrease.toFixed(6)} SOL; expected ${expectedSol} SOL`,
+      }
+    }
 
-  if (buyerDecrease + SOL_TOLERANCE < expectedSol) {
-    return {
-      ok: false,
-      error: `Buyer spend ${buyerDecrease.toFixed(6)} SOL below pack price`,
+    if (buyerDecrease + SOL_TOLERANCE < expectedSol) {
+      return {
+        ok: false,
+        error: `Buyer spend ${buyerDecrease.toFixed(6)} SOL below pack price`,
+      }
     }
   }
 
@@ -153,12 +169,27 @@ export async function verifyPackPayment(input: {
 /**
  * Verify OWL pack checkout: vault receives ≥ expected OWL + ≥ expected SOL fee.
  */
+/** Exact OWL checkout quote match (used when one buyer has several pending opens). */
+export function packOwlPaymentMatchesExactQuote(input: {
+  vaultOwlDeltaRaw: bigint
+  vaultSolFeeReceivedSol: number
+  expectedOwl: number
+  expectedFeeSol: number
+  owlDecimals: number
+}): boolean {
+  const expectedRaw = owlUiToRawBigint(input.expectedOwl, input.owlDecimals)
+  if (input.vaultOwlDeltaRaw !== expectedRaw) return false
+  return Math.abs(input.vaultSolFeeReceivedSol - input.expectedFeeSol) <= SOL_TOLERANCE
+}
+
 export async function verifyPackOwlPayment(input: {
   signature: string
   buyerWallet: string
   expectedOwl?: number
   expectedFeeSol: number
   connection?: Connection
+  /** Reconcile: fee and OWL must match this open's quote exactly (not merely ≥). */
+  exactQuote?: boolean
 }): Promise<PackPaymentVerifyResult> {
   const vault = getPacksVaultPublicKey()
   if (!vault) {
@@ -234,13 +265,6 @@ export async function verifyPackOwlPayment(input: {
   const vaultSolIncrease =
     (tx.meta.postBalances[vaultIndex]! - tx.meta.preBalances[vaultIndex]!) / LAMPORTS_PER_SOL
 
-  if (vaultSolIncrease + SOL_TOLERANCE < input.expectedFeeSol) {
-    return {
-      ok: false,
-      error: `Vault received ${vaultSolIncrease.toFixed(6)} SOL fee; expected ${input.expectedFeeSol.toFixed(6)} SOL`,
-    }
-  }
-
   const vaultOwlDelta = packTokenBalanceDeltaForOwnerMint(
     tx.meta.preTokenBalances as TokenBalanceRow[] | null | undefined,
     tx.meta.postTokenBalances as TokenBalanceRow[] | null | undefined,
@@ -248,11 +272,35 @@ export async function verifyPackOwlPayment(input: {
     owl.mintAddress
   )
 
-  if (vaultOwlDelta < expectedOwlRaw) {
-    const got = Number(vaultOwlDelta) / 10 ** owl.decimals
-    return {
-      ok: false,
-      error: `Vault received ${got} $OWL; expected ${expectedOwl} $OWL`,
+  if (input.exactQuote) {
+    if (
+      !packOwlPaymentMatchesExactQuote({
+        vaultOwlDeltaRaw: vaultOwlDelta,
+        vaultSolFeeReceivedSol: vaultSolIncrease,
+        expectedOwl,
+        expectedFeeSol: input.expectedFeeSol,
+        owlDecimals: owl.decimals,
+      })
+    ) {
+      return {
+        ok: false,
+        error: 'Payment does not match this open OWL checkout quote',
+      }
+    }
+  } else {
+    if (vaultSolIncrease + SOL_TOLERANCE < input.expectedFeeSol) {
+      return {
+        ok: false,
+        error: `Vault received ${vaultSolIncrease.toFixed(6)} SOL fee; expected ${input.expectedFeeSol.toFixed(6)} SOL`,
+      }
+    }
+
+    if (vaultOwlDelta < expectedOwlRaw) {
+      const got = Number(vaultOwlDelta) / 10 ** owl.decimals
+      return {
+        ok: false,
+        error: `Vault received ${got} $OWL; expected ${expectedOwl} $OWL`,
+      }
     }
   }
 
