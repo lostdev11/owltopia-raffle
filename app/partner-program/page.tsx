@@ -22,7 +22,6 @@ import {
   PLATFORM_NAME,
   getSiteBaseUrl,
 } from '@/lib/site-config'
-import { StaticPublicFooter } from '@/components/static/StaticPublicFooter'
 import { PARTNER_COMMUNITY_FEE_BPS, STANDARD_FEE_BPS } from '@/lib/config/raffles'
 import { PARTNER_PRO_SETUP_USD } from '@/lib/config/partner-program-pricing'
 import {
@@ -345,7 +344,6 @@ export default function PartnerProgramPage() {
           </Button>
         </section>
       </div>
-      <StaticPublicFooter />
     </div>
   )
 }

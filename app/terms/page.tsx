@@ -11,7 +11,6 @@ import {
   getDefaultOgImageAbsoluteUrl,
   SITE_META_DESCRIPTION,
 } from '@/lib/site-config'
-import { StaticPublicFooter } from '@/components/static/StaticPublicFooter'
 
 const SITE_URL = getSiteBaseUrl()
 const OG_IMAGE = getDefaultOgImageAbsoluteUrl()
@@ -278,7 +277,6 @@ export default function TermsPage() {
           </p>
         </section>
       </div>
-      <StaticPublicFooter />
     </div>
   )
 }

@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
 import { EnterOwlTopia } from '@/components/EnterOwlTopia'
-import { StaticLandingAbout } from '@/components/static/StaticLandingAbout'
 import {
   PLATFORM_NAME,
   OG_ALT,
@@ -35,10 +34,5 @@ export const metadata: Metadata = {
 }
 
 export default function Home() {
-  return (
-    <>
-      <EnterOwlTopia />
-      <StaticLandingAbout />
-    </>
-  )
+  return <EnterOwlTopia />
 }

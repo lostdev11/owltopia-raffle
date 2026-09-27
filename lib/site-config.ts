@@ -5,12 +5,6 @@
 const raw = typeof process !== 'undefined' && process.env.NEXT_PUBLIC_PLATFORM_NAME?.trim()
 export const PLATFORM_NAME = raw || 'Owltopia'
 
-/** Public source repository (linked in footer and security disclosures). */
-export const PUBLIC_GITHUB_REPO_URL = 'https://github.com/lostdev11/owltopia-raffle'
-
-/** Official X (Twitter) profile. */
-export const OFFICIAL_X_URL = 'https://x.com/Owltopia_sol'
-
 /** Owltopia Discord invite (same link as Footer). */
 export const COMMUNITY_DISCORD_INVITE_URL = 'https://discord.gg/nRD2wyg2vq'
 
