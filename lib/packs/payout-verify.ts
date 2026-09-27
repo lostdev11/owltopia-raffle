@@ -10,8 +10,10 @@ import { getSolanaReadConnection } from '@/lib/solana/connection'
 import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 import { getTokenInfo } from '@/lib/tokens'
 import { withPackSolanaRpcRetry } from '@/lib/packs/rpc-retry'
+import { packTokenBalanceDeltaForOwnerMint } from '@/lib/packs/verify-payment'
 import type { PackOpenRow } from '@/lib/packs/types'
 import { solToLamports } from '@/lib/packs/config'
+import { PACK_OWL_DECIMALS, isPackOwlMintAddress } from '@/lib/packs/owl-pack-mint'
 
 const CONFIRM_POLL_MS = 1_500
 
@@ -65,34 +67,41 @@ async function recipientHoldsNftMint(
   })
 }
 
-async function recipientReceivedOwl(
-  recipientWallet: string,
+type TokenBalanceRow = {
+  mint: string
+  owner?: string
+  uiTokenAmount?: { amount?: string } | null
+}
+
+async function recipientReceivedOwlFromPayoutSignature(input: {
+  payoutSignature: string
+  recipientWallet: string
   minUiAmount: number
-): Promise<boolean> {
+}): Promise<boolean> {
   const owl = getTokenInfo('OWL')
-  if (!owl.mintAddress || !(minUiAmount > 0)) return false
+  if (!owl.mintAddress || !(input.minUiAmount > 0)) return false
+  const decimals = isPackOwlMintAddress(owl.mintAddress)
+    ? PACK_OWL_DECIMALS
+    : owl.decimals
+  const minRaw = BigInt(Math.floor(input.minUiAmount * 10 ** decimals * 0.999))
   const connection = getSolanaReadConnection()
-  const owner = new PublicKey(recipientWallet.trim())
-  const mint = new PublicKey(owl.mintAddress)
-  const minRaw = BigInt(Math.floor(minUiAmount * 10 ** owl.decimals * 0.999))
+  const recipient = input.recipientWallet.trim()
+  const mintB58 = owl.mintAddress
 
   return withPackSolanaRpcRetry(async () => {
-    for (const program of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
-      try {
-        const ata = await getAssociatedTokenAddress(
-          mint,
-          owner,
-          false,
-          program,
-          ASSOCIATED_TOKEN_PROGRAM_ID
-        )
-        const acc = await getAccount(connection, ata, 'confirmed', program)
-        if (acc.amount >= minRaw) return true
-      } catch {
-        // no ATA
-      }
-    }
-    return false
+    const tx = await connection.getTransaction(input.payoutSignature, {
+      commitment: 'confirmed',
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
+    })
+    if (!tx?.meta || tx.meta.err) return false
+
+    const delta = packTokenBalanceDeltaForOwnerMint(
+      tx.meta.preTokenBalances as TokenBalanceRow[] | null | undefined,
+      tx.meta.postTokenBalances as TokenBalanceRow[] | null | undefined,
+      recipient,
+      mintB58
+    )
+    return delta >= minRaw
   })
 }
 
@@ -128,10 +137,16 @@ export async function detectPackPayoutAlreadyLanded(open: PackOpenRow): Promise<
     }
   }
 
-  if (category === 'owl' && open.owl_amount != null && open.owl_amount > 0) {
+  if (category === 'owl' && open.owl_amount != null && open.owl_amount > 0 && sig) {
     try {
-      if (await recipientReceivedOwl(buyer, open.owl_amount)) {
-        return { landed: true, signature: sig ?? null }
+      if (
+        await recipientReceivedOwlFromPayoutSignature({
+          payoutSignature: sig,
+          recipientWallet: buyer,
+          minUiAmount: open.owl_amount,
+        })
+      ) {
+        return { landed: true, signature: sig }
       }
     } catch {
       // ignore

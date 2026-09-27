@@ -12,7 +12,7 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
-  createAssociatedTokenAccountInstruction,
+  createAssociatedTokenAccountIdempotentInstruction,
   createTransferInstruction,
   getAccount,
   getAssociatedTokenAddress,
@@ -90,7 +90,7 @@ async function confirmPackOpen(input: {
   wallet: string
   paymentSignature: string
 }): Promise<{ ok: true; result: PackOpenClientResult } | { ok: false; error: string }> {
-  const maxAttempts = 4
+  const maxAttempts = 6
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), PACK_OPEN_CLIENT_TIMEOUT_MS)
@@ -230,20 +230,16 @@ async function buildOwlCheckoutTx(input: {
   const { blockhash } = await input.connection.getLatestBlockhash('confirmed')
   const tx = new Transaction({ recentBlockhash: blockhash, feePayer: input.publicKey })
 
-  try {
-    await getAccount(input.connection, recipientAta, 'confirmed', programId)
-  } catch {
-    tx.add(
-      createAssociatedTokenAccountInstruction(
-        input.publicKey,
-        recipientAta,
-        vaultPk,
-        mint,
-        programId,
-        ASSOCIATED_TOKEN_PROGRAM_ID
-      )
+  tx.add(
+    createAssociatedTokenAccountIdempotentInstruction(
+      input.publicKey,
+      recipientAta,
+      vaultPk,
+      mint,
+      programId,
+      ASSOCIATED_TOKEN_PROGRAM_ID
     )
-  }
+  )
 
   tx.add(createTransferInstruction(senderAta, recipientAta, input.publicKey, amountRaw, [], programId))
   tx.add(
@@ -350,14 +346,8 @@ export async function executePackPurchase(
         undefined,
         { pollIntervalMs: PACK_PAYMENT_CONFIRM_POLL_MS }
       )
-    } catch (e) {
-      return {
-        ok: false,
-        error:
-          e instanceof Error
-            ? e.message
-            : 'Payment sent but confirmation timed out — contact support with your signature',
-      }
+    } catch {
+      // Payment may still have landed — server verifies on-chain in /api/packs/open.
     }
 
     opts.onPaymentConfirmed?.({ openId, paymentSignature: signature })
@@ -433,14 +423,8 @@ export async function executePackPurchase(
       undefined,
       { pollIntervalMs: PACK_PAYMENT_CONFIRM_POLL_MS }
     )
-  } catch (e) {
-    return {
-      ok: false,
-      error:
-        e instanceof Error
-          ? e.message
-          : 'Payment sent but confirmation timed out — contact support with your signature',
-    }
+  } catch {
+    // Payment may still have landed — server verifies on-chain in /api/packs/open.
   }
 
   opts.onPaymentConfirmed?.({ openId, paymentSignature: signature })

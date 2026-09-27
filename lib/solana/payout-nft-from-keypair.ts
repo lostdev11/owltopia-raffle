@@ -15,6 +15,7 @@ import { fetchAsset, transferV1 } from '@metaplex-foundation/mpl-core'
 import { buildBubblegumLeafTransferBuilder } from '@/lib/solana/bubblegum-leaf-transfer'
 import { umiSignatureToBase58 } from '@/lib/solana/umi-signature'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
+import { withPackSolanaRpcRetry } from '@/lib/packs/rpc-retry'
 
 export type KeypairNftPayoutResult =
   | { ok: true; signature: string }
@@ -40,7 +41,7 @@ export async function payoutMplCoreFromKeypair(
 
     const asset = umiPublicKey(trimmedAsset)
     const newOwner = umiPublicKey(recipient)
-    const assetAccount: any = await fetchAsset(umi as any, asset)
+    const assetAccount: any = await withPackSolanaRpcRetry(() => fetchAsset(umi as any, asset))
     const maybeCollection: any =
       assetAccount?.updateAuthority?.type === 'Collection'
         ? assetAccount.updateAuthority.address
@@ -51,14 +52,20 @@ export async function payoutMplCoreFromKeypair(
       newOwner,
       ...(maybeCollection ? { collection: maybeCollection } : {}),
     } as any)
-    const result: any = await builder.sendAndConfirm(umi as any)
+    const result: any = await withPackSolanaRpcRetry(() => builder.sendAndConfirm(umi as any))
     return { ok: true, signature: umiSignatureToBase58(result) }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }
 
-/** Compressed (Bubblegum): transfer leaf from `keypair` to recipient. Requires DAS RPC. */
+/**
+ * Compressed (Bubblegum): transfer leaf from `keypair` to recipient. Requires DAS RPC.
+ *
+ * Uses DAS `getAsset` + `getAssetProof` only — `truncateCanopy: false` avoids
+ * `fetchMerkleTree`, which downloads the full merkle tree account (~500KB+) and
+ * often hits RPC rate limits on large trees.
+ */
 export async function payoutCompressedFromKeypair(
   keypair: Keypair,
   assetId: string,
@@ -78,9 +85,9 @@ export async function payoutCompressedFromKeypair(
     const signer = createSignerFromKeypair(umi, umiKeypair)
     umi.use(signerIdentity(signer))
 
-    const asset: any = await getAssetWithProof(umi, umiPublicKey(trimmedAsset), {
-      truncateCanopy: true,
-    })
+    const asset: any = await withPackSolanaRpcRetry(() =>
+      getAssetWithProof(umi, umiPublicKey(trimmedAsset), { truncateCanopy: false })
+    )
     const leafOwnerStr = asset?.leafOwner ? String(asset.leafOwner) : ''
     if (leafOwnerStr !== sourceBase58) {
       return {
@@ -90,14 +97,16 @@ export async function payoutCompressedFromKeypair(
       }
     }
 
-    const builder: any = await buildBubblegumLeafTransferBuilder(
-      umi,
-      signer,
-      umiPublicKey(sourceBase58),
-      umiPublicKey(recipient),
-      asset
+    const builder: any = await withPackSolanaRpcRetry(() =>
+      buildBubblegumLeafTransferBuilder(
+        umi,
+        signer,
+        umiPublicKey(sourceBase58),
+        umiPublicKey(recipient),
+        asset
+      )
     )
-    const result: any = await builder.sendAndConfirm(umi)
+    const result: any = await withPackSolanaRpcRetry(() => builder.sendAndConfirm(umi))
     return { ok: true, signature: umiSignatureToBase58(result) }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
