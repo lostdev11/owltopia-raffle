@@ -5,15 +5,36 @@ import {
   getPackProductById,
   isPackPaymentSignatureClaimed,
   listPackOpensForReconcile,
-  listStalePendingPaymentPackOpens,
+  listPendingPaymentPackOpensInReconcileWindow,
 } from '@/lib/packs/db'
 import { PackOpenRetryableError } from '@/lib/packs/pack-open-errors'
 import { payoutCommittedPackOpen } from '@/lib/packs/open-payout'
 import { PACK_PRICE_OWL, PACK_PRICE_SOL } from '@/lib/packs/config'
+import {
+  buyerHasSignaturesAfterOpenCreated,
+  filterSignaturesForOpen,
+  groupPackOpensByBuyer,
+  openCreatedAtSec,
+  pendingPaymentReconcileWindowBounds,
+  pickPendingOpenForOnChainPayment,
+  PACK_OPEN_PENDING_PAYMENT_MIN_AGE_MS,
+  PACK_OPEN_PENDING_PAYMENT_RECONCILE_BATCH_LIMIT,
+  PACK_OPEN_PENDING_PAYMENT_SIG_PAGE_LIMIT,
+  PACK_OPEN_PENDING_PAYMENT_BLOCKTIME_SLACK_SEC,
+  shouldStopSignatureScanForBuyerBatch,
+  signatureBlockTimeSec,
+  sortPendingPaymentOpensNewestFirst,
+  type SignatureTimeInfo,
+} from '@/lib/packs/pending-payment-reconcile-policy'
 import { verifyPackOwlPayment, verifyPackPayment } from '@/lib/packs/verify-payment'
 import { withPackSolanaRpcRetry } from '@/lib/packs/rpc-retry'
 import { resolveServerSolanaRpcUrl } from '@/lib/solana-rpc-url'
 import type { PackOpenRow } from '@/lib/packs/types'
+
+export {
+  PACK_OPEN_PENDING_PAYMENT_MIN_AGE_MS,
+  pendingPaymentReconcileWindowBounds,
+} from '@/lib/packs/pending-payment-reconcile-policy'
 
 export const PACK_OPEN_RECONCILE_PIPELINE_STATUSES = [
   'paying_out',
@@ -22,8 +43,6 @@ export const PACK_OPEN_RECONCILE_PIPELINE_STATUSES = [
 ] as const
 
 export const PACK_OPEN_RECONCILE_PIPELINE_MIN_AGE_MS = 3 * 60 * 1000
-export const PACK_OPEN_PENDING_PAYMENT_MIN_AGE_MS = 5 * 60 * 1000
-const BUYER_SIG_SCAN_LIMIT = 30
 
 function cutoffIso(minAgeMs: number): string {
   return new Date(Date.now() - minAgeMs).toISOString()
@@ -58,72 +77,136 @@ async function resumePipelineOpen(open: PackOpenRow): Promise<'completed' | 'ret
   }
 }
 
-async function findMatchingPaymentSignatureForOpen(
+async function paymentSignatureMatchesOpenQuote(
   open: PackOpenRow,
+  signature: string,
   connection: Connection
-): Promise<string | null> {
+): Promise<boolean> {
   const buyer = open.buyer_wallet.trim()
-  let sigInfos: Awaited<ReturnType<Connection['getSignaturesForAddress']>>
-  try {
-    sigInfos = await withPackSolanaRpcRetry(() =>
-      connection.getSignaturesForAddress(new PublicKey(buyer), { limit: BUYER_SIG_SCAN_LIMIT })
-    )
-  } catch (e) {
-    console.error('[pack-open-reconcile] getSignaturesForAddress failed', buyer, e)
-    return null
-  }
-
   const product = await getPackProductById(open.product_id)
   const priceSol = Number(product?.price_sol) || PACK_PRICE_SOL
   const currency = open.payment_currency === 'OWL' ? 'OWL' : 'SOL'
 
-  for (const info of sigInfos) {
-    if (info.err) continue
-    const sig = info.signature
-    if (await isPackPaymentSignatureClaimed(sig, open.id)) continue
+  const verified =
+    currency === 'OWL'
+      ? await verifyPackOwlPayment({
+          signature,
+          buyerWallet: buyer,
+          expectedOwl: Number(open.payment_owl_amount) || PACK_PRICE_OWL,
+          expectedFeeSol: Number(open.payment_fee_sol) || 0,
+          connection,
+          exactQuote: true,
+        })
+      : await verifyPackPayment({
+          signature,
+          buyerWallet: buyer,
+          expectedSol: priceSol,
+          connection,
+          exactQuote: true,
+        })
 
-    const verified =
-      currency === 'OWL'
-        ? await verifyPackOwlPayment({
-            signature: sig,
-            buyerWallet: buyer,
-            expectedOwl: Number(open.payment_owl_amount) || PACK_PRICE_OWL,
-            expectedFeeSol: Number(open.payment_fee_sol) || 0,
-            connection,
-          })
-        : await verifyPackPayment({
-            signature: sig,
-            buyerWallet: buyer,
-            expectedSol: priceSol,
-            connection,
-          })
-
-    if (verified.ok) {
-      return sig
-    }
-  }
-  return null
+  return verified.ok
 }
 
-async function reconcileStalePendingPayment(open: PackOpenRow): Promise<'completed' | 'skipped'> {
-  const connection = new Connection(resolveServerSolanaRpcUrl(), 'confirmed')
-  const sig = await findMatchingPaymentSignatureForOpen(open, connection)
-  if (!sig) return 'skipped'
+async function reconcilePendingPaymentsForBuyer(
+  buyerOpens: PackOpenRow[],
+  connection: Connection
+): Promise<number> {
+  const pending = buyerOpens.filter(
+    (o) => o.status === 'pending_payment' && !o.payment_signature?.trim()
+  )
+  if (pending.length === 0) return 0
 
-  if (await isPackPaymentSignatureClaimed(sig, open.id)) return 'skipped'
+  const earliestOpenSec = Math.min(...pending.map(openCreatedAtSec))
 
+  let sigInfos: Awaited<ReturnType<Connection['getSignaturesForAddress']>>
   try {
-    await confirmAndOpenPack({
-      openId: open.id,
-      buyerWallet: open.buyer_wallet,
-      paymentSignature: sig,
-    })
-    return 'completed'
+    sigInfos = await withPackSolanaRpcRetry(() =>
+      connection.getSignaturesForAddress(new PublicKey(pending[0]!.buyer_wallet.trim()), {
+        limit: PACK_OPEN_PENDING_PAYMENT_SIG_PAGE_LIMIT,
+      })
+    )
   } catch (e) {
-    if (e instanceof PackOpenRetryableError) return 'skipped'
-    console.error('[pack-open-reconcile] pending_payment confirm failed', open.id, e)
-    return 'skipped'
+    console.error('[pack-open-reconcile] getSignaturesForAddress failed', pending[0]?.buyer_wallet, e)
+    return 0
   }
+
+  if (!buyerHasSignaturesAfterOpenCreated(sigInfos, earliestOpenSec)) {
+    return 0
+  }
+
+  let completed = 0
+
+  for (const info of sigInfos) {
+    if (shouldStopSignatureScanForBuyerBatch(info, earliestOpenSec)) {
+      break
+    }
+    if (info.err) continue
+
+    const blockTimeSec = signatureBlockTimeSec(info)
+    if (blockTimeSec == null) continue
+
+    const sig = info.signature
+    if (await isPackPaymentSignatureClaimed(sig)) continue
+
+    const timeEligible = pending.filter((open) => {
+      const createdSec = openCreatedAtSec(open)
+      return createdSec <= blockTimeSec + PACK_OPEN_PENDING_PAYMENT_BLOCKTIME_SLACK_SEC
+    })
+    if (timeEligible.length === 0) continue
+
+    const quoteMatches: PackOpenRow[] = []
+    for (const open of timeEligible) {
+      if (await paymentSignatureMatchesOpenQuote(open, sig, connection)) {
+        quoteMatches.push(open)
+      }
+    }
+    if (quoteMatches.length === 0) continue
+
+    const target =
+      quoteMatches.length === 1
+        ? quoteMatches[0]!
+        : pickPendingOpenForOnChainPayment(quoteMatches, blockTimeSec)
+    if (!target) continue
+
+    if (await isPackPaymentSignatureClaimed(sig, target.id)) continue
+
+    try {
+      await confirmAndOpenPack({
+        openId: target.id,
+        buyerWallet: target.buyer_wallet,
+        paymentSignature: sig,
+      })
+      completed++
+      return completed
+    } catch (e) {
+      if (e instanceof PackOpenRetryableError) return completed
+      console.error('[pack-open-reconcile] pending_payment confirm failed', target.id, e)
+    }
+  }
+
+  return completed
+}
+
+export async function reconcilePendingPaymentBatch(
+  opens: PackOpenRow[],
+  connection: Connection
+): Promise<number> {
+  const sorted = sortPendingPaymentOpensNewestFirst(opens)
+  const byBuyer = groupPackOpensByBuyer(sorted)
+  let completed = 0
+  for (const [, buyerOpens] of byBuyer) {
+    completed += await reconcilePendingPaymentsForBuyer(buyerOpens, connection)
+  }
+  return completed
+}
+
+/** @deprecated Prefer reconcilePendingPaymentBatch — kept for tests importing scan helpers. */
+export function filterSignaturesForOpenReconcile(
+  sigInfos: SignatureTimeInfo[],
+  open: PackOpenRow
+): SignatureTimeInfo[] {
+  return filterSignaturesForOpen(sigInfos, openCreatedAtSec(open))
 }
 
 export async function runPackOpenReconcile(): Promise<{
@@ -150,19 +233,15 @@ export async function runPackOpenReconcile(): Promise<{
     else if (outcome === 'retryable') pipelineRetryable++
   }
 
-  const pendingCutoff = cutoffIso(PACK_OPEN_PENDING_PAYMENT_MIN_AGE_MS)
-  const pendingOpens = await listStalePendingPaymentPackOpens({
-    createdBeforeIso: pendingCutoff,
-    limit: 10,
+  const window = pendingPaymentReconcileWindowBounds()
+  const pendingOpens = await listPendingPaymentPackOpensInReconcileWindow({
+    minCreatedIso: window.minCreatedIso,
+    maxCreatedIso: window.maxCreatedIso,
+    limit: PACK_OPEN_PENDING_PAYMENT_RECONCILE_BATCH_LIMIT,
   })
 
-  let pendingCompleted = 0
-  for (const open of pendingOpens) {
-    const fresh = (await getPackOpenById(open.id)) ?? open
-    if (fresh.status !== 'pending_payment' || fresh.payment_signature) continue
-    const outcome = await reconcileStalePendingPayment(fresh)
-    if (outcome === 'completed') pendingCompleted++
-  }
+  const connection = new Connection(resolveServerSolanaRpcUrl(), 'confirmed')
+  const pendingCompleted = await reconcilePendingPaymentBatch(pendingOpens, connection)
 
   return {
     pipelineScanned: pipelineOpens.length,

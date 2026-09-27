@@ -537,18 +537,23 @@ export async function listPackOpensForReconcile(input: {
   return (data as PackOpenRow[]) ?? []
 }
 
-export async function listStalePendingPaymentPackOpens(input: {
-  createdBeforeIso: string
+/** Pending orphans in the reconcile window (newest first). */
+export async function listPendingPaymentPackOpensInReconcileWindow(input: {
+  /** Rows created before this instant (must be older than min-age grace). */
+  maxCreatedIso: string
+  /** Rows created after this instant (exclude ancient abandoned rows). */
+  minCreatedIso: string
   limit?: number
 }): Promise<PackOpenRow[]> {
-  const limit = Math.min(Math.max(input.limit ?? 15, 1), 30)
+  const limit = Math.min(Math.max(input.limit ?? 8, 1), 20)
   const { data, error } = await getSupabaseAdmin()
     .from('pack_opens')
     .select('*')
     .eq('status', 'pending_payment')
     .is('payment_signature', null)
-    .lt('created_at', input.createdBeforeIso)
-    .order('created_at', { ascending: true })
+    .gt('created_at', input.minCreatedIso)
+    .lt('created_at', input.maxCreatedIso)
+    .order('created_at', { ascending: false })
     .limit(limit)
   if (error) throw error
   return (data as PackOpenRow[]) ?? []

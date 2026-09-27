@@ -128,6 +128,7 @@
     "test:pack-purchase-errors": "npx --yes tsx scripts/test-pack-purchase-errors.ts",
     "test:pack-owl-checkout": "npx --yes tsx scripts/test-pack-owl-checkout.ts",
     "test:packs-open-payout-resilience": "npx --yes tsx scripts/test-packs-open-payout-resilience.ts",
+    "test:packs-pending-payment-reconcile": "npx --yes tsx scripts/test-packs-pending-payment-reconcile.ts",
     "test:packs-rpc-hardening": "npx --yes tsx scripts/test-packs-rpc-hardening.ts",
     "test:pack-reveal-ledger": "npx --yes tsx scripts/test-pack-reveal-ledger.ts",
     "test:admin-pack-opens": "npx --yes tsx scripts/test-admin-pack-opens.ts",
