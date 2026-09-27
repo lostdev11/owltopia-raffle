@@ -198,8 +198,15 @@ export async function confirmAndOpenPack(input: {
   openId: string
   buyerWallet: string
   paymentSignature: string
+  /**
+   * When true, return the reserved prize as soon as the roll commits and skip
+   * the blocking vault payout. Caller must finish payout (e.g. waitUntil) —
+   * used so “Open pack” unlocks during VRF-heavy opens (~30s → seed+roll only).
+   */
+  deferPayout?: boolean
 }): Promise<PackOpenResult> {
   const openWall = vrfPhaseTimer()
+  const deferPayout = input.deferPayout === true
   const existingBySig = await getPackOpenByPaymentSignature(input.paymentSignature)
   if (existingBySig?.status === 'completed' && existingBySig.open_seed) {
     return rowToResult(existingBySig)
@@ -231,6 +238,9 @@ export async function confirmAndOpenPack(input: {
   ])
 
   if (open.open_seed && open.open_commit_hash && open.category) {
+    if (deferPayout) {
+      return rowToResult(open)
+    }
     const payoutResult = await payoutCommittedPackOpen({
       open,
       buyerWallet: input.buyerWallet,
@@ -365,6 +375,19 @@ export async function confirmAndOpenPack(input: {
   }
 
   if (open.category && open.prize_label) {
+    if (deferPayout) {
+      logVrfPhase('pack', 'open.total', openWall.elapsed(), {
+        openId: open.id,
+        category: open.category,
+        vrf: isPackVrfEnabled(),
+        resumed: true,
+        deferredPayout: true,
+      })
+      return {
+        ...rowToResult(open),
+        jackpotPoolSol: Number(openProduct.jackpot_pool_sol ?? 0),
+      }
+    }
     const payoutResult = await payoutCommittedPackOpen({
       open,
       buyerWallet: input.buyerWallet,
@@ -430,6 +453,19 @@ export async function confirmAndOpenPack(input: {
       jackpot_amount_sol: jackpotAmount,
       nft_pool_snapshot: null,
     })
+
+    if (deferPayout) {
+      logVrfPhase('pack', 'open.total', openWall.elapsed(), {
+        openId: open.id,
+        category: 'jackpot',
+        vrf: isPackVrfEnabled(),
+        deferredPayout: true,
+      })
+      return {
+        ...rowToResult(open),
+        jackpotPoolSol: jackpotResolution.poolAfterSol,
+      }
+    }
 
     const jackpotPayout = await payoutCommittedPackOpen({
       open,
@@ -568,6 +604,19 @@ export async function confirmAndOpenPack(input: {
     jackpot_amount_sol: null,
     nft_pool_snapshot: nftPoolSnapshot,
   })
+
+  if (deferPayout) {
+    logVrfPhase('pack', 'open.total', openWall.elapsed(), {
+      openId: open.id,
+      category: open.category,
+      vrf: isPackVrfEnabled(),
+      deferredPayout: true,
+    })
+    return {
+      ...rowToResult(open, { nftName, nftImageUrl }),
+      jackpotPoolSol: jackpotResolution.poolAfterSol,
+    }
+  }
 
   const payoutResult = await payoutCommittedPackOpen({
     open,

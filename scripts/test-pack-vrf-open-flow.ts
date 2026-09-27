@@ -82,8 +82,9 @@ function main() {
   const packCommit = resolvePackSwitchboardCommitOptions()
   assert.equal(packCommit.bundleCreateAndCommit, true)
   assert.equal(packCommit.timingScope, 'pack')
-  assert.equal(PACK_SWITCHBOARD_SEED_WAIT.minWaitMs, 5_000)
-  assert.equal(PACK_SWITCHBOARD_SEED_WAIT.pollIntervalMs, 400)
+  assert.equal(PACK_SWITCHBOARD_SEED_WAIT.minWaitMs, 3_500)
+  assert.equal(PACK_SWITCHBOARD_SEED_WAIT.pollIntervalMs, 350)
+  assert.equal(PACK_SWITCHBOARD_SEED_WAIT.maxWaitMs, 12_000)
   assert.equal(PACK_SWITCHBOARD_SEED_WAIT.maturitySlots, SWITCHBOARD_SEED_SLOT_MATURITY)
   assert.ok(PACK_PAYMENT_CONFIRM_POLL_MS <= 500)
 
