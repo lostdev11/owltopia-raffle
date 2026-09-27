@@ -42,6 +42,8 @@ export type OwlCenterAssetUploadJob = {
   completed_at: string | null
   created_at: string
   updated_at: string
+  /** Short lease while a Core deploy POST holds the writer lock. */
+  deploy_lock_until?: string | null
 }
 
 export function emptyUploadProgress(): AssetUploadProgress {

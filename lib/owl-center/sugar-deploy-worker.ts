@@ -46,6 +46,7 @@ import {
 } from '@/lib/owl-center/core-cm-deploy-onchain'
 import { resolveLaunchMintNetwork } from '@/lib/solana/launch-cm'
 import { getSupabaseAdmin } from '@/lib/supabase-admin'
+import { isDeployLockActive } from '@/lib/owl-center/deploy-panel-status'
 import { isValidSolanaPubkey, sanitizeLaunchMintPubkey, validateSolanaPubkeyInput } from '@/lib/solana/validate-pubkey'
 
 export type SugarDeployGoLiveSummary = {
@@ -79,7 +80,6 @@ export type SugarDeployWorkerResult =
       candy_guard_id?: string
     }
 
-const CONFIG_LINE_CHECKPOINT_EVERY_CHUNKS = 5
 
 function withDeployState(progress: AssetUploadProgress, patch: OnchainDeployState): AssetUploadProgress {
   return { ...progress, onchain_deploy: patch } as AssetUploadProgress
@@ -165,6 +165,9 @@ export async function getSugarDeployStatusForLaunch(launchId: string) {
     (deployState?.status === 'cm_ready' ||
       (deployState?.status === 'failed' && Boolean(deployState.candy_machine_id && deployState.collection_mint)))
 
+  const deployLockUntil = job?.deploy_lock_until ?? null
+  const deployLocked = isDeployLockActive(deployLockUntil)
+
   const canContinueLoading =
     Boolean(launch) &&
     launch!.mint_mode === 'public_simple' &&
@@ -172,6 +175,7 @@ export async function getSugarDeployStatusForLaunch(launchId: string) {
     job?.status === 'completed' &&
     loadingInProgress &&
     deployState?.status !== 'running' &&
+    !deployLocked &&
     isOwlCenterOnchainCmDeployEnabled()
 
   const overTmCap =
@@ -205,10 +209,14 @@ export async function getSugarDeployStatusForLaunch(launchId: string) {
       !loadingInProgress &&
       !handoffPending &&
       deployState?.status !== 'running' &&
+      !deployLocked &&
       !overTmCap &&
       isOwlCenterOnchainCmDeployEnabled(),
     can_continue_loading: canContinueLoading,
-    can_retry_handoff: handoffPending && deployState?.status !== 'running' && !loadingInProgress,
+    can_retry_handoff:
+      handoffPending && deployState?.status !== 'running' && !loadingInProgress && !deployLocked,
+    deploy_locked: deployLocked,
+    deploy_lock_until: deployLockUntil,
   }
 }
 
@@ -470,7 +478,6 @@ async function runCoreResumableDeploy(
     })
   }
 
-  let chunksSinceCheckpoint = 0
   const load = await loadCoreCandyMachineConfigLines({
     network,
     candyMachineId: candyMachineId!,
@@ -479,9 +486,6 @@ async function runCoreResumableDeploy(
     configLines: pkg.configLines,
     startIndex: loadedSoFar,
     onProgress: async (loaded) => {
-      chunksSinceCheckpoint += 1
-      if (chunksSinceCheckpoint < CONFIG_LINE_CHECKPOINT_EVERY_CHUNKS) return
-      chunksSinceCheckpoint = 0
       await persistDeployCheckpoint(job.id, {
         status: 'loading_items',
         candy_machine_id: candyMachineId!,

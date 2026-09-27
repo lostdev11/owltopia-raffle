@@ -55,6 +55,8 @@ import { sendAndConfirmUmiWithRetry } from '@/lib/solana/server-umi-send'
 import { isBlockhashOrTxExpiryError } from '@/lib/solana/tx-expiry-patterns'
 
 const CONFIG_LINES_PER_TX = 10
+/** Typical blockhash validity window — cap confirm waits so we exit before budget elapses. */
+const BLOCKHASH_CONFIRM_CAP_MS = 55_000
 
 export type OnchainCoreDeployInput = {
   launch: Pick<
@@ -417,7 +419,8 @@ export async function loadCoreCandyMachineConfigLines(params: {
     }
 
     while (index < total) {
-      if (Date.now() >= deadline) {
+      const timeLeftMs = deadline - Date.now()
+      if (timeLeftMs <= 0) {
         index = await readLoadedIndex()
         return {
           ok: true,
@@ -431,6 +434,7 @@ export async function loadCoreCandyMachineConfigLines(params: {
       }
 
       const chunk = configLines.slice(index, index + CONFIG_LINES_PER_TX)
+      const maxConfirmMs = Math.min(timeLeftMs, BLOCKHASH_CONFIRM_CAP_MS)
       try {
         await sendAndConfirmUmiWithRetry(
           umi,
@@ -439,7 +443,7 @@ export async function loadCoreCandyMachineConfigLines(params: {
             index,
             configLines: chunk,
           }),
-          { label: `add_config_lines_${index}` }
+          { label: `add_config_lines_${index}`, maxConfirmMs }
         )
         index += chunk.length
         await onProgress?.(index)

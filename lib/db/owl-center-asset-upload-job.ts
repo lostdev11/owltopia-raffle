@@ -24,6 +24,7 @@ function mapJobRow(row: Record<string, unknown>): OwlCenterAssetUploadJob {
     completed_at: row.completed_at != null ? String(row.completed_at) : null,
     created_at: String(row.created_at ?? ''),
     updated_at: String(row.updated_at ?? ''),
+    deploy_lock_until: row.deploy_lock_until != null ? String(row.deploy_lock_until) : null,
   }
 }
 
