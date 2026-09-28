@@ -4,6 +4,7 @@ import { CollectionCard } from '@/components/owl-center/CollectionCard'
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { listOwlCenterLaunchesPublic } from '@/lib/db/owl-center-launch'
 import { getGen2PresaleSoldOutForDisplay } from '@/lib/gen2-presale/owl-center-presale-status'
+import { partitionOwlCenterHubLaunches } from '@/lib/owl-center/hub-launch-sort'
 import { OWL_CENTER_COLLECTION_CARD_GRID } from '@/lib/owl-center/layout'
 import { PLATFORM_NAME } from '@/lib/site-config'
 
@@ -17,7 +18,7 @@ export default async function OwlCenterDropsPage() {
     listOwlCenterLaunchesPublic(),
     getGen2PresaleSoldOutForDisplay(),
   ])
-  const live = launches.filter((l) => l.status !== 'SOLD_OUT' && l.active_phase !== 'TRADING_ACTIVE')
+  const { live } = partitionOwlCenterHubLaunches(launches)
 
   return (
     <OwlCenterShell

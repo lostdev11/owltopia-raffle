@@ -6,6 +6,7 @@ import { OwlCenterHubQuickLinks, OwlCenterSubmitHint } from '@/components/owl-ce
 import { OwlCenterShell } from '@/components/owl-center/OwlCenterShell'
 import { listOwlCenterLaunchesPublic } from '@/lib/db/owl-center-launch'
 import { getGen2PresaleSoldOutForDisplay } from '@/lib/gen2-presale/owl-center-presale-status'
+import { partitionOwlCenterHubLaunches } from '@/lib/owl-center/hub-launch-sort'
 import { OWL_CENTER_COLLECTION_CARD_GRID } from '@/lib/owl-center/layout'
 import { PLATFORM_NAME } from '@/lib/site-config'
 
@@ -20,17 +21,25 @@ export default async function OwlCenterHomePage() {
     listOwlCenterLaunchesPublic(),
     getGen2PresaleSoldOutForDisplay(),
   ])
+  const { live: liveMints, soldOut, trading } = partitionOwlCenterHubLaunches(launches)
   const gen2 = launches.find((l) => l.slug === 'gen2')
-  const featured = gen2 ?? launches.find((l) => l.is_featured) ?? launches[0]
-
-  const liveMints = launches.filter(
-    (l) => l.active_phase !== 'SOLD_OUT' && l.active_phase !== 'TRADING_ACTIVE' && l.status !== 'SOLD_OUT'
-  )
-  const soldOut = launches.filter((l) => l.active_phase === 'SOLD_OUT' || l.status === 'SOLD_OUT')
-  const trading = launches.filter((l) => l.active_phase === 'TRADING_ACTIVE')
+  const featured = gen2 ?? launches.find((l) => l.is_featured) ?? liveMints[0] ?? launches[0]
 
   return (
     <OwlCenterShell>
+      <section className="mb-16">
+        <h2 className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#00C97A]">Live mints</h2>
+        <div className={`mt-6 ${OWL_CENTER_COLLECTION_CARD_GRID}`}>
+          {liveMints.length ? (
+            liveMints.map((l) => (
+              <CollectionCard key={l.id} launch={l} presaleSoldOut={l.slug === 'gen2' ? presaleSoldOut : false} />
+            ))
+          ) : (
+            <p className="font-mono text-sm text-[#5C6773]">No live primary mints — see upcoming or trading.</p>
+          )}
+        </div>
+      </section>
+
       <section className="mb-16 border-b border-[#1A222B] pb-14">
         <p className="font-mono text-[10px] font-bold uppercase tracking-[0.4em] text-[#00C97A]">Owltopia // Command</p>
         <h1 className="mt-4 font-display text-5xl tracking-tight text-[#F4FBF8] md:text-6xl">Launch. Control. Activate.</h1>
@@ -46,19 +55,6 @@ export default async function OwlCenterHomePage() {
           <Gen2FeaturedLaunch launch={featured} presaleSoldOut={presaleSoldOut} />
         </section>
       ) : null}
-
-      <section className="mb-16">
-        <h2 className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">Live mints</h2>
-        <div className={`mt-6 ${OWL_CENTER_COLLECTION_CARD_GRID}`}>
-          {liveMints.length ? (
-            liveMints.map((l) => (
-              <CollectionCard key={l.id} launch={l} presaleSoldOut={l.slug === 'gen2' ? presaleSoldOut : false} />
-            ))
-          ) : (
-            <p className="font-mono text-sm text-[#5C6773]">No live primary mints — see upcoming or trading.</p>
-          )}
-        </div>
-      </section>
 
       <section className="mb-16">
         <h2 className="font-mono text-[10px] font-bold uppercase tracking-[0.35em] text-[#5C6773]">Upcoming collections</h2>
