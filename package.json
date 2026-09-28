@@ -119,6 +119,7 @@
     "test:coin-art-upgrade-fee-split": "npx --yes tsx scripts/test-coin-art-upgrade-fee-split.ts",
     "test:filter-browse-host": "npx --yes tsx scripts/test-filter-browse-host.ts",
     "test:filter-browse-collection": "npx --yes tsx scripts/test-filter-browse-collection.ts",
+    "test:enrich-collection-nft-self-labels": "npx --yes tsx scripts/test-enrich-collection-nft-self-labels.ts",
     "test:partner-program-apply": "npx --yes tsx scripts/test-partner-program-apply.ts",
     "test:partner-pro-owl-center-sync": "npx --yes tsx scripts/test-partner-pro-owl-center-sync.ts",
     "backfill:platform-projects": "npx --yes tsx --env-file=.env.local scripts/backfill-platform-projects.ts",

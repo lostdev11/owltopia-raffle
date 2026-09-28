@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token'
 import type { WalletNft } from '@/lib/solana/wallet-tokens'
 import { getHeliusRpcUrl } from '@/lib/helius-rpc-url'
+import {
+  extractDasAssetCollectionMint,
+  extractDasAssetCollectionName,
+} from '@/lib/helius/das-asset-collection'
+import { enrichCollectionNftSelfLabels } from '@/lib/helius/enrich-collection-nft-self-labels'
 import { enrichWalletNftCollectionNames } from '@/lib/helius/enrich-wallet-nft-collection-names'
+import { pickImageFromHeliusAsset, pickNameFromHeliusAsset } from '@/lib/nft-helius-image'
 import {
   clearUnconfirmedDasFrozen,
   mergeDasNftsWithOnChainLocks,
@@ -33,40 +39,14 @@ interface HeliusAsset {
     metadata?: {
       name?: string
       symbol?: string
+      image?: string
       collection?: { name?: string; key?: string; verified?: boolean }
+      properties?: { files?: Array<{ uri?: string; type?: string }> }
     }
     files?: Array<{ uri?: string; cdn_uri?: string }>
+    links?: { image?: string }
   }
-  grouping?: Array<{ group_key?: string; group_value?: string }>
-}
-
-function extractCollectionNameFromDasAsset(item: HeliusAsset): string | null {
-  const topName = item.collection?.name
-  if (typeof topName === 'string' && topName.trim()) return topName.trim()
-  const metaName = item.content?.metadata?.collection?.name
-  if (typeof metaName === 'string' && metaName.trim()) return metaName.trim()
-  return null
-}
-
-function extractCollectionMintFromDasAsset(item: HeliusAsset): string | null {
-  const top = item.collection
-  if (typeof top?.address === 'string' && top.address.trim().length >= 32) return top.address.trim()
-  if (typeof top?.key === 'string' && top.key.trim().length >= 32) return top.key.trim()
-  const grouping = item.grouping
-  if (Array.isArray(grouping)) {
-    for (const g of grouping) {
-      const gv = g?.group_value
-      const gk = g?.group_key
-      if (typeof gv === 'string' && gv.trim().length >= 32 && gk === 'collection') return gv.trim()
-    }
-    for (const g of grouping) {
-      const gv = g?.group_value
-      if (typeof gv === 'string' && gv.trim().length >= 32) return gv.trim()
-    }
-  }
-  const mk = item.content?.metadata?.collection?.key
-  if (typeof mk === 'string' && mk.trim().length >= 32) return mk.trim()
-  return null
+  grouping?: Array<{ group_key?: string; group_value?: string; collection_metadata?: { name?: string } }>
 }
 
 /** Parsed token account info from getParsedTokenAccountsByOwner */
@@ -276,13 +256,15 @@ export async function GET(request: NextRequest) {
         const content = item.content
         const jsonUri = content?.json_uri ?? null
         const firstFile = content?.files?.[0]
-        // Prefer direct uri over cdn_uri: Helius CDN proxy often gets 403 from hosts like jpegs.fun
-        const image = firstFile?.uri ?? firstFile?.cdn_uri ?? null
-        const name = content?.metadata?.name ?? null
+        // Prefer direct uri over cdn_uri: Helius CDN proxy often gets 403 from hosts like jpegs.fun.
+        // Fall back to metadata.image / properties.files when DAS omits content.files
+        // (common for collection NFTs — e.g. Owltopia Gen2 collection mint).
+        const image = firstFile?.uri ?? firstFile?.cdn_uri ?? pickImageFromHeliusAsset(item)
+        const name = pickNameFromHeliusAsset(item) ?? content?.metadata?.name ?? null
         const symbol =
           typeof content?.metadata?.symbol === 'string' ? content.metadata.symbol.trim() || null : null
-        const collectionMint = extractCollectionMintFromDasAsset(item)
-        const collectionName = extractCollectionNameFromDasAsset(item)
+        const collectionMint = extractDasAssetCollectionMint(item)
+        const collectionName = extractDasAssetCollectionName(item)
         const frozen = item.ownership?.frozen === true
         const delegated =
           item.ownership?.delegated === true ||
@@ -333,6 +315,9 @@ export async function GET(request: NextRequest) {
     }
 
     nfts = await enrichWalletNftCollectionNames(nfts)
+    // Collection NFTs themselves have no parent grouping — label them from peers
+    // so the picker does not show "No collection" next to Gen2 / GenBeta masters.
+    nfts = enrichCollectionNftSelfLabels(nfts)
 
     return NextResponse.json(nfts, {
       headers: {
