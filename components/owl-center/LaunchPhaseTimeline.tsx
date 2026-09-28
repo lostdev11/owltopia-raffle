@@ -25,6 +25,9 @@ type Props = {
     | 'public_supply'
     | 'mint_mode'
     | 'creator_wl_enabled'
+    | 'mint_standard'
+    | 'freeze_enabled'
+    | 'freeze_status'
   >
   /** Phase where the connected wallet can mint right now. */
   userMintPhase?: OwlCenterPhase | null
@@ -39,6 +42,11 @@ export function LaunchPhaseTimeline({ active, launch, userMintPhase = null, user
   const reservedSet = new Set(userReservedPhases)
   const publicSimple = launch?.mint_mode === 'public_simple'
   const publicSimpleOpen = publicSimple && launch ? isPublicSimpleMintOpen(launch) : true
+  const tradingFreezeNote =
+    launch &&
+    launch.mint_standard === 'core' &&
+    launch.freeze_enabled &&
+    launch.freeze_status !== 'thawed'
 
   return (
     <div className="min-w-0 overflow-x-clip">
@@ -75,6 +83,14 @@ export function LaunchPhaseTimeline({ active, launch, userMintPhase = null, user
               {startLabel ? (
                 <span className="mt-0.5 text-[8px] font-normal normal-case tracking-normal text-[#5C6773]">
                   {startLabel}
+                </span>
+              ) : null}
+              {p === 'TRADING_ACTIVE' && tradingFreezeNote ? (
+                <span
+                  className="mt-1 max-w-[11rem] px-1 text-center text-[8px] font-normal normal-case leading-snug tracking-normal text-[#5C6773] md:max-w-none md:px-0 md:text-left"
+                  title="Minted NFTs stay in your wallet, but transfers and marketplace listings unlock when the project opens trading (usually after mint ends)."
+                >
+                  Transfers unlock when trading opens
                 </span>
               ) : null}
               {isUserMint ? (
