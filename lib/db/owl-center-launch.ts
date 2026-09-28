@@ -141,6 +141,7 @@ function mapRow(data: Record<string, unknown>): OwlCenterLaunchPublic {
     is_paused: Boolean(data.is_paused),
     launch_deadline_at: normalizeTimestamp(data.launch_deadline_at),
     phase_schedule: parsePhaseSchedule(data.phase_schedule),
+    created_at: normalizeTimestamp(data.created_at) ?? String(data.created_at ?? ''),
     updated_at: String(data.updated_at ?? ''),
     metadata_ready: Boolean(data.metadata_ready),
     assets_ready: Boolean(data.assets_ready),

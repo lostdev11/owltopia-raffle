@@ -123,6 +123,7 @@ export type OwlCenterLaunchPublic = {
   launch_deadline_at: string | null
   /** Optional ISO start time per mint phase (AIRDROP, PRESALE, …). */
   phase_schedule: Partial<Record<OwlCenterPhase, string>>
+  created_at: string
   updated_at: string
   /** Asset + metadata package gates (Owl Center launchpad). */
   metadata_ready: boolean
