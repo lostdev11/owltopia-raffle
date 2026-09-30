@@ -9,6 +9,8 @@ import { getNestingActionsPauseBreakdown } from '@/lib/nesting/policy'
 import {
   getEarlyUnstakeFeeLamports,
   getEarlyUnstakeFeeSol,
+  getRevShareClaimPlatformFeeLamports,
+  getRevShareClaimPlatformFeeSol,
   getStakingPlatformFeeLamports,
   getStakingPlatformFeeSol,
   isEarlyUnstakeFeeEnabled,
@@ -38,6 +40,12 @@ export async function GET() {
       nesting_paused_by_admin: pause.adminDbPaused,
       nesting_platform_fee_sol: isStakingPlatformFeeEnabled() ? getStakingPlatformFeeSol() : 0,
       nesting_platform_fee_lamports: isStakingPlatformFeeEnabled() ? getStakingPlatformFeeLamports() : 0,
+      nesting_rev_share_claim_fee_sol: isStakingPlatformFeeEnabled()
+        ? getRevShareClaimPlatformFeeSol()
+        : 0,
+      nesting_rev_share_claim_fee_lamports: isStakingPlatformFeeEnabled()
+        ? getRevShareClaimPlatformFeeLamports()
+        : 0,
       nesting_platform_fee_treasury:
         isStakingPlatformFeeEnabled() || isEarlyUnstakeFeeEnabled()
           ? getPlatformFeeTreasuryWalletAddress()

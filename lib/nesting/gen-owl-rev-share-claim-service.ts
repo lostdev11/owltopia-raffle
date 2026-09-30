@@ -230,7 +230,7 @@ export async function executeGenOwlRevShareClaim(params: {
 
 /**
  * Claim every pending Gen nest rev-share row for the wallet in one pooled payout.
- * Requires a wallet-signed platform fee of 0.001 SOL × nest count (when fees are enabled).
+ * Requires a wallet-signed platform fee of 0.0001 SOL × nest count (when fees are enabled).
  */
 export async function executeGenOwlRevShareClaimAll(params: {
   wallet: string

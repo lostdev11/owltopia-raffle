@@ -6,6 +6,8 @@ import {
 } from '@/lib/solana/platform-fee-treasury-wallet'
 
 const DEFAULT_FEE_SOL = 0.001
+/** Fixed SOL per nest for Gen owl rev-share claims (OWL claim stays at DEFAULT_FEE_SOL). */
+const DEFAULT_REV_SHARE_CLAIM_FEE_SOL = 0.0001
 const DEFAULT_EARLY_UNSTAKE_FEE_SOL = 0.2
 
 export type StakingPlatformFeeAction =
@@ -27,7 +29,7 @@ function readBoolean(raw: string | undefined): boolean {
   return v === 'true' || v === '1' || v === 'yes'
 }
 
-/** Per-nest platform fee in SOL (default 0.001). Server env: `NESTING_PLATFORM_FEE_SOL`. */
+/** Per-nest platform fee in SOL for stake/unstake/OWL claim (default 0.001). Env: `NESTING_PLATFORM_FEE_SOL`. */
 export function getStakingPlatformFeeSol(): number {
   const raw =
     typeof process !== 'undefined'
@@ -39,6 +41,25 @@ export function getStakingPlatformFeeSol(): number {
 
 export function getStakingPlatformFeeLamports(): number {
   const sol = getStakingPlatformFeeSol()
+  if (sol <= 0) return 0
+  return Math.round(sol * LAMPORTS_PER_SOL)
+}
+
+/**
+ * Per-nest platform fee in SOL for Gen owl rev-share claims (default 0.0001, fixed SOL).
+ * Env: `NESTING_REV_SHARE_CLAIM_FEE_SOL` / `NEXT_PUBLIC_NESTING_REV_SHARE_CLAIM_FEE_SOL`.
+ */
+export function getRevShareClaimPlatformFeeSol(): number {
+  const raw =
+    typeof process !== 'undefined'
+      ? process.env.NESTING_REV_SHARE_CLAIM_FEE_SOL?.trim() ||
+        process.env.NEXT_PUBLIC_NESTING_REV_SHARE_CLAIM_FEE_SOL?.trim()
+      : undefined
+  return readFeeSolFromEnv(raw, DEFAULT_REV_SHARE_CLAIM_FEE_SOL)
+}
+
+export function getRevShareClaimPlatformFeeLamports(): number {
+  const sol = getRevShareClaimPlatformFeeSol()
   if (sol <= 0) return 0
   return Math.round(sol * LAMPORTS_PER_SOL)
 }
@@ -81,12 +102,19 @@ export function formatEarlyUnstakeFeeLabel(): string {
   return `${str} SOL early leave fee`
 }
 
-/** Per-nest unit lamports for a platform-fee action (early unstake uses 0.2 SOL). */
+/** Per-nest unit lamports for a platform-fee action (rev-share 0.0001; OWL/stake 0.001; early leave 0.2). */
 export function getStakingPlatformFeeUnitLamportsForAction(
   action: StakingPlatformFeeAction
 ): number {
   if (action === 'early_unstake') return getEarlyUnstakeFeeLamports()
+  if (action === 'rev_share_claim') return getRevShareClaimPlatformFeeLamports()
   return getStakingPlatformFeeLamports()
+}
+
+export function getStakingPlatformFeeSolForAction(action: StakingPlatformFeeAction): number {
+  if (action === 'early_unstake') return getEarlyUnstakeFeeSol()
+  if (action === 'rev_share_claim') return getRevShareClaimPlatformFeeSol()
+  return getStakingPlatformFeeSol()
 }
 
 export function isStakingPlatformFeeEnvDisabled(): boolean {
@@ -108,16 +136,21 @@ export function isStakingPlatformFeeEnabledClient(): boolean {
   return lamports > 0 && !!getPlatformFeeTreasuryWalletAddressClient()
 }
 
-export function formatStakingPlatformFeePerNestLabel(): string {
-  const sol = getStakingPlatformFeeSol()
+export function formatStakingPlatformFeePerNestLabel(
+  action: StakingPlatformFeeAction = 'claim'
+): string {
+  const sol = getStakingPlatformFeeSolForAction(action)
   if (sol <= 0) return 'No platform fee'
   const str = sol >= 0.01 ? sol.toFixed(3) : sol.toFixed(4)
   return `${str} SOL per nested NFT`
 }
 
-export function formatStakingPlatformFeeTotalLabel(units: number): string {
+export function formatStakingPlatformFeeTotalLabel(
+  units: number,
+  action: StakingPlatformFeeAction = 'claim'
+): string {
   if (units <= 0) return ''
-  const unitSol = getStakingPlatformFeeSol()
+  const unitSol = getStakingPlatformFeeSolForAction(action)
   if (unitSol <= 0) return ''
   const total = unitSol * units
   const totalStr = total >= 0.01 ? total.toFixed(3) : total.toFixed(4)
