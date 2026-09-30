@@ -47,6 +47,11 @@ import {
   describeInvalidSolanaTxSignatureInput,
   normalizeDepositTxSignatureInput,
 } from '@/lib/raffles/verify-prize-deposit-client'
+import {
+  buildRevShareSchedulePatchBody,
+  isRevShareScheduleEditDirty,
+  revShareScheduleToEditFields,
+} from '@/lib/admin/rev-share-schedule-form'
 
 interface DeletedEntry {
   id: string
@@ -290,6 +295,8 @@ export default function AdminDashboardPage() {
     gen2_total_sol: '',
     gen2_total_usdc: '',
   })
+  const revShareScheduleRef = useRef(revShareSchedule)
+  revShareScheduleRef.current = revShareSchedule
   const [genOwlRevShareNestCounts, setGenOwlRevShareNestCounts] = useState({ gen1: 0, gen2: 0 })
   const [gen1RevShareBucketPreview, setGen1RevShareBucketPreview] = useState<GenOwlRevShareBucketPreview | null>(
     null
@@ -1018,15 +1025,10 @@ export default function AdminDashboardPage() {
         if (res.ok) {
           const data = await res.json()
           setRevShareSchedule(data)
-          setRevShareScheduleEdit({
-            gen1_next_date: data.gen1_next_date ?? data.next_date ?? '',
-            gen2_next_date: data.gen2_next_date ?? data.next_date ?? '',
-            total_sol: data.total_sol != null ? String(data.total_sol) : '',
-            total_usdc: data.total_usdc != null ? String(data.total_usdc) : '',
-            gen1_total_sol: data.gen1_total_sol != null ? String(data.gen1_total_sol) : '',
-            gen1_total_usdc: data.gen1_total_usdc != null ? String(data.gen1_total_usdc) : '',
-            gen2_total_sol: data.gen2_total_sol != null ? String(data.gen2_total_sol) : '',
-            gen2_total_usdc: data.gen2_total_usdc != null ? String(data.gen2_total_usdc) : '',
+          setRevShareScheduleEdit((prev) => {
+            // Keep in-progress edits across visibility / auto-refresh polls.
+            if (isRevShareScheduleEditDirty(prev, revShareScheduleRef.current)) return prev
+            return revShareScheduleToEditFields(data)
           })
         }
       } catch (e) {
@@ -1161,30 +1163,8 @@ export default function AdminDashboardPage() {
     if (!publicKey) return
     setRevShareScheduleSaving(true)
     try {
-      // Empty amount fields mean "leave claimable/display totals unchanged" — never send null
-      // after a deposit clears the form, or Save would wipe the homepage.
-      const body: Record<string, string | number | null> = {
-        gen1_next_date: revShareScheduleEdit.gen1_next_date.trim() || null,
-        gen2_next_date: revShareScheduleEdit.gen2_next_date.trim() || null,
-      }
-      if (revShareScheduleEdit.total_sol.trim() !== '') {
-        body.total_sol = parseFloat(revShareScheduleEdit.total_sol)
-      }
-      if (revShareScheduleEdit.total_usdc.trim() !== '') {
-        body.total_usdc = parseFloat(revShareScheduleEdit.total_usdc)
-      }
-      if (revShareScheduleEdit.gen1_total_sol.trim() !== '') {
-        body.gen1_total_sol = parseFloat(revShareScheduleEdit.gen1_total_sol)
-      }
-      if (revShareScheduleEdit.gen1_total_usdc.trim() !== '') {
-        body.gen1_total_usdc = parseFloat(revShareScheduleEdit.gen1_total_usdc)
-      }
-      if (revShareScheduleEdit.gen2_total_sol.trim() !== '') {
-        body.gen2_total_sol = parseFloat(revShareScheduleEdit.gen2_total_sol)
-      }
-      if (revShareScheduleEdit.gen2_total_usdc.trim() !== '') {
-        body.gen2_total_usdc = parseFloat(revShareScheduleEdit.gen2_total_usdc)
-      }
+      // Always send amounts (empty → 0) so clearing a field zeros homepage display totals.
+      const body = buildRevShareSchedulePatchBody(revShareScheduleEdit)
       const res = await fetch('/api/admin/rev-share-schedule', {
         method: 'PATCH',
         credentials: 'include',
@@ -1194,16 +1174,7 @@ export default function AdminDashboardPage() {
       if (res.ok) {
         const data = await res.json()
         setRevShareSchedule(data)
-        setRevShareScheduleEdit({
-          gen1_next_date: data.gen1_next_date ?? data.next_date ?? '',
-          gen2_next_date: data.gen2_next_date ?? '',
-          total_sol: data.total_sol != null ? String(data.total_sol) : '',
-          total_usdc: data.total_usdc != null ? String(data.total_usdc) : '',
-          gen1_total_sol: data.gen1_total_sol != null ? String(data.gen1_total_sol) : '',
-          gen1_total_usdc: data.gen1_total_usdc != null ? String(data.gen1_total_usdc) : '',
-          gen2_total_sol: data.gen2_total_sol != null ? String(data.gen2_total_sol) : '',
-          gen2_total_usdc: data.gen2_total_usdc != null ? String(data.gen2_total_usdc) : '',
-        })
+        setRevShareScheduleEdit(revShareScheduleToEditFields(data))
       }
     } catch (e) {
       console.error('Error saving rev share schedule:', e)
@@ -2700,8 +2671,9 @@ export default function AdminDashboardPage() {
               )}
             </Button>
             <p className="mt-2 max-w-2xl text-xs text-muted-foreground">
-              Empty amount fields on Save leave existing homepage totals unchanged. Use the deposit buttons below to
-              send SOL/USDC on-chain and credit this month&apos;s claimable pools (Gen 1 and Gen 2 separately).
+              Save writes the dates and display totals shown above (including 0). Use the deposit buttons below to
+              send SOL/USDC on-chain and credit this month&apos;s claimable pools (Gen 1 and Gen 2 separately) —
+              Save alone does not fund claims.
             </p>
             <GenOwlRevShareAdminDepositPanel
               edit={revShareScheduleEdit}
@@ -2711,28 +2683,7 @@ export default function AdminDashboardPage() {
               }}
               onDepositSucceeded={(schedule) => {
                 if (!schedule || typeof schedule !== 'object') return
-                const s = schedule as {
-                  next_date?: string | null
-                  gen1_next_date?: string | null
-                  gen2_next_date?: string | null
-                  total_sol?: number | null
-                  total_usdc?: number | null
-                  gen1_total_sol?: number | null
-                  gen1_total_usdc?: number | null
-                  gen2_total_sol?: number | null
-                  gen2_total_usdc?: number | null
-                }
-                setRevShareScheduleEdit((p) => ({
-                  ...p,
-                  gen1_next_date: s.gen1_next_date ?? s.next_date ?? p.gen1_next_date,
-                  gen2_next_date: s.gen2_next_date ?? p.gen2_next_date,
-                  total_sol: s.total_sol != null ? String(s.total_sol) : '',
-                  total_usdc: s.total_usdc != null ? String(s.total_usdc) : '',
-                  gen1_total_sol: s.gen1_total_sol != null ? String(s.gen1_total_sol) : '',
-                  gen1_total_usdc: s.gen1_total_usdc != null ? String(s.gen1_total_usdc) : '',
-                  gen2_total_sol: s.gen2_total_sol != null ? String(s.gen2_total_sol) : '',
-                  gen2_total_usdc: s.gen2_total_usdc != null ? String(s.gen2_total_usdc) : '',
-                }))
+                setRevShareScheduleEdit(revShareScheduleToEditFields(schedule))
               }}
             />
           </div>

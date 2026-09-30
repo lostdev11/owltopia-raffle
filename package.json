@@ -138,6 +138,7 @@
     "test:pack-open-deferred-payout": "npx --yes tsx scripts/test-pack-open-deferred-payout.ts",
     "test:admin-pack-opens": "npx --yes tsx scripts/test-admin-pack-opens.ts",
     "test:admin-ops-log-payments": "npx --yes tsx scripts/test-admin-ops-log-payments.ts",
+    "test:rev-share-schedule-form": "npx --yes tsx scripts/test-rev-share-schedule-form.ts",
     "packs:ev-simulator": "npx --yes tsx scripts/packs-ev-simulator.ts",
     "packs:grind-vault": "npx --yes tsx scripts/grind-packs-vault-vanity.ts",
     "packs:normalize-vault-keypair": "node scripts/normalize-packs-vault-keypair.mjs",
