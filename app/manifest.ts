@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next'
-import { PLATFORM_NAME } from '@/lib/site-config'
+import { PLATFORM_NAME, SITE_META_DESCRIPTION } from '@/lib/site-config'
 
 /**
  * PWA manifest for mobile "Add to Home Screen" and standalone mode.
@@ -9,7 +9,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: PLATFORM_NAME,
     short_name: PLATFORM_NAME,
-    description: 'Trusted raffles with full transparency. Every entry verified on-chain. Connect your wallet to enter.',
+    description: SITE_META_DESCRIPTION,
     start_url: '/',
     display: 'standalone',
     background_color: '#0f172a',
