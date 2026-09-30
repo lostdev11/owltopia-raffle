@@ -5,7 +5,11 @@ import {
   listClaimPlatformFeesWithSpareCapacity,
   type StakingPlatformFeePaymentRow,
 } from '@/lib/db/staking-platform-fee-payments'
-import { isStakingPlatformFeeEnabled } from '@/lib/nesting/staking-platform-fee'
+import {
+  getStakingPlatformFeeLamports,
+  getStakingPlatformFeeUnitLamportsForAction,
+  isStakingPlatformFeeEnabled,
+} from '@/lib/nesting/staking-platform-fee'
 import { verifyStakingPlatformFeeTransaction } from '@/lib/nesting/verify-staking-platform-fee'
 import { getNestingReadConnection } from '@/lib/solana/nesting/client'
 import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
@@ -39,6 +43,8 @@ export async function findReusableClaimPlatformFeeSignature(params: {
 
   const nowMs = params.nowMs ?? Date.now()
   const newerThanIso = new Date(nowMs - CLAIM_FEE_RECOVERY_MAX_AGE_MS).toISOString()
+  const unitLamports = getStakingPlatformFeeUnitLamportsForAction(action)
+  if (unitLamports <= 0) return null
 
   const spare = await listClaimPlatformFeesWithSpareCapacity({
     wallet,
@@ -100,9 +106,19 @@ export async function findReusableClaimPlatformFeeSignature(params: {
         fromWallet: wallet,
         treasuryWallet: treasury,
         minUnits,
+        unitLamports,
       })
       if (!verified.ok) continue
       if (verified.units < minUnits) continue
+
+      // Do not treat an OWL-rate fee (0.001/nest) as a rev-share fee (0.0001/nest).
+      if (action === 'rev_share_claim') {
+        const owlUnit = getStakingPlatformFeeLamports()
+        if (owlUnit > unitLamports && verified.lamports % owlUnit === 0) {
+          const owlUnits = Math.floor(verified.lamports / owlUnit)
+          if (owlUnits >= minUnits) continue
+        }
+      }
 
       return signature
     }

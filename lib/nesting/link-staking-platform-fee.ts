@@ -62,7 +62,7 @@ function isPlatformFeeActionEnabled(action: StakingPlatformFeeAction): boolean {
 
 function feeLabelForAction(action: StakingPlatformFeeAction): string {
   if (action === 'early_unstake') return formatEarlyUnstakeFeeLabel()
-  return formatStakingPlatformFeePerNestLabel()
+  return formatStakingPlatformFeePerNestLabel(action)
 }
 
 function parseStakingPlatformFeeLinkParams(

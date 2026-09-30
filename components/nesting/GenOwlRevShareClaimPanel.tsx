@@ -30,8 +30,8 @@ import {
 } from '@/lib/nesting/pending-claim-platform-fee'
 import {
   formatStakingPlatformFeeTotalLabel,
-  getStakingPlatformFeeLamports,
-  getStakingPlatformFeeSol,
+  getRevShareClaimPlatformFeeLamports,
+  getRevShareClaimPlatformFeeSol,
   isStakingPlatformFeeEnabledClient,
 } from '@/lib/nesting/staking-platform-fee'
 import { nestingClaimReadyButtonClass } from '@/lib/nesting/ui-classes'
@@ -240,13 +240,16 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
           typeof data.nesting_platform_fee_treasury === 'string'
             ? data.nesting_platform_fee_treasury.trim()
             : ''
-        const unitLamports = Number(data.nesting_platform_fee_lamports) || 0
+        const unitLamports =
+          Number(data.nesting_rev_share_claim_fee_lamports) ||
+          Number(data.nesting_platform_fee_lamports) ||
+          0
         if (treasury && unitLamports > 0) {
           setFeeConfig({ treasury, unitLamports })
         } else if (isStakingPlatformFeeEnabledClient()) {
           setFeeConfig({
             treasury: '',
-            unitLamports: getStakingPlatformFeeLamports(),
+            unitLamports: getRevShareClaimPlatformFeeLamports(),
           })
         } else {
           setFeeConfig(null)
@@ -272,8 +275,16 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
     return { sol, usdc }
   }, [claimable])
 
-  const feeActive = Boolean(feeConfig && (feeConfig.unitLamports > 0 || getStakingPlatformFeeSol() > 0))
-  const feeLabel = feeActive ? formatStakingPlatformFeeTotalLabel(claimAllCount) : null
+  const feeActive = Boolean(
+    feeConfig && (feeConfig.unitLamports > 0 || getRevShareClaimPlatformFeeSol() > 0)
+  )
+  const feeUnitSol =
+    feeConfig && feeConfig.unitLamports > 0
+      ? feeConfig.unitLamports / 1e9
+      : getRevShareClaimPlatformFeeSol()
+  const feeLabel = feeActive
+    ? formatStakingPlatformFeeTotalLabel(claimAllCount, 'rev_share_claim')
+    : null
   const poolBlocked = Boolean(poolFunding && !poolFunding.can_pay)
 
   const openPeriodMonth = useMemo(() => latestOpenClaimPeriodMonth(), [])
@@ -582,7 +593,7 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
                 {totals.sol > 0 && totals.usdc > 0 ? ' ·' : ''}
                 {totals.usdc > 0 ? ` ${formatGenOwlRevShareUsdc(totals.usdc)} USDC` : ''}
                 {feeActive && claimAllCount > 0 && !savedFeeHint
-                  ? ` · ${(getStakingPlatformFeeSol() * claimAllCount).toFixed(3)} SOL fee`
+                  ? ` · ${(feeUnitSol * claimAllCount).toFixed(4)} SOL fee`
                   : feeActive && savedFeeHint
                     ? ' · fee already paid'
                     : ''}
