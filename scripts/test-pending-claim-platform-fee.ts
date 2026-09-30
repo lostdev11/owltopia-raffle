@@ -14,6 +14,12 @@ import {
   revShareClaimRetryWithoutRepayMessage,
   writePendingRevShareClaimPlatformFee,
 } from '../lib/nesting/pending-claim-platform-fee'
+import {
+  FEE_TX_FAILED_ONCHAIN_ERROR,
+  FEE_TX_NOT_FOUND_ERROR,
+  isHardPlatformFeeFailureError,
+  isRetryableFeeTxLookupError,
+} from '../lib/nesting/staking-platform-fee-errors'
 
 const now = 1_700_000_000_000
 
@@ -45,6 +51,10 @@ assert.match(claimRetryWithoutRepayMessage(5), /5 nest platform fees were paid/i
 
 assert.match(revShareClaimRetryWithoutRepayMessage(1), /rev share was not sent/i)
 assert.match(revShareClaimRetryWithoutRepayMessage(19), /19 nest platform fees were paid/i)
+
+// Fee-error classification used by Claim UI to clear vs keep pending localStorage.
+assert.equal(isRetryableFeeTxLookupError(FEE_TX_NOT_FOUND_ERROR), true)
+assert.equal(isHardPlatformFeeFailureError(FEE_TX_FAILED_ONCHAIN_ERROR), true)
 
 const mem = new Map<string, string>()
 const fakeStorage = {
