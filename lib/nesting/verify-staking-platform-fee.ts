@@ -1,10 +1,17 @@
 import type { ParsedTransactionWithMeta } from '@solana/web3.js'
 import { Connection, PublicKey } from '@solana/web3.js'
 
-import { collectParsedTransactionAccountKeys, feePayerMatchesBuyer } from '@/lib/gen2-presale/verify-payment'
+import {
+  collectParsedTransactionAccountKeys,
+  feePayerMatchesBuyer,
+  fetchParsedTransactionWithPoll,
+} from '@/lib/gen2-presale/verify-payment'
+import {
+  FEE_TX_FAILED_ONCHAIN_ERROR,
+  FEE_TX_NOT_FOUND_ERROR,
+} from '@/lib/nesting/staking-platform-fee-errors'
 import { getStakingPlatformFeeLamports } from '@/lib/nesting/staking-platform-fee'
 import { getSolanaConnection } from '@/lib/solana/connection'
-import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 
 export type VerifyStakingPlatformFeeResult =
   | { ok: true; lamports: number; units: number }
@@ -27,6 +34,9 @@ function treasurySolIncrease(parsed: ParsedTransactionWithMeta, treasuryB58: str
   return BigInt(meta.postBalances[idx] ?? 0) - BigInt(meta.preBalances[idx] ?? 0)
 }
 
+/**
+ * Poll until RPC indexes a confirmed parsed fee tx (same window as presale payment verify).
+ */
 export async function fetchConfirmedParsedTransaction(
   signature: string,
   connection?: Connection
@@ -35,18 +45,10 @@ export async function fetchConfirmedParsedTransaction(
   const sig = signature.trim()
   if (!sig) return null
 
-  let tx = await conn.getParsedTransaction(sig, {
-    commitment: 'confirmed',
-    maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
+  return fetchParsedTransactionWithPoll(conn, sig, {
+    maxWaitMs: 8000,
+    intervalMs: 250,
   })
-  if (!tx) {
-    await new Promise((r) => setTimeout(r, 600))
-    tx = await conn.getParsedTransaction(sig, {
-      commitment: 'confirmed',
-      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
-    })
-  }
-  return tx ?? null
 }
 
 /**
@@ -76,12 +78,21 @@ export async function verifyStakingPlatformFeeTransaction(params: {
   }
 
   const parsed =
-    params.parsed ?? (await fetchConfirmedParsedTransaction(params.signature.trim()))
+    params.parsed !== undefined
+      ? params.parsed
+      : await fetchConfirmedParsedTransaction(params.signature.trim())
 
-  if (!parsed?.meta || parsed.meta.err) {
+  if (!parsed?.meta) {
     return {
       ok: false,
-      error: 'Fee transaction not found or failed on-chain. Wait a moment and try again.',
+      error: FEE_TX_NOT_FOUND_ERROR,
+    }
+  }
+
+  if (parsed.meta.err) {
+    return {
+      ok: false,
+      error: FEE_TX_FAILED_ONCHAIN_ERROR,
     }
   }
 

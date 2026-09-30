@@ -21,8 +21,7 @@ import type { GenOwlStakingGroupKey } from '@/lib/nesting/gen-owl-staking-groups
 import { areGenOwlRevShareClaimsEnabled } from '@/lib/db/rev-share-schedule'
 import {
   commitStakingPlatformFeeLinked,
-  resolveStakingPlatformFeeSignature,
-  validateStakingPlatformFeeLinked,
+  resolveAndValidateStakingPlatformFeeLinked,
 } from '@/lib/nesting/link-staking-platform-fee'
 import { assessGenOwlRevSharePoolAffordability } from '@/lib/nesting/gen-owl-rev-share-pool'
 import { assertGenOwlRevShareOutstandingLiabilityCovered } from '@/lib/nesting/gen-owl-rev-share-liability-service'
@@ -144,10 +143,9 @@ export async function executeGenOwlRevShareClaim(params: {
     )
   }
 
-  const feeParams = await resolveStakingPlatformFeeSignature(
+  const feeParams = await resolveAndValidateStakingPlatformFeeLinked(
     feeParamsForRevShareClaim(wallet, params.platform_fee_signature, [positionId])
   )
-  await validateStakingPlatformFeeLinked(feeParams)
 
   // Reserve unique claim row BEFORE payout so concurrent requests cannot double-pay.
   const reserved = await insertGenOwlRevShareClaim({
@@ -291,10 +289,9 @@ export async function executeGenOwlRevShareClaimAll(params: {
   }
 
   const positionIds = pending.map((r) => r.position_id)
-  const feeParams = await resolveStakingPlatformFeeSignature(
+  const feeParams = await resolveAndValidateStakingPlatformFeeLinked(
     feeParamsForRevShareClaim(wallet, params.platform_fee_signature, positionIds)
   )
-  await validateStakingPlatformFeeLinked(feeParams)
 
   const reservedIds: string[] = []
 

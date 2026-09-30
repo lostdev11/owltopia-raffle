@@ -13,8 +13,14 @@ import {
   isStakingPlatformFeeEnabled,
   type StakingPlatformFeeAction,
 } from '@/lib/nesting/staking-platform-fee'
+import {
+  isHardPlatformFeeFailureError,
+  isRetryableFeeTxLookupError,
+} from '@/lib/nesting/staking-platform-fee-errors'
 import { verifyStakingPlatformFeeTransaction } from '@/lib/nesting/verify-staking-platform-fee'
+import { getSolanaConnection } from '@/lib/solana/connection'
 import { getPlatformFeeTreasuryWalletAddress } from '@/lib/solana/platform-fee-treasury-wallet'
+import { MAX_SUPPORTED_TRANSACTION_VERSION } from '@/lib/solana/transaction-version'
 import { STAKING_UUID_RE } from '@/lib/nesting/validation'
 
 export type StakingPlatformFeeLinkParams = {
@@ -110,9 +116,48 @@ function parseStakingPlatformFeeLinkParams(
 }
 
 /**
+ * Fast check: is the client-provided fee signature worth keeping, or should we
+ * attempt on-chain recovery? Avoids a full verify poll here — validate still
+ * does authoritative checks. Returns false when the sig failed on-chain so a
+ * stuck localStorage value cannot block recovery of a real unpaid fee.
+ */
+async function providedClaimFeeLooksUsable(params: {
+  wallet: string
+  feeSignature: string
+  action: Extract<StakingPlatformFeeAction, 'claim' | 'rev_share_claim'>
+  positionIds: string[]
+  minUnits: number
+}): Promise<boolean> {
+  const existing = await getStakingPlatformFeePaymentBySignature(params.feeSignature)
+  if (existing) {
+    if (existing.wallet_address !== params.wallet.trim()) return false
+    if (existing.action !== params.action) return false
+    const linked = new Set(existing.position_ids)
+    const toLink = params.positionIds.filter((id) => !linked.has(id))
+    if (toLink.length === 0) return true
+    return linked.size + toLink.length <= existing.units
+  }
+
+  try {
+    const parsed = await getSolanaConnection().getParsedTransaction(params.feeSignature, {
+      commitment: 'confirmed',
+      maxSupportedTransactionVersion: MAX_SUPPORTED_TRANSACTION_VERSION,
+    })
+    // Missing: may still be indexing — keep provided and let validate poll.
+    // Failed on-chain: do not keep; fall through to recovery.
+    if (parsed?.meta?.err) return false
+    return true
+  } catch {
+    // RPC blip — keep provided; validate will poll / error clearly.
+    return true
+  }
+}
+
+/**
  * For claim / rev-share-claim actions: if the client lost the fee signature
- * (mobile redirect / cleared storage), recover a recent unpaid or spare-capacity
- * fee for this wallet before requiring a new payment.
+ * (mobile redirect / cleared storage), or sent a failed/stale localStorage sig,
+ * recover a recent unpaid or spare-capacity fee for this wallet before requiring
+ * a new payment.
  */
 export async function resolveStakingPlatformFeeSignature(
   params: StakingPlatformFeeLinkParams
@@ -121,17 +166,72 @@ export async function resolveStakingPlatformFeeSignature(
   if (params.action !== 'claim' && params.action !== 'rev_share_claim') return params
 
   const provided = parseFeeSignature(params.feeSignature)
-  if (provided) return params
+  const positionIds = validatePositionIds(params.positionIds, {
+    allowEmpty: params.positionIds.length === 0 && (params.minUnits ?? 0) > 0,
+  })
+  const minUnits = Math.max(1, feeMinUnits({ positionIds, minUnits: params.minUnits }))
 
-  const positionIds = validatePositionIds(params.positionIds)
+  if (provided) {
+    const looksUsable = await providedClaimFeeLooksUsable({
+      wallet: params.wallet,
+      feeSignature: provided,
+      action: params.action,
+      positionIds,
+      minUnits,
+    })
+    if (looksUsable) return params
+  }
+
   const recovered = await findReusableClaimPlatformFeeSignature({
     wallet: params.wallet,
-    minUnits: positionIds.length,
+    minUnits,
     action: params.action,
   })
   if (!recovered) return params
+  if (provided && recovered === provided) return params
 
   return { ...params, feeSignature: recovered }
+}
+
+/**
+ * Resolve (with recovery) then validate. If a provided signature still fails
+ * verify after polling, try recovery once more with an empty signature so a
+ * stuck localStorage fee cannot permanently block a good unpaid fee on-chain.
+ */
+export async function resolveAndValidateStakingPlatformFeeLinked(
+  params: StakingPlatformFeeLinkParams
+): Promise<StakingPlatformFeeLinkParams> {
+  let feeParams = await resolveStakingPlatformFeeSignature(params)
+  try {
+    await validateStakingPlatformFeeLinked(feeParams)
+    return feeParams
+  } catch (e) {
+    const msg = e instanceof StakingUserError ? e.message : ''
+    const provided = parseFeeSignature(params.feeSignature)
+    const resolved = parseFeeSignature(feeParams.feeSignature)
+    const canRecover =
+      Boolean(provided) &&
+      resolved === provided &&
+      (params.action === 'claim' || params.action === 'rev_share_claim') &&
+      (isRetryableFeeTxLookupError(msg) || isHardPlatformFeeFailureError(msg))
+
+    if (!canRecover) throw e
+
+    const positionIds = validatePositionIds(params.positionIds, {
+      allowEmpty: params.positionIds.length === 0 && (params.minUnits ?? 0) > 0,
+    })
+    const minUnits = Math.max(1, feeMinUnits({ positionIds, minUnits: params.minUnits }))
+    const recovered = await findReusableClaimPlatformFeeSignature({
+      wallet: params.wallet,
+      minUnits,
+      action: params.action as 'claim' | 'rev_share_claim',
+    })
+    if (!recovered || recovered === provided) throw e
+
+    feeParams = { ...params, feeSignature: recovered }
+    await validateStakingPlatformFeeLinked(feeParams)
+    return feeParams
+  }
 }
 
 /**

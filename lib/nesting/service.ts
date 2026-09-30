@@ -60,7 +60,7 @@ import {
   commitStakingPlatformFeeLinked,
   requireStakingPlatformFeeLinked,
   reserveStakingPlatformFeeLinked,
-  resolveStakingPlatformFeeSignature,
+  resolveAndValidateStakingPlatformFeeLinked,
   validateStakingPlatformFeeLinked,
 } from '@/lib/nesting/link-staking-platform-fee'
 import { verifyClaimAllEligibilityToken } from '@/lib/nesting/claim-all-eligibility'
@@ -487,15 +487,12 @@ export async function executeClaim(params: {
 
   const feeParams = params.skipPlatformFee
     ? null
-    : await resolveStakingPlatformFeeSignature({
+    : await resolveAndValidateStakingPlatformFeeLinked({
         wallet: params.wallet,
         action: 'claim' as const,
         feeSignature: params.platform_fee_signature,
         positionIds: [position_id],
       })
-  if (feeParams) {
-    await validateStakingPlatformFeeLinked(feeParams)
-  }
 
   const adapter = resolveMutationAdapter(pool)
   const result = await adapter.claimPositionRewards({
@@ -673,13 +670,14 @@ export async function executeClaimAll(params: {
     eligibility?.feeUnits ?? 0
   )
 
-  const feeParams = await resolveStakingPlatformFeeSignature({
+  const feeParams = await resolveAndValidateStakingPlatformFeeLinked({
     wallet: params.wallet,
     action: 'claim' as const,
     feeSignature: params.platform_fee_signature,
     positionIds: claimPlans.map((p) => p.positionId),
     minUnits: feeUnitCount,
   })
+  // Re-validate with empty position ids for Claim-all reserve capacity check.
   await validateStakingPlatformFeeLinked({
     ...feeParams,
     positionIds: [],

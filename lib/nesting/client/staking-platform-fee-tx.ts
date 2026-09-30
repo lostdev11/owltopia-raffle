@@ -68,6 +68,12 @@ export async function sendStakingPlatformFeeTransaction(params: {
     preflightCommitment: 'confirmed',
     maxRetries: 3,
   })
-  await params.connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed')
+  const confirmation = await params.connection.confirmTransaction(
+    { signature, blockhash, lastValidBlockHeight },
+    'confirmed'
+  )
+  if (confirmation.value.err) {
+    throw new Error('Platform fee transaction failed on-chain. Please try again.')
+  }
   return signature
 }

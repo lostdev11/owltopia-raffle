@@ -61,6 +61,10 @@ import {
   type PendingClaimPlatformFee,
 } from '@/lib/nesting/pending-claim-platform-fee'
 import {
+  isHardPlatformFeeFailureError,
+  isRetryableFeeTxLookupError,
+} from '@/lib/nesting/staking-platform-fee-errors'
+import {
   clearPendingUnstakePlatformFee,
   pendingUnstakePlatformFeeMatches,
   readPendingUnstakePlatformFee,
@@ -3328,11 +3332,17 @@ export function DashboardNestingClient() {
                 : typeof json.error === 'string'
                   ? json.error
                   : 'Claim failed'
-            const feeRejected =
+            const feeTxRelated =
               err.toLowerCase().includes('platform fee') ||
               err.toLowerCase().includes('fee payment') ||
               err.toLowerCase().includes('fee transaction')
-            if (feeRejected) {
+            if (isHardPlatformFeeFailureError(err)) {
+              clearPendingClaimPlatformFee()
+              setActionError(err)
+            } else if (isRetryableFeeTxLookupError(err)) {
+              // Keep pending fee — RPC may still be indexing the paid signature.
+              setActionError(err)
+            } else if (feeTxRelated) {
               clearPendingClaimPlatformFee()
               setActionError(err)
             } else {
@@ -3724,11 +3734,17 @@ export function DashboardNestingClient() {
 
           if (!result.ok) {
             const err = typeof json.error === 'string' ? json.error : 'Claim all failed'
-            const feeRejected =
+            const feeTxRelated =
               err.toLowerCase().includes('platform fee') ||
               err.toLowerCase().includes('fee payment') ||
               err.toLowerCase().includes('fee transaction')
-            if (feeRejected) {
+            if (isHardPlatformFeeFailureError(err)) {
+              clearPendingClaimPlatformFee()
+              setActionError(err)
+            } else if (isRetryableFeeTxLookupError(err)) {
+              // Keep pending fee — RPC may still be indexing the paid signature.
+              setActionError(err)
+            } else if (feeTxRelated) {
               clearPendingClaimPlatformFee()
               setActionError(err)
             } else {
