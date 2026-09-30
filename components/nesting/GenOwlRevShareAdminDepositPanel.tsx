@@ -11,6 +11,7 @@ import {
   sendGenOwlRevShareSolDeposit,
   sendGenOwlRevShareUsdcDeposit,
 } from '@/lib/nesting/client/gen-owl-rev-share-deposit-tx'
+import { periodMonthFromScheduleDate } from '@/lib/nesting/gen-owl-rev-share-month'
 
 type ScheduleEdit = {
   gen1_next_date: string
@@ -24,7 +25,7 @@ type DepositAmounts = {
   gen2_total_usdc: string
 }
 
-type DepositTarget = 'gen1' | 'gen2'
+type DepositTarget = 'gen1' | 'gen2' | 'both'
 
 type PeriodTotals = {
   gen1_total_sol: number | null
@@ -169,16 +170,34 @@ export function GenOwlRevShareAdminDepositPanel({
         return
       }
 
-      // Deposit amount is this tx only (additive to claimable books) — not homepage display fields.
-      const gen1Sol = target === 'gen1' ? parseAmount(depositAmounts.gen1_total_sol) : 0
-      const gen2Sol = target === 'gen2' ? parseAmount(depositAmounts.gen2_total_sol) : 0
-      const gen1Usdc = target === 'gen1' ? parseAmount(depositAmounts.gen1_total_usdc) : 0
-      const gen2Usdc = target === 'gen2' ? parseAmount(depositAmounts.gen2_total_usdc) : 0
+      // Deposit amount is this tx only (additive 1:1 to claimable books) — not homepage display fields.
+      const includeGen1 = target === 'gen1' || target === 'both'
+      const includeGen2 = target === 'gen2' || target === 'both'
+      const gen1Sol = includeGen1 ? parseAmount(depositAmounts.gen1_total_sol) : 0
+      const gen2Sol = includeGen2 ? parseAmount(depositAmounts.gen2_total_sol) : 0
+      const gen1Usdc = includeGen1 ? parseAmount(depositAmounts.gen1_total_usdc) : 0
+      const gen2Usdc = includeGen2 ? parseAmount(depositAmounts.gen2_total_usdc) : 0
+      const hasGen1 = gen1Sol > 0 || gen1Usdc > 0
+      const hasGen2 = gen2Sol > 0 || gen2Usdc > 0
       const totalSol = gen1Sol + gen2Sol
       const totalUsdc = gen1Usdc + gen2Usdc
-      const label = target === 'gen1' ? 'Gen 1' : 'Gen 2'
+      const label =
+        target === 'both' ? 'Gen 1 + Gen 2' : target === 'gen1' ? 'Gen 1' : 'Gen 2'
 
-      if (totalSol <= 0 && totalUsdc <= 0) {
+      if (target === 'both') {
+        if (!hasGen1 || !hasGen2) {
+          setError('Enter SOL or USDC for both Gen 1 and Gen 2, then deposit both pools.')
+          return
+        }
+        const gen1Month = periodMonthFromScheduleDate(edit.gen1_next_date)
+        const gen2Month = periodMonthFromScheduleDate(edit.gen2_next_date)
+        if (gen1Month && gen2Month && gen1Month !== gen2Month) {
+          setError(
+            `Gen 1 and Gen 2 schedule dates resolve to different months (${gen1Month} vs ${gen2Month}). Use the per-gen deposit buttons instead.`
+          )
+          return
+        }
+      } else if (totalSol <= 0 && totalUsdc <= 0) {
         setError(`Enter ${label} deposit SOL or USDC below, then deposit that pool only.`)
         return
       }
@@ -263,21 +282,30 @@ export function GenOwlRevShareAdminDepositPanel({
         }
         if (!confirmData.already_recorded) {
           onDepositSucceeded?.(confirmData.schedule ?? null)
-          // Clear only the gen that was deposited so the next add is intentional.
-          setDepositAmounts((prev) =>
-            target === 'gen1'
-              ? { ...prev, gen1_total_sol: '', gen1_total_usdc: '' }
-              : { ...prev, gen2_total_sol: '', gen2_total_usdc: '' }
-          )
+          setDepositAmounts((prev) => {
+            if (target === 'both') return { ...EMPTY_DEPOSIT_AMOUNTS }
+            if (target === 'gen1') return { ...prev, gen1_total_sol: '', gen1_total_usdc: '' }
+            return { ...prev, gen2_total_sol: '', gen2_total_usdc: '' }
+          })
         }
 
         const parts: string[] = []
-        if (totalSol > 0) parts.push(`${totalSol} SOL`)
-        if (totalUsdc > 0) parts.push(`${totalUsdc} USDC`)
+        if (target === 'both') {
+          const g1: string[] = []
+          if (gen1Sol > 0) g1.push(`${gen1Sol} SOL`)
+          if (gen1Usdc > 0) g1.push(`${gen1Usdc} USDC`)
+          const g2: string[] = []
+          if (gen2Sol > 0) g2.push(`${gen2Sol} SOL`)
+          if (gen2Usdc > 0) g2.push(`${gen2Usdc} USDC`)
+          parts.push(`Gen 1 ${g1.join(' + ')}`, `Gen 2 ${g2.join(' + ')}`)
+        } else {
+          if (totalSol > 0) parts.push(`${totalSol} SOL`)
+          if (totalUsdc > 0) parts.push(`${totalUsdc} USDC`)
+        }
         setMessage(
           confirmData.already_recorded
-            ? `${label} deposit already recorded (${parts.join(' + ')}). Period totals unchanged.`
-            : `Deposited ${parts.join(' + ')} into the ${label} rev-share pool for ${confirmData.period_month ?? 'this month'}. That amount is added to claimable books and stacks until claimed.`
+            ? `${label} deposit already recorded (${parts.join(' · ')}). Period totals unchanged.`
+            : `Deposited ${parts.join(' · ')} into the ${label} rev-share pool for ${confirmData.period_month ?? 'this month'}. Each gen is credited 1:1 to claimable books (90% all staked / 10% 1/1 bonus) and stacks until claimed.`
         )
         await refreshPeriod()
       } catch (e) {
@@ -380,6 +408,11 @@ export function GenOwlRevShareAdminDepositPanel({
   const gen2MonthLabel = gen2PeriodMonth ?? periodMonth
   const gen1Totals = gen1Period ?? period
   const gen2Totals = gen2Period ?? period
+  const canDepositBoth =
+    (parseAmount(depositAmounts.gen1_total_sol) > 0 ||
+      parseAmount(depositAmounts.gen1_total_usdc) > 0) &&
+    (parseAmount(depositAmounts.gen2_total_sol) > 0 ||
+      parseAmount(depositAmounts.gen2_total_usdc) > 0)
 
   return (
     <div className="mt-4 max-w-2xl space-y-2 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.05] p-3">
@@ -393,12 +426,15 @@ export function GenOwlRevShareAdminDepositPanel({
           </>
         ) : null}
         . Funds escrow is not used. Enter the <span className="font-medium text-foreground/90">amount to
-        add</span> below (separate from homepage display totals above). Verified deposits credit claimable
-        books 1:1 — e.g. deposit 10 SOL and 10 SOL is owed across nests; unclaimed months{' '}
-        <span className="font-medium text-foreground/90">stack</span>. Partial claims reduce unclaimed
-        liability only; they do not shrink deposited books. If claims show &quot;Waiting for pool
-        top-up&quot;, use <span className="font-medium text-foreground/90">Cover shortfall</span> instead
-        (moves SOL into the pool without raising books).
+        add</span> per gen below (separate from homepage display totals). Gen 1 and Gen 2 are separate
+        pools — each deposit credits that gen&apos;s claimable books{' '}
+        <span className="font-medium text-foreground/90">1:1</span> (deposit 10 SOL → 10 SOL owed). Within
+        each gen, <span className="font-medium text-foreground/90">90% all staked / 10% 1/1 bonus</span>{' '}
+        still sums to 100% of that deposit (1/1s get both shares). Unclaimed months{' '}
+        <span className="font-medium text-foreground/90">stack</span>; partial claims do not shrink
+        deposited books. If claims show &quot;Waiting for pool top-up&quot;, use{' '}
+        <span className="font-medium text-foreground/90">Cover shortfall</span> instead (moves SOL into
+        the pool without raising books).
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-2 rounded-md border border-white/10 bg-black/10 p-2.5">
@@ -575,6 +611,22 @@ export function GenOwlRevShareAdminDepositPanel({
         ) : null}
         <Button
           type="button"
+          onClick={() => void deposit('both')}
+          disabled={disabled || busy || !connected || !canDepositBoth}
+          className="min-h-[44px] touch-manipulation"
+        >
+          {busyTarget === 'both' ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+              Depositing Gen 1 + Gen 2…
+            </>
+          ) : (
+            'Deposit Gen 1 + Gen 2'
+          )}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
           onClick={() => void deposit('gen1')}
           disabled={disabled || busy || !connected}
           className="min-h-[44px] touch-manipulation"

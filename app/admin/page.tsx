@@ -2671,8 +2671,9 @@ export default function AdminDashboardPage() {
               )}
             </Button>
             <p className="mt-2 max-w-2xl text-xs text-muted-foreground">
-              Save writes the homepage dates and display totals shown above (including 0). Deposit amounts are
-              entered separately below and add 1:1 to claimable books — Save alone does not fund claims.
+              Save writes the homepage dates and display totals shown above (including 0). Deposit amounts
+              for Gen 1 and Gen 2 are entered separately below and credit each gen&apos;s claimable books
+              1:1 (90% all staked / 10% 1/1 bonus per gen). Save alone does not fund claims.
             </p>
             <GenOwlRevShareAdminDepositPanel
               edit={revShareScheduleEdit}
