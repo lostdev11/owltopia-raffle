@@ -5,6 +5,10 @@ import {
   type GenOwlRevSharePeriodRow,
 } from '@/lib/db/gen-owl-rev-share-periods'
 import { getRevShareSchedule, updateRevShareSchedule } from '@/lib/db/rev-share-schedule'
+import {
+  addGenOwlRevSharePeriodCredit,
+  mergeRevShareScheduleAmountsAfterDeposit,
+} from '@/lib/nesting/gen-owl-rev-share-deposit-books'
 import { getGenOwlRevSharePoolPublicKey } from '@/lib/nesting/gen-owl-rev-share-pool'
 import {
   formatPeriodMonthUtc,
@@ -228,23 +232,37 @@ export async function confirmGenOwlRevSharePoolDeposit(params: {
 
   if (addGen1Sol > 0 || addGen2Sol > 0 || addGen1Usdc > 0 || addGen2Usdc > 0) {
     const fresh = await getGenOwlRevSharePeriod(periodMonth)
-    const nextGen1Sol = numOrZero(fresh?.gen1_total_sol) + addGen1Sol
-    const nextGen2Sol = numOrZero(fresh?.gen2_total_sol) + addGen2Sol
-    const nextGen1Usdc = numOrZero(fresh?.gen1_total_usdc) + addGen1Usdc
-    const nextGen2Usdc = numOrZero(fresh?.gen2_total_usdc) + addGen2Usdc
+    const next = addGenOwlRevSharePeriodCredit({
+      previous: fresh,
+      addGen1Sol,
+      addGen2Sol,
+      addGen1Usdc,
+      addGen2Usdc,
+    })
 
     period = await upsertGenOwlRevSharePeriodTotals({
       period_month: periodMonth,
-      gen1_total_sol: nextGen1Sol,
-      gen1_total_usdc: nextGen1Usdc,
-      gen2_total_sol: nextGen2Sol,
-      gen2_total_usdc: nextGen2Usdc,
+      gen1_total_sol: next.gen1_total_sol,
+      gen1_total_usdc: next.gen1_total_usdc,
+      gen2_total_sol: next.gen2_total_sol,
+      gen2_total_usdc: next.gen2_total_usdc,
     })
     if (!period) {
       throw new StakingUserError('Deposit recorded but period totals failed to update.', 500)
     }
 
     const schedule = await getRevShareSchedule()
+    const scheduleAmounts = mergeRevShareScheduleAmountsAfterDeposit({
+      schedule,
+      addGen1Sol,
+      addGen2Sol,
+      addGen1Usdc,
+      addGen2Usdc,
+      nextPeriodGen1Sol: next.gen1_total_sol,
+      nextPeriodGen2Sol: next.gen2_total_sol,
+      nextPeriodGen1Usdc: next.gen1_total_usdc,
+      nextPeriodGen2Usdc: next.gen2_total_usdc,
+    })
     await updateRevShareSchedule({
       gen1_next_date:
         params.gen1_next_date !== undefined
@@ -258,12 +276,7 @@ export async function confirmGenOwlRevSharePoolDeposit(params: {
         params.gen1_next_date !== undefined
           ? params.gen1_next_date
           : schedule?.gen1_next_date ?? schedule?.next_date ?? undefined,
-      gen1_total_sol: nextGen1Sol,
-      gen1_total_usdc: nextGen1Usdc,
-      gen2_total_sol: nextGen2Sol,
-      gen2_total_usdc: nextGen2Usdc,
-      total_sol: nextGen1Sol + nextGen2Sol,
-      total_usdc: nextGen1Usdc + nextGen2Usdc,
+      ...scheduleAmounts,
     })
   } else {
     period = (await getGenOwlRevSharePeriod(periodMonth)) ?? period

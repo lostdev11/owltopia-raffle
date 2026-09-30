@@ -2671,9 +2671,8 @@ export default function AdminDashboardPage() {
               )}
             </Button>
             <p className="mt-2 max-w-2xl text-xs text-muted-foreground">
-              Save writes the dates and display totals shown above (including 0). Use the deposit buttons below to
-              send SOL/USDC on-chain and credit this month&apos;s claimable pools (Gen 1 and Gen 2 separately) —
-              Save alone does not fund claims.
+              Save writes the homepage dates and display totals shown above (including 0). Deposit amounts are
+              entered separately below and add 1:1 to claimable books — Save alone does not fund claims.
             </p>
             <GenOwlRevShareAdminDepositPanel
               edit={revShareScheduleEdit}

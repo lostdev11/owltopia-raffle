@@ -5,6 +5,7 @@ import { listStakingPositionsByWallet } from '@/lib/db/staking-positions'
 import { getStakingPoolById } from '@/lib/db/staking-pools'
 import { classifyGen1OneOfOneMints } from '@/lib/nesting/gen1-one-of-one'
 import { classifyGen2OneOfOneMints } from '@/lib/nesting/gen2-one-of-one'
+import { resolveGenOwlRevShareEstimatePoolAmount } from '@/lib/nesting/gen-owl-rev-share-deposit-books'
 import {
   computeGenOwlRevShareBucketAmounts,
   formatGenOwlRevShareSol,
@@ -43,11 +44,6 @@ export type GenOwlRevShareEstimateResult = {
   total_usdc: number
 }
 
-function positive(n: number | null | undefined): number {
-  const v = Number(n)
-  return Number.isFinite(v) && v > 0 ? v : 0
-}
-
 /**
  * Projected monthly rev share for the wallet's active Gen 1 / Gen 2 nests
  * based on deposited period totals ÷ live nest counts (estimate until claim opens / finalize).
@@ -68,18 +64,26 @@ export async function getGenOwlRevShareEstimateForWallet(
   const useGen2Schedule =
     !finalized && scheduleTotalsApplyToPeriod(schedule?.gen2_next_date ?? schedule?.next_date, periodMonth)
 
-  const pool_gen1_sol = positive(
-    period?.gen1_total_sol ?? (useGen1Schedule ? schedule?.gen1_total_sol : null)
-  )
-  const pool_gen1_usdc = positive(
-    period?.gen1_total_usdc ?? (useGen1Schedule ? schedule?.gen1_total_usdc : null)
-  )
-  const pool_gen2_sol = positive(
-    period?.gen2_total_sol ?? (useGen2Schedule ? schedule?.gen2_total_sol : null)
-  )
-  const pool_gen2_usdc = positive(
-    period?.gen2_total_usdc ?? (useGen2Schedule ? schedule?.gen2_total_usdc : null)
-  )
+  const pool_gen1_sol = resolveGenOwlRevShareEstimatePoolAmount({
+    periodAmount: period?.gen1_total_sol,
+    scheduleAmount: schedule?.gen1_total_sol,
+    useSchedulePreview: useGen1Schedule,
+  })
+  const pool_gen1_usdc = resolveGenOwlRevShareEstimatePoolAmount({
+    periodAmount: period?.gen1_total_usdc,
+    scheduleAmount: schedule?.gen1_total_usdc,
+    useSchedulePreview: useGen1Schedule,
+  })
+  const pool_gen2_sol = resolveGenOwlRevShareEstimatePoolAmount({
+    periodAmount: period?.gen2_total_sol,
+    scheduleAmount: schedule?.gen2_total_sol,
+    useSchedulePreview: useGen2Schedule,
+  })
+  const pool_gen2_usdc = resolveGenOwlRevShareEstimatePoolAmount({
+    periodAmount: period?.gen2_total_usdc,
+    scheduleAmount: schedule?.gen2_total_usdc,
+    useSchedulePreview: useGen2Schedule,
+  })
 
   if (pool_gen1_sol <= 0 && pool_gen1_usdc <= 0 && pool_gen2_sol <= 0 && pool_gen2_usdc <= 0) {
     return null
