@@ -5,6 +5,8 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   sendGenOwlRevShareSolDeposit,
   sendGenOwlRevShareUsdcDeposit,
@@ -13,6 +15,9 @@ import {
 type ScheduleEdit = {
   gen1_next_date: string
   gen2_next_date: string
+}
+
+type DepositAmounts = {
   gen1_total_sol: string
   gen1_total_usdc: string
   gen2_total_sol: string
@@ -30,11 +35,12 @@ type PeriodTotals = {
 }
 
 type Props = {
+  /** Dates only — used to resolve which period month a gen deposit credits. */
   edit: ScheduleEdit
   onScheduleUpdated: (schedule: unknown) => void
   /**
-   * Called after a successful new deposit with the updated schedule so the form can
-   * sync to cumulative display totals (do not blank fields — that makes Save wipe the homepage).
+   * Called after a successful new deposit with the updated schedule so homepage
+   * display totals can sync to cumulative books for the gen(s) just funded.
    */
   onDepositSucceeded?: (schedule: unknown) => void
   disabled?: boolean
@@ -52,6 +58,13 @@ function formatPoolAmount(n: number | null | undefined, unit: string): string {
   return `${n} ${unit}`
 }
 
+const EMPTY_DEPOSIT_AMOUNTS: DepositAmounts = {
+  gen1_total_sol: '',
+  gen1_total_usdc: '',
+  gen2_total_sol: '',
+  gen2_total_usdc: '',
+}
+
 export function GenOwlRevShareAdminDepositPanel({
   edit,
   onScheduleUpdated,
@@ -60,6 +73,7 @@ export function GenOwlRevShareAdminDepositPanel({
 }: Props) {
   const { connection } = useConnection()
   const { publicKey, connected, sendTransaction } = useWallet()
+  const [depositAmounts, setDepositAmounts] = useState<DepositAmounts>(EMPTY_DEPOSIT_AMOUNTS)
   const [busyTarget, setBusyTarget] = useState<DepositTarget | null>(null)
   const [coveringShortfall, setCoveringShortfall] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -155,16 +169,17 @@ export function GenOwlRevShareAdminDepositPanel({
         return
       }
 
-      const gen1Sol = target === 'gen1' ? parseAmount(edit.gen1_total_sol) : 0
-      const gen2Sol = target === 'gen2' ? parseAmount(edit.gen2_total_sol) : 0
-      const gen1Usdc = target === 'gen1' ? parseAmount(edit.gen1_total_usdc) : 0
-      const gen2Usdc = target === 'gen2' ? parseAmount(edit.gen2_total_usdc) : 0
+      // Deposit amount is this tx only (additive to claimable books) — not homepage display fields.
+      const gen1Sol = target === 'gen1' ? parseAmount(depositAmounts.gen1_total_sol) : 0
+      const gen2Sol = target === 'gen2' ? parseAmount(depositAmounts.gen2_total_sol) : 0
+      const gen1Usdc = target === 'gen1' ? parseAmount(depositAmounts.gen1_total_usdc) : 0
+      const gen2Usdc = target === 'gen2' ? parseAmount(depositAmounts.gen2_total_usdc) : 0
       const totalSol = gen1Sol + gen2Sol
       const totalUsdc = gen1Usdc + gen2Usdc
       const label = target === 'gen1' ? 'Gen 1' : 'Gen 2'
 
       if (totalSol <= 0 && totalUsdc <= 0) {
-        setError(`Enter ${label} SOL or USDC above, then deposit that pool only.`)
+        setError(`Enter ${label} deposit SOL or USDC below, then deposit that pool only.`)
         return
       }
 
@@ -223,10 +238,10 @@ export function GenOwlRevShareAdminDepositPanel({
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            gen1_total_sol: gen1Sol || null,
-            gen1_total_usdc: gen1Usdc || null,
-            gen2_total_sol: gen2Sol || null,
-            gen2_total_usdc: gen2Usdc || null,
+            gen1_total_sol: gen1Sol > 0 ? gen1Sol : null,
+            gen1_total_usdc: gen1Usdc > 0 ? gen1Usdc : null,
+            gen2_total_sol: gen2Sol > 0 ? gen2Sol : null,
+            gen2_total_usdc: gen2Usdc > 0 ? gen2Usdc : null,
             sol_signature: solSignature,
             usdc_signature: usdcSignature,
             gen1_next_date: edit.gen1_next_date.trim() || null,
@@ -248,6 +263,12 @@ export function GenOwlRevShareAdminDepositPanel({
         }
         if (!confirmData.already_recorded) {
           onDepositSucceeded?.(confirmData.schedule ?? null)
+          // Clear only the gen that was deposited so the next add is intentional.
+          setDepositAmounts((prev) =>
+            target === 'gen1'
+              ? { ...prev, gen1_total_sol: '', gen1_total_usdc: '' }
+              : { ...prev, gen2_total_sol: '', gen2_total_usdc: '' }
+          )
         }
 
         const parts: string[] = []
@@ -256,7 +277,7 @@ export function GenOwlRevShareAdminDepositPanel({
         setMessage(
           confirmData.already_recorded
             ? `${label} deposit already recorded (${parts.join(' + ')}). Period totals unchanged.`
-            : `Deposited ${parts.join(' + ')} into the ${label} rev-share pool for ${confirmData.period_month ?? 'this month'}. Nested holders can see projected amounts.`
+            : `Deposited ${parts.join(' + ')} into the ${label} rev-share pool for ${confirmData.period_month ?? 'this month'}. That amount is added to claimable books and stacks until claimed.`
         )
         await refreshPeriod()
       } catch (e) {
@@ -268,7 +289,9 @@ export function GenOwlRevShareAdminDepositPanel({
     [
       connected,
       connection,
-      edit,
+      depositAmounts,
+      edit.gen1_next_date,
+      edit.gen2_next_date,
       onDepositSucceeded,
       onScheduleUpdated,
       publicKey,
@@ -369,14 +392,94 @@ export function GenOwlRevShareAdminDepositPanel({
             (<span className="font-mono text-[11px] text-foreground/80 break-all">{poolAddress}</span>)
           </>
         ) : null}
-        . Funds escrow is not used. Only verified on-chain deposits credit claimable totals (homepage Save
-        is display-only). Use the Gen 1 or Gen 2 button to fund that month&apos;s pool — amounts are{' '}
-        <span className="font-medium text-foreground/90">added</span> to claimable books. If claims show
-        &quot;Waiting for pool top-up&quot;, use <span className="font-medium text-foreground/90">Cover
-        shortfall</span> instead (moves SOL into the pool without raising books). Filling an admin wallet
-        alone does nothing. Platform claim fees go to the mint-fee treasury — they do{' '}
-        <span className="font-medium text-foreground/90">not</span> fund this pool.
+        . Funds escrow is not used. Enter the <span className="font-medium text-foreground/90">amount to
+        add</span> below (separate from homepage display totals above). Verified deposits credit claimable
+        books 1:1 — e.g. deposit 10 SOL and 10 SOL is owed across nests; unclaimed months{' '}
+        <span className="font-medium text-foreground/90">stack</span>. Partial claims reduce unclaimed
+        liability only; they do not shrink deposited books. If claims show &quot;Waiting for pool
+        top-up&quot;, use <span className="font-medium text-foreground/90">Cover shortfall</span> instead
+        (moves SOL into the pool without raising books).
       </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-2 rounded-md border border-white/10 bg-black/10 p-2.5">
+          <p className="text-xs font-medium text-foreground/90">Gen 1 deposit (adds to claimable)</p>
+          <div>
+            <Label htmlFor="rev-deposit-gen1-sol" className="text-xs">
+              SOL to deposit
+            </Label>
+            <Input
+              id="rev-deposit-gen1-sol"
+              type="number"
+              step="any"
+              min="0"
+              placeholder="e.g. 10"
+              value={depositAmounts.gen1_total_sol}
+              onChange={(e) =>
+                setDepositAmounts((p) => ({ ...p, gen1_total_sol: e.target.value }))
+              }
+              className="mt-1"
+              disabled={disabled || busy}
+            />
+          </div>
+          <div>
+            <Label htmlFor="rev-deposit-gen1-usdc" className="text-xs">
+              USDC to deposit (optional)
+            </Label>
+            <Input
+              id="rev-deposit-gen1-usdc"
+              type="number"
+              step="any"
+              min="0"
+              placeholder="e.g. 50"
+              value={depositAmounts.gen1_total_usdc}
+              onChange={(e) =>
+                setDepositAmounts((p) => ({ ...p, gen1_total_usdc: e.target.value }))
+              }
+              className="mt-1"
+              disabled={disabled || busy}
+            />
+          </div>
+        </div>
+        <div className="space-y-2 rounded-md border border-white/10 bg-black/10 p-2.5">
+          <p className="text-xs font-medium text-foreground/90">Gen 2 deposit (adds to claimable)</p>
+          <div>
+            <Label htmlFor="rev-deposit-gen2-sol" className="text-xs">
+              SOL to deposit
+            </Label>
+            <Input
+              id="rev-deposit-gen2-sol"
+              type="number"
+              step="any"
+              min="0"
+              placeholder="e.g. 10"
+              value={depositAmounts.gen2_total_sol}
+              onChange={(e) =>
+                setDepositAmounts((p) => ({ ...p, gen2_total_sol: e.target.value }))
+              }
+              className="mt-1"
+              disabled={disabled || busy}
+            />
+          </div>
+          <div>
+            <Label htmlFor="rev-deposit-gen2-usdc" className="text-xs">
+              USDC to deposit (optional)
+            </Label>
+            <Input
+              id="rev-deposit-gen2-usdc"
+              type="number"
+              step="any"
+              min="0"
+              placeholder="e.g. 25"
+              value={depositAmounts.gen2_total_usdc}
+              onChange={(e) =>
+                setDepositAmounts((p) => ({ ...p, gen2_total_usdc: e.target.value }))
+              }
+              className="mt-1"
+              disabled={disabled || busy}
+            />
+          </div>
+        </div>
+      </div>
       {poolOnchain ? (
         <p
           className={`text-xs tabular-nums leading-relaxed ${
@@ -427,7 +530,7 @@ export function GenOwlRevShareAdminDepositPanel({
       {gen1MonthLabel || gen2MonthLabel ? (
         <div className="space-y-1 text-xs text-foreground/90 tabular-nums">
           <p>
-            Gen 1 → {gen1MonthLabel ?? '—'}
+            Gen 1 claimable books → {gen1MonthLabel ?? '—'}
             {gen1MonthLabel && claimsOpen && gen1MonthLabel === periodMonth ? (
               <span className="ml-1 font-medium text-emerald-400">· claims open</span>
             ) : (
@@ -439,7 +542,7 @@ export function GenOwlRevShareAdminDepositPanel({
               : ''}
           </p>
           <p>
-            Gen 2 → {gen2MonthLabel ?? '—'}
+            Gen 2 claimable books → {gen2MonthLabel ?? '—'}
             {gen2MonthLabel && claimsOpen && gen2MonthLabel === periodMonth ? (
               <span className="ml-1 font-medium text-emerald-400">· claims open</span>
             ) : (
