@@ -29,6 +29,10 @@ import {
   writePendingRevShareClaimPlatformFee,
 } from '@/lib/nesting/pending-claim-platform-fee'
 import {
+  isHardPlatformFeeFailureError,
+  isRetryableFeeTxLookupError,
+} from '@/lib/nesting/staking-platform-fee-errors'
+import {
   formatStakingPlatformFeeTotalLabel,
   getRevShareClaimPlatformFeeLamports,
   getRevShareClaimPlatformFeeSol,
@@ -342,19 +346,36 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
       }
 
       setPhaseHint('Sending rev share to your wallet…')
-      const res = await fetch('/api/me/nesting/gen-owl-rev-share/claim-all', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          platformFeeSignature ? { platform_fee_signature: platformFeeSignature } : {}
-        ),
-      })
-      const data = await res.json().catch(() => ({}))
+      const postClaimAll = async (feeSig: string | undefined) => {
+        const res = await fetch('/api/me/nesting/gen-owl-rev-share/claim-all', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(feeSig ? { platform_fee_signature: feeSig } : {}),
+        })
+        const data = await res.json().catch(() => ({}))
+        return { res, data }
+      }
+
+      let { res, data } = await postClaimAll(platformFeeSignature)
+      if (
+        !res.ok &&
+        typeof data.error === 'string' &&
+        isRetryableFeeTxLookupError(data.error) &&
+        platformFeeSignature
+      ) {
+        setPhaseHint('Waiting for the fee transaction to confirm — retrying…')
+        await new Promise((r) => setTimeout(r, 1500))
+        ;({ res, data } = await postClaimAll(platformFeeSignature))
+      }
+
       if (!res.ok) {
         const errMsg = typeof data.error === 'string' ? data.error : 'Claim failed.'
         setError(errMsg)
-        if (data.pool_shortfall && platformFeeSignature) {
+        if (isHardPlatformFeeFailureError(errMsg)) {
+          clearPendingRevShareClaimPlatformFee()
+          setSavedFeeHint(null)
+        } else if (data.pool_shortfall && platformFeeSignature) {
           setSavedFeeHint(revShareClaimRetryWithoutRepayMessage(claimable.length))
         }
         return
@@ -376,6 +397,10 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Network error during claim.'
       setError(msg)
+      if (isHardPlatformFeeFailureError(msg)) {
+        clearPendingRevShareClaimPlatformFee()
+        setSavedFeeHint(null)
+      }
     } finally {
       setPhaseHint(null)
       setBusy(false)
@@ -465,9 +490,16 @@ export function GenOwlRevShareClaimPanel({ connected, needsSignIn, className }: 
           Checking claimable rev share…
         </p>
       ) : !claimsEnabled ? (
-        <p className="mt-2 text-xs text-amber-400/95">
-          Claims are temporarily paused. Your rev share stays stacked — check back soon.
-        </p>
+        <div
+          className="mt-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-3"
+          role="status"
+          aria-live="polite"
+        >
+          <p className="text-sm font-semibold text-red-400">Claims paused</p>
+          <p className="mt-1 text-xs leading-relaxed text-red-300/90">
+            Rev share claims are temporarily stopped. Your share stays stacked — check back soon.
+          </p>
+        </div>
       ) : claimable.length === 0 ? (
         claimedOpenPeriod ? (
           <div className="mt-2 space-y-1" role="status">
