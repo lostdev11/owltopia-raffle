@@ -203,4 +203,72 @@ assert.ok(
 )
 assert.equal(stacked.open.open_period_count, 2)
 
+// --- Gen2-only: deposit 10 → books 10; partial claims → paid + unclaimed === 10 ---
+const gen2Deposited = addGenOwlRevSharePeriodCredit({
+  previous: null,
+  addGen1Sol: 0,
+  addGen2Sol: 10,
+  addGen1Usdc: 0,
+  addGen2Usdc: 0,
+})
+assert.equal(gen2Deposited.gen2_total_sol, 10)
+assert.equal(gen2Deposited.total_sol, 10)
+
+const gen2Snap = computeGenOwlRevShareLiabilitySnapshot({
+  now,
+  periods: [period('2026-09', { gen2Sol: gen2Deposited.gen2_total_sol, gen2Eligible: 100 })],
+  claims: Array.from({ length: 25 }, () => ({
+    period_month: '2026-09',
+    amount_sol: 0.1,
+    amount_usdc: 0,
+    sol_transaction_signature: 'gen2-paid',
+    usdc_transaction_signature: null,
+  })),
+})
+assert.equal(gen2Snap.open.deposited_sol, 10)
+assert.ok(Math.abs(gen2Snap.open.paid_sol - 2.5) < 1e-9)
+assert.ok(Math.abs(gen2Snap.open.unclaimed_sol - 7.5) < 1e-9)
+assert.ok(
+  Math.abs(gen2Snap.open.paid_sol + gen2Snap.open.unclaimed_sol - gen2Snap.open.deposited_sol) < 1e-9
+)
+
+// --- Both gens same period: Gen1 10 + Gen2 5 → 15; Gen1 partial claims leave Gen2 fully owed ---
+const bothDeposited = addGenOwlRevSharePeriodCredit({
+  previous: null,
+  addGen1Sol: 10,
+  addGen2Sol: 5,
+  addGen1Usdc: 0,
+  addGen2Usdc: 0,
+})
+assert.equal(bothDeposited.gen1_total_sol, 10)
+assert.equal(bothDeposited.gen2_total_sol, 5)
+assert.equal(bothDeposited.total_sol, 15)
+
+const bothSnap = computeGenOwlRevShareLiabilitySnapshot({
+  now,
+  periods: [
+    period('2026-09', {
+      gen1Sol: bothDeposited.gen1_total_sol,
+      gen2Sol: bothDeposited.gen2_total_sol,
+      gen1Eligible: 100,
+      gen2Eligible: 50,
+    }),
+  ],
+  claims: Array.from({ length: 40 }, () => ({
+    period_month: '2026-09',
+    amount_sol: 0.1,
+    amount_usdc: 0,
+    sol_transaction_signature: 'gen1-partial',
+    usdc_transaction_signature: null,
+  })),
+})
+assert.equal(bothSnap.open.deposited_sol, 15)
+assert.ok(Math.abs(bothSnap.open.paid_sol - 4) < 1e-9)
+assert.ok(Math.abs(bothSnap.open.unclaimed_sol - 11) < 1e-9)
+assert.ok(
+  Math.abs(bothSnap.open.paid_sol + bothSnap.open.unclaimed_sol - bothSnap.open.deposited_sol) < 1e-9
+)
+assert.equal(bothSnap.open.claimed_nests, 40)
+assert.equal(bothSnap.open.unclaimed_nests, 110) // 150 eligible - 40 claimed
+
 console.log('test-gen-owl-rev-share-deposit-books: ok')

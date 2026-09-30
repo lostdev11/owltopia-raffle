@@ -56,7 +56,7 @@ function almostEqual(actual: number | null, expected: number, label: string) {
 }
 
 {
-  // Gen 2-shaped pool: 7 SOL across 1397 nests with a few 1/1s
+  // Gen 2-shaped pool: 7 SOL across 1397 nests with a few 1/1s — must conserve full deposit
   const buckets = computeGenOwlRevShareBucketAmounts({
     totalSol: 7,
     totalUsdc: null,
@@ -69,6 +69,10 @@ function almostEqual(actual: number | null, expected: number, label: string) {
     (7 * 0.9) / 1397 + (7 * 0.1) / 7,
     'gen2 1/1 total'
   )
+  const paid =
+    buckets.standard_count * (buckets.standard_per_nest_sol ?? 0) +
+    buckets.one_of_one_count * (buckets.one_of_one_per_nest_sol ?? 0)
+  almostEqual(paid, 7, 'gen2 pool conservation (90% + 10% 1/1 = 100%)')
 }
 
 {
